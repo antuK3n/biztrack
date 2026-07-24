@@ -1,0 +1,180 @@
+@import 'tailwindcss';
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/prata';
+
+/*
+ * BizTrack tokens — PROTOTYPE-FIDELITY rebuild (docs/rehaul-spec.md).
+ * The visual source of truth is "BizTrack Prototype Linked.pdf":
+ * royal-blue rail (#3242ca), periwinkle canvas (#d1dbeb), white shadow cards,
+ * pill buttons, light-blue filled inputs, Prata serif accents.
+ */
+@theme {
+  --font-sans: 'Poppins', 'Segoe UI', system-ui, sans-serif;
+  --font-serif: 'Prata', Georgia, serif;
+
+  --color-*: initial;
+  --color-white: #fff;
+  --color-black: #000;
+
+  /* Royal blue family (sidebar, buttons, links, modal headers) */
+  --color-royal: #3242ca;
+  --color-royal-hover: #2b3ab5;
+  --color-royal-deep: #1d4b9e;
+  --color-royal-tint: #eef2fc;
+
+  /* App canvas + panels */
+  --color-canvas: #d1dbeb; /* app background */
+  --color-panel: #b7c7e2; /* deeper blue panel (drafts grid, chat body) */
+  --color-chatbody: #8fa8d4;
+
+  /* Inputs */
+  --color-input: #cfe0f7;
+  --color-input-border: #9fb6dd;
+
+  /* Ink */
+  --color-ink: #14171d;
+  --color-ink-secondary: #3d4453;
+  --color-ink-muted: #5b6472;
+  --color-line: #c5cfe0;
+
+  /* Status */
+  --color-s-orange: #f2a33c;
+  --color-s-green: #22b573;
+  --color-s-yellow: #f5c518;
+  --color-s-red: #c11212;
+  --color-s-red-deep: #bd0000;
+  --color-s-orange-tint: #fdeed8;
+  --color-s-green-tint: #ddf4e9;
+  --color-s-yellow-tint: #fdf6d8;
+  --color-s-red-tint: #f9dede;
+  --color-s-purple: #7a4bd0;
+  --color-s-purple-tint: #ece4f9;
+
+  /* Modal footer buttons */
+  --color-modal-cancel: #cfe0f7;
+  --color-modal-confirm: #8fabd9;
+  --color-modal-cancel-red: #f4c7c7;
+  --color-modal-confirm-red: #e39a9a;
+
+  /* Office-use box */
+  --color-officeuse: #fdf6e3;
+  --color-officeuse-border: #e0c98f;
+
+  /* LEGACY ALIASES — keep not-yet-rebuilt screens rendering during the rehaul.
+     Remove once every page is on the prototype tokens. */
+  --color-surface: #ffffff;
+  --color-shell: #d1dbeb;
+  --color-shell-deep: #b7c7e2;
+  --color-line-strong: #9fb6dd;
+  --color-blue-50: #eef2fc;
+  --color-blue-100: #cfe0f7;
+  --color-blue-200: #d1dbeb;
+  --color-blue-300: #7796c5;
+  --color-blue-400: #5a6fd6;
+  --color-blue-500: #3242ca;
+  --color-blue-600: #3242ca;
+  --color-blue-700: #2b3ab5;
+  --color-blue-800: #1d4b9e;
+  --color-blue-900: #17356e;
+  --color-red-600: #bd0000;
+  --color-red-700: #a30000;
+  --color-red-50: #f9dede;
+  --color-red-200: #f4c7c7;
+  --color-green-700: #1c8f5c;
+  --color-green-50: #ddf4e9;
+  --color-green-200: #b8e8d2;
+  --color-amber-800: #b5620a;
+  --color-amber-50: #fdf6d8;
+  --color-amber-200: #f5df8e;
+
+  --text-*: initial;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.1875rem;
+  --text-lg--line-height: 1.625rem;
+  --text-xl: 1.4375rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.125rem;
+  --text-3xl: 2.125rem;
+  --text-3xl--line-height: 2.5rem;
+
+  --radius-*: initial;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-full: 9999px;
+
+  /* Prototype cards float on soft shadows */
+  --shadow-*: initial;
+  --shadow-card: 0 2px 8px rgba(30, 50, 120, 0.18);
+  --shadow-raised: 0 4px 14px rgba(30, 50, 120, 0.22);
+  --shadow-overlay: 0 10px 40px rgba(20, 30, 70, 0.35);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --default-transition-duration: 150ms;
+}
+
+@layer base {
+  html {
+    font-kerning: normal;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-canvas text-base text-ink;
+  }
+
+  ::placeholder {
+    @apply text-ink-muted;
+  }
+
+  ::selection {
+    @apply bg-royal text-white;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-royal);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Serif display accents — exactly where the prototype uses them */
+  .display-serif {
+    font-family: var(--font-serif);
+    font-weight: 400;
+  }
+}
+
+/* Auth screens keep touch-first sizing */
+.auth-form input:not([type='checkbox']),
+.auth-form select,
+.auth-form button[type='submit'] {
+  height: 3.25rem;
+  font-size: 1.0625rem;
+}
