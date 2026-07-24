@@ -1,0 +1,27 @@
+# BizTrack dev stack (master plan §4). Dev runs API+web natively (./dev.sh);
+# this compose provides the backing services: PostGIS + Mailpit.
+#   docker compose -f infra/docker-compose.yml up -d
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: biztrack
+      POSTGRES_USER: biztrack
+      POSTGRES_PASSWORD: biztrack
+    ports:
+      - '5432:5432'
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U biztrack']
+      interval: 5s
+      retries: 10
+
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - '8025:8025' # web UI
+      - '1025:1025' # SMTP
+
+volumes:
+  dbdata:
