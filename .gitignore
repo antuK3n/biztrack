@@ -1,0 +1,31 @@
+# R analytics prototype — generated artifacts (regenerable from seed)
+r/data/
+r/outputs/
+
+# R session / package cruft
+.Rhistory
+.RData
+.Rproj.user/
+.Rproj.user
+
+# Local tooling and editor state (not part of the product)
+.claude/
+.cursor/
+.gemini/
+.impeccable/
+.playwright-mcp/
+graphify-out/
+CLAUDE.md
+md/
+rehaul-check/
+.DS_Store
+
+# Unpublished coursework stays off the public repo
+GROUP 12 - REVISED PROPOSAL DEFENSE MANUSCRIPT.docx.pdf
+BizTrack Prototype Linked.pdf
+prototype-pages/
+
+# Regenerable screenshot/board scratch (final PDFs are committed instead)
+bt-figma-shots/
+bt-board/
+/*.png
