@@ -1,0 +1,49 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\OfficerRequestStatus;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class OfficerRequest extends Model
+{
+    protected $fillable = [
+        'application_id', 'requested_by_user_id', 'department_id', 'title',
+        'description', 'request_type', 'status', 'due_date',
+        'file_name', 'file_path', 'application_document_id',
+        'meeting_scheduled_at', 'meeting_duration_minutes', 'meeting_link',
+        'meeting_platform', 'external_calendar_event_id',
+        'applicant_response', 'submitted_at',
+        'reviewed_by_user_id', 'reviewed_at', 'remarks',
+    ];
+
+    protected $casts = [
+        'status' => OfficerRequestStatus::class,
+        'due_date' => 'datetime',
+        'meeting_scheduled_at' => 'datetime',
+        'submitted_at' => 'datetime',
+        'reviewed_at' => 'datetime',
+    ];
+
+    public function application(): BelongsTo
+    {
+        return $this->belongsTo(Application::class);
+    }
+
+    /** Officer who created the request (paper: requested_by_user_id). */
+    public function createdBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by_user_id');
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
+    }
+
+    public function document(): BelongsTo
+    {
+        return $this->belongsTo(ApplicationDocument::class, 'application_document_id');
+    }
+}
