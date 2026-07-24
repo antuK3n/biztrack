@@ -1,0 +1,16 @@
+meta {
+  name: Download Document
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/documents/1/download
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

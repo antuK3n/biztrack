@@ -1,0 +1,25 @@
+meta {
+  name: Create Document Request
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/applications/1/requests
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "request_type": "document",
+  "subject": "Upload lease",
+  "body": "Please upload your lease contract."
+}
+}

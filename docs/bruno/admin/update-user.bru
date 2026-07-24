@@ -1,0 +1,24 @@
+meta {
+  name: Update User
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/admin/users/1
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "first_name": "Liza",
+  "last_name": "Reyes"
+}
+}

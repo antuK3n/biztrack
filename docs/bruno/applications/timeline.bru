@@ -1,0 +1,16 @@
+meta {
+  name: Timeline
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/applications/1/timeline
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

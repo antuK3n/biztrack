@@ -1,0 +1,16 @@
+meta {
+  name: List Businesses
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/businesses
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

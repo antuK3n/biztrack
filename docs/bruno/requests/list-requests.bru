@@ -1,0 +1,16 @@
+meta {
+  name: List Requests
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/requests
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

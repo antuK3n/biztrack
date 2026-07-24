@@ -1,0 +1,29 @@
+meta {
+  name: Adjust Fee
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/applications/1/fee/adjust
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "line_items": [
+    {
+      "label": "Adjusted fee",
+      "amount": 1234.0
+    }
+  ],
+  "total_amount": 1234.0
+}
+}

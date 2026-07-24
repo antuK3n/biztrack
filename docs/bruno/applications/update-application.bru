@@ -1,0 +1,26 @@
+meta {
+  name: Update Application
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/applications/1
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "business_id": 1,
+  "permit_type_ids": [
+    1
+  ]
+}
+}

@@ -1,0 +1,16 @@
+meta {
+  name: List Payments
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/payments
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

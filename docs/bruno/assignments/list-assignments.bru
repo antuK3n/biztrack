@@ -1,0 +1,16 @@
+meta {
+  name: List Assignments
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/assignments
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

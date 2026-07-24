@@ -1,0 +1,16 @@
+meta {
+  name: Download Attachment
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/message-attachments/1/download
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

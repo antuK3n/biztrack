@@ -1,0 +1,16 @@
+meta {
+  name: List Inspections
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/inspections
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

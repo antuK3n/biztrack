@@ -1,0 +1,23 @@
+meta {
+  name: Reject Application
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/applications/1/reject
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "reason": "Incomplete requirements."
+}
+}

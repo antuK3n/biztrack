@@ -1,0 +1,23 @@
+meta {
+  name: Approve Assignment
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/assignments/1/approve
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "remarks": "Looks good."
+}
+}

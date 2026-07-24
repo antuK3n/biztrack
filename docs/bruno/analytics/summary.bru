@@ -1,0 +1,16 @@
+meta {
+  name: Summary
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/analytics/summary
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

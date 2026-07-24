@@ -1,0 +1,26 @@
+meta {
+  name: Upsert Office Form
+  type: http
+  seq: 10
+}
+
+put {
+  url: {{baseUrl}}/applications/1/office-forms/OCCUPANCY
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "form_data": {
+    "floor_area": 45,
+    "occupancy_type": "commercial"
+  }
+}
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Barangays
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/reference/barangays
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

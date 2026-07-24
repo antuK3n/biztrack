@@ -1,0 +1,29 @@
+meta {
+  name: Create Application
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/applications
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "business_id": 1,
+  "application_type": "new",
+  "permit_type_ids": [
+    1,
+    2,
+    3
+  ]
+}
+}

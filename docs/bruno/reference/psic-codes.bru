@@ -1,0 +1,16 @@
+meta {
+  name: PSIC Codes
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/reference/psic-codes
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

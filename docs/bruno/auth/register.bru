@@ -1,0 +1,29 @@
+meta {
+  name: Register
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/auth/register
+  body: json
+  auth: none
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+}
+
+body:json {
+{
+  "first_name": "Juan",
+  "last_name": "Dela Cruz",
+  "gender": "M",
+  "email": "newowner@example.com",
+  "mobile_number": "09171234567",
+  "password": "biztrack1",
+  "password_confirmation": "biztrack1",
+  "data_privacy_consent": true
+}
+}

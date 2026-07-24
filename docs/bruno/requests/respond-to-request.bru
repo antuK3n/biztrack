@@ -1,0 +1,23 @@
+meta {
+  name: Respond to Request
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/requests/1/respond
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "body": "Here is the document."
+}
+}

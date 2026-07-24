@@ -1,0 +1,16 @@
+meta {
+  name: Toggle Active
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/admin/users/1/toggle-active
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

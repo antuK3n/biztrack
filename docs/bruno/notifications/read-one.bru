@@ -1,0 +1,16 @@
+meta {
+  name: Read One
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/notifications/1/read
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

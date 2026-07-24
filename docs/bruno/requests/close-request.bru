@@ -1,0 +1,23 @@
+meta {
+  name: Close Request
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/requests/1/close
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "outcome": "fulfilled"
+}
+}

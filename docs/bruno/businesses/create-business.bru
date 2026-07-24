@@ -1,0 +1,40 @@
+meta {
+  name: Create Business
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/businesses
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "name": "Catmon Eatery",
+  "trade_name": "Catmon Eats",
+  "registration_type": "DTI",
+  "registration_number": "DTI-04217788",
+  "tin": "123-456-789-000",
+  "address": {
+    "line1": "12 Gen. Luna St.",
+    "line2": "",
+    "barangay_id": 1,
+    "latitude": 14.657,
+    "longitude": 120.956
+  },
+  "lines": [
+    {
+      "psic_code_id": 1,
+      "capitalization": 100000
+    }
+  ]
+}
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Cancel Application
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/applications/1/cancel
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

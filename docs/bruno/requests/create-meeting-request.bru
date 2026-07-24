@@ -1,0 +1,28 @@
+meta {
+  name: Create Meeting Request
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/applications/1/requests
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "request_type": "meeting",
+  "title": "Clarification call",
+  "description": "Quick call.",
+  "meeting_scheduled_at": "2026-08-01T09:00:00Z",
+  "meeting_duration_minutes": 45,
+  "meeting_link": "https://meet.google.com/abc-defg-hij"
+}
+}

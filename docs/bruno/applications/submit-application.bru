@@ -1,0 +1,16 @@
+meta {
+  name: Submit Application
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/applications/1/submit
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

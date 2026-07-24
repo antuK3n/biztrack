@@ -1,0 +1,16 @@
+meta {
+  name: Read All
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/notifications/read-all
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

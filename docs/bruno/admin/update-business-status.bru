@@ -1,0 +1,24 @@
+meta {
+  name: Update Business Status
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/admin/businesses/1/status
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "status": "suspended",
+  "reason": "Non-compliance."
+}
+}

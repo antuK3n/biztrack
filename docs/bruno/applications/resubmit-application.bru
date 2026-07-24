@@ -1,0 +1,16 @@
+meta {
+  name: Resubmit Application
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/applications/1/resubmit
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

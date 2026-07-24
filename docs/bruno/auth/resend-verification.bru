@@ -1,0 +1,16 @@
+meta {
+  name: Resend Verification
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/auth/email/resend
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

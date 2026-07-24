@@ -1,0 +1,16 @@
+meta {
+  name: Receipt PDF
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/payments/1/receipt
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

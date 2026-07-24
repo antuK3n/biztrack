@@ -1,0 +1,16 @@
+meta {
+  name: Document Types
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/reference/document-types
+  body: none
+  auth: inherit
+}
+
+headers {
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}

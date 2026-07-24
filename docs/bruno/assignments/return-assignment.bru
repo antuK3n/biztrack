@@ -1,0 +1,23 @@
+meta {
+  name: Return Assignment
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/assignments/1/return
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  Accept: application/json
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+{
+  "remarks": "Please fix the address."
+}
+}
