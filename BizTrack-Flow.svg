@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1612" viewBox="0 0 1680 1612" font-family="Source Sans 3, sans-serif">
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#9aa4b5"/>
+  </marker>
+</defs>
+<rect width="1680" height="1612" fill="#eef1f6"/>
+<text x="48" y="68" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="30" font-weight="700" fill="#1d2433" text-anchor="start">BizTrack — Screen Flow</text>
+<text x="48" y="92" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="400" fill="#5b6472" text-anchor="start">City of Malabon · every screen of the running app, by role and workflow order · editable — imported from SVG</text>
+<rect x="48" y="124" width="1584" height="56" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="68" y="137" width="151.6" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="83" cy="152" r="4" fill="#0025cc"/>
+<text x="94" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Register / Sign in</text>
+<text x="228.6" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="245.6" y="137" width="58" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="260.6" cy="152" r="4" fill="#0025cc"/>
+<text x="271.6" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Apply</text>
+<text x="312.6" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="329.6" y="137" width="94" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="344.6" cy="152" r="4" fill="#0025cc"/>
+<text x="355.6" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Assess fee</text>
+<text x="432.6" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="449.6" y="137" width="43.6" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="464.6" cy="152" r="4" fill="#0025cc"/>
+<text x="475.6" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Pay</text>
+<text x="502.20000000000005" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="519.2" y="137" width="58" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="534.2" cy="152" r="4" fill="#0025cc"/>
+<text x="545.2" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Route</text>
+<text x="586.2" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="603.2" y="137" width="122.8" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="618.2" cy="152" r="4" fill="#0025cc"/>
+<text x="629.2" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Officer review</text>
+<text x="735" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="752" y="137" width="94" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="767" cy="152" r="4" fill="#0025cc"/>
+<text x="778" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Inspection</text>
+<text x="855" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="872" y="137" width="94" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="887" cy="152" r="4" fill="#0a7d3c"/>
+<text x="898" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Issue + QR</text>
+<text x="975" y="157" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="16" font-weight="700" fill="#9aa4b5" text-anchor="start">→</text>
+<rect x="992" y="137" width="122.8" height="30" rx="15" fill="#f3f5fa" stroke="#dce0e8" stroke-width="1"/>
+<circle cx="1007" cy="152" r="4" fill="#0a7d3c"/>
+<text x="1018" y="156" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12.5" font-weight="600" fill="#1d2433" text-anchor="start">Track / Verify</text>
+<rect x="48" y="214" width="1584" height="474" rx="16" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="68" y="232" width="102" height="24" rx="6" fill="#0025cc"/>
+<text x="119" y="248" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">APPLICANT</text>
+<text x="184" y="249" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="400" fill="#5b6472" text-anchor="start">Business owner — guided, one primary action per screen</text>
+<rect x="72" y="268" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="72" y="268" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="84" y="286" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="94" y="306" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Sign in</text>
+<text x="346" y="306" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/login</text>
+<rect x="86" y="334" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="343" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Email</text>
+<rect x="86" y="356" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="365" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Password</text>
+<rect x="86" y="378" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="387" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Sign In</text>
+<path d="M 364 356 L 392 356" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="400" y="268" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="400" y="268" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="412" y="286" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="422" y="306" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Home dashboard</text>
+<text x="674" y="306" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/dashboard</text>
+<rect x="414" y="334" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="343" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Apply for a permit</text>
+<rect x="414" y="356" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="365" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">In progress</text>
+<rect x="414" y="378" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="387" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Nearing expiry</text>
+<path d="M 692 356 L 720 356" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="728" y="268" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="728" y="268" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="740" y="286" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="750" y="306" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Apply wizard</text>
+<text x="1002" y="306" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/apply</text>
+<rect x="742" y="334" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="343" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Business</text>
+<rect x="742" y="356" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="365" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">PSIC lines</text>
+<rect x="742" y="378" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="387" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Map pin</text>
+<rect x="742" y="400" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="409" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Requirements</text>
+<rect x="742" y="422" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="431" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Docs</text>
+<rect x="742" y="444" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="453" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Review</text>
+<path d="M 1020 356 L 1048 356" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="1056" y="268" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="1056" y="268" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="1068" y="286" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="1078" y="306" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Track / timeline</text>
+<text x="1330" y="306" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/applications/:id</text>
+<rect x="1070" y="334" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="1088" y="343" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Status timeline</text>
+<rect x="1070" y="356" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="1088" y="365" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Assigned office</text>
+<rect x="1070" y="378" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="1088" y="387" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Next action</text>
+<rect x="72" y="486" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="72" y="486" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="84" y="504" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="94" y="524" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Payments</text>
+<text x="346" y="524" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/payments</text>
+<rect x="86" y="552" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="561" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Fee ₱</text>
+<rect x="86" y="574" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="583" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">GCash / Maya / Card</text>
+<rect x="86" y="596" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="104" y="605" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Receipt PAY-</text>
+<path d="M 364 574 L 392 574" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="400" y="486" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="400" y="486" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="412" y="504" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="422" y="524" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Permit vault</text>
+<text x="674" y="524" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/permits</text>
+<rect x="414" y="552" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="561" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Active permits</text>
+<rect x="414" y="574" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="583" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Validity</text>
+<rect x="414" y="596" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="432" y="605" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Expiry state</text>
+<path d="M 692 574 L 720 574" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="728" y="486" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="728" y="486" width="286" height="6" rx="3" fill="#0025cc"/>
+<rect x="740" y="504" width="262" height="30" rx="7" fill="#eef2fc"/>
+<text x="750" y="524" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Permit + QR</text>
+<text x="1002" y="524" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/permits/:id</text>
+<rect x="742" y="552" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="561" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Printable permit</text>
+<rect x="742" y="574" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="583" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">QR → verify</text>
+<rect x="742" y="596" width="10" height="10" rx="2" fill="#0025cc"/>
+<text x="760" y="605" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Download</text>
+<rect x="48" y="722" width="1584" height="256" rx="16" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="68" y="740" width="86" height="24" rx="6" fill="#33415c"/>
+<text x="111" y="756" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">OFFICER</text>
+<text x="168" y="757" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="400" fill="#5b6472" text-anchor="start">Department staff (BPLO / Sanitary / Fire) — dense, scannable</text>
+<rect x="72" y="776" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="72" y="776" width="286" height="6" rx="3" fill="#33415c"/>
+<rect x="84" y="794" width="262" height="30" rx="7" fill="#eef0f4"/>
+<text x="94" y="814" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Review queue</text>
+<text x="346" y="814" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/queue</text>
+<rect x="86" y="842" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="104" y="851" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Dept assignments</text>
+<rect x="86" y="864" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="104" y="873" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Filter status</text>
+<path d="M 364 864 L 392 864" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="400" y="776" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="400" y="776" width="286" height="6" rx="3" fill="#33415c"/>
+<rect x="412" y="794" width="262" height="30" rx="7" fill="#eef0f4"/>
+<text x="422" y="814" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Review detail</text>
+<text x="674" y="814" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/queue/:id</text>
+<rect x="414" y="842" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="432" y="851" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Documents</text>
+<rect x="414" y="864" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="432" y="873" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Checklist</text>
+<rect x="414" y="886" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="432" y="895" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Approve / Return / Reject</text>
+<path d="M 692 864 L 720 864" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="728" y="776" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="728" y="776" width="286" height="6" rx="3" fill="#33415c"/>
+<rect x="740" y="794" width="262" height="30" rx="7" fill="#eef0f4"/>
+<text x="750" y="814" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Inspections</text>
+<text x="1002" y="814" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/inspections</text>
+<rect x="742" y="842" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="760" y="851" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Scheduled</text>
+<rect x="742" y="864" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="760" y="873" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Conduct</text>
+<rect x="742" y="886" width="10" height="10" rx="2" fill="#33415c"/>
+<text x="760" y="895" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Pass / Fail / Conditional</text>
+<rect x="48" y="1012" width="1584" height="256" rx="16" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="68" y="1030" width="134" height="24" rx="6" fill="#7a4bd0"/>
+<text x="135" y="1046" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">ADMINISTRATOR</text>
+<text x="216" y="1047" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="400" fill="#5b6472" text-anchor="start">Oversight — analytics, users, audit trail</text>
+<rect x="72" y="1066" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="72" y="1066" width="286" height="6" rx="3" fill="#7a4bd0"/>
+<rect x="84" y="1084" width="262" height="30" rx="7" fill="#f3eefb"/>
+<text x="94" y="1104" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Analytics</text>
+<text x="346" y="1104" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/analytics</text>
+<rect x="86" y="1132" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="104" y="1141" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Approval rate</text>
+<rect x="86" y="1154" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="104" y="1163" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Avg processing</text>
+<rect x="86" y="1176" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="104" y="1185" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Revenue</text>
+<path d="M 364 1154 L 392 1154" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="400" y="1066" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="400" y="1066" width="286" height="6" rx="3" fill="#7a4bd0"/>
+<rect x="412" y="1084" width="262" height="30" rx="7" fill="#f3eefb"/>
+<text x="422" y="1104" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Users &amp; roles</text>
+<text x="674" y="1104" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/admin/users</text>
+<rect x="414" y="1132" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="432" y="1141" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Create officer</text>
+<rect x="414" y="1154" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="432" y="1163" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Role + dept</text>
+<rect x="414" y="1176" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="432" y="1185" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Activate</text>
+<path d="M 692 1154 L 720 1154" stroke="#9aa4b5" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="728" y="1066" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="728" y="1066" width="286" height="6" rx="3" fill="#7a4bd0"/>
+<rect x="740" y="1084" width="262" height="30" rx="7" fill="#f3eefb"/>
+<text x="750" y="1104" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Audit logs</text>
+<text x="1002" y="1104" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/admin/audit-logs</text>
+<rect x="742" y="1132" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="760" y="1141" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Who</text>
+<rect x="742" y="1154" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="760" y="1163" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">What</text>
+<rect x="742" y="1176" width="10" height="10" rx="2" fill="#7a4bd0"/>
+<text x="760" y="1185" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">When</text>
+<rect x="48" y="1302" width="1584" height="256" rx="16" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="68" y="1320" width="78" height="24" rx="6" fill="#0a7d3c"/>
+<text x="107" y="1336" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">PUBLIC</text>
+<text x="160" y="1337" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="13" font-weight="400" fill="#5b6472" text-anchor="start">No login — QR scan target</text>
+<rect x="72" y="1356" width="286" height="176" rx="12" fill="#ffffff" stroke="#dce0e8" stroke-width="1"/>
+<rect x="72" y="1356" width="286" height="6" rx="3" fill="#0a7d3c"/>
+<rect x="84" y="1374" width="262" height="30" rx="7" fill="#eef7ef"/>
+<text x="94" y="1394" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="14" font-weight="700" fill="#1d2433" text-anchor="start">Permit verification</text>
+<text x="346" y="1394" font-family="IBM Plex Mono, SF Mono, monospace" font-size="10.5" font-weight="400" fill="#5b6472" text-anchor="end">/verify/:permit</text>
+<rect x="86" y="1422" width="10" height="10" rx="2" fill="#0a7d3c"/>
+<text x="104" y="1431" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Valid / invalid</text>
+<rect x="86" y="1444" width="10" height="10" rx="2" fill="#0a7d3c"/>
+<text x="104" y="1453" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">Business + type</text>
+<rect x="86" y="1466" width="10" height="10" rx="2" fill="#0a7d3c"/>
+<text x="104" y="1475" font-family="Source Sans 3, Segoe UI, sans-serif" font-size="12" font-weight="400" fill="#3b4557" text-anchor="start">No PII</text>
+</svg>
