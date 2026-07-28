@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FieldLabel, inputCls } from '../../components/ui/Proto'
+import { formatDate } from '../../lib/format'
 
 /*
  * Per-office application form sheets (UI prototype Parts 4-7, pages 040-043).
@@ -8,6 +9,13 @@ import { FieldLabel, inputCls } from '../../components/ui/Proto'
  * as opaque JSON via PUT office-forms/{code}. The auto-generated control numbers
  * (SP-2026-…, CEC-2026-…, FSIC-…) are read-only placeholders per the prototype —
  * the real number is minted server-side on issuance.
+ *
+ * The form never asks for anything the system already holds. Whether this is a
+ * new or renewal application, the date it was filed, and which certificate the
+ * FSIC is for all come from the application record: the API derives them on
+ * every read and write, and they are shown here read-only so the sheet still
+ * carries what the paper form needs. Issuance dates ("Date Issued") belong to
+ * the office that issued the document and are filled in during officer review.
  */
 
 export type OfficeFormData = Record<string, unknown>
@@ -63,18 +71,15 @@ export function todayISO(): string {
 export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): string[] {
   const has = (key: string) => typeof data[key] === 'string' && (data[key] as string).trim() !== ''
   const missing: string[] = []
+  // Derived answers (type of application, filing date, certificate applied for)
+  // are never required here: the API fills them in, so they cannot be missing.
   if (code === 'SANITARY') {
-    if (!has('application_type')) missing.push('Type of Application')
     if (!has('sanitary_classification')) missing.push('Sanitary Classification')
   }
   if (code === 'CEC') {
-    if (!has('application_type')) missing.push('Type of Application')
     if (has('owner_birthday') && (data.owner_birthday as string) >= todayISO()) {
       missing.push('Owner birthday must be a past date')
     }
-  }
-  if (code === 'FSIC') {
-    if (!has('certificate_applied_for')) missing.push('Certificate Applied For')
   }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
@@ -99,17 +104,15 @@ function SectionMarker({ letter, label, required }: { letter: string; label: str
   )
 }
 
-/** Radio/checkbox chip pill (New/Renewal, classification, Full/Partial). */
+/** Radio/checkbox chip pill (sanitary classification, Full/Partial occupancy). */
 function ChipOption({
   label,
   selected,
   onClick,
-  wide,
 }: {
   label: string
   selected: boolean
   onClick: () => void
-  wide?: boolean
 }) {
   return (
     <button
@@ -118,8 +121,6 @@ function ChipOption({
       aria-checked={selected}
       onClick={onClick}
       className={`flex items-center gap-2.5 rounded-md border px-4 py-2.5 text-sm font-medium transition-colors ${
-        wide ? 'w-full text-left' : ''
-      } ${
         selected
           ? 'border-royal bg-input text-ink'
           : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -154,25 +155,6 @@ function ChipRow({
   )
 }
 
-/** Full-width stacked radio list (FSIC "Certificate Applied For"). */
-function ChipList({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[]
-  value: string
-  onChange: (v: string) => void
-}) {
-  return (
-    <div className="space-y-2.5">
-      {options.map((o) => (
-        <ChipOption key={o} label={o} selected={value === o} onClick={() => onChange(o)} wide />
-      ))}
-    </div>
-  )
-}
-
 /** Read-only auto-number field (SP-2026-…, CEC-2026-…, FSIC-…). */
 function ControlNoField({
   label,
@@ -197,11 +179,66 @@ function ControlNoField({
 
 const AutoTag = () => <span className="font-normal text-ink-muted"> (auto-generated)</span>
 
+const FromApplicationTag = () => (
+  <span className="font-normal text-ink-muted"> (from your application)</span>
+)
+
+/**
+ * An answer the system already holds, shown read-only. The API derives it from
+ * the application record on every read and write, so the applicant confirms it
+ * instead of re-typing what they already told us.
+ */
+function DerivedField({
+  label,
+  value,
+  hint,
+}: {
+  label: ReactNode
+  value: string
+  hint?: string
+}) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        value={value}
+        readOnly
+        aria-readonly="true"
+        placeholder="Filled in from your application"
+        className={`${inputCls} cursor-not-allowed bg-line/60 text-ink-secondary`}
+      />
+      {hint && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
+    </div>
+  )
+}
+
 /* ── Per-office field bodies ──────────────────────────────────────────── */
 
 function get(data: OfficeFormData, key: string): string {
   const v = data[key]
   return typeof v === 'string' ? v : ''
+}
+
+/** The filing date, formatted for display; blank until the API supplies it. */
+function applicationDate(data: OfficeFormData): string {
+  const raw = get(data, 'application_date')
+  return raw === '' ? '' : formatDate(raw)
+}
+
+/** "Date of Application" reads from submitted_at and is never typed (item 11). */
+function ApplicationDateField({ data }: { data: OfficeFormData }) {
+  return (
+    <DerivedField
+      label={
+        <>
+          Date of Application
+          <AutoTag />
+        </>
+      }
+      value={applicationDate(data)}
+      hint="Recorded by the system when you submit."
+    />
+  )
 }
 
 const WATER_SOURCES = ['Level III (Waterworks)', 'Deep Well', 'Bottled / Refill', 'Other']
@@ -218,14 +255,16 @@ function SanitaryFields({
       <section className="space-y-4">
         <SectionMarker letter="A" label="Application Details" />
         <div className="grid gap-5 sm:grid-cols-2">
-          <div>
-            <FieldLabel required>Type of Application</FieldLabel>
-            <ChipRow
-              options={['New', 'Renewal']}
-              value={get(data, 'application_type')}
-              onChange={(v) => set('application_type', v)}
-            />
-          </div>
+          {/* New vs Renewal is the application's own type — never re-asked. */}
+          <DerivedField
+            label={
+              <>
+                Type of Application
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'application_type')}
+          />
           <ControlNoField
             label={
               <>
@@ -235,6 +274,7 @@ function SanitaryFields({
             }
             placeholder="SP-2026-________"
           />
+          <ApplicationDateField data={data} />
         </div>
       </section>
 
@@ -297,14 +337,16 @@ function CecFields({
       <section className="space-y-4">
         <SectionMarker letter="A" label="Application Details" />
         <div className="grid gap-5 sm:grid-cols-2">
-          <div>
-            <FieldLabel required>Type of Application</FieldLabel>
-            <ChipRow
-              options={['Initial Application', 'Renewal of CEC']}
-              value={get(data, 'application_type')}
-              onChange={(v) => set('application_type', v)}
-            />
-          </div>
+          {/* Initial vs renewal follows the application type on record. */}
+          <DerivedField
+            label={
+              <>
+                Type of Application
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'application_type')}
+          />
           <ControlNoField
             label={
               <>
@@ -314,6 +356,7 @@ function CecFields({
             }
             placeholder="CEC-2026-________"
           />
+          <ApplicationDateField data={data} />
         </div>
         <div className="sm:w-1/2 sm:pr-2.5">
           <FieldLabel>Birthday of Owner</FieldLabel>
@@ -336,18 +379,6 @@ function CecFields({
     </div>
   )
 }
-
-/*
- * "Certificate Applied For" stays applicant-side on purpose: verified against
- * the standard BFP FSIC application form (BFP-QSF-FSED-002), where the
- * applicant ticks FSEC vs FSIC-new vs FSIC-renewal. It is the applicant's
- * decision, not the issuing office's.
- */
-const FSIC_CERTIFICATES = [
-  'FSIC for Certificate of Occupancy',
-  'FSIC for Business Permit (New Business)',
-  'FSIC for Business Permit (Renewal of Business)',
-]
 
 function FsicFields({
   data,
@@ -379,16 +410,25 @@ function FsicFields({
               className={inputCls}
             />
           </div>
+          <ApplicationDateField data={data} />
         </div>
       </section>
 
       <section className="space-y-4">
-        <SectionMarker letter="B" label="Certificate Applied For" required />
-        <p className="-mt-2 text-xs text-ink-muted">Select one.</p>
-        <ChipList
-          options={FSIC_CERTIFICATES}
+        <SectionMarker letter="B" label="Certificate Applied For" />
+        {/*
+         * The permits you picked and the application type already decide this,
+         * so the BFP sheet carries it without asking the applicant to repeat it.
+         */}
+        <DerivedField
+          label={
+            <>
+              Certificate Applied For
+              <FromApplicationTag />
+            </>
+          }
           value={get(data, 'certificate_applied_for')}
-          onChange={(v) => set('certificate_applied_for', v)}
+          hint="Set from the permits and application type you chose in step 1. To change it, go back to Permit Selection."
         />
       </section>
     </div>
@@ -407,6 +447,10 @@ function OccupancyFields({
       <section className="space-y-4">
         <SectionMarker letter="A" label="Application & Permit Details" />
         <div className="grid gap-5 sm:grid-cols-2">
+          {/*
+           * Full vs Partial is how much of the building will be occupied — a
+           * real applicant decision, not the new/renewal the system knows.
+           */}
           <div>
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
@@ -415,11 +459,7 @@ function OccupancyFields({
               onChange={(v) => set('application_type', v)}
             />
           </div>
-          {/*
-           * No applicant-entered dates here: the application date comes from
-           * submitted_at server-side, and "Date Issued" values are recorded by
-           * the issuing office at issuance. The API also strips these keys.
-           */}
+          <ApplicationDateField data={data} />
           <div>
             <FieldLabel>Building Permit No.</FieldLabel>
             <input
@@ -437,6 +477,14 @@ function OccupancyFields({
             />
           </div>
         </div>
+        {/*
+         * The dates these documents were issued are recorded by the office that
+         * issued them, during review (ReviewPage "For Office Use Only").
+         */}
+        <p className="text-xs text-ink-muted">
+          The dates these documents were issued are filled in by the reviewing office. Just give the
+          numbers here.
+        </p>
       </section>
     </div>
   )
