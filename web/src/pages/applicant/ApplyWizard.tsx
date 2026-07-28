@@ -453,6 +453,8 @@ export function ApplyWizard() {
   const [form, setForm] = useState<FormState>(EMPTY)
   // Per-office form payloads keyed by permit-type code (prototype Parts 4-7).
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
+  /* Bumped after a permit re-sync to refetch server-derived office-form answers. */
+  const [officeFormsVersion, setOfficeFormsVersion] = useState(0)
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -788,6 +790,9 @@ export function ApplyWizard() {
         // is presented once a certificate is clicked").
         if (applicationId) {
           await applications.update(applicationId, { permit_type_ids: form.permit_type_ids })
+          // The sheets for any newly-added certificate carry derived answers
+          // the server only knows now that it has the new permit list.
+          setOfficeFormsVersion((v) => v + 1)
         }
       } else if (phase === 'business' || phase === 'lines') {
         if (applicationId) {
@@ -1062,7 +1067,13 @@ export function ApplyWizard() {
     }
   }, [draftIdParam, refs.data, navigate])
 
-  /* Load any previously-saved office-form payloads once the draft exists. */
+  /*
+   * Load any previously-saved office-form payloads once the draft exists, and
+   * again whenever the permit selection has been synced. Parts of these sheets
+   * are derived server-side from the permits chosen (the FSIC "Certificate
+   * Applied For", the sanitary and CEC application types), so adding a
+   * certificate mid-session leaves those fields blank until we refetch.
+   */
   useEffect(() => {
     if (!applicationId) return
     let active = true
@@ -1087,7 +1098,7 @@ export function ApplyWizard() {
     return () => {
       active = false
     }
-  }, [applicationId])
+  }, [applicationId, officeFormsVersion])
 
   /*
    * Entering the Business & Tax Profile step: seed structure from the business
