@@ -113,8 +113,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
-        Route::post('applications/{application}/reject', [ApplicationController::class, 'reject']);
     });
+    /*
+     * Rejecting the whole application is not a per-office power. Each office
+     * reviews its own clearance and returns its own assignment; ending the
+     * application belongs to the issuing office (BPLO) and the super admin.
+     * Otherwise a market administrator could terminate a business permit that
+     * every other office had already cleared.
+     */
+    Route::middleware('permission:application.reject')
+        ->post('applications/{application}/reject', [ApplicationController::class, 'reject']);
     // OIC: (re)assign an officer to an assignment (oic.assign)
     Route::middleware('permission:oic.assign')
         ->post('assignments/{assignment}/assign', [AssignmentController::class, 'assign']);
