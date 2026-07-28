@@ -105,10 +105,17 @@ export const applications = {
     prior_permit_id?: number
     /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
     fee_profile?: FeeProfile
+    /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
+    payment_mode?: 'annual' | 'quarterly'
   }) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
-    body: { business_id?: number; permit_type_ids?: number[]; fee_profile?: FeeProfile | null },
+    body: {
+      business_id?: number
+      permit_type_ids?: number[]
+      fee_profile?: FeeProfile | null
+      payment_mode?: 'annual' | 'quarterly'
+    },
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),

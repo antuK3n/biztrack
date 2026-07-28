@@ -19,6 +19,14 @@ class BusinessResource extends JsonResource
             'tin' => $this->tin,
             'ban' => $this->ban,
             'is_active' => (bool) $this->is_active,
+            // Unified-form premises and contact block.
+            'is_rented' => (bool) $this->is_rented,
+            'lessor_name' => $this->lessor_name,
+            'lessor_address' => $this->lessor_address,
+            'lessor_contact' => $this->lessor_contact,
+            'monthly_rental' => $this->monthly_rental,
+            'emergency_contact_name' => $this->emergency_contact_name,
+            'emergency_contact_number' => $this->emergency_contact_number,
             // Owner-visible standing (p006 blacklist modal reads this).
             'status' => $this->status ?? 'active',
             'address' => $this->whenLoaded('address', fn () => $this->address ? [

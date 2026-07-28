@@ -60,6 +60,9 @@ class ApplicationController extends Controller
         $data = $request->validate([
             'business_id' => ['required', 'exists:businesses,id'],
             'application_type' => ['required', 'in:new,renewal,amendment'],
+            // Ordinance Sec. 2N: annual (first 20 days of January) or quarterly
+            // (first 20 days of Jan/Apr/Jul/Oct). No semi-annual option exists.
+            'payment_mode' => ['sometimes', 'in:annual,quarterly'],
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
@@ -87,6 +90,7 @@ class ApplicationController extends Controller
             'application_type' => $data['application_type'],
             'status' => ApplicationStatus::Draft,
             'prior_permit_id' => $data['prior_permit_id'] ?? null,
+            'payment_mode' => $data['payment_mode'] ?? 'annual',
             'fee_profile' => $data['fee_profile'] ?? null,
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
@@ -120,6 +124,7 @@ class ApplicationController extends Controller
             'business_id' => ['sometimes', 'exists:businesses,id'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
+            'payment_mode' => ['sometimes', 'in:annual,quarterly'],
             ...$this->feeProfileRules(),
         ]);
 
@@ -133,6 +138,9 @@ class ApplicationController extends Controller
         }
         if (array_key_exists('fee_profile', $data)) {
             $application->update(['fee_profile' => $data['fee_profile']]);
+        }
+        if (isset($data['payment_mode'])) {
+            $application->update(['payment_mode' => $data['payment_mode']]);
         }
 
         Audit::log('application.updated', $application);
@@ -263,6 +271,9 @@ class ApplicationController extends Controller
             'fee_profile.capitalization' => ['nullable', 'numeric', 'min:0'],
             'fee_profile.floor_area_sqm' => ['nullable', 'numeric', 'min:0'],
             'fee_profile.employees' => ['nullable', 'integer', 'min:0'],
+            // Unified form asks how many of those live in the city.
+            'fee_profile.employees_in_lgu' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.tax_incentive_grantor' => ['nullable', 'string', 'max:120'],
             'fee_profile.storeys' => ['nullable', 'integer', 'min:0'],
             'fee_profile.doors' => ['nullable', 'integer', 'min:0'],
             'fee_profile.rooms' => ['nullable', 'integer', 'min:0'],

@@ -20,6 +20,7 @@ export interface FeeProfileDraft {
   categories: Record<number, FeeCategoryDraft>
   floor_area_sqm: string
   employees: string
+  employees_in_lgu: string
   delivery_vehicles_motorized: string
   delivery_vehicles_other: string
   occupancy_group: string
@@ -34,6 +35,7 @@ export const EMPTY_FEE_PROFILE: FeeProfileDraft = {
   categories: {},
   floor_area_sqm: '',
   employees: '',
+  employees_in_lgu: '',
   delivery_vehicles_motorized: '',
   delivery_vehicles_other: '',
   occupancy_group: '',
@@ -202,6 +204,7 @@ export function buildFeeProfile(
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
           employees: toInt(draft.employees),
+          employees_in_lgu: toInt(draft.employees_in_lgu),
           delivery_vehicles_motorized: toInt(draft.delivery_vehicles_motorized),
           delivery_vehicles_other: toInt(draft.delivery_vehicles_other),
         }
@@ -246,6 +249,7 @@ export function feeProfileToDraft(
     categories,
     floor_area_sqm: str(profile.floor_area_sqm),
     employees: str(profile.employees),
+    employees_in_lgu: str(profile.employees_in_lgu),
     delivery_vehicles_motorized: str(profile.delivery_vehicles_motorized),
     delivery_vehicles_other: str(profile.delivery_vehicles_other),
     occupancy_group: profile.occupancy_group ?? '',
@@ -327,6 +331,8 @@ export function FeeProfileStep({
   lines,
   value,
   onChange,
+  paymentMode,
+  onPaymentModeChange,
 }: {
   applicationType: ApplicationType
   /** Selected permit-type codes. */
@@ -335,6 +341,8 @@ export function FeeProfileStep({
   lines: { id: number; title: string }[]
   value: FeeProfileDraft
   onChange: (next: FeeProfileDraft) => void
+  paymentMode: 'annual' | 'quarterly'
+  onPaymentModeChange: (next: 'annual' | 'quarterly') => void
 }) {
   const isRenewal = applicationType === 'renewal'
   const isNew = applicationType === 'new'
@@ -504,6 +512,50 @@ export function FeeProfileStep({
         </div>
       </section>
 
+      {/* ── BUSINESS permit: how the business tax is settled ─────────────── */}
+      {hasBusiness && (
+        <section>
+          <SectionMarker letter={nextLetter()} label="How You Want to Pay" />
+          <div>
+            <FieldLabel>Mode of Payment</FieldLabel>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  { value: 'annual', label: 'Annually', hint: 'One payment, on or before January 20.' },
+                  {
+                    value: 'quarterly',
+                    label: 'Quarterly',
+                    hint: 'Four payments, within the first 20 days of January, April, July and October.',
+                  },
+                ] as const
+              ).map((opt) => {
+                const selected = paymentMode === opt.value
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => onPaymentModeChange(opt.value)}
+                    className={`flex max-w-xs flex-col items-start gap-1 rounded-md border px-4 py-2.5 text-left transition-colors ${
+                      selected
+                        ? 'border-royal bg-input text-ink'
+                        : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">{opt.label}</span>
+                    <span className="text-xs text-ink-secondary">{opt.hint}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <p className="mt-2 text-xs text-ink-secondary">
+              The business tax may be settled in full or in four instalments (Malabon Revenue Code
+              Sec. 2N). Regulatory fees are due with the first payment either way.
+            </p>
+          </div>
+        </section>
+      )}
+
       {/* ── BUSINESS permit: premises & operations ───────────────────────── */}
       {hasBusiness && (
         <section>
@@ -526,6 +578,17 @@ export function FeeProfileStep({
                 value={value.employees}
                 onChange={(e) => set('employees', e.target.value)}
                 placeholder="e.g. 3"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              {/* Unified form asks this separately; some LGU incentives key off it. */}
+              <FieldLabel>Employees Residing in Malabon</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={value.employees_in_lgu}
+                onChange={(e) => set('employees_in_lgu', e.target.value)}
+                placeholder="e.g. 2"
                 className={inputCls}
               />
             </div>

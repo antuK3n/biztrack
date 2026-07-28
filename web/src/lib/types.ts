@@ -110,6 +110,13 @@ export interface Business {
   tin: string | null
   ban: string | null
   is_active: boolean
+  is_rented?: boolean
+  lessor_name?: string | null
+  lessor_address?: string | null
+  lessor_contact?: string | null
+  monthly_rental?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_number?: string | null
   /**
    * Access status. Optional because the owner `/businesses` list resource
    * (BusinessResource) does not currently expose `status` — only `ban` and
@@ -126,6 +133,13 @@ export interface BusinessPayload {
   registration_type?: string
   registration_number?: string
   tin?: string
+  is_rented?: boolean
+  lessor_name?: string
+  lessor_address?: string
+  lessor_contact?: string
+  monthly_rental?: string
+  emergency_contact_name?: string
+  emergency_contact_number?: string
   address: {
     line1: string
     line2?: string
@@ -233,6 +247,8 @@ export interface FeeProfile {
   floor_area_sqm?: number
   construction_cost?: number
   employees?: number
+  /** How many of those live in Malabon (unified form). */
+  employees_in_lgu?: number
   storeys?: number
   doors?: number
   rooms?: number
@@ -325,6 +341,8 @@ export interface Permit {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /** How the business tax is settled: in full by Jan 20, or in four quarters. */
+  payment_mode?: 'annual' | 'quarterly'
   /** Full resource embeds the complete business (address + lines). */
   business: Business
   documents: AppDocument[]

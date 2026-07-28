@@ -41,6 +41,13 @@ class BusinessController extends Controller
                 'registration_type' => $data['registration_type'] ?? null,
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
                 'ban' => Numbering::ban(),
                 'is_active' => true,
             ]);
@@ -78,6 +85,13 @@ class BusinessController extends Controller
                 'registration_type' => $data['registration_type'] ?? null,
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
             ]);
             $this->syncAddressAndLines($business, $data);
         });
@@ -163,7 +177,22 @@ class BusinessController extends Controller
             // detail for any line.
             'lines.*.line_of_business' => ['nullable', 'string', 'max:255'],
             'lines.*.products_services' => ['nullable', 'string', 'max:1000'],
+            /*
+             * Unified form, lessor block. Only required once the applicant says
+             * the premises are rented; an owner-occupied shop has no lessor and
+             * must not be asked to invent one.
+             */
+            'is_rented' => ['sometimes', 'boolean'],
+            'lessor_name' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
+            'lessor_address' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
+            'lessor_contact' => ['nullable', 'string', 'max:40'],
+            'monthly_rental' => ['nullable', 'required_if:is_rented,true', 'numeric', 'min:0'],
+            'emergency_contact_name' => ['nullable', 'string', 'max:255'],
+            'emergency_contact_number' => ['nullable', 'string', 'max:40'],
         ], [
+            'lessor_name.required_if' => "Enter the lessor's name, or set the premises to owner-occupied.",
+            'lessor_address.required_if' => "Enter the lessor's address, or set the premises to owner-occupied.",
+            'monthly_rental.required_if' => 'Enter the monthly rental, or set the premises to owner-occupied.',
             'lines.required' => 'Add at least one line of business.',
             'lines.min' => 'Add at least one line of business.',
             'address.required' => 'A business address is required.',
