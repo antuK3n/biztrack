@@ -1,11 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
 import { InfoCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
-import { api, toApiError } from '../../lib/api'
+import { SESSION_EXPIRED_KEY, api, toApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
 import { useAuth } from '../../stores/auth'
@@ -25,7 +25,15 @@ export function LoginPage() {
   const [errors, setErrors] = useState<FormErrors>({})
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
+
+  useEffect(() => {
+    if (sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
+      sessionStorage.removeItem(SESSION_EXPIRED_KEY)
+      setSessionExpired(true)
+    }
+  }, [])
 
   function validate(): FormErrors {
     return {
@@ -47,6 +55,7 @@ export function LoginPage() {
 
     setLoading(true)
     setFormError(null)
+    setSessionExpired(false)
     try {
       const { data } = await api.post<{ data: { token: string; user: User } }>('/auth/login', {
         email: email.trim(),
@@ -96,6 +105,11 @@ export function LoginPage() {
       }
     >
       <form ref={formRef} onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+        {sessionExpired && !formError && (
+          <Alert variant="warning" title="Your session has expired">
+            For your security, sessions end after 12 hours. Sign in again to continue.
+          </Alert>
+        )}
         {formError && (
           <Alert variant={formError.variant} title={formError.title}>
             {formError.body}

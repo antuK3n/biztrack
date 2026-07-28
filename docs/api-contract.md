@@ -13,7 +13,18 @@ owner: `business.manage_own application.create application.view_own document.upl
 officer/staff: `application.view_all application.review inspection.manage permit.view_all permit.issue`
 admin adds: `analytics.view user.manage owner.manage_status oic.assign reference.manage audit.view`
 
+## Session security (bearer tokens)
+- Tokens are Sanctum bearer tokens sent as `Authorization: Bearer <token>`; HTTPS is required in production (a leaked token is a full session).
+- Expiration: 12 hours (`config/sanctum.php` `expiration = 720`). Expired tokens 401; the web client redirects to login with a "session expired" notice.
+- Revocation: `POST /auth/logout` deletes the current token server-side. `PUT /auth/password` and password reset revoke all of the user's other tokens (password change keeps the token making the request; reset revokes everything).
+- Brute force: per-account lockout after 5 failed attempts (15 min, persisted in `failed_login_attempts`/`locked_until`) plus an IP rate limit of 10 login requests/min on `POST /auth/login` (429).
+- No IP or user-agent binding by design: mobile testers roam across networks.
+
 ## Endpoints
+
+### Auth self-service (auth required)
+- `PUT /auth/profile` — `{first_name, middle_name?, last_name, suffix?, mobile_number}` → `{data: UserResource}`. Email is the login identifier and cannot be changed here (no live re-verification flow); support handles email changes.
+- `PUT /auth/password` — `{current_password, password, password_confirmation}` (min 8, confirmed). 422 with `current_password` error if the current password is wrong. On success revokes all other tokens for the user.
 
 ### Reference (auth required; read-only lookups for the wizard)
 - `GET /reference/barangays` → `[{id,name}]`
@@ -126,3 +137,28 @@ Artisan `biztrack:scan-permits`: (1) notify owners at 60/30/7 days before `valid
 
 ### Chatbot (dormant per plan §9 — tables only)
 - Migrations for `chatbot_conversations`, `chatbot_messages`. No endpoints, no runtime.
+
+### Revenue-code fee engine (Ordinance A10-2016)
+
+- Fee assessment now computes an itemized Tax Order of Payment from ~420
+  seeded rules extracted from the New Revenue Code of Malabon 2016
+  (`docs/revenue-code-extract.md` is the legal source; rule data lives in
+  `api/database/data/revenue_code/*.json` per `SCHEMA.md` there).
+- `POST/PUT /applications` accept `fee_profile`: lines of business with
+  category + gross_sales (renewal) or capitalization (new), floor area,
+  employees, business_structure, occupancy fields, unit counts, and flags
+  (liquor/tobacco/signage/flammables/BMBE/cooperative/petroleum/…). Field
+  list: `ApplicationController::feeProfileRules()`.
+- `FeeAssessment.line_items` entries are now
+  `{code, label, amount, office, group, section, source, requires_officer, defects}`.
+  Lines with `requires_officer: true` are ₱0 placeholders the officer
+  completes via the existing fee-adjust endpoint (PIL, market stall rental,
+  BMBE/cooperative claims, missing-in-print fees).
+- Engine rules: business tax per line of business; franchise/printing route
+  to 0.75% in lieu of the graduated table; environmental and sanitary bill
+  the highest matched rate; garbage bills the highest schedule (+25% when
+  several match, capped ₱6,000); FSIC = 10% of mayors_permit + regulatory
+  lines (RA 9514), computed last. Late payment: 25% surcharge + 2%/month
+  interest capped at 36 months (`FeeCalculator::latePenalty`).
+- Applications without a `fee_profile` fall back to the legacy flat
+  per-permit-type fee so existing data keeps working.
