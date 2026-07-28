@@ -42,6 +42,11 @@ class BusinessResource extends JsonResource
                     'title' => $line->psicCode->title,
                 ] : null,
                 'capitalization' => $line->capitalization,
+                // What the applicant typed when their trade is not in the PSIC
+                // list. Without this a reopened draft loses the free text and
+                // they have to type it again.
+                'line_of_business' => $line->line_of_business,
+                'products_services' => $line->products_services,
             ])->values()),
         ];
     }

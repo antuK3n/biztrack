@@ -90,6 +90,9 @@ export interface BusinessLine {
   id: number
   psic_code: PsicCode
   capitalization: string | null
+  /** Free text, set when the applicant picked "Other (not listed)". */
+  line_of_business: string | null
+  products_services: string | null
 }
 
 export interface Business {
