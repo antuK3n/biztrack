@@ -31,6 +31,15 @@ class ApplicationResource extends JsonResource
             'documents' => $this->relationLoaded('documents')
                 ? DocumentResource::collection($this->documents)
                 : [],
+            'fee_profile' => $this->fee_profile,
+            'office_forms' => $this->relationLoaded('officeForms')
+                ? $this->officeForms->map(fn ($form) => [
+                    'permit_type_code' => $form->permitType?->code,
+                    'permit_type_name' => $form->permitType?->name,
+                    'department_code' => $form->permitType?->department?->code,
+                    'form_data' => $form->form_data,
+                ])->values()
+                : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
                 'line_items' => $this->feeAssessment->line_items,
                 'total_amount' => $this->feeAssessment->total_amount,

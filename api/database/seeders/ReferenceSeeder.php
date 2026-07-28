@@ -80,6 +80,8 @@ class ReferenceSeeder extends Seeder
             ['SANITARY_REQ', 'Sanitary Requirements', 'Health cards and sanitary documents for food-related businesses.'],
             ['FIRE_REQ', 'Fire Safety Requirements', 'Fire safety documents required for the FSIC.'],
             ['LOCATIONAL', 'Locational / Zoning Clearance', 'Zoning clearance for your business location.'],
+            // Repeatable "Other Requirements": applicants may attach several files.
+            ['OTHER', 'Other Requirements', 'Any other supporting documents. You can add more than one file.'],
         ];
         foreach ($docs as [$code, $name, $help]) {
             DocumentType::updateOrCreate(['code' => $code], ['name' => $name, 'help_text' => $help]);

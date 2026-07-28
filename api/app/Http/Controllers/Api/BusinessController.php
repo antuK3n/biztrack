@@ -139,7 +139,9 @@ class BusinessController extends Controller
             'trade_name' => ['nullable', 'string', 'max:255'],
             'registration_type' => ['nullable', 'string', 'max:50'],
             'registration_number' => ['nullable', 'string', 'max:100'],
-            'tin' => ['nullable', 'string', 'max:50'],
+            // Philippine TIN: 9 digits (individual) or 12 digits (with branch
+            // code), optionally hyphen-grouped in threes.
+            'tin' => ['nullable', 'string', 'max:20', 'regex:/^\d{3}-?\d{3}-?\d{3}(-?\d{3})?$/'],
             'address' => ['required', 'array'],
             'address.line1' => ['required', 'string', 'max:255'],
             'address.line2' => ['nullable', 'string', 'max:255'],
@@ -153,6 +155,7 @@ class BusinessController extends Controller
             'lines.required' => 'Add at least one line of business.',
             'lines.min' => 'Add at least one line of business.',
             'address.required' => 'A business address is required.',
+            'tin.regex' => 'Enter a valid TIN: 9 or 12 digits, like 123-456-789 or 123-456-789-000.',
         ]);
     }
 

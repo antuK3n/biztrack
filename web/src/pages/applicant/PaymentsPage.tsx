@@ -24,6 +24,45 @@ function serifPeso(amount: string | number): string {
 
 type FeeDetail = FeeAssessment | 'loading' | 'none'
 
+const SORT_OPTIONS = [
+  { value: 'date_desc', label: 'Newest first' },
+  { value: 'date_asc', label: 'Oldest first' },
+  { value: 'amount_desc', label: 'Amount: high to low' },
+  { value: 'amount_asc', label: 'Amount: low to high' },
+  { value: 'status', label: 'Status (A to Z)' },
+]
+
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All statuses' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'refunded', label: 'Refunded' },
+]
+
+/** "2026-07-24" comparison key for a payment's paid date (empty when unpaid). */
+function paidDay(p: Payment): string {
+  return p.paid_at ? p.paid_at.slice(0, 10) : ''
+}
+
+function sortPayments(list: Payment[], sortKey: string): Payment[] {
+  const amount = (p: Payment) => Number(p.amount) || 0
+  const date = (p: Payment) => p.paid_at ?? ''
+  const sorted = [...list]
+  switch (sortKey) {
+    case 'date_asc':
+      return sorted.sort((a, b) => date(a).localeCompare(date(b)))
+    case 'amount_desc':
+      return sorted.sort((a, b) => amount(b) - amount(a))
+    case 'amount_asc':
+      return sorted.sort((a, b) => amount(a) - amount(b))
+    case 'status':
+      return sorted.sort((a, b) => a.status.localeCompare(b.status))
+    default:
+      return sorted.sort((a, b) => date(b).localeCompare(date(a)))
+  }
+}
+
 function TaxOrderCard({ payment, detail }: { payment: Payment; detail: FeeDetail | undefined }) {
   const fee = typeof detail === 'object' ? detail : null
   return (
@@ -66,6 +105,22 @@ export function PaymentsPage() {
   const { data, loading, error, reload } = useAsync(() => payments.history(), [])
   const list = data ?? []
 
+  const [sortKey, setSortKey] = useState('date_desc')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  const visible = sortPayments(
+    list.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false
+      const day = paidDay(p)
+      if (dateFrom && (!day || day < dateFrom)) return false
+      if (dateTo && (!day || day > dateTo)) return false
+      return true
+    }),
+    sortKey,
+  )
+
   const [openId, setOpenId] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, FeeDetail>>({})
   const [receiptBusy, setReceiptBusy] = useState<number | null>(null)
@@ -104,7 +159,24 @@ export function PaymentsPage() {
 
   return (
     <div>
-      <PageTitle right={<SortFilter />}>Payment History</PageTitle>
+      <PageTitle
+        right={
+          <SortFilter
+            sort={{ value: sortKey, options: SORT_OPTIONS, onChange: setSortKey }}
+            filter={{ value: statusFilter, options: STATUS_OPTIONS, onChange: setStatusFilter }}
+            dateRange={{
+              from: dateFrom,
+              to: dateTo,
+              onChange: (from, to) => {
+                setDateFrom(from)
+                setDateTo(to)
+              },
+            }}
+          />
+        }
+      >
+        Payment History
+      </PageTitle>
 
       {loading ? (
         <SkeletonList rows={3} />
@@ -123,8 +195,13 @@ export function PaymentsPage() {
             {receiptError}
           </p>
         )}
+        {visible.length === 0 && (
+          <p className="rounded-xl bg-white px-6 py-5 text-sm text-ink-secondary shadow-card">
+            No payments match the current filter.
+          </p>
+        )}
         <ul className="space-y-5">
-          {list.map((p) => {
+          {visible.map((p) => {
             const open = openId === p.id
             return (
               <li key={p.id} className="space-y-3">

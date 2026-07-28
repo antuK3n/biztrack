@@ -75,6 +75,7 @@ class PaymentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $payments = Payment::whereHas('application', fn ($q) => $q->where('applicant_user_id', $request->user()->id))
+            ->with('application:id,tracking_id')
             ->orderByDesc('paid_at')
             ->get();
 
