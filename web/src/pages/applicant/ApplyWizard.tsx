@@ -441,9 +441,9 @@ export function ApplyWizard() {
 
   const isReuse = applicationType === 'renewal' || applicationType === 'amendment'
   /*
-   * Zoning outcome is presentational until real zoning data exists: the wizard
-   * shows CONGRATULATIONS by default, and the red SORRY modal (p031) only when
-   * a `?zoning=deny` debug query param is present.
+   * The wizard does not evaluate zoning; CPDO does, during processing. The
+   * default modal only confirms the pin was recorded. The red non-conforming
+   * modal (p031) is reachable with a `?zoning=deny` debug query param.
    */
   const zoningDenied = searchParams.get('zoning') === 'deny'
 
@@ -541,7 +541,9 @@ export function ApplyWizard() {
         lines: b.lines.map((l) => ({
           psic_code_id: l.psic_code.id,
           capitalization: l.capitalization ?? '',
-          line_of_business: '',
+          // Carry over the free text for an "Other (not listed)" trade, or a
+          // renewal would silently blank it and block Next.
+          line_of_business: l.line_of_business ?? '',
         })),
         // The permits picked in Part 1 win; suggestions only fill a blank choice.
         permit_type_ids:
@@ -584,13 +586,28 @@ export function ApplyWizard() {
   const otherType: DocumentType | undefined = (refs.data?.documentTypes ?? []).find(
     (dt) => dt.code === OTHER_DOC_CODE,
   )
+  /*
+   * Documents the selected permits ask for, minus the ones whose `context`
+   * does not apply. A new business has no previous mayor's permit to upload,
+   * so demanding one is an unclearable block, not a requirement.
+   */
   const requiredDocs = useMemo(() => {
+    const selected = permitTypes.filter((pt) => form.permit_type_ids.includes(pt.id))
+    const selectedCodes = new Set(selected.map((pt) => pt.code))
+    const appliesNow = (context?: string) =>
+      !context ||
+      context === 'all' ||
+      context === applicationType ||
+      selectedCodes.has(context.toUpperCase())
+
     const map = new Map<number, DocumentType>()
-    permitTypes
-      .filter((pt) => form.permit_type_ids.includes(pt.id))
-      .forEach((pt) => pt.document_types.forEach((dt) => map.set(dt.id, dt)))
+    for (const pt of selected) {
+      for (const dt of pt.document_types) {
+        if (appliesNow(dt.context)) map.set(dt.id, dt)
+      }
+    }
     return [...map.values()]
-  }, [permitTypes, form.permit_type_ids])
+  }, [permitTypes, form.permit_type_ids, applicationType])
   const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
 
   /*
@@ -1841,7 +1858,13 @@ export function ApplyWizard() {
           </ProtoModal>
         ) : (
           <ProtoModal
-            title="CONGRATULATIONS!"
+            /*
+             * Not "CONGRATULATIONS": nothing has been approved here. The system
+             * records the pin, CPDO rules on conformance later. Announcing a
+             * result we have not determined is how an applicant ends up
+             * believing their zoning passed.
+             */
+            title="Location recorded"
             tone="green"
             cancelLabel="Back"
             confirmLabel="Proceed to Application"
