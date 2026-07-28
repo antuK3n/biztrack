@@ -413,6 +413,15 @@ export type RequestType = 'document' | 'message'
 
 export type RequestStatus = 'pending' | 'submitted' | 'fulfilled' | 'rejected'
 
+/** One applicant reply; a request can collect several. */
+export interface OfficerRequestResponse {
+  id: number
+  body: string | null
+  author: { name: string | null }
+  document: { id: number; filename: string | null } | null
+  created_at: string
+}
+
 export interface OfficerRequest {
   id: number
   request_type: RequestType
@@ -422,7 +431,9 @@ export interface OfficerRequest {
   status_label: string
   created_by: { name: string; department: string | null }
   application: { id: number; tracking_id: string; business_name: string }
+  /** Latest reply, mirrored for older clients; `responses` is the full thread. */
   response_body: string | null
+  responses: OfficerRequestResponse[]
   created_at: string
   responded_at: string | null
 }
