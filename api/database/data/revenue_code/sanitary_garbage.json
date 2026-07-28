@@ -1,0 +1,3393 @@
+[
+  {
+    "code": "sanitary.financial_institution_main",
+    "title": "Sanitary inspection fee — financial institutions (banks, pawnshops, insurance, finance/investment companies, dealers in securities, foreign exchange dealers), main office",
+    "section": "Sec. 4D.01(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "financial_institution_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 750
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.financial_institution_branch",
+    "title": "Sanitary inspection fee — financial institutions, every branch office",
+    "section": "Sec. 4D.01(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "financial_institution_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 500
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.gasoline_station",
+    "title": "Sanitary inspection fee — gasoline service and filling stations",
+    "section": "Sec. 4D.01(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "gasoline_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.private_hospital",
+    "title": "Sanitary inspection fee — private hospitals",
+    "section": "Sec. 4D.01(c)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_hospital"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.medical_clinic",
+    "title": "Sanitary inspection fee — medical clinics and dental and animal hospitals",
+    "section": "Sec. 4D.01(d)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "medical_clinic",
+        "dental_clinic",
+        "animal_hospital"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1500
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.hotel_motel_per_room",
+    "title": "Sanitary inspection fee — hotel, motel and similar establishments, per room",
+    "section": "Sec. 4D.01(e)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel",
+        "motel"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 50,
+      "unit_key": "rooms"
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": [
+      "'appartels' spelled as printed in item e) heading (elsewhere the Code spells it 'apartelleas') — Appendix A #82."
+    ]
+  },
+  {
+    "code": "sanitary.apartment_per_door",
+    "title": "Sanitary inspection fee — apartments, per door",
+    "section": "Sec. 4D.01(e)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "apartment_lessor"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 220,
+      "unit_key": "doors"
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.house_for_rent",
+    "title": "Sanitary inspection fee — house for rent",
+    "section": "Sec. 4D.01(e)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "house_for_rent"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.dormitory_boarders",
+    "title": "Sanitary inspection fee — dormitories, lodging or boarding houses, by boarder/lodger accommodation",
+    "section": "Sec. 4D.01(e)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "dormitory",
+        "lodging_house",
+        "boarding_house"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 15,
+          "amount": 165
+        },
+        {
+          "min": 15,
+          "max": 40,
+          "amount": 275
+        },
+        {
+          "min": 40,
+          "max": null,
+          "amount": 440
+        }
+      ],
+      "unit_key": "boarders"
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.institution_of_learning",
+    "title": "Sanitary inspection fee — institutions of learning",
+    "section": "Sec. 4D.01(f)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "institution_of_learning"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2550
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.media_facility",
+    "title": "Sanitary inspection fee — media facilities",
+    "section": "Sec. 4D.01(g)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "media_facility"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.telecom_company",
+    "title": "Sanitary inspection fee — telecommunication companies, including cable and wireless communication companies",
+    "section": "Sec. 4D.01(h)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "telecom_company"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.telephone_electric_power_main",
+    "title": "Sanitary inspection fee — telephone, electric and power companies, main office",
+    "section": "Sec. 4D.01(i)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "telephone_electric_power_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.telephone_electric_power_branch",
+    "title": "Sanitary inspection fee — telephone, electric and power companies, every branch office",
+    "section": "Sec. 4D.01(i)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "telephone_electric_power_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.admin_office",
+    "title": "Sanitary inspection fee — administration, display offices, service center and liaison office of businesses",
+    "section": "Sec. 4D.01(j)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "admin_office"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.food_peddler",
+    "title": "Sanitary inspection fee — food peddlers",
+    "section": "Sec. 4D.01(k)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "food_peddler"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.lending_investor",
+    "title": "Sanitary inspection fee — lending investors",
+    "section": "Sec. 4D.01(l)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "business_category": [
+        "lending_investor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 500
+    },
+    "cap": null,
+    "notes": "Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": []
+  },
+  {
+    "code": "sanitary.catch_all_floor_area",
+    "title": "Sanitary inspection fee — all other business (industrial, commercial, agricultural establishments not specifically mentioned), by floor area",
+    "section": "Sec. 4D.01(m)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {},
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 110
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 220
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 440
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 660
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 1100
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 1760
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 2200
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Catch-all: applies only when no business-type-specific sanitary rule (items a-l) matches. Sec. 4D.01: where multiple businesses are conducted in one place/establishment by the same person, partnership, or corporation, only the sanitary fee with the highest rate is imposed.",
+    "defects": [
+      "Item lettering jumps m) to u) in the source (no items n)-t) appear); sub-items 4-7 under m) printed without numerals — Appendix A #82; transcribed as printed.",
+      "Bracket 3 printed '50 sq. m. but less than 100 sq. m.' (missing 'or more'); top row printed 'More than 1,000 sq. m.', leaving exactly 1,000 sq. m. unassigned in print — encoded with min 1,000 inclusive."
+    ]
+  },
+  {
+    "code": "sanitary.water_potability_cert",
+    "title": "Certificate of potability of water, monthly",
+    "section": "Sec. 4D.01(u)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 50
+    },
+    "cap": null,
+    "notes": "Monthly charge as printed (all other 4D.01 items are annual). [ON-DEMAND SERVICE: not part of the permit assessment; documented only, not seeded. Charged at the counter when the service is requested.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "sanitary.hiv_aids_seminar",
+    "title": "User charge — HIV/AIDS seminar fee",
+    "section": "Sec. 4D.01(v)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 50
+    },
+    "cap": null,
+    "notes": "On-demand user charge, not part of the standard annual permit assessment. [ON-DEMAND SERVICE: not part of the permit assessment; documented only, not seeded. Charged at the counter when the service is requested.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "sanitary.insect_vermin_control",
+    "title": "User charge — insect and vermin control fee",
+    "section": "Sec. 4D.01(v)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 200
+    },
+    "cap": null,
+    "notes": "On-demand user charge, not part of the standard annual permit assessment. [ON-DEMAND SERVICE: not part of the permit assessment; documented only, not seeded. Charged at the counter when the service is requested.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "sanitary.massagist_seminar",
+    "title": "User charge — massagist course seminar",
+    "section": "Sec. 4D.01(v)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 100
+    },
+    "cap": null,
+    "notes": "On-demand user charge, not part of the standard annual permit assessment. [ON-DEMAND SERVICE: not part of the permit assessment; documented only, not seeded. Charged at the counter when the service is requested.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "sanitary.health_certificate",
+    "title": "Health certificate fee, per employee per year",
+    "section": "Sec. 4D.02",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "SANITARY"
+    ],
+    "conditions": {
+      "flags": [
+        "employees_need_health_certificates"
+      ]
+    },
+    "basis": "employees",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 50,
+      "unit_key": "employees"
+    },
+    "cap": null,
+    "notes": "Applies to all persons employed in business establishments engaged in food, entertainment and personnel services (as printed); requires medical/physical examination by government or accredited private hospitals/clinics. [Bills only when the employees_need_health_certificates flag is set — food handlers and personal-care staff per Secs. 4D.02/3A.06; auto-charging every business would over-assess.]",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_a.watercraft_main",
+    "title": "Garbage fee — Schedule A: watercraft companies, main office (per quarter as printed)",
+    "section": "Sec. 4F.01 Sch. A",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "watercraft_company_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": [
+      "Schedule A is labeled 'PER QUARTER' while Sec. 4F.01 says 'annual garbage generation fee' — tension in the source itself (Appendix A #83); encoded as printed (per quarter)."
+    ]
+  },
+  {
+    "code": "garbage.schedule_a.watercraft_branch",
+    "title": "Garbage fee — Schedule A: watercraft companies, for every branch office (per quarter as printed)",
+    "section": "Sec. 4F.01 Sch. A",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "watercraft_company_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": [
+      "Schedule A is labeled 'PER QUARTER' while Sec. 4F.01 says 'annual garbage generation fee' — tension in the source itself (Appendix A #83); encoded as printed (per quarter)."
+    ]
+  },
+  {
+    "code": "garbage.schedule_b.amusement_center",
+    "title": "Garbage fee — Schedule B: amusement centers and establishments with coin-operated machines, appliances, amusement rides, shooting galleries, side show booths and similar, per contrivance",
+    "section": "Sec. 4F.01 Sch. B(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_center"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "contrivances"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.billiard_pool_hall",
+    "title": "Garbage fee — Schedule B: billiard and/or pool halls, per table",
+    "section": "Sec. 4F.01 Sch. B(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "billiard_pool_hall"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "tables"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.bowling_automatic",
+    "title": "Garbage fee — Schedule B: bowling establishments, automatic, per lane",
+    "section": "Sec. 4F.01 Sch. B(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bowling_automatic"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 66,
+      "unit_key": "lanes"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.bowling_non_automatic",
+    "title": "Garbage fee — Schedule B: bowling establishments, non-automatic, per lane",
+    "section": "Sec. 4F.01 Sch. B(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bowling_non_automatic"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "lanes"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.casino",
+    "title": "Garbage fee — Schedule B: casinos",
+    "section": "Sec. 4F.01 Sch. B(4)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "casino"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.circus_carnival",
+    "title": "Garbage fee — Schedule B: circuses, carnivals and the like",
+    "section": "Sec. 4F.01 Sch. B(5)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "circus_carnival"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.cockpit",
+    "title": "Garbage fee — Schedule B: cockpits",
+    "section": "Sec. 4F.01 Sch. B(6)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cockpit"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1320
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.golf_links",
+    "title": "Garbage fee — Schedule B: golf links and/or ranges",
+    "section": "Sec. 4F.01 Sch. B(7)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "golf_links"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2600
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.gymnasium",
+    "title": "Garbage fee — Schedule B: gymnasiums",
+    "section": "Sec. 4F.01 Sch. B(8)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "gymnasium"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.membership_club_lodging",
+    "title": "Garbage fee — Schedule B: membership clubs/associations/organizations serving foods, drinks and lodging facilities",
+    "section": "Sec. 4F.01 Sch. B(9)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "membership_club_lodging"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 880
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.membership_club_no_lodging",
+    "title": "Garbage fee — Schedule B: membership clubs/associations/organizations serving foods and drinks without lodging facilities",
+    "section": "Sec. 4F.01 Sch. B(9)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "membership_club_no_lodging"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 440
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.night_club",
+    "title": "Garbage fee — Schedule B: night clubs",
+    "section": "Sec. 4F.01 Sch. B(10)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "night_club"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2600
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.day_club",
+    "title": "Garbage fee — Schedule B: day clubs",
+    "section": "Sec. 4F.01 Sch. B(10)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "day_club"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.cocktail_lounge_bar",
+    "title": "Garbage fee — Schedule B: cocktail lounges or bars, beer gardens, discos",
+    "section": "Sec. 4F.01 Sch. B(10)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cocktail_lounge_bar",
+        "beer_garden",
+        "disco"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.cabaret_dance_hall",
+    "title": "Garbage fee — Schedule B: cabarets/dance halls",
+    "section": "Sec. 4F.01 Sch. B(10)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cabaret_dance_hall"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.race_track_coliseum",
+    "title": "Garbage fee — Schedule B: race tracks, Jai-Alai fronton, coliseums or similar establishments",
+    "section": "Sec. 4F.01 Sch. B(11)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "race_track_coliseum"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2600
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.betting_center",
+    "title": "Garbage fee — Schedule B: for every off-track and/or fronton betting center",
+    "section": "Sec. 4F.01 Sch. B(11)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "betting_center"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": [
+      "Printed 'Fro every off-track and/or Fronton Betting centers' — 'Fro' for 'For'; as printed."
+    ]
+  },
+  {
+    "code": "garbage.schedule_b.resort",
+    "title": "Garbage fee — Schedule B: resorts or other similar establishments",
+    "section": "Sec. 4F.01 Sch. B(12)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "resort"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2320
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.sauna_massage_clinic",
+    "title": "Garbage fee — Schedule B: sauna baths and massage clinics, per cubicle",
+    "section": "Sec. 4F.01 Sch. B(13)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "sauna_massage_clinic"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 110,
+      "unit_key": "cubicles"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.skating_rink",
+    "title": "Garbage fee — Schedule B: skating rinks",
+    "section": "Sec. 4F.01 Sch. B(14)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "skating_rink"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.stadium_sports_complex",
+    "title": "Garbage fee — Schedule B: stadia, sports complexes",
+    "section": "Sec. 4F.01 Sch. B(15)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "stadium_sports_complex"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.theater_cinema",
+    "title": "Garbage fee — Schedule B: theaters or cinema houses, by seating capacity",
+    "section": "Sec. 4F.01 Sch. B(16)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "theater_cinema"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 500,
+          "amount": 660
+        },
+        {
+          "min": 500,
+          "max": 2001,
+          "amount": 880
+        },
+        {
+          "min": 2001,
+          "max": null,
+          "amount": 1100
+        }
+      ],
+      "unit_key": "seating_capacity"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Printed brackets: less than 500 / 500 to 2,000 (inclusive) / more than 2,000; encoded with 2,001 as the exclusive boundary so 2,000 seats falls in the 880 row as printed. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_b.pelota_tennis_court",
+    "title": "Garbage fee — Schedule B: pelota courts, tennis courts and others of similar nature",
+    "section": "Sec. 4F.01 Sch. B(17)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "pelota_tennis_court"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_c.electric_power_main",
+    "title": "Garbage fee — Schedule C: electric and power companies, main office and/or each power plant",
+    "section": "Sec. 4F.01 Sch. C",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "electric_power_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_c.electric_power_branch",
+    "title": "Garbage fee — Schedule C: electric and power companies, every branch office",
+    "section": "Sec. 4F.01 Sch. C",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "electric_power_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.commercial_bank_main",
+    "title": "Garbage fee — Schedule D: commercial banks, main office",
+    "section": "Sec. 4F.01 Sch. D(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "commercial_bank_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.commercial_bank_branch",
+    "title": "Garbage fee — Schedule D: commercial banks, every branch",
+    "section": "Sec. 4F.01 Sch. D(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "commercial_bank_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.savings_bank_main",
+    "title": "Garbage fee — Schedule D: savings banks, main office",
+    "section": "Sec. 4F.01 Sch. D(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "savings_bank_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.savings_bank_branch",
+    "title": "Garbage fee — Schedule D: savings banks, every branch",
+    "section": "Sec. 4F.01 Sch. D(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "savings_bank_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.rural_bank",
+    "title": "Garbage fee — Schedule D: rural banks",
+    "section": "Sec. 4F.01 Sch. D(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "rural_bank"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.savings_loan_insurance_pawnshop_main",
+    "title": "Garbage fee — Schedule D: savings and loan associations, insurance companies, pawnshops, main office",
+    "section": "Sec. 4F.01 Sch. D(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "savings_loan_association",
+        "insurance_company",
+        "pawnshop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Main office rate. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.savings_loan_insurance_pawnshop_branch",
+    "title": "Garbage fee — Schedule D: savings and loan associations, insurance companies, pawnshops, every branch",
+    "section": "Sec. 4F.01 Sch. D(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "savings_loan_association_branch",
+        "insurance_company_branch",
+        "pawnshop_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.lending_investor_main",
+    "title": "Garbage fee — Schedule D: financial and/or lending investors establishments, money shops, main office",
+    "section": "Sec. 4F.01 Sch. D(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lending_investor",
+        "money_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Main office rate. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.lending_investor_branch",
+    "title": "Garbage fee — Schedule D: financial and/or lending investors establishments, money shops, every branch",
+    "section": "Sec. 4F.01 Sch. D(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lending_investor_branch",
+        "money_shop_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_d.forex_dealer_stock_broker",
+    "title": "Garbage fee — Schedule D: authorized dealers in foreign currencies and stock brokers",
+    "section": "Sec. 4F.01 Sch. D(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "forex_dealer",
+        "stock_broker"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_e.gasoline_station_area",
+    "title": "Garbage fee — Schedule E: gasoline service/filling stations, by area",
+    "section": "Sec. 4F.01 Sch. E",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "gasoline_station"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000,
+          "amount": 660
+        },
+        {
+          "min": 1000,
+          "max": 1500,
+          "amount": 880
+        },
+        {
+          "min": 1500,
+          "max": null,
+          "amount": 1100
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Printed bounds: '1,000 sq.ms. or less' (660) / 'more than 1,000 but less than 1,500' (880) / '1,500 or more' (1,100). Exactly 1,000 sqm takes the 660 row per print; schema min-inclusive/max-exclusive encoding places the boundary at 1,000 — boundary divergence flagged. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_e.curb_pump_filling_station",
+    "title": "Garbage fee — Schedule E: curb pumps and filling stations",
+    "section": "Sec. 4F.01 Sch. E(4)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "curb_pump_filling_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_f.hospital_bed_capacity",
+    "title": "Garbage fee — Schedule F: private hospitals and medical clinics, by bed capacity",
+    "section": "Sec. 4F.01 Sch. F",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_hospital",
+        "medical_clinic"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 440
+        },
+        {
+          "min": 25,
+          "max": 51,
+          "amount": 550
+        },
+        {
+          "min": 51,
+          "max": 76,
+          "amount": 660
+        },
+        {
+          "min": 76,
+          "max": 101,
+          "amount": 1100
+        },
+        {
+          "min": 101,
+          "max": 151,
+          "amount": 1320
+        },
+        {
+          "min": 151,
+          "max": 301,
+          "amount": 1650
+        },
+        {
+          "min": 301,
+          "max": 501,
+          "amount": 2200
+        },
+        {
+          "min": 501,
+          "max": null,
+          "amount": 3300
+        }
+      ],
+      "unit_key": "beds"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_f.animal_hospital",
+    "title": "Garbage fee — Schedule F: animal hospitals and others",
+    "section": "Sec. 4F.01 Sch. F(9)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "animal_hospital"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_5star_single",
+    "title": "Garbage fee — Schedule G: five-star hotels, per single-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_five_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 22,
+      "unit_key": "rooms_single"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_5star_double",
+    "title": "Garbage fee — Schedule G: five-star hotels, per double-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_five_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 33,
+      "unit_key": "rooms_double"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_5star_suite",
+    "title": "Garbage fee — Schedule G: five-star hotels, per suite",
+    "section": "Sec. 4F.01 Sch. G(1)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_five_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 44,
+      "unit_key": "rooms_suite"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_4star_single",
+    "title": "Garbage fee — Schedule G: four-star hotels, per single-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_four_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 22,
+      "unit_key": "rooms_single"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_4star_double",
+    "title": "Garbage fee — Schedule G: four-star hotels, per double-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_four_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 33,
+      "unit_key": "rooms_double"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_4star_suite",
+    "title": "Garbage fee — Schedule G: four-star hotels, per suite",
+    "section": "Sec. 4F.01 Sch. G(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_four_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 40,
+      "unit_key": "rooms_suite"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_3star_single",
+    "title": "Garbage fee — Schedule G: three-star hotels, per single-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(c)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_three_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 11,
+      "unit_key": "rooms_single"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_3star_double",
+    "title": "Garbage fee — Schedule G: three-star hotels, per double-bed room",
+    "section": "Sec. 4F.01 Sch. G(1)(c)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_three_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 22,
+      "unit_key": "rooms_double"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_3star_suite",
+    "title": "Garbage fee — Schedule G: three-star hotels, per suite",
+    "section": "Sec. 4F.01 Sch. G(1)(c)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_three_star"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 33,
+      "unit_key": "rooms_suite"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.motel_drive_inn",
+    "title": "Garbage fee — Schedule G: motels and drive-inns, per room",
+    "section": "Sec. 4F.01 Sch. G(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "motel",
+        "drive_inn"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 50,
+      "unit_key": "rooms"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_pension_aircon_single",
+    "title": "Garbage fee — Schedule G: hotels, apartelleas, pension inns with air-conditioner, per single-bed room",
+    "section": "Sec. 4F.01 Sch. G(3)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_pension_aircon"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 65,
+      "unit_key": "rooms_single"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_pension_aircon_double",
+    "title": "Garbage fee — Schedule G: hotels, apartelleas, pension inns with air-conditioner, per double-bed room",
+    "section": "Sec. 4F.01 Sch. G(3)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_pension_aircon"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "rooms_double"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": [
+      "Amount printed '55..00' with doubled period — read as 55.00 (Appendix A #84)."
+    ]
+  },
+  {
+    "code": "garbage.schedule_g.hotel_pension_non_aircon_single",
+    "title": "Garbage fee — Schedule G: hotels, apartelleas, pension inns without air-conditioner, per single-bed room",
+    "section": "Sec. 4F.01 Sch. G(3)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_pension_non_aircon"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "rooms_single"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.hotel_pension_non_aircon_double",
+    "title": "Garbage fee — Schedule G: hotels, apartelleas, pension inns without air-conditioner, per double-bed room",
+    "section": "Sec. 4F.01 Sch. G(3)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_pension_non_aircon"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 44,
+      "unit_key": "rooms_double"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.boarding_house_per_bed",
+    "title": "Garbage fee — Schedule G: boarding houses, lodging houses, dormitories, bed spaces, per bed",
+    "section": "Sec. 4F.01 Sch. G(4)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "boarding_house",
+        "lodging_house",
+        "dormitory"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 22,
+      "unit_key": "beds"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.condominium",
+    "title": "Garbage fee — Schedule G: condominiums, by number of units",
+    "section": "Sec. 4F.01 Sch. G(5)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "condominium"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 1,
+          "max": 5,
+          "amount": 390
+        },
+        {
+          "min": 5,
+          "max": 11,
+          "amount": 520
+        },
+        {
+          "min": 11,
+          "max": null,
+          "amount": 780
+        }
+      ],
+      "unit_key": "units"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_g.building_lessor_per_sqm",
+    "title": "Garbage fee — Schedule G: lessors of buildings, houses, apartments, per sq.m.",
+    "section": "Sec. 4F.01 Sch. G(6)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "building_lessor",
+        "apartment_lessor"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 2,
+      "unit_key": "floor_area_sqm"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_h.school_enrollment",
+    "title": "Garbage fee — Schedule H: private universities, colleges, schools and educational or vocational institutions, by total semestral enrollment",
+    "section": "Sec. 4F.01 Sch. H",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "institution_of_learning"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 300,
+          "amount": 330
+        },
+        {
+          "min": 300,
+          "max": 1000,
+          "amount": 440
+        },
+        {
+          "min": 1000,
+          "max": 5000,
+          "amount": 660
+        },
+        {
+          "min": 5000,
+          "max": 10000,
+          "amount": 880
+        },
+        {
+          "min": 10000,
+          "max": 20000,
+          "amount": 1100
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 1650
+        },
+        {
+          "min": 30000,
+          "max": 50000,
+          "amount": 1760
+        },
+        {
+          "min": 50000,
+          "max": null,
+          "amount": 2200
+        }
+      ],
+      "unit_key": "enrollment"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_i.lpg_marketer",
+    "title": "Garbage fee — Schedule I: liquefied petroleum gas marketers",
+    "section": "Sec. 4F.01 Sch. I(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lpg_marketer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 440
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_i.lpg_dealer",
+    "title": "Garbage fee — Schedule I: liquefied petroleum gas dealers",
+    "section": "Sec. 4F.01 Sch. I(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lpg_dealer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_j.public_market_100_plus",
+    "title": "Garbage fee — Schedule J: public markets with 100 or more stallholders, each stall",
+    "section": "Sec. 4F.01 Sch. J(1)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "MARKET",
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "public_market_100_plus_stalls"
+      ]
+    },
+    "basis": "stall_count",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "stalls"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Rate applies when the market has 100 or more stallholders. Stallholders with more than 5 sq.ms. and/or rendering special services (pawnshops, appliance stores, banks, and similar) are excluded from the term 'stallholders' and levied garbage fees under the pertinent provisions of this Article. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_j.public_market_under_100",
+    "title": "Garbage fee — Schedule J: public markets with less than 100 stallholders, each stall",
+    "section": "Sec. 4F.01 Sch. J(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "MARKET",
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "public_market_under_100_stalls"
+      ]
+    },
+    "basis": "stall_count",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 44,
+      "unit_key": "stalls"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Rate applies when the market has fewer than 100 stallholders. Stallholders with more than 5 sq.ms. and/or rendering special services (pawnshops, appliance stores, banks, and similar) are excluded from the term 'stallholders' and levied garbage fees under the pertinent provisions of this Article. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_j.private_market",
+    "title": "Garbage fee — Schedule J: private markets, each stall",
+    "section": "Sec. 4F.01 Sch. J(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "MARKET",
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_market"
+      ]
+    },
+    "basis": "stall_count",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 55,
+      "unit_key": "stalls"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Stallholders with more than 5 sq.ms. and/or rendering special services (pawnshops, appliance stores, banks, and similar) are excluded from the term 'stallholders' and levied garbage fees under the pertinent provisions of this Article. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_k.daily_newspaper",
+    "title": "Garbage fee — Schedule K: daily newspaper publications",
+    "section": "Sec. 4F.01 Sch. K(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "daily_newspaper_publisher"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_k.weekly_magazine",
+    "title": "Garbage fee — Schedule K: weekly magazine publications",
+    "section": "Sec. 4F.01 Sch. K(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "weekly_magazine_publisher"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_k.book_magazine_publisher",
+    "title": "Garbage fee — Schedule K: books and other magazine publications",
+    "section": "Sec. 4F.01 Sch. K(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "book_magazine_publisher"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_k.radio_station",
+    "title": "Garbage fee — Schedule K: radio stations",
+    "section": "Sec. 4F.01 Sch. K(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "radio_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_k.television_station",
+    "title": "Garbage fee — Schedule K: television stations",
+    "section": "Sec. 4F.01 Sch. K(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "television_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_l.cable_wireless_main",
+    "title": "Garbage fee — Schedule L: telegraph, teletype, cable and wireless communication companies, main office",
+    "section": "Sec. 4F.01 Sch. L(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cable_wireless_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_l.cable_wireless_branch",
+    "title": "Garbage fee — Schedule L: telegraph, teletype, cable and wireless communication companies, every branch/station",
+    "section": "Sec. 4F.01 Sch. L(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cable_wireless_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_m.telephone_main",
+    "title": "Garbage fee — Schedule M: telephone companies, main office",
+    "section": "Sec. 4F.01 Sch. M(1)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "telephone_company_main"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_m.telephone_branch",
+    "title": "Garbage fee — Schedule M: telephone companies, every branch/station",
+    "section": "Sec. 4F.01 Sch. M(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "telephone_company_branch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_n.terminal_garage",
+    "title": "Garbage fee — Schedule N: terminal garage for bus, taxi and other public utility vehicles (except home garages), by area",
+    "section": "Sec. 4F.01 Sch. N",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "terminal_garage"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 300,
+          "amount": 220
+        },
+        {
+          "min": 300,
+          "max": 500,
+          "amount": 440
+        },
+        {
+          "min": 500,
+          "max": 700,
+          "amount": 1650
+        },
+        {
+          "min": 700,
+          "max": 1000,
+          "amount": 2200
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 3300
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_o.peddler_ambulant_vendor",
+    "title": "Garbage fee — Schedule O: peddlers, ambulant vendors, except van or truck",
+    "section": "Sec. 4F.01 Sch. O",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "peddler",
+        "ambulant_vendor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_p.admin_display_professional_office",
+    "title": "Garbage fee — Schedule P: administration offices, display offices and/or offices of professionals",
+    "section": "Sec. 4F.01 Sch. P",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "admin_office",
+        "display_office",
+        "professional_office"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_q.film_shooting_per_day",
+    "title": "Garbage fee — Schedule Q: film shooting, per day",
+    "section": "Sec. 4F.01 Sch. Q",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "film_shooting"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 110,
+      "unit_key": "shooting_days"
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_r.private_warehouse_bodega",
+    "title": "Garbage fee — Schedule R: private warehouse or bodega",
+    "section": "Sec. 4F.01 Sch. R",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_warehouse",
+        "bodega"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.factory_area",
+    "title": "Garbage fee — Schedule S(1)(a): manufacturers, producers and processors — factory, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(1)(a)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer",
+        "producer",
+        "processor"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 220
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 550
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 990
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 1320
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 1650
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 2200
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 3300
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.03: manufacturers/producers maintaining principal offices, factories and/or sales offices in the same premises pay based on the total aggregate area at the Schedule S(1)(a) rates [printed 'Schedule S (l A)']. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.factory_office_within",
+    "title": "Garbage fee — Schedule S(1)(b): principal/branch or sales office of factories within Malabon City, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "factory_sales_office"
+      ],
+      "office_location": "within"
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 55
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 110
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 330
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 440
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 660
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 990
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 1100
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.03: manufacturers/producers maintaining principal offices, factories and/or sales offices in the same premises pay based on the total aggregate area at the Schedule S(1)(a) rates [printed 'Schedule S (l A)']. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.factory_office_outside",
+    "title": "Garbage fee — Schedule S(1)(b): principal/branch or sales office of factories outside Malabon City, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(1)(b)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "factory_sales_office"
+      ],
+      "office_location": "outside"
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 110
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 220
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 440
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 660
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 770
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 1100
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 1650
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.03: manufacturers/producers maintaining principal offices, factories and/or sales offices in the same premises pay based on the total aggregate area at the Schedule S(1)(a) rates [printed 'Schedule S (l A)']. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.exporter_importer",
+    "title": "Garbage fee — Schedule S(2): exporters/importers",
+    "section": "Sec. 4F.01 Sch. S(2)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter",
+        "importer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.brewer_eatery_area",
+    "title": "Garbage fee — Schedule S(3): brewers, distillers, compounders and public eating places, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "brewer",
+        "distiller",
+        "compounder",
+        "public_eating_place"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 220
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 550
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 990
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 1320
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 1650
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 2200
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 3300
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.carinderia",
+    "title": "Garbage fee — Schedule S(3): carinderia",
+    "section": "Sec. 4F.01 Sch. S(3)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "carinderia"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Printed as a flat row within the Schedule S(3) area table. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_s.service_establishment_area",
+    "title": "Garbage fee — Schedule S(4): owners or operators of business establishments rendering service, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(4)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "service_establishment"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 110
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 330
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 880
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 1210
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 1750
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 2200
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 3300
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": [
+      "Second bracket lower bound printed '00 or more but less than 1,000 sq.ms.' — leading digit missing in print; almost certainly 500 (Appendix A #85). Amount 2,200 as printed; bound encoded as 500."
+    ]
+  },
+  {
+    "code": "garbage.schedule_s.wholesaler_retailer_area",
+    "title": "Garbage fee — Schedule S(5): independent wholesalers, dealers, distributors, repackers and retailers, by aggregate area",
+    "section": "Sec. 4F.01 Sch. S(5)",
+    "source": "A10-2016",
+    "office": "CHO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "wholesaler",
+        "dealer",
+        "distributor",
+        "repacker",
+        "retailer"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 25,
+          "amount": 110
+        },
+        {
+          "min": 25,
+          "max": 50,
+          "amount": 220
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 330
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 660
+        },
+        {
+          "min": 200,
+          "max": 500,
+          "amount": 1100
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 1540
+        },
+        {
+          "min": 1000,
+          "max": null,
+          "amount": 2200
+        }
+      ]
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  },
+  {
+    "code": "garbage.schedule_t.bulky_special_waste",
+    "title": "Garbage fee — Schedule T: bulky/special waste collection (old furniture, appliances, construction debris/waste, earthmound, and the like), per trip",
+    "section": "Sec. 4F.01 Sch. T",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": {
+      "max_amount": 6000,
+      "uplift_rate": 0.25
+    },
+    "notes": "Officer-priced (requires_officer): charged at the cost of truck rental per trip; CENRO issues the order of payment to the requesting party before hauling. Emitted as amount 0 and adjusted via adjustFee. Sec. 4F.02: engine applies the highest applicable garbage schedule, then the cap rule (+25% uplift, max Php 6,000/yr).",
+    "defects": []
+  }
+]

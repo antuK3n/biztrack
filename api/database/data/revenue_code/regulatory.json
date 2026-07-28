@@ -1,0 +1,2306 @@
+[
+  {
+    "code": "permit.equipment_bulldozer",
+    "title": "Rental permit fee — Bulldozer",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_bulldozer_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_forklift",
+    "title": "Rental permit fee — Forklift",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 500.0,
+      "unit_key": "equipment_forklift_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_heavy_grader",
+    "title": "Rental permit fee — Heavy Graders",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_heavy_grader_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_light_grader",
+    "title": "Rental permit fee — Light Graders",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 750.0,
+      "unit_key": "equipment_light_grader_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_cargo_truck",
+    "title": "Rental permit fee — Cargo Truck/Arm Roll Truck",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_cargo_truck_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_dump_truck",
+    "title": "Rental permit fee — Dump Truck",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_dump_truck_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_road_roller",
+    "title": "Rental permit fee — Road Rollers",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_road_roller_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_payloader",
+    "title": "Rental permit fee — Payloader",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_payloader_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_primemover",
+    "title": "Rental permit fee — Primemovers/Flatbeds",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 2000.0,
+      "unit_key": "equipment_primemover_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_backhoe",
+    "title": "Rental permit fee — Backhoe",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_backhoe_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_rock_crusher",
+    "title": "Rental permit fee — Rock Crusher",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_rock_crusher_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_batching_plant",
+    "title": "Rental permit fee — Batching Plant",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 3000.0,
+      "unit_key": "equipment_batching_plant_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_mixer_truck",
+    "title": "Rental permit fee — Transit/Mixer Truck",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_mixer_truck_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_crane",
+    "title": "Rental permit fee — Crane",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 3000.0,
+      "unit_key": "equipment_crane_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.equipment_other",
+    "title": "Rental permit fee — Other machinery or heavy equipment not enumerated above",
+    "section": "Sec. 3M.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "rents_out_heavy_equipment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "equipment_other_count"
+    },
+    "cap": null,
+    "notes": "Annual permit fee per unit of machinery/heavy equipment rented out in the city; payable prior to rental upon application for a Mayor's permit (Sec. 3M.02).",
+    "defects": []
+  },
+  {
+    "code": "permit.machinery_ice_engine",
+    "title": "Inspection fee — internal combustion engines (per Hp bracket)",
+    "section": "Sec. 3N.01(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "operates_machinery"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "engine_hp",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 200.0
+        },
+        {
+          "min": 3,
+          "max": 6,
+          "amount": 250.0
+        },
+        {
+          "min": 6,
+          "max": 11,
+          "amount": 300.0
+        },
+        {
+          "min": 11,
+          "max": 15,
+          "amount": 400.0
+        },
+        {
+          "min": 15,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual inspection fee per engine/machine, bracketed by horsepower; evaluated per unit by the engine. Paid upon application of the permit, not later than 15 days after actual inspection; thereafter within 20 days of January or of every quarter (Sec. 3N.02). Brackets normalized to integer Hp with boundary Hp assigned per the printed 'xHp and below' rows (3Hp->250, 5Hp->250, 10Hp->300, 14Hp->400).",
+    "defects": [
+      "Sec. 3N.01(a) printed brackets jump from '2Hp and below' to 'not lower than 3Hp', leaving 2-3Hp unassigned; normalized so the 200.00 row covers below 3Hp (extract [?] note, PDF 110).",
+      "Sec. 3N.01(a) row 5 printed 'Above 15Hp' (vs. subsection (b)'s 'Above 14Hp'), leaving 15Hp unassigned; normalized to above 14Hp per (b) so 15Hp takes 500.00 (extract [?] note, PDF 110)."
+    ]
+  },
+  {
+    "code": "permit.machinery_stationary_engine",
+    "title": "Inspection fee — other stationary engines or machines (per Hp bracket)",
+    "section": "Sec. 3N.01(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "operates_machinery"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "stationary_engine_hp",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 200.0
+        },
+        {
+          "min": 3,
+          "max": 6,
+          "amount": 250.0
+        },
+        {
+          "min": 6,
+          "max": 11,
+          "amount": 300.0
+        },
+        {
+          "min": 11,
+          "max": 15,
+          "amount": 400.0
+        },
+        {
+          "min": 15,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual inspection fee per engine/machine, bracketed by horsepower; evaluated per unit by the engine. Paid upon application of the permit, not later than 15 days after actual inspection; thereafter within 20 days of January or of every quarter (Sec. 3N.02). Brackets normalized to integer Hp with boundary Hp assigned per the printed 'xHp and below' rows (3Hp->250, 5Hp->250, 10Hp->300, 14Hp->400).",
+    "defects": [
+      "Sec. 3N.01(b) printed rows overlap at exact boundary values ('3Hp and below' vs 'not lower than 3Hp', etc.); boundary Hp assigned to the lower-fee 'and below' row on normalization."
+    ]
+  },
+  {
+    "code": "permit.machinery_electric_generator",
+    "title": "Inspection fee — electrical generators and machines propelled by electric motors",
+    "section": "Sec. 3N.01(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "operates_machinery"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "generator_hp",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 200.0
+        },
+        {
+          "min": 3,
+          "max": 6,
+          "amount": 250.0
+        },
+        {
+          "min": 6,
+          "max": 11,
+          "amount": 300.0
+        },
+        {
+          "min": 11,
+          "max": 15,
+          "amount": 400.0
+        },
+        {
+          "min": 15,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Levied the same rates as internal combustion engines (subsection (a)). Annual inspection fee per engine/machine, bracketed by horsepower; evaluated per unit by the engine. Paid upon application of the permit, not later than 15 days after actual inspection; thereafter within 20 days of January or of every quarter (Sec. 3N.02). Brackets normalized to integer Hp with boundary Hp assigned per the printed 'xHp and below' rows (3Hp->250, 5Hp->250, 10Hp->300, 14Hp->400).",
+    "defects": [
+      "Sec. 3N.01(c) printed 'same rates found in subsection (1)' [sic]; presumably subsection (a) — rates copied from (a) (extract [?] note, PDF 110).",
+      "Sec. 3N.01(a) printed brackets jump from '2Hp and below' to 'not lower than 3Hp', leaving 2-3Hp unassigned; normalized so the 200.00 row covers below 3Hp (extract [?] note, PDF 110).",
+      "Sec. 3N.01(a) row 5 printed 'Above 15Hp' (vs. subsection (b)'s 'Above 14Hp'), leaving 15Hp unassigned; normalized to above 14Hp per (b) so 15Hp takes 500.00 (extract [?] note, PDF 110)."
+    ]
+  },
+  {
+    "code": "fire.flammables_fuel",
+    "title": "Storage of gasoline, diesel, fuel, kerosene and similar products",
+    "section": "Sec. 3O.01(a)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "flammables_liters",
+      "brackets": [
+        {
+          "min": 500,
+          "max": 2001,
+          "amount": 1500.0
+        },
+        {
+          "min": 2001,
+          "max": 5001,
+          "amount": 2000.0
+        },
+        {
+          "min": 5001,
+          "max": 20001,
+          "amount": 2500.0
+        },
+        {
+          "min": 20001,
+          "max": 50001,
+          "amount": 3000.0
+        },
+        {
+          "min": 50001,
+          "max": 100001,
+          "amount": 3500.0
+        },
+        {
+          "min": 100001,
+          "max": null,
+          "amount": 4000.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)). Schedule starts at 500 liters; storage below 500 liters has no printed bracket.",
+    "defects": [
+      "Row 2 fee printed '2,0000.00' [sic] with extra zero; normalized to 2,000.00 per Appendix A (intended 2,000.00; PDF 111).",
+      "Row 5 printed '50,0001 to 100,0000 liters' [sic]; normalized to 50,001-100,000 per Appendix A (PDF 111)."
+    ]
+  },
+  {
+    "code": "fire.flammables_film",
+    "title": "Storage of cinematographic film",
+    "section": "Sec. 3O.01(b)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "film_units",
+      "brackets": [
+        {
+          "min": 1,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)). Flat fee for any quantity stored.",
+    "defects": []
+  },
+  {
+    "code": "fire.flammables_celluloid",
+    "title": "Storage of celluloid",
+    "section": "Sec. 3O.01(b) [sic; should be (c)]",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "celluloid_units",
+      "brackets": [
+        {
+          "min": 1,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)). Flat fee for any quantity stored.",
+    "defects": [
+      "Printed schedule labels both cinematographic film and celluloid '(b)' with no '(c)' (Appendix A; PDF 111)."
+    ]
+  },
+  {
+    "code": "fire.flammables_carbide",
+    "title": "Storage of calcium carbide",
+    "section": "Sec. 3O.01(d)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "carbide_cases",
+      "brackets": [
+        {
+          "min": 1,
+          "max": 50,
+          "amount": 200.0
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 300.0
+        },
+        {
+          "min": 100,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)).",
+    "defects": [
+      "Middle bracket printed '50 to 90 cases' [sic], leaving 91-99 cases unassigned before '100 or more'; normalized to 50-99 cases per Appendix A (PDF 111)."
+    ]
+  },
+  {
+    "code": "fire.flammables_tar",
+    "title": "Storage of tar, resin and similar materials",
+    "section": "Sec. 3O.01(e)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "tar_kilos",
+      "brackets": [
+        {
+          "min": 1,
+          "max": 1000,
+          "amount": 100.0
+        },
+        {
+          "min": 1000,
+          "max": 2500,
+          "amount": 200.0
+        },
+        {
+          "min": 2500,
+          "max": 5001,
+          "amount": 300.0
+        },
+        {
+          "min": 5001,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)).",
+    "defects": [
+      "Printed rows '1,000 to 2,500 kls' and '2,500 to 5,000 kls' both include the 2,500 boundary; normalized max-exclusive so exactly 2,500 kls takes the 300.00 row."
+    ]
+  },
+  {
+    "code": "fire.flammables_coal",
+    "title": "Storage for coal deposits",
+    "section": "Sec. 3O.01(f)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "coal_tons",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 100,
+          "amount": 1000.0
+        },
+        {
+          "min": 100,
+          "max": null,
+          "amount": 2000.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)).",
+    "defects": []
+  },
+  {
+    "code": "fire.flammables_other",
+    "title": "Storage for combustible, flammable or explosive substance not mentioned above",
+    "section": "Sec. 3O.01(g)",
+    "source": "A10-2016",
+    "office": "BFP",
+    "group": "regulatory",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {
+      "flags": [
+        "stores_flammables"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "other_combustibles_units",
+      "brackets": [
+        {
+          "min": 1,
+          "max": null,
+          "amount": 500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Annual storage permit fee; paid to the City Treasurer upon application for the permit to store (Sec. 3O.02). Gasoline/naphtha not exceeding 100 gallons kept in and used by launches or motor vehicles is exempt (Sec. 3O.03(a)). Catch-all flat fee for any quantity stored.",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_filing_retailer",
+    "title": "Liquor permit application/filing fee — Retailer",
+    "section": "Sec. 3T.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_retailer"
+      ],
+      "flags": [
+        "sells_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 150.0
+    },
+    "cap": null,
+    "notes": "Filing fee on application for the BPLO liquor permit (Sec. 3T.01-.02). Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_filing_wholesaler",
+    "title": "Liquor permit application/filing fee — Wholesaler",
+    "section": "Sec. 3T.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_wholesaler"
+      ],
+      "flags": [
+        "sells_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 300.0
+    },
+    "cap": null,
+    "notes": "Filing fee on application for the BPLO liquor permit (Sec. 3T.01-.02). Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_filing_serving",
+    "title": "Liquor permit application/filing fee — Serving/dispensing",
+    "section": "Sec. 3T.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_serving"
+      ],
+      "flags": [
+        "sells_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 750.0
+    },
+    "cap": null,
+    "notes": "Filing fee on application for the BPLO liquor permit (Sec. 3T.01-.02). Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_filing_manufacturer",
+    "title": "Liquor permit application/filing fee — Manufacture/Distiller/Producer",
+    "section": "Sec. 3T.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_manufacturer"
+      ],
+      "flags": [
+        "sells_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1000.0
+    },
+    "cap": null,
+    "notes": "Filing fee on application for the BPLO liquor permit (Sec. 3T.01-.02). Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_filing_amusement",
+    "title": "Liquor permit application/filing fee — Special Permit (for amusement places)",
+    "section": "Sec. 3T.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_place"
+      ],
+      "flags": [
+        "sells_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5000.0
+    },
+    "cap": null,
+    "notes": "Filing fee on application for the BPLO liquor permit (Sec. 3T.01-.02). Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_prohibited_hours",
+    "title": "Special permit — sell liquor 10:00 p.m. to 2:00 a.m. (establishments other than amusement places)",
+    "section": "Sec. 3T.03",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "extends_liquor_hours"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2000.0
+    },
+    "cap": null,
+    "notes": "Annual fee for qualified establishments other than amusement places (those take permit.liquor_prohibited_hours_amusement instead) to sell liquor from 10:00 p.m. but not beyond 2:00 a.m. Sari-sari stores may not sell liquor 6:00 p.m.-8:00 a.m. and are limited to 8:00 a.m.-6:00 p.m. Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": [
+      "Sec. 3T.03 printed 'shall sell or serve liquor before 8:00 a.m. to 10:00 p.m.' [sic]; likely intended 'before 8:00 a.m. [or after] 10:00 p.m.' (extract [?] note, PDF 128).",
+      "Sec. 3T.03 printed 'If shall be unlawful' [sic]; likely 'It' (PDF 128)."
+    ]
+  },
+  {
+    "code": "permit.liquor_prohibited_hours_amusement",
+    "title": "Special permit — amusement places serving liquor beyond 10:00 p.m. up to 3:00 a.m.",
+    "section": "Sec. 3T.03",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_place"
+      ],
+      "flags": [
+        "extends_liquor_hours"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4000.0
+    },
+    "cap": null,
+    "notes": "Annual fee for qualified amusement places to serve/dispense liquor beyond 10:00 p.m. but not beyond 3:00 a.m. Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_imported_wholesale",
+    "title": "Regulatory fee — imported liquor, wholesale",
+    "section": "Sec. 3T.03",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_wholesaler"
+      ],
+      "flags": [
+        "sells_imported_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4000.0
+    },
+    "cap": null,
+    "notes": "Regulatory fee per annum, in addition to the special permit fee. Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_imported_retail",
+    "title": "Regulatory fee — imported liquor, retail",
+    "section": "Sec. 3T.03",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liquor_retailer"
+      ],
+      "flags": [
+        "sells_imported_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2000.0
+    },
+    "cap": null,
+    "notes": "Regulatory fee per annum, in addition to the special permit fee. Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.liquor_imported_amusement",
+    "title": "Regulatory fee — imported liquor in amusement places",
+    "section": "Sec. 3T.03",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_place"
+      ],
+      "flags": [
+        "sells_imported_liquor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5000.0
+    },
+    "cap": null,
+    "notes": "Regulatory fee for amusement places (night club, bar, cocktail lounge, beer garden, disco house, videoke bar, cabaret, ballroom dancing halls, sing-a-long pub houses and similar), in addition to the special permit fee. Paid before release of the permit; renewable annually on or before January 20 (Sec. 3T.05).",
+    "defects": []
+  },
+  {
+    "code": "permit.tobacco_wholesale",
+    "title": "Special permit to sell tobacco/cigarettes — wholesale",
+    "section": "Sec. 3U.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "sells_tobacco_wholesale"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 200.0
+    },
+    "cap": null,
+    "notes": "Annual fee, renewable on or before January 20 (Sec. 3U.02). Manufacturers are taxed under Sec. 2K.02 with permit fee under Sec. 3A.03 (Sec. 3U.01 note).",
+    "defects": []
+  },
+  {
+    "code": "permit.tobacco_retail",
+    "title": "Special permit to sell tobacco/cigarettes — retail",
+    "section": "Sec. 3U.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "sells_tobacco_retail"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 50.0
+    },
+    "cap": null,
+    "notes": "Annual fee, renewable on or before January 20 (Sec. 3U.02). Manufacturers are taxed under Sec. 2K.02 with permit fee under Sec. 3A.03 (Sec. 3U.01 note).",
+    "defects": []
+  },
+  {
+    "code": "env.cec_certificate",
+    "title": "Certificate of Environment Clearance (CEC)",
+    "section": "Sec. 3W.02",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "min_capitalization": 100000
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Headline CEC fee ('Same schedule as Inspection Fees'). Applies to business, industrial, commercial or agricultural establishments with minimum capitalization of Php100,000 and other establishments (Sec. 3W.01). CEC or Certificate of Non-Coverage (NCC) issued only after compliance with Malabon CENRO environmental requirements and payment of fees. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_fuel_depot",
+    "title": "Environmental fee (Bracket I, high-risk) — Fuel Depot & Fuel Storage Facilities",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "fuel_depot"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_gasoline_lpg_station",
+    "title": "Environmental fee (Bracket I, high-risk) — Gasoline Service, LPG and auto LPG filling/refilling stations",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "gasoline_lpg_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_big_scale_manufacturing",
+    "title": "Environmental fee (Bracket I, high-risk) — All Big Scale Manufacturing Industries",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "big_scale_manufacturing"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_garbage_contractor",
+    "title": "Environmental fee (Bracket I, high-risk) — Garbage Contractors, Terminal of Garbage Trucks, Garbage Transfer Station",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "garbage_contractor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_hospital_clinic_lab",
+    "title": "Environmental fee (Bracket I, high-risk) — Private Hospitals and Medical and Dental Clinics and Laboratories",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "hospital_clinic_lab"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_shopping_center_mall_market",
+    "title": "Environmental fee (Bracket I, high-risk) — Shopping Centers, Malls and Markets",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "shopping_center_mall_market"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_junkshop",
+    "title": "Environmental fee (Bracket I, high-risk) — Junkshops",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "junkshop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.highrisk_lpg_retailer",
+    "title": "Environmental fee (Bracket I, high-risk) — Retailer of LPG",
+    "section": "Sec. 3W.02(I)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "lpg_retailer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket I: all high-risk industries and establishments. High-risk industries required by DENR-EMB to secure national permits must submit copies to Malabon CENRO with the business permit application before CENRO clearance issues. Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_small_scale_manufacturing",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Small-Scale Manufacturing Industries",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "small_scale_manufacturing"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1000.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_housing_development",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Housing Development Projects (Residential Subdivisions, Parks incl. Memorial Parks, Condominiums, Townhouses)",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "housing_development"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_funeral_cremation",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Funeral Parlors and Cremation Services",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "funeral_cremation"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_highrise_building",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — High-Rise Building",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "highrise_building"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_midrise_building",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Medium Rise Building",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "midrise_building"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1000.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_fastfood_chain",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Fastfood Chains or Quick Service Restaurants",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "fastfood_chain"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_catering_commissary",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Catering Services, commissaries",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "catering_commissary"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_vehicle_terminal_garage",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Vehicle Terminal/Garage of Transport/Trucking Services",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "vehicle_terminal_garage"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_hotel_motel_inn",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Hotels, Motels, Apartels, Inns and similar establishments",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_motel_inn"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_water_refilling_station",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Water refilling Stations",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "water_refilling_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_amusement_place",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Amusement places such as KTV, Videoke bars, beer houses and the like",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_place"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_repair_fabrication_shop",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Welding shops, machine shops, vehicle repair and repainting shops; refrigerator and air conditioning repair shops; furniture shops and sash factories, fabricators (steel, concrete)",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "welding_machine_shop",
+        "vehicle_repair_shop",
+        "refrigeration_aircon_repair_shop",
+        "furniture_sash_fabricator"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": [
+      "Sec. 3W.02 Bracket II item 12 prints three description lines under the number '12.' (one unnumbered); numbering resumes at 13. Numbering defect in the original; all three lines carry Php2,500.00 (Appendix A row 72; PDF 149)."
+    ]
+  },
+  {
+    "code": "env.waste_warehouse_storage",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Warehouses, storage facilities",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "warehouse_storage"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_car_wash",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Car Wash Shops",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "car_wash"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1000.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_animal_farm",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Animal Farm like piggery, Animal Breeding Services",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "animal_farm"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_school_learning_center",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Schools, Montessori's, learning centers, review centers and other similar establishments",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "school_learning_center"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_laundry_dry_cleaning",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Laundry shops and dry cleaning services",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "laundry_dry_cleaning"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_tailoring_clothes_manufacturing",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Haberdashery, tailoring, clothes manufacturing services and others",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "tailoring_clothes_manufacturing"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_apartment_three_door",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Three-door apartments and up",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "apartment_three_door"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1000.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.waste_cenro_other",
+    "title": "Environmental fee (Bracket II, waste/pollution-generating) — Such other activities and projects as may be determined by CENRO officers",
+    "section": "Sec. 3W.02(II)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "regulatory",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "business_category": [
+        "cenro_other"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 500.0
+    },
+    "cap": null,
+    "notes": "Bracket II: industries, establishments, institutions, offices and agencies generating waste or pollution of any kind/form (water, air, odor, noise, smoke, land). Annual environmental protection and preservation fee; payable on or before January 20 (Sec. 3W.06). Same-nature/same-type businesses of one owner in one barangay: only the higher/highest rate is imposed (Sec. 3W.02; FeeCalculator implements the dedup). Different-nature businesses at one address pay separate fees per business.",
+    "defects": []
+  },
+  {
+    "code": "env.construction_residential_single_detached",
+    "title": "Environmental protection clearance processing fee — Residential Buildings — Single Detached",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "residential_single_detached"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 800.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_residential_duplex",
+    "title": "Environmental protection clearance processing fee — Residential Buildings — Duplex",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "residential_duplex"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1200.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_residential_multistorey",
+    "title": "Environmental protection clearance processing fee — Residential Buildings — Multi-Story (per floor)",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "residential_multi_storey"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 800.0,
+      "unit_key": "storeys"
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_commercial",
+    "title": "Environmental protection clearance processing fee — Commercial Buildings",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "commercial"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1600.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_industrial_warehouse",
+    "title": "Environmental protection clearance processing fee — Industrial Buildings — Warehouse",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "industrial_warehouse"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1600.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_industrial_factory",
+    "title": "Environmental protection clearance processing fee — Industrial Buildings — Manufacturing/Factory",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "industrial_factory"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2000.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_institutional",
+    "title": "Environmental protection clearance processing fee — Institutional Buildings",
+    "section": "Sec. 3W.04(A)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "service",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "building_type": [
+        "institutional"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1600.0
+    },
+    "cap": null,
+    "notes": "Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "env.construction_filing_fee",
+    "title": "Environmental protection clearance — filing fee",
+    "section": "Sec. 3W.04(B)",
+    "source": "A10-2016",
+    "office": "CENRO",
+    "group": "admin",
+    "permit_types": [
+      "CEC"
+    ],
+    "conditions": {
+      "flags": [
+        "has_construction"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 100.0
+    },
+    "cap": null,
+    "notes": "Flat filing fee accompanying the environmental protection clearance application. Environmental protection clearance required before processing/approval of building permits for new construction, renovation, repair and/or alteration of existing structures (Sec. 3W.04). Payable on or before January 20 (Sec. 3W.06).",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_billboard",
+    "title": "Billboards, signs or advertisements for business and professions (painted on or detached from any building or structure), per sq.m. or fraction",
+    "section": "Sec. 3Z.01(1)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 25.0,
+      "unit_key": "sign_billboard_sqm"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_placard",
+    "title": "Advertisement by means of placards, per sq.m. or fraction",
+    "section": "Sec. 3Z.01(2)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 25.0,
+      "unit_key": "sign_placard_sqm"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_movie_slide",
+    "title": "Advertisements by means of slides in movie houses or theaters (annual, payable by owners)",
+    "section": "Sec. 3Z.01(3)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 300.0
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_film_exhibition",
+    "title": "Advertisements by means of film exhibition (annual, payable by owners of movie houses or theaters)",
+    "section": "Sec. 3Z.01(4)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2000.0
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_neon_surcharge",
+    "title": "Surcharge for use of electric or neon lights in billboards, per sq.m. or fraction (in addition to items 1 and 2)",
+    "section": "Sec. 3Z.01",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 30.0,
+      "unit_key": "sign_neon_sqm"
+    },
+    "cap": null,
+    "notes": "Printed between items 4 and 5 as an unnumbered rider to items 1 and 2. Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_mass_display",
+    "title": "Mass display of signs (per quarter), by number of display signs",
+    "section": "Sec. 3Z.01(5)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "unit_key": "sign_display_count",
+      "brackets": [
+        {
+          "min": 100,
+          "max": 251,
+          "amount": 500.0
+        },
+        {
+          "min": 251,
+          "max": 501,
+          "amount": 750.0
+        },
+        {
+          "min": 501,
+          "max": 751,
+          "amount": 1000.0
+        },
+        {
+          "min": 751,
+          "max": 1001,
+          "amount": 1500.0
+        },
+        {
+          "min": 1001,
+          "max": null,
+          "amount": 2500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Fee is per quarter. Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": [
+      "Sec. 3Z.01 item 5 layout ambiguity [?]: '(Per Quarter)' label and numeral '5)' printed adjacent to the 'Mass display of signs' heading; transcribed as item 5 covering the five display-count brackets (Appendix A row 79; PDF 155)."
+    ]
+  },
+  {
+    "code": "permit.sign_vehicle_ads_daily",
+    "title": "Advertisements by means of vehicles, balloons, kites, etc. — per day or fraction",
+    "section": "Sec. 3Z.01(6)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 100.0,
+      "unit_key": "ad_vehicle_days"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_vehicle_ads_weekly",
+    "title": "Advertisements by means of vehicles, balloons, kites, etc. — per week or fraction",
+    "section": "Sec. 3Z.01(6)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 150.0,
+      "unit_key": "ad_vehicle_weeks"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_vehicle_ads_monthly",
+    "title": "Advertisements by means of vehicles, balloons, kites, etc. — per month or fraction",
+    "section": "Sec. 3Z.01(6)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 200.0,
+      "unit_key": "ad_vehicle_months"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  },
+  {
+    "code": "permit.sign_promo_sales",
+    "title": "Advertisements by means of promotional sales (house to house), per day per person",
+    "section": "Sec. 3Z.01(7)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "regulatory",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "has_signage"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "promo_sales_person_days"
+    },
+    "cap": null,
+    "notes": "Paid to the City Treasurer before the advertisement is displayed or distributed; renewable on or before January 20 (Sec. 3Z.02). Per-contract transactions: paid five days before display/distribution.",
+    "defects": []
+  }
+]
