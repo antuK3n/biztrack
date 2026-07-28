@@ -19,6 +19,9 @@ admin adds: `analytics.view user.manage owner.manage_status oic.assign reference
 - Revocation: `POST /auth/logout` deletes the current token server-side. `PUT /auth/password` and password reset revoke all of the user's other tokens (password change keeps the token making the request; reset revokes everything).
 - Brute force: per-account lockout after 5 failed attempts (15 min, persisted in `failed_login_attempts`/`locked_until`) plus an IP rate limit of 10 login requests/min on `POST /auth/login` (429).
 - No IP or user-agent binding by design: mobile testers roam across networks.
+- Separate portals: `POST /auth/login` takes `portal: public|staff` (default `public`). Business owners are admitted only at `public`, LGU officers and the super admin only at `staff`. The wrong door returns **409** with `{message, portal}` naming the right one, issues no token, and is only reachable after the password has already verified, so it cannot be used to enumerate staff accounts. The token is named `web:{portal}`. Web routes: `/login` and `/staff/login`.
+- Response hardening (`SecurityHeaders` middleware, all responses): `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `Permissions-Policy`, plus HSTS when the request is over TLS. Set in the app, not the proxy, so they hold in dev and behind a tunnel.
+- Unauthenticated requests return **401 JSON** regardless of `Accept` (guests are not redirected; this API has no `login` route).
 
 ## Endpoints
 
@@ -151,6 +154,11 @@ Artisan `biztrack:scan-permits`: (1) notify owners at 60/30/7 days before `valid
   list: `ApplicationController::feeProfileRules()`.
 - `FeeAssessment.line_items` entries are now
   `{code, label, amount, office, group, section, source, requires_officer, defects}`.
+  `section` and `source` are the ordinance citation and are **stripped for
+  anyone without `application.review`**: officers need them to defend an
+  assessment, applicants should not see ordinance sections on their bill.
+  Hiding them only in the UI would leave them in the network tab, so the
+  filtering is in `ApplicationResource`.
   Lines with `requires_officer: true` are ₱0 placeholders the officer
   completes via the existing fee-adjust endpoint (PIL, market stall rental,
   BMBE/cooperative claims, missing-in-print fees).
