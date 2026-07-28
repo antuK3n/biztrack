@@ -13,7 +13,15 @@ type ChatMessage = {
 }
 
 const WELCOME =
-  "Kumusta! I'm the BizTrack assistant. Ask me about requirements, fees, payments, renewal deadlines, or where your application is. You can also send me a tracking number like BIZ-2026-00123."
+  "Kumusta! I'm the BizTrack assistant. Ask me about one permit at a time (requirements, fees, processing time, renewal) and I'll keep the answer short. You can also send me a tracking number like BIZ-2026-00123."
+
+/* Starter questions, shown only on an empty thread. They double as a hint that
+ * naming the permit gets a scoped answer instead of a rundown of all of them. */
+const STARTERS = [
+  'Requirements for a sanitary permit',
+  'How much is the fire safety fee?',
+  'Where is my application?',
+]
 
 function MessageRow({ message }: { message: ChatMessage }) {
   const mine = message.sender === 'user'
@@ -80,11 +88,8 @@ export function ChatBubble() {
     if (el) el.scrollTop = el.scrollHeight
   }, [messages, sending, open])
 
-  async function send(e: FormEvent) {
-    e.preventDefault()
-    const body = draft.trim()
+  async function send(body: string) {
     if (!body || sending) return
-    setDraft('')
     setMessages((prev) => [...prev, { id: `tmp-${Date.now()}`, sender: 'user', body }])
     setSending(true)
     try {
@@ -105,25 +110,33 @@ export function ChatBubble() {
     }
   }
 
+  function onSubmit(e: FormEvent) {
+    e.preventDefault()
+    const body = draft.trim()
+    if (!body) return
+    setDraft('')
+    void send(body)
+  }
+
   return (
     <>
-      <button
-        type="button"
-        aria-label={open ? 'Close BizTrack ChatBot' : 'Open BizTrack ChatBot'}
-        onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-royal shadow-raised transition-transform hover:scale-105"
-      >
-        {open ? (
-          <XIcon size={24} className="text-white" />
-        ) : (
+      {/* The bubble hides while the panel is open: it used to sit on top of the
+       * send button. Closing is done from the panel header. */}
+      {!open && (
+        <button
+          type="button"
+          aria-label="Open BizTrack ChatBot"
+          onClick={() => setOpen(true)}
+          className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-royal shadow-raised transition-transform hover:scale-105"
+        >
           <svg viewBox="0 0 24 24" width={26} height={26} fill="none" aria-hidden="true">
             <path
               d="M4 6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H9l-4.2 3.36A.75.75 0 0 1 3.6 18.8V16A3 3 0 0 1 4 13V6Z"
               fill="#fff"
             />
           </svg>
-        )}
-      </button>
+        </button>
+      )}
       {open && (
         <div className="fixed bottom-0 right-0 top-0 z-30 flex w-80 flex-col bg-chatbody shadow-overlay">
           <div className="flex items-center justify-between bg-royal px-4 py-3">
@@ -131,7 +144,7 @@ export function ChatBubble() {
               <span className="flex h-6 w-6 items-center justify-center rounded bg-white/20 text-[10px]">🤖</span>
               BizTrack ChatBot
             </span>
-            <button type="button" aria-label="Close" onClick={() => setOpen(false)}>
+            <button type="button" aria-label="Close BizTrack ChatBot" onClick={() => setOpen(false)}>
               <XIcon size={18} className="text-white" />
             </button>
           </div>
@@ -141,8 +154,22 @@ export function ChatBubble() {
               <MessageRow key={m.id} message={m} />
             ))}
             {sending && <TypingDots />}
+            {loaded && messages.length === 0 && !sending && (
+              <div className="flex flex-col items-start gap-1.5 pt-1">
+                {STARTERS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => void send(s)}
+                    className="rounded-full border border-royal/30 bg-white/70 px-3 py-1.5 text-left text-xs font-medium text-royal transition-colors hover:bg-white"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <form onSubmit={send} className="flex items-center gap-2 p-3">
+          <form onSubmit={onSubmit} className="flex items-center gap-2 p-3">
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-royal">
               <PlusIcon size={18} />
             </span>
