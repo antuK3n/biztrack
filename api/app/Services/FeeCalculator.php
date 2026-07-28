@@ -6,25 +6,6 @@ use App\Models\Application;
 use App\Models\FeeRule;
 use Illuminate\Support\Collection;
 
-/**
- * Computes the Tax Order of Payment from the seeded revenue-code rules
- * (Ordinance A10-2016; see database/data/revenue_code/SCHEMA.md for the rule
- * format and docs/revenue-code-extract.md for the legal source).
- *
- * Ordering rules the ordinance imposes (SCHEMA.md "Engine ordering rules"):
- *  1. Business tax resolves per line of business, then sums. Franchise and
- *     printing/publication categories route to their 0.75% rules instead of
- *     the graduated table (their rules match those categories exclusively).
- *  2. Environmental annual fee: highest matched bracket only (Sec. 3W.02
- *     same-nature rule, conservatively applied per application).
- *  3. Garbage: highest matched schedule; if more than one schedule matches,
- *     +25% uplift; never above P6,000/yr (Sec. 4F.02).
- *  4. FSIC: 10% of mayors_permit + regulatory lines, computed last
- *     (RA 9514 Sec. 12(b)) — never part of its own base.
- *  5. is_petroleum suppresses biztax.* lines (Sec. 2L.01). BMBE/cooperative
- *     flags emit P0 claim lines only; officers adjust via adjustFee.
- *  6. requires_officer rules emit P0 lines the officer completes.
- */
 class FeeCalculator
 {
     /** @return array{items: list<array<string,mixed>>, total: float} */
@@ -36,7 +17,7 @@ class FeeCalculator
         $requested = $app->permitTypes->pluck('code')->all();
         $profile['is_new_business'] = $app->application_type?->value === 'new';
 
-        // Lines of business: explicit profile lines win; fall back to the
+        // lines of business: explicit profile lines win; fall back to the
         // registered business lines with the profile's shared figures.
         $lines = collect($profile['lines'] ?? []);
         if ($lines->isEmpty()) {
@@ -54,7 +35,7 @@ class FeeCalculator
 
         $items = [];
 
-        // 1. Business tax: per line of business.
+        // re: business tax: per line of business.
         $suppressBiztax = in_array('is_petroleum', $profile['flags'] ?? [], true);
         if (! $suppressBiztax) {
             foreach ($lines as $line) {
