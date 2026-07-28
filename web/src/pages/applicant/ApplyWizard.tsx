@@ -46,25 +46,6 @@ import type {
   PsicCode,
 } from '../../lib/types'
 
-/*
- * Prototype-fidelity wizard (PDF p26–47): persistent draft chrome (clipboard +
- * title + saved cloud + Clear All), bottom bar with royal pill Next/Submit +
- * green "Part n of N" progress, zoning map step, white form sheets with
- * lettered sections, dashed upload bars + Data Privacy Consent, serif
- * "LGU Section" permit cards, CONFIRMATION modal before submit.
- *
- * Flow rework (user testing): the applicant picks permit types FIRST, and the
- * wizard then shows the COMPLETE map of every section that application will
- * require, upfront and navigable, like the paper form's fixed sections. No
- * section ever appears for the first time mid-flow.
- */
-
-/*
- * Base wizard phases. Permits come first (the one choice that shapes the
- * form), then the fixed sections. Per-office form steps (SANITARY/CEC/FSIC/
- * OCCUPANCY) are inserted after Location & Zoning, so the full sequence is
- * known the moment permits are picked.
- */
 type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'fees' | 'review'
 const BASE_PHASES: BasePhase[] = ['permits', 'business', 'lines', 'address', 'documents', 'fees', 'review']
 
