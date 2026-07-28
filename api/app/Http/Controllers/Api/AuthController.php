@@ -23,14 +23,32 @@ use Illuminate\Validation\ValidationException;
  */
 class AuthController extends Controller
 {
+    /**
+     * The citizen-facing portal admits business owners only; the staff portal
+     * admits LGU officers and the super admin. Keeping the two doors separate
+     * means a leaked staff credential is useless at the public sign-in, and an
+     * applicant can never land on an officer dashboard by accident.
+     */
+    private const STAFF_ROLES = [
+        'bplo_staff', 'sanitary_officer', 'fire_inspector', 'zoning_officer',
+        'obo_staff', 'cenro_officer', 'market_admin', 'admin',
+    ];
+
     private function withRelations(User $user): User
     {
         return $user->load('department', 'roles.permissions');
     }
 
-    private function authPayload(User $user): JsonResponse
+    private function isStaff(User $user): bool
     {
-        $token = $user->createToken('web')->plainTextToken;
+        return $user->roles->pluck('name')->intersect(self::STAFF_ROLES)->isNotEmpty();
+    }
+
+    private function authPayload(User $user, string $portal = 'public'): JsonResponse
+    {
+        // The token name records which door was used, so revoking one portal's
+        // sessions later doesn't take the other's down with it.
+        $token = $user->createToken("web:{$portal}")->plainTextToken;
 
         return response()->json([
             'data' => [
@@ -86,7 +104,9 @@ class AuthController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+            'portal' => ['sometimes', 'in:public,staff'],
         ]);
+        $portal = $data['portal'] ?? 'public';
 
         $key = 'login:'.Str::lower($data['email']).'|'.$request->ip();
 
@@ -129,6 +149,20 @@ class AuthController extends Controller
             return response()->json(['message' => 'Your account is deactivated. Contact the City BPLO.'], 403);
         }
 
+        // Wrong door. Say which one is right, but only after the password has
+        // already checked out, so this can't be used to enumerate staff accounts.
+        $user->loadMissing('roles');
+        if ($this->isStaff($user) !== ($portal === 'staff')) {
+            RateLimiter::clear($key);
+
+            return response()->json([
+                'message' => $portal === 'staff'
+                    ? 'This is the LGU staff sign-in. Business owners sign in on the main BizTrack page.'
+                    : 'LGU staff accounts sign in through the staff portal.',
+                'portal' => $portal === 'staff' ? 'public' : 'staff',
+            ], 409);
+        }
+
         RateLimiter::clear($key);
         $user->forceFill([
             'failed_login_attempts' => 0,
@@ -137,7 +171,7 @@ class AuthController extends Controller
         ])->save();
         Audit::log('user.logged_in', $user);
 
-        return $this->authPayload($user);
+        return $this->authPayload($user, $portal);
     }
 
     public function logout(Request $request): JsonResponse
