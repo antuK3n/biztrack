@@ -11,11 +11,12 @@ import type { FeeAssessment, FeeLineItem } from '../lib/types'
  */
 
 /** Canonical collecting-office order; unknown offices append after. */
-const OFFICE_ORDER = ['BPLO', 'CTO', 'CHO', 'CENRO', 'OBO', 'BFP', 'CMO-MARKET']
+const OFFICE_ORDER = ['BPLO', 'CTO', 'CPDO', 'CHO', 'CENRO', 'OBO', 'BFP', 'CMO-MARKET']
 
 const OFFICE_LABELS: Record<string, string> = {
   BPLO: 'Business Permits & Licensing Office (BPLO)',
   CTO: "City Treasurer's Office (CTO)",
+  CPDO: 'City Planning and Development Office (CPDO)',
   CHO: 'City Health Office (CHO)',
   CENRO: 'City Environment & Natural Resources Office (CENRO)',
   OBO: 'Office of the Building Official (OBO)',
