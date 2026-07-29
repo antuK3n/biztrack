@@ -11,7 +11,7 @@ import {
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
-import { FieldLabel, ProtoModal, inputCls } from '../../components/ui/Proto'
+import { FieldLabel, FilterPills, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { admin, applications, assignments, documents, officeForms as officeFormsApi } from '../../lib/resources'
@@ -21,9 +21,15 @@ import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/
 
 /*
  * Admin Review sheet (PDF p56, p67–p76): the officer reads the application as
- * the submitted BPLO form — filled read-only inputs, documents, consent note,
- * tan FOR OFFICE USE ONLY box — with Reject/Approve in the top-right header
- * zone and remark bubbles floating on the right.
+ * the submitted BPLO form — documents, consent note, tan FOR OFFICE USE ONLY
+ * box — with remark bubbles floating on the right.
+ *
+ * The screen has two modes (tester checklist item 54). It opens in View: a
+ * record of what the applicant filed, with nothing on it that can be typed
+ * into. Edit turns on the handful of fields the office actually owns and the
+ * decision buttons. The applicant's own answers are never editable in either
+ * mode, which is what the API enforces too: OfficeFormController lets the owner
+ * write the answers and the reviewer write only the issuance dates.
  */
 
 /** The assignment detail embeds the FULL business (address, lines) — the list types understate it. */
@@ -72,9 +78,26 @@ function todayISO(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-const readOnlyInput = `${inputCls} read-only:cursor-default`
+/** View / Edit, the two ways of being on this screen (checklist item 54). */
+type ReviewMode = 'view' | 'edit'
+
+const MODE_OPTIONS: { value: ReviewMode; label: string }[] = [
+  { value: 'view', label: 'View' },
+  { value: 'edit', label: 'Edit' },
+]
+
+/*
+ * A submitted answer. It keeps the prototype's filled-blue surface but is no
+ * longer an input: read-only inputs looked exactly like the boxes the office
+ * fills in, so nothing on the page said which half was a record and which half
+ * was work.
+ */
+const recordValue = 'w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink'
 const officeInput =
   'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-officeuse-border'
+/** An office value in View mode, or one nobody types here: same footprint, no affordance. */
+const officeValue =
+  'w-full rounded-md border border-dashed border-officeuse-border bg-white/70 px-3 py-2 text-sm text-ink'
 
 function CloudIcon() {
   return (
@@ -84,6 +107,19 @@ function CloudIcon() {
         fill="#2b4fd8"
       />
       <path d="m9.5 10.5 2.4 2.4 4.6-4.6" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function PencilIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
     </svg>
   )
 }
@@ -124,12 +160,25 @@ function SubHeading({ children }: { children: ReactNode }) {
   )
 }
 
+/** One answer the applicant submitted, presented as a record, never a control. */
 function Field({ label, value, className = '' }: { label: string; value: string; className?: string }) {
   return (
-    <label className={`block ${className}`}>
-      <FieldLabel>{label}</FieldLabel>
-      <input className={readOnlyInput} value={value || '—'} readOnly />
-    </label>
+    <dl className={`block ${className}`}>
+      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
+      <dd className={recordValue}>{value || '—'}</dd>
+    </dl>
+  )
+}
+
+/** A FOR OFFICE USE ONLY value the officer is not filling in right now. */
+function OfficeReadout({ label, value }: { label: string; value: string }) {
+  // Column-stretched so a label that wraps to two lines does not push its
+  // value out of line with its neighbours.
+  return (
+    <dl className="flex h-full flex-col">
+      <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
+      <dd className={`mt-auto ${officeValue}`}>{value || '—'}</dd>
+    </dl>
   )
 }
 
@@ -374,14 +423,21 @@ export function ReviewPage() {
   const canAssign = Boolean(user?.permissions.includes('oic.assign'))
   const canListUsers = Boolean(user?.permissions.includes('user.manage'))
 
+  // Opens as a record of the filing; Edit turns on the office's own fields.
+  const [mode, setMode] = useState<ReviewMode>('view')
+
   const [popup, setPopup] = useState<'reject' | 'return' | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [showVerification, setShowVerification] = useState(false)
 
-  // FOR OFFICE USE ONLY inputs (editable during review; remarks feed approve).
-  const [officeUse, setOfficeUse] = useState({ receipt: '', receivedBy: '', ban: '', psic: '', fee: '', remarks: '' })
-  const [officeTouched, setOfficeTouched] = useState<Record<string, boolean>>({})
+  /*
+   * The only two FOR OFFICE USE ONLY boxes that go anywhere: the assessment
+   * (fee.adjust) and the remarks that ride along with Approve or Return. The
+   * rest of that panel is read back from the record, so it is shown, not typed.
+   */
+  const [feeInput, setFeeInput] = useState<string | null>(null)
+  const [remarks, setRemarks] = useState('')
 
   // Office-recorded issuance dates, keyed "PERMIT_CODE.field_key".
   const [issued, setIssued] = useState<Record<string, string>>({})
@@ -513,20 +569,18 @@ export function ReviewPage() {
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
   const decided = rejected || approvedHere || Boolean(data.completed_at)
+  // A decided review is a record for good: there is nothing left to change.
+  const editing = mode === 'edit' && !decided
 
-  // Office-use prefills from the real record; user edits override.
-  const office = {
-    receipt: officeTouched.receipt ? officeUse.receipt : formatDate(app.submitted_at),
-    receivedBy: officeTouched.receivedBy ? officeUse.receivedBy : (data.officer?.name ?? ''),
-    ban: officeTouched.ban ? officeUse.ban : (business.ban ?? ''),
-    psic: officeTouched.psic ? officeUse.psic : (business.lines?.[0]?.psic_code?.code ?? ''),
-    fee: officeTouched.fee ? officeUse.fee : (app.fee_assessment?.total_amount ?? ''),
-    remarks: officeUse.remarks,
-  }
-  function setOffice(key: keyof typeof officeUse, value: string) {
-    setOfficeTouched((t) => ({ ...t, [key]: true }))
-    setOfficeUse((v) => ({ ...v, [key]: value }))
-  }
+  // Read back from the record, not typed here: the paper form still carries
+  // these boxes, but the system already knows every one of them.
+  const officeRecord = [
+    { label: 'Date of Receipt', value: formatDate(app.submitted_at) },
+    { label: 'Received by', value: data.officer?.name ?? '' },
+    { label: 'Business Account No. (BAN)', value: business.ban ?? '' },
+    { label: 'PSIC Code', value: business.lines?.[0]?.psic_code?.code ?? '' },
+  ]
+  const feeValue = feeInput ?? String(app.fee_assessment?.total_amount ?? '')
 
   /*
    * One group per permit type on this application that carries issuance dates.
@@ -569,7 +623,7 @@ export function ReviewPage() {
     setBusy(true)
     setActionError(null)
     try {
-      await assignments.approve(assignmentId, office.remarks || undefined)
+      await assignments.approve(assignmentId, remarks.trim() || undefined)
       setShowVerification(true)
       reload()
     } catch (err) {
@@ -595,7 +649,7 @@ export function ReviewPage() {
   }
 
   async function saveAssessment() {
-    const amount = office.fee.trim()
+    const amount = feeValue.trim()
     if (!amount) return
     setFeeSaving(true)
     setFeeNote(null)
@@ -674,26 +728,58 @@ export function ReviewPage() {
             {rejected ? 'Rejected' : 'Approved'}
           </span>
         ) : (
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setPopup('reject')}
-              disabled={busy}
-              className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
-            >
-              Reject
-            </button>
-            <button
-              type="button"
-              onClick={approve}
-              disabled={busy}
-              className="rounded-md bg-s-green px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
-            >
-              Approve
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <span
+                id="review-mode-label"
+                className="text-[11px] font-bold uppercase tracking-wide text-ink-muted"
+              >
+                Mode
+              </span>
+              <div role="group" aria-labelledby="review-mode-label">
+                <FilterPills options={MODE_OPTIONS} value={mode} onChange={setMode} />
+              </div>
+            </div>
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPopup('reject')}
+                  disabled={busy}
+                  className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={approve}
+                  disabled={busy}
+                  className="rounded-md bg-s-green px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                >
+                  Approve
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
+
+      {/* What each mode means, said plainly so nobody has to infer it (item 54). */}
+      <p
+        aria-live="polite"
+        className="mb-4 flex items-start gap-2.5 rounded-lg bg-white px-4 py-3 text-sm text-ink-secondary shadow-card"
+      >
+        <span className={`mt-0.5 shrink-0 ${editing ? 'text-royal' : 'text-ink-muted'}`}>
+          {editing ? <PencilIcon /> : <EyeIcon size={16} />}
+        </span>
+        <span>
+          {decided
+            ? 'This review is closed. The page is a record of the application and the decision made on it.'
+            : editing
+              ? 'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve, return, or reject.'
+              : 'View mode. Everything below is the application exactly as the applicant submitted it. Switch to Edit to fill in your office’s fields and record a decision.'}
+        </span>
+      </p>
 
       {actionError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{actionError}</p>
@@ -905,82 +991,72 @@ export function ReviewPage() {
           {/* FOR OFFICE USE ONLY (p72/p76) */}
           <div className="mt-8 rounded-lg border border-officeuse-border bg-officeuse px-5 py-5">
             <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
-              ✎ For Office Use Only — Complete During Review
+              ✎ For Office Use Only {editing ? '· You are editing this panel' : '· Read only'}
             </p>
-            <div className="mt-4 grid gap-4 sm:grid-cols-3">
-              <label className="block">
-                <FieldLabel>Date of Receipt</FieldLabel>
-                <input
-                  className={officeInput}
-                  value={office.receipt}
-                  placeholder="dd/mm/yyyy"
-                  onChange={(e) => setOffice('receipt', e.target.value)}
-                />
-              </label>
-              <label className="block">
-                <FieldLabel>Received by</FieldLabel>
-                <input
-                  className={officeInput}
-                  value={office.receivedBy}
-                  placeholder="Officer name"
-                  onChange={(e) => setOffice('receivedBy', e.target.value)}
-                />
-              </label>
-              <label className="block">
-                <FieldLabel>Business Account No. (BAN)</FieldLabel>
-                <input
-                  className={officeInput}
-                  value={office.ban}
-                  placeholder="Assign BAN"
-                  onChange={(e) => setOffice('ban', e.target.value)}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1.5 flex items-center gap-1.5 text-[13px] font-semibold text-ink">
-                  PSIC Code
-                  <span className="rounded bg-officeuse-border px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-ink">
-                    BPLO/CTO
-                  </span>
-                </span>
-                <input
-                  className={officeInput}
-                  value={office.psic}
-                  placeholder="e.g. 5610"
-                  onChange={(e) => setOffice('psic', e.target.value)}
-                />
-              </label>
-              <label className="block">
-                <FieldLabel>Assessed Fee (Php)</FieldLabel>
-                <input
-                  className={`${officeInput} tnum`}
-                  value={office.fee}
-                  placeholder="0.00"
-                  readOnly={!canAdjustFee}
-                  onChange={(e) => setOffice('fee', e.target.value)}
-                />
-                {canAdjustFee && (
+            <p className="mt-1 text-xs text-ink-secondary">
+              {decided
+                ? 'What this office recorded during its review.'
+                : editing
+                  ? 'This panel is the only part of the sheet you can change, and each field saves with its own button.'
+                  : 'Switch the mode at the top of the page to Edit to fill these in.'}
+            </p>
+
+            <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+              Taken from the record
+            </p>
+            <div className="mt-2 grid gap-4 sm:grid-cols-4">
+              {officeRecord.map((entry) => (
+                <OfficeReadout key={entry.label} label={entry.label} value={entry.value} />
+              ))}
+            </div>
+
+            <p className="mt-5 text-[11px] font-bold uppercase tracking-wide text-amber-800">
+              Yours to fill in
+            </p>
+            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+              {editing && canAdjustFee ? (
+                <label className="block">
+                  <FieldLabel>Assessed Fee (Php)</FieldLabel>
+                  <input
+                    className={`${officeInput} tnum`}
+                    value={feeValue}
+                    placeholder="0.00"
+                    onChange={(e) => setFeeInput(e.target.value)}
+                  />
                   <span className="mt-1.5 flex items-center gap-2">
                     <button
                       type="button"
                       onClick={saveAssessment}
-                      disabled={feeSaving || !office.fee.trim()}
+                      disabled={feeSaving || !feeValue.trim()}
                       className="rounded-md bg-royal px-3 py-1 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
                     >
                       {feeSaving ? 'Saving…' : 'Save assessment'}
                     </button>
                     {feeNote && <span className="text-xs font-medium text-s-green">{feeNote}</span>}
                   </span>
-                )}
-              </label>
-              <label className="block">
-                <FieldLabel>Evaluator Remarks</FieldLabel>
-                <input
-                  className={officeInput}
-                  value={office.remarks}
-                  placeholder="Notes for this application"
-                  onChange={(e) => setOffice('remarks', e.target.value)}
+                </label>
+              ) : (
+                <OfficeReadout
+                  label="Assessed Fee (Php)"
+                  value={feeValue ? formatMoney(feeValue) : ''}
                 />
-              </label>
+              )}
+              {editing ? (
+                <label className="block">
+                  <FieldLabel>Evaluator Remarks</FieldLabel>
+                  <input
+                    className={officeInput}
+                    value={remarks}
+                    placeholder="Notes for this application"
+                    onChange={(e) => setRemarks(e.target.value)}
+                  />
+                  <span className="mt-1.5 block text-xs text-ink-secondary">
+                    Sent with the application when you approve or return it.
+                  </span>
+                </label>
+              ) : (
+                <OfficeReadout label="Evaluator Remarks" value={data.remarks ?? ''} />
+              )}
             </div>
 
             {/* Issuance dates: recorded here, never asked of the applicant. */}
@@ -990,34 +1066,45 @@ export function ReviewPage() {
                   {group.name} · Issuance Dates
                 </p>
                 <p className="mt-1 text-xs text-ink-secondary">
-                  Enter the dates the issuing office released these documents. Applicants are not
-                  asked for them.
+                  {editing
+                    ? 'Enter the dates the issuing office released these documents. Applicants are not asked for them.'
+                    : 'The dates the issuing office released these documents.'}
                 </p>
                 <div className="mt-3 grid gap-4 sm:grid-cols-3 sm:items-end">
-                  {group.fields.map((field) => (
-                    <label key={field.key} className="block">
-                      <FieldLabel>{field.label}</FieldLabel>
-                      <input
-                        type="date"
-                        max={todayISO()}
-                        className={officeInput}
-                        value={field.value}
-                        onChange={(e) =>
-                          setIssued((v) => ({ ...v, [`${group.code}.${field.key}`]: e.target.value }))
-                        }
+                  {group.fields.map((field) =>
+                    editing ? (
+                      <label key={field.key} className="block">
+                        <FieldLabel>{field.label}</FieldLabel>
+                        <input
+                          type="date"
+                          max={todayISO()}
+                          className={officeInput}
+                          value={field.value}
+                          onChange={(e) =>
+                            setIssued((v) => ({ ...v, [`${group.code}.${field.key}`]: e.target.value }))
+                          }
+                        />
+                      </label>
+                    ) : (
+                      <OfficeReadout
+                        key={field.key}
+                        label={field.label}
+                        value={field.value ? formatDate(field.value) : ''}
                       />
-                    </label>
-                  ))}
-                  <span className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => saveIssuedDates(group)}
-                      disabled={issuedSavingCode !== null}
-                      className="rounded-md bg-royal px-3 py-2 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-                    >
-                      {issuedSavingCode === group.code ? 'Saving…' : 'Save dates'}
-                    </button>
-                  </span>
+                    ),
+                  )}
+                  {editing && (
+                    <span className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => saveIssuedDates(group)}
+                        disabled={issuedSavingCode !== null}
+                        className="rounded-md bg-royal px-3 py-2 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                      >
+                        {issuedSavingCode === group.code ? 'Saving…' : 'Save dates'}
+                      </button>
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -1040,8 +1127,8 @@ export function ReviewPage() {
             </div>
           )}
 
-          {/* Assign officer (oic.assign) — v2 */}
-          {canAssign && !decided && (
+          {/* Assign officer (oic.assign) — v2. Editing only: it changes the file. */}
+          {canAssign && editing && (
             <div className="mt-6 rounded-lg border border-royal/30 bg-royal-tint px-5 py-5">
               <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
                 Assign officer-in-charge
@@ -1090,7 +1177,7 @@ export function ReviewPage() {
             </div>
           )}
 
-          {!decided && (
+          {editing && (
             <div className="mt-6 text-right">
               <button
                 type="button"
