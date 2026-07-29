@@ -14,7 +14,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { admin, applications, assignments, documents } from '../../lib/resources'
+import { admin, applications, assignments, documents, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
@@ -51,6 +51,25 @@ const TYPE_TITLES: Record<string, string> = {
   new: 'New',
   renewal: 'Renewal of',
   amendment: 'Amendment of',
+}
+
+/*
+ * Issuance dates the applicant can never know: the office that issued the
+ * document records them here during review, and they save straight back into
+ * that permit type's office form.
+ */
+const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string }[]> = {
+  OCCUPANCY: [
+    { key: 'building_permit_date', label: 'Building Permit Date Issued' },
+    { key: 'fsec_date', label: 'FSEC Date Issued' },
+  ],
+}
+
+/** Today as a local-timezone YYYY-MM-DD string (input[type=date] max). */
+function todayISO(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 const readOnlyInput = `${inputCls} read-only:cursor-default`
@@ -325,6 +344,11 @@ export function ReviewPage() {
   const [officeUse, setOfficeUse] = useState({ receipt: '', receivedBy: '', ban: '', psic: '', fee: '', remarks: '' })
   const [officeTouched, setOfficeTouched] = useState<Record<string, boolean>>({})
 
+  // Office-recorded issuance dates, keyed "PERMIT_CODE.field_key".
+  const [issued, setIssued] = useState<Record<string, string>>({})
+  const [issuedSavingCode, setIssuedSavingCode] = useState<string | null>(null)
+  const [issuedNote, setIssuedNote] = useState<string | null>(null)
+
   // Fee adjustment (fee.adjust) + officer assignment (oic.assign) — v2.
   const [feeSaving, setFeeSaving] = useState(false)
   const [feeNote, setFeeNote] = useState<string | null>(null)
@@ -404,6 +428,43 @@ export function ReviewPage() {
   function setOffice(key: keyof typeof officeUse, value: string) {
     setOfficeTouched((t) => ({ ...t, [key]: true }))
     setOfficeUse((v) => ({ ...v, [key]: value }))
+  }
+
+  /*
+   * One group per permit type on this application that carries issuance dates.
+   * Prefilled from whatever the office already recorded; edits override.
+   */
+  const issuedGroups = app.permit_types
+    .filter((pt) => OFFICER_DATE_FIELDS[pt.code])
+    .map((pt) => {
+      const saved = officeForms.find((f) => f.permit_type_code === pt.code)?.form_data ?? {}
+      return {
+        code: pt.code,
+        name: pt.name,
+        fields: OFFICER_DATE_FIELDS[pt.code].map((field) => {
+          const stored = saved[field.key]
+          return {
+            ...field,
+            value: issued[`${pt.code}.${field.key}`] ?? (typeof stored === 'string' ? stored : ''),
+          }
+        }),
+      }
+    })
+
+  async function saveIssuedDates(group: (typeof issuedGroups)[number]) {
+    setIssuedSavingCode(group.code)
+    setIssuedNote(null)
+    setActionError(null)
+    try {
+      const payload = Object.fromEntries(group.fields.map((f) => [f.key, f.value || null]))
+      await officeFormsApi.save(app.id, group.code, payload)
+      setIssuedNote(`${group.name} issuance dates saved.`)
+      reload()
+    } catch (err) {
+      setActionError(toApiError(err).message)
+    } finally {
+      setIssuedSavingCode(null)
+    }
   }
 
   async function approve() {
@@ -823,6 +884,46 @@ export function ReviewPage() {
                 />
               </label>
             </div>
+
+            {/* Issuance dates: recorded here, never asked of the applicant. */}
+            {issuedGroups.map((group) => (
+              <div key={group.code} className="mt-5 border-t border-officeuse-border pt-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                  {group.name} · Issuance Dates
+                </p>
+                <p className="mt-1 text-xs text-ink-secondary">
+                  Enter the dates the issuing office released these documents. Applicants are not
+                  asked for them.
+                </p>
+                <div className="mt-3 grid gap-4 sm:grid-cols-3 sm:items-end">
+                  {group.fields.map((field) => (
+                    <label key={field.key} className="block">
+                      <FieldLabel>{field.label}</FieldLabel>
+                      <input
+                        type="date"
+                        max={todayISO()}
+                        className={officeInput}
+                        value={field.value}
+                        onChange={(e) =>
+                          setIssued((v) => ({ ...v, [`${group.code}.${field.key}`]: e.target.value }))
+                        }
+                      />
+                    </label>
+                  ))}
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveIssuedDates(group)}
+                      disabled={issuedSavingCode !== null}
+                      className="rounded-md bg-royal px-3 py-2 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                    >
+                      {issuedSavingCode === group.code ? 'Saving…' : 'Save dates'}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            ))}
+            {issuedNote && <p className="mt-2 text-xs font-medium text-s-green">{issuedNote}</p>}
           </div>
 
           {/* Itemized Tax Order of Payment (revenue-code assessment) */}
