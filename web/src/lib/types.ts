@@ -170,6 +170,8 @@ export interface ApplicationListItem {
   id: number
   tracking_id: string
   application_type: ApplicationType
+  /** The applicant's own name for the filing; null falls back to the business name. */
+  title: string | null
   status: ApplicationStatus
   status_label: string
   business: { id: number; name: string }
@@ -432,6 +434,24 @@ export interface Message {
   sender: { id: number; name: string; is_officer: boolean }
   attachments: MessageAttachment[]
   created_at: string
+}
+
+/** One conversation row in the Messages inbox (GET /message-threads). */
+export interface MessageThreadSummary {
+  application_id: number
+  tracking_id: string | null
+  business_name: string | null
+  status: string | null
+  /** Whoever the reader is talking to: the applicant, or the officer/office. */
+  counterparty: { name: string; subtitle: string | null; is_officer: boolean }
+  messages_count: number
+  last_message: {
+    body: string
+    sender_name: string | null
+    mine: boolean
+    created_at: string
+  } | null
+  updated_at: string | null
 }
 
 /* ── Officer requests (Other Requirements; v2 CONTRACT) ───────────────── */

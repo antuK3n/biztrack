@@ -16,7 +16,7 @@ class Application extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'tracking_id', 'business_id', 'applicant_user_id', 'application_type',
+        'tracking_id', 'business_id', 'applicant_user_id', 'application_type', 'title',
         'status', 'prior_permit_id', 'submitted_at', 'deadline_at', 'decided_at',
         'rejection_reason', 'fee_profile', 'payment_mode',
     ];

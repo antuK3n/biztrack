@@ -15,6 +15,9 @@ class ApplicationResource extends JsonResource
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
             'application_type' => $this->application_type?->value,
+            // The applicant's own label for the filing; null means "use the
+            // business name", which every reader does.
+            'title' => $this->title,
             'payment_mode' => $this->payment_mode,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),

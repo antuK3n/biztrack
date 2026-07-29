@@ -34,6 +34,7 @@ import {
   buildFeeProfile,
   feeProfileMissing,
   feeProfileToDraft,
+  formatAmountInput,
   type FeeProfileDraft,
 } from './FeeProfileStep'
 import type {
@@ -47,7 +48,13 @@ import type {
 } from '../../lib/types'
 
 type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'fees' | 'review'
-const BASE_PHASES: BasePhase[] = ['permits', 'business', 'lines', 'address', 'documents', 'fees', 'review']
+/*
+ * Location & Zoning comes first (revised GUI, screens 28-33: "Zoning -
+ * Selecting Business Location" is Part 1 of 8, the LGU Section cards are Part
+ * 3). Where the business is decides what it may be, so asking for the address
+ * before the paperwork matches how the counter actually works.
+ */
+const BASE_PHASES: BasePhase[] = ['address', 'permits', 'business', 'lines', 'documents', 'fees', 'review']
 
 const BASE_LABELS: Record<BasePhase, string> = {
   permits: 'Permits & Certificates',
@@ -70,6 +77,13 @@ const OFFICE_LABELS: Record<OfficeFormCode, string> = {
 const OTHER_DOC_CODE = 'OTHER'
 
 /*
+ * How long typing settles before the draft is written. Long enough that a
+ * sentence is one save, short enough that stepping away from the keyboard
+ * always leaves the work saved.
+ */
+const AUTOSAVE_DELAY_MS = 1200
+
+/*
  * The Mayor's / Business Permit is the OUTCOME of the application, not a
  * clearance you tick, so it is never rendered as a card: the wizard attaches
  * it to every application so BPLO always gets the assignment.
@@ -88,6 +102,13 @@ const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120',
 
 /** A single running step: either a base phase or one office form sheet. */
 type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
+
+/** An attachment already on the draft: the id is what a removal needs. */
+interface UploadedFile {
+  id: number
+  name: string
+  size: number
+}
 
 const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
   new: { title: 'Application for New Business Permit', ref: 'MCG-BPLO-FO-001 · v2.0' },
@@ -171,6 +192,27 @@ function tinValid(raw: string): boolean {
 
 const TIN_ERROR =
   'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'
+
+/**
+ * Philippine contact number: an 11-digit mobile (09XX XXX XXXX), the same
+ * number written +63, or a landline with or without its area code. Deliberately
+ * lenient about separators — the point is to catch a typo, not a format.
+ */
+function phoneValid(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!/^[+\d\s().-]+$/.test(trimmed)) return false
+  const digits = trimmed.replace(/\D/g, '').length
+
+  return digits >= 7 && digits <= 13
+}
+
+const PHONE_ERROR =
+  'Enter a Philippine mobile or landline number, like 09171234567 or 8123 4567.'
+
+/** Strip the display separators before an amount goes to the API. */
+function plainAmount(raw: string): string {
+  return raw.replace(/,/g, '').trim()
+}
 
 /* ── Small prototype glyphs ───────────────────────────────────────────── */
 
@@ -358,6 +400,9 @@ function LinesStep({
               // free-text box; everything else keeps the PSIC title.
               const isOther = code?.code === OTHER_PSIC_CODE
               const needsText = isOther && !line.line_of_business.trim()
+              // Capital is what the business tax and the capitalization-based
+              // fees are computed from, so a blank one is not a detail.
+              const needsCapital = !line.capitalization.trim()
               return (
                 <div key={line.psic_code_id}>
                   <div className="flex items-end gap-3">
@@ -386,20 +431,24 @@ function LinesStep({
                       )}
                     </div>
                     <div className="w-44">
-                      <FieldLabel>Capital (₱)</FieldLabel>
+                      <FieldLabel required>Capital (₱)</FieldLabel>
                       <input
-                        inputMode="numeric"
+                        inputMode="decimal"
                         value={line.capitalization}
                         onChange={(e) =>
                           onChange(
                             lines.map((l) =>
                               l.psic_code_id === line.psic_code_id
-                                ? { ...l, capitalization: e.target.value }
+                                ? // Grouped as it is typed (1,000,000); the API
+                                  // gets the plain number back.
+                                  { ...l, capitalization: formatAmountInput(e.target.value) }
                                 : l,
                             ),
                           )
                         }
-                        className={inputCls}
+                        placeholder="0.00"
+                        className={`${inputCls} tnum`}
+                        aria-invalid={needsCapital}
                       />
                     </div>
                     <button
@@ -413,6 +462,11 @@ function LinesStep({
                   {needsText && (
                     <p className="mt-1 text-xs font-medium text-s-red">
                       Type the line of business you want registered.
+                    </p>
+                  )}
+                  {needsCapital && (
+                    <p className="mt-1 text-xs font-medium text-s-red">
+                      Enter the capital you are putting into this line, in pesos.
                     </p>
                   )}
                 </div>
@@ -450,6 +504,11 @@ export function ApplyWizard() {
   // Highest step index the applicant has reached; the map is clickable up to here.
   const [maxVisited, setMaxVisited] = useState(0)
   const [form, setForm] = useState<FormState>(EMPTY)
+  /*
+   * The applicant's own name for this filing. Blank is normal and means "call
+   * it by the business name", which is what the header and the Drafts page do.
+   */
+  const [title, setTitle] = useState('')
   // Per-office form payloads keyed by permit-type code (prototype Parts 4-7).
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
   /* Bumped after a permit re-sync to refetch server-derived office-form answers. */
@@ -459,7 +518,11 @@ export function ApplyWizard() {
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [draftNote, setDraftNote] = useState<string | null>(null)
+  /* Autosave bookkeeping — see the autosave effect below. */
+  const [dirty, setDirty] = useState(false)
+  const [autosaveNonce, setAutosaveNonce] = useState(0)
+  const savedSnapshotRef = useRef<string | null>(null)
+  const inFlightRef = useRef(false)
 
   // Renewal/amendment prefill (v2): reuse an existing business + link prior permit.
   const [prefillBusinessId, setPrefillBusinessId] = useState<number | null>(null)
@@ -479,10 +542,12 @@ export function ApplyWizard() {
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
-  const [uploaded, setUploaded] = useState<Record<number, { name: string; size: number }>>({})
+  // Keyed by document type; the document id is what a removal needs.
+  const [uploaded, setUploaded] = useState<Record<number, UploadedFile>>({})
   // "Other Requirements" allows multiple files (repeatable uploads).
-  const [otherDocs, setOtherDocs] = useState<{ name: string; size: number }[]>([])
+  const [otherDocs, setOtherDocs] = useState<UploadedFile[]>([])
   const [uploadingType, setUploadingType] = useState<number | null>(null)
+  const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
 
   // Prototype presentational modals — none of these fabricate API calls.
@@ -539,14 +604,14 @@ export function ApplyWizard() {
         lessor_name: b.lessor_name ?? '',
         lessor_address: b.lessor_address ?? '',
         lessor_contact: b.lessor_contact ?? '',
-        monthly_rental: b.monthly_rental ?? '',
+        monthly_rental: formatAmountInput(b.monthly_rental ?? ''),
         emergency_contact_name: b.emergency_contact_name ?? '',
         emergency_contact_number: b.emergency_contact_number ?? '',
         latitude: b.address.latitude ?? null,
         longitude: b.address.longitude ?? null,
         lines: b.lines.map((l) => ({
           psic_code_id: l.psic_code.id,
-          capitalization: l.capitalization ?? '',
+          capitalization: formatAmountInput(l.capitalization ?? ''),
           // Carry over the free text for an "Other (not listed)" trade, or a
           // renewal would silently blank it and block Next.
           line_of_business: l.line_of_business ?? '',
@@ -629,15 +694,16 @@ export function ApplyWizard() {
   }, [permitTypes, form.permit_type_ids])
 
   /*
-   * Full step sequence, fixed from the moment permits are chosen (step 1).
-   * Office forms slot in after Location & Zoning. Because permits are the
-   * first choice, no section ever appears for the first time mid-flow.
+   * Full step sequence, fixed from the moment permits are chosen (step 2).
+   * Each office form sheet slots in after the business is described, so a
+   * certificate ticked in Part 2 shows its sheet the moment it is ticked and
+   * never appears for the first time mid-flow.
    */
   const sequence: StepNode[] = useMemo(() => {
     const nodes: StepNode[] = []
     for (const p of BASE_PHASES) {
       nodes.push({ kind: 'base', phase: p })
-      if (p === 'address') {
+      if (p === 'lines') {
         for (const code of selectedOfficeCodes) nodes.push({ kind: 'office', code })
       }
     }
@@ -704,21 +770,41 @@ export function ApplyWizard() {
       }
       case 'lines': {
         if (form.lines.length === 0) return ['Select at least one line of business']
+        const missing: string[] = []
         const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
         const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
-        return otherLine && !otherLine.line_of_business.trim()
-          ? ['Your line of business (typed in, for “Other”)']
-          : []
+        if (otherLine && !otherLine.line_of_business.trim()) {
+          missing.push('Your line of business (typed in, for “Other”)')
+        }
+        if (form.lines.some((l) => !l.capitalization.trim())) {
+          missing.push('Capital for every line of business')
+        }
+        return missing
       }
       case 'address': {
         const missing: string[] = []
         if (!form.line1.trim()) missing.push('House No. & Street Name')
         if (!form.barangay_id) missing.push('Barangay')
+        // CPDO rules on the zoning clearance from where the business actually
+        // is, so the pin is part of the answer, not a nicety.
+        if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
         // Only when renting: the API enforces the same three with required_if.
         if (form.is_rented) {
           if (!form.lessor_name.trim()) missing.push("Lessor's Name")
           if (!form.lessor_address.trim()) missing.push("Lessor's Address")
           if (!form.monthly_rental.trim()) missing.push('Monthly Rental')
+          else if (!Number.isFinite(Number(plainAmount(form.monthly_rental)))) {
+            missing.push('A monthly rental in pesos')
+          }
+          if (form.lessor_contact.trim() && !phoneValid(form.lessor_contact)) {
+            missing.push("A valid Lessor's Contact Number")
+          }
+        }
+        // Inspectors turn up unannounced; somebody has to be reachable.
+        if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
+        if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
+        else if (!phoneValid(form.emergency_contact_number)) {
+          missing.push('A valid Emergency Contact Number')
         }
         return missing
       }
@@ -730,11 +816,29 @@ export function ApplyWizard() {
         return missing
       }
       case 'fees':
-        return feeProfileMissing(feeDraft, { applicationType, lines: feeLines })
+        return feeProfileMissing(feeDraft, {
+          applicationType,
+          permitCodes: permitTypes
+            .filter((pt) => form.permit_type_ids.includes(pt.id))
+            .map((pt) => pt.code),
+          lines: feeLines,
+        })
       case 'review':
         return []
     }
-  }, [node, form, officeData, requiredDocs, uploaded, consent, feeDraft, applicationType, feeLines, psic])
+  }, [
+    node,
+    form,
+    officeData,
+    requiredDocs,
+    uploaded,
+    consent,
+    feeDraft,
+    applicationType,
+    feeLines,
+    psic,
+    permitTypes,
+  ])
 
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
@@ -751,6 +855,34 @@ export function ApplyWizard() {
         : '',
     line1: touched.line1 && !form.line1.trim() ? 'Enter your street address.' : '',
     barangay_id: touched.barangay_id && !form.barangay_id ? 'Choose your barangay.' : '',
+    lessor_name:
+      touched.lessor_name && form.is_rented && !form.lessor_name.trim()
+        ? "Enter your lessor's name, or set the premises to owner-occupied."
+        : '',
+    lessor_address:
+      touched.lessor_address && form.is_rented && !form.lessor_address.trim()
+        ? "Enter your lessor's address, or set the premises to owner-occupied."
+        : '',
+    lessor_contact:
+      form.lessor_contact.trim() && !phoneValid(form.lessor_contact) ? PHONE_ERROR : '',
+    monthly_rental: form.monthly_rental.trim()
+      ? Number.isFinite(Number(plainAmount(form.monthly_rental)))
+        ? ''
+        : 'Enter the monthly rental as an amount in pesos.'
+      : touched.monthly_rental && form.is_rented
+        ? 'Enter the monthly rental, or set the premises to owner-occupied.'
+        : '',
+    emergency_contact_name:
+      touched.emergency_contact_name && !form.emergency_contact_name.trim()
+        ? 'Enter someone we can reach if an inspector cannot reach you.'
+        : '',
+    emergency_contact_number: form.emergency_contact_number.trim()
+      ? phoneValid(form.emergency_contact_number)
+        ? ''
+        : PHONE_ERROR
+      : touched.emergency_contact_number
+        ? 'Enter a contact number for that person.'
+        : '',
   }
 
   function businessPayload(): BusinessPayload {
@@ -766,7 +898,7 @@ export function ApplyWizard() {
       lessor_name: form.is_rented ? form.lessor_name.trim() || undefined : undefined,
       lessor_address: form.is_rented ? form.lessor_address.trim() || undefined : undefined,
       lessor_contact: form.is_rented ? form.lessor_contact.trim() || undefined : undefined,
-      monthly_rental: form.is_rented ? form.monthly_rental.trim() || undefined : undefined,
+      monthly_rental: form.is_rented ? plainAmount(form.monthly_rental) || undefined : undefined,
       emergency_contact_name: form.emergency_contact_name.trim() || undefined,
       emergency_contact_number: form.emergency_contact_number.trim() || undefined,
       address: {
@@ -780,7 +912,8 @@ export function ApplyWizard() {
       // business_lines.line_of_business (contract addition, hence the cast).
       lines: form.lines.map((l) => ({
         psic_code_id: l.psic_code_id,
-        capitalization: l.capitalization.trim() || undefined,
+        // Typed as "1,000,000", stored as 1000000.
+        capitalization: plainAmount(l.capitalization) || undefined,
         line_of_business: l.line_of_business.trim() || undefined,
       })) as BusinessPayload['lines'],
     }
@@ -803,6 +936,7 @@ export function ApplyWizard() {
     const app = await applications.create({
       business_id: bid,
       application_type: applicationType,
+      title: title.trim() || undefined,
       payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
@@ -817,6 +951,7 @@ export function ApplyWizard() {
    * forms, and the fee profile all round-trip through the API.
    */
   async function persistOnLeave(): Promise<boolean> {
+    inFlightRef.current = true
     setSaving(true)
     setSubmitError(null)
     try {
@@ -833,16 +968,13 @@ export function ApplyWizard() {
           // the server only knows now that it has the new permit list.
           setOfficeFormsVersion((v) => v + 1)
         }
-      } else if (phase === 'business' || phase === 'lines') {
+      } else if (phase === 'address' || phase === 'business' || phase === 'lines') {
         if (applicationId) {
           const bid = businessId ?? prefillBusinessId
           if (bid) await businesses.update(bid, businessPayload())
-        }
-      } else if (phase === 'address') {
-        if (applicationId) {
-          const bid = businessId ?? prefillBusinessId
-          if (bid) await businesses.update(bid, businessPayload())
-        } else {
+        } else if (phase === 'lines' && canCreateDraft) {
+          // Last step before uploads: there must be something to attach
+          // documents to, even if the autosave debounce has not fired yet.
           await ensureDraftRaw()
         }
       } else if (phase === 'fees') {
@@ -862,6 +994,7 @@ export function ApplyWizard() {
       setSubmitError(toApiError(err).message)
       return false
     } finally {
+      inFlightRef.current = false
       setSaving(false)
     }
   }
@@ -898,23 +1031,36 @@ export function ApplyWizard() {
     setStep(index)
   }
 
+  /*
+   * A draft is an application against a business, so the API cannot hold one
+   * until the business itself is valid: name, registration, TIN, a line of
+   * business and an address. Everything typed before that lives in this
+   * component and is pushed by the first autosave that can run, so nothing
+   * the applicant typed is dropped — it is just not on the server yet, which
+   * is exactly what the header says while it waits.
+   */
   const canCreateDraft =
     form.permit_type_ids.length > 0 &&
     form.name.trim() !== '' &&
+    form.registration_type !== '' &&
+    form.registration_number.trim() !== '' &&
+    tinValid(form.tin) &&
     form.lines.length > 0 &&
     form.line1.trim() !== '' &&
-    form.barangay_id !== ''
+    form.barangay_id !== '' &&
+    (!form.is_rented ||
+      (form.lessor_name.trim() !== '' &&
+        form.lessor_address.trim() !== '' &&
+        form.monthly_rental.trim() !== ''))
 
-  /** Explicit "Save draft": pushes every section entered so far in one go. */
-  async function saveDraft() {
-    setDraftNote(null)
-    setSubmitError(null)
-    if (!applicationId && !canCreateDraft) {
-      setDraftNote(
-        'To save a draft, first complete Permits & Certificates, Business Information, Line of Business, and Location & Zoning.',
-      )
+  /** Push every section entered so far in one go. */
+  async function autosave(target: string) {
+    // A step change is already writing; come back once it has finished.
+    if (inFlightRef.current) {
+      setAutosaveNonce((n) => n + 1)
       return
     }
+    inFlightRef.current = true
     setSaving(true)
     try {
       const hadDraft = applicationId !== null
@@ -930,6 +1076,7 @@ export function ApplyWizard() {
         const bid = businessId ?? prefillBusinessId
         if (bid) await businesses.update(bid, businessPayload())
         await applications.update(id, {
+          title: title.trim(),
           permit_type_ids: form.permit_type_ids,
           fee_profile: feeProfile,
           payment_mode: paymentMode,
@@ -941,13 +1088,71 @@ export function ApplyWizard() {
         const data = officeData[code]
         if (data && Object.keys(data).length > 0) await officeForms.save(id, code, data)
       }
-      setDraftNote('Draft saved. You can pick it up anytime from your Drafts page.')
+      savedSnapshotRef.current = target
+      setDirty(false)
+      setSubmitError(null)
     } catch (err) {
+      // Leave the draft dirty: the indicator keeps saying so, and the next
+      // edit tries again.
       setSubmitError(toApiError(err).message)
     } finally {
+      inFlightRef.current = false
       setSaving(false)
     }
   }
+
+  /*
+   * Everything a draft owns, as one comparable string: when this changes, the
+   * applicant has typed something the server does not have yet.
+   */
+  const snapshot = useMemo(
+    () =>
+      JSON.stringify({
+        title,
+        form,
+        officeData,
+        feeDraft,
+        paymentMode,
+        applicationType,
+        priorPermitId,
+      }),
+    [title, form, officeData, feeDraft, paymentMode, applicationType, priorPermitId],
+  )
+  const syncedRef = useRef(false)
+
+  /*
+   * Autosave (there is no Save draft button): every edit is debounced, then
+   * written as soon as a draft may legally exist. `dirty` is what the header
+   * reads, so the saved indicator can never claim more than actually happened.
+   */
+  useEffect(() => {
+    if (hydrating || refs.loading || tracking) return
+    if (!syncedRef.current) {
+      syncedRef.current = true
+      // A reopened draft opens in sync with what the server already holds.
+      if (applicationId) {
+        savedSnapshotRef.current = snapshot
+        return
+      }
+    }
+    if (savedSnapshotRef.current === snapshot) return
+    setDirty(true)
+    if (!applicationId && !canCreateDraft) return
+    const timer = setTimeout(() => void autosave(snapshot), AUTOSAVE_DELAY_MS)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, autosaveNonce, applicationId, canCreateDraft, hydrating, refs.loading, tracking])
+
+  /* Closing the tab mid-form should not silently take the answers with it. */
+  useEffect(() => {
+    if (!dirty) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty])
 
   /** "Clear All" (p35) — clears the inputs for the current part only. */
   function clearCurrentPart() {
@@ -981,8 +1186,16 @@ export function ApplyWizard() {
     setUploadingType(docTypeId)
     setSubmitError(null)
     try {
+      // Replacing a requirement: the old attachment goes, so the officer never
+      // sees two files for one line.
+      const previous = uploaded[docTypeId]
       const doc = await documents.upload(applicationId, docTypeId, file)
-      setUploaded((u) => ({ ...u, [docTypeId]: { name: file.name, size: file.size } }))
+      if (previous) {
+        await documents.remove(applicationId, previous.id).catch(() => {
+          /* The new file is already attached; a stale one is not worth a stop. */
+        })
+      }
+      setUploaded((u) => ({ ...u, [docTypeId]: { id: doc.id, name: file.name, size: file.size } }))
       // OCR-lite: surface any suggestions from the upload response (v2).
       if (doc.ocr_suggestions && Object.keys(doc.ocr_suggestions).length > 0) {
         setOcr(doc.ocr_suggestions)
@@ -1000,12 +1213,39 @@ export function ApplyWizard() {
     setUploadingType(otherType.id)
     setSubmitError(null)
     try {
-      await documents.upload(applicationId, otherType.id, file)
-      setOtherDocs((d) => [...d, { name: file.name, size: file.size }])
+      const doc = await documents.upload(applicationId, otherType.id, file)
+      setOtherDocs((d) => [...d, { id: doc.id, name: file.name, size: file.size }])
     } catch (err) {
       setSubmitError(toApiError(err).message)
     } finally {
       setUploadingType(null)
+    }
+  }
+
+  /**
+   * Take an attachment back off the draft (tester checklist item 47). The
+   * stored file is deleted server-side first: a file that disappears from the
+   * screen but stays in the record is not removed, it is hidden.
+   */
+  async function handleRemoveDocument(doc: UploadedFile, docTypeId?: number) {
+    if (!applicationId) return
+    setRemovingDoc(doc.id)
+    setSubmitError(null)
+    try {
+      await documents.remove(applicationId, doc.id)
+      if (docTypeId !== undefined) {
+        setUploaded((u) => {
+          const next = { ...u }
+          delete next[docTypeId]
+          return next
+        })
+      } else {
+        setOtherDocs((d) => d.filter((f) => f.id !== doc.id))
+      }
+    } catch (err) {
+      setSubmitError(toApiError(err).message)
+    } finally {
+      setRemovingDoc(null)
     }
   }
 
@@ -1053,6 +1293,7 @@ export function ApplyWizard() {
         const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
         setApplicationType(app.application_type)
         setApplicationId(app.id)
+        setTitle(app.title ?? '')
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
         setForm({
@@ -1068,14 +1309,14 @@ export function ApplyWizard() {
           lessor_name: b.lessor_name ?? '',
           lessor_address: b.lessor_address ?? '',
           lessor_contact: b.lessor_contact ?? '',
-          monthly_rental: b.monthly_rental ?? '',
+          monthly_rental: formatAmountInput(b.monthly_rental ?? ''),
           emergency_contact_name: b.emergency_contact_name ?? '',
           emergency_contact_number: b.emergency_contact_number ?? '',
           latitude: b.address?.latitude ?? null,
           longitude: b.address?.longitude ?? null,
           lines: (b.lines ?? []).map((l) => ({
             psic_code_id: l.psic_code.id,
-            capitalization: l.capitalization ?? '',
+            capitalization: formatAmountInput(l.capitalization ?? ''),
             // Free text typed against "Other (not listed)". Restoring it is what
             // stops a reopened draft from making the applicant type it again.
             line_of_business: l.line_of_business ?? '',
@@ -1087,16 +1328,17 @@ export function ApplyWizard() {
         // Restore uploaded documents by document-type code.
         const codeToId = new Map<string, number>()
         for (const dt of refData.documentTypes) codeToId.set(dt.code, dt.id)
-        const restored: Record<number, { name: string; size: number }> = {}
-        const others: { name: string; size: number }[] = []
+        const restored: Record<number, UploadedFile> = {}
+        const others: UploadedFile[] = []
         for (const doc of app.documents ?? []) {
           const code = doc.document_type?.code
           if (!code) continue
+          const file = { id: doc.id, name: doc.original_filename, size: doc.size_bytes }
           if (code === OTHER_DOC_CODE) {
-            others.push({ name: doc.original_filename, size: doc.size_bytes })
+            others.push(file)
           } else {
             const dtId = codeToId.get(code)
-            if (dtId != null) restored[dtId] = { name: doc.original_filename, size: doc.size_bytes }
+            if (dtId != null) restored[dtId] = file
           }
         }
         setUploaded(restored)
@@ -1221,37 +1463,46 @@ export function ApplyWizard() {
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
       <div className="mb-5 flex items-center gap-4">
         <ClipboardIcon size={34} className="shrink-0 text-royal" />
-        {form.name.trim() ? (
-          <span className="truncate text-xl font-bold text-ink">{form.name}</span>
-        ) : (
-          <span className="text-xl font-bold text-ink underline underline-offset-4">
-            Title of Application
-          </span>
-        )}
-        <span className="ml-3 flex items-center gap-2">
+        {/*
+          Name the filing, not the business: one business can have three
+          applications open, and "Nena's Sari-Sari Store" three times over is
+          not a list anyone can use. Blank keeps the business name.
+        */}
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">Application title</span>
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            maxLength={120}
+            placeholder={form.name.trim() || 'Title of Application'}
+            className="w-full max-w-md truncate rounded-md border border-input-border bg-white px-3 py-1.5 text-xl font-bold text-ink placeholder:font-bold placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+          />
+        </label>
+        <span className="flex shrink-0 items-center gap-2">
           {saving ? (
             <span className="text-xs italic text-ink-muted">Saving…</span>
-          ) : applicationId ? (
+          ) : applicationId && !dirty ? (
             <>
               <CloudSavedIcon />
-              <span className="text-xs italic text-ink-muted">Draft saved</span>
+              <span className="text-xs italic text-ink-muted">All Changes Saved</span>
             </>
           ) : (
-            <span className="text-xs italic text-ink-muted">Not saved yet</span>
+            <span className="text-xs italic text-ink-muted">
+              {dirty && (applicationId || canCreateDraft) ? 'Unsaved changes' : 'Not saved yet'}
+            </span>
           )}
         </span>
-        <span className="flex-1" />
         <button
           type="button"
           onClick={() => setShowClear(true)}
-          className="text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+          className="shrink-0 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
         >
           Clear All
         </button>
       </div>
 
       {/* ── Full section map: every step this application requires ─────── */}
-      <ol className="mb-3 flex flex-wrap gap-2" aria-label="Application sections">
+      <ol className="mb-8 flex flex-wrap gap-2" aria-label="Application sections">
         {sequence.map((n, i) => {
           const label = n.kind === 'base' ? BASE_LABELS[n.phase] : OFFICE_LABELS[n.code]
           const current = i === stepIndex
@@ -1279,15 +1530,6 @@ export function ApplyWizard() {
           )
         })}
       </ol>
-      {phase === 'permits' && (
-        <p className="mb-5 text-xs text-ink-secondary">
-          This is the complete list of sections your application will go through, just like the
-          paper form. Selecting a certificate below adds its office form to the list right away,
-          never in the middle of the flow.
-        </p>
-      )}
-      {phase !== 'permits' && <div className="mb-5" />}
-
       {submitError && (
         <div className="mb-4">
           <Alert variant="error">{submitError}</Alert>
@@ -1300,20 +1542,11 @@ export function ApplyWizard() {
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Section</h1>
           <div className="mb-6 h-px bg-ink/40" />
           {/*
-            The Mayor's / Business Permit is stated, not offered: it is the
-            outcome of the whole application, so it is always attached and
-            BPLO always receives the file.
+            The Mayor's / Business Permit is neither offered nor explained: it
+            is the outcome of the whole application, so it is always attached
+            (permit_type_ids) and BPLO always receives the file. Only the
+            supporting clearances are cards.
           */}
-          <div className="mb-6 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4">
-            <p className="text-sm font-bold text-ink">
-              You are applying for the Mayor’s / Business Permit
-            </p>
-            <p className="mt-1 text-sm text-ink-secondary">
-              That permit is the result of this application, so it is always included and goes to
-              the Business Permits and Licensing Office. Below, add the clearances your business
-              needs to support it.
-            </p>
-          </div>
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {clearanceTypes.map((pt) => {
               const selected = form.permit_type_ids.includes(pt.id)
@@ -1416,7 +1649,7 @@ export function ApplyWizard() {
                   value={form.tin}
                   onChange={(e) => update('tin', e.target.value)}
                   onBlur={() => touch('tin')}
-                  placeholder="123-456-789-000"
+                  placeholder="000-000-000-000"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.tin)}
                 />
@@ -1512,20 +1745,27 @@ export function ApplyWizard() {
                 longitude={form.longitude}
                 onPick={(lat, lng) => setForm((f) => ({ ...f, latitude: lat, longitude: lng }))}
               />
-              <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
-                {form.latitude !== null
-                  ? `Pinned at ${form.latitude}, ${form.longitude}`
-                  : 'Click the map to drop a pin where your business is.'}
-              </p>
+              {form.latitude !== null ? (
+                <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
+                  Pinned at {form.latitude}, {form.longitude}
+                </p>
+              ) : (
+                <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
+                  Required: click the map to drop a pin where your business is.
+                </p>
+              )}
             </div>
             <div className="space-y-4">
               <div>
-                <FieldLabel required>Line of Business</FieldLabel>
+                {/* A read-only echo: the picker lives in the Line of Business
+                    section, so there is no asterisk on a field nobody can
+                    fill here. */}
+                <FieldLabel>Line of Business</FieldLabel>
                 <select className={inputCls} disabled>
                   <option>
                     {form.lines.length > 0
                       ? psic.find((c) => c.id === form.lines[0].psic_code_id)?.title ?? 'Line of Business'
-                      : 'Selected in the Line of Business section'}
+                      : 'You choose this later, in the Line of Business section'}
                   </option>
                 </select>
               </div>
@@ -1615,39 +1855,65 @@ export function ApplyWizard() {
                     <input
                       value={form.lessor_name}
                       onChange={(e) => update('lessor_name', e.target.value)}
+                      onBlur={() => touch('lessor_name')}
                       placeholder="Who you pay rent to"
                       className={inputCls}
+                      aria-invalid={Boolean(fieldErrors.lessor_name)}
                     />
+                    {fieldErrors.lessor_name && (
+                      <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.lessor_name}</p>
+                    )}
                   </div>
                   <div>
                     <FieldLabel required>Lessor's Address</FieldLabel>
                     <input
                       value={form.lessor_address}
                       onChange={(e) => update('lessor_address', e.target.value)}
+                      onBlur={() => touch('lessor_address')}
                       placeholder="Lessor's address"
                       className={inputCls}
+                      aria-invalid={Boolean(fieldErrors.lessor_address)}
                     />
+                    {fieldErrors.lessor_address && (
+                      <p className="mt-1 text-xs font-medium text-s-red">
+                        {fieldErrors.lessor_address}
+                      </p>
+                    )}
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <FieldLabel>Lessor's Contact Number</FieldLabel>
                       <input
+                        inputMode="tel"
                         value={form.lessor_contact}
                         onChange={(e) => update('lessor_contact', e.target.value)}
+                        onBlur={() => touch('lessor_contact')}
                         placeholder="09XX XXX XXXX"
                         className={inputCls}
+                        aria-invalid={Boolean(fieldErrors.lessor_contact)}
                       />
+                      {fieldErrors.lessor_contact && (
+                        <p className="mt-1 text-xs font-medium text-s-red">
+                          {fieldErrors.lessor_contact}
+                        </p>
+                      )}
                     </div>
                     <div>
-                      <FieldLabel required>Monthly Rental (P)</FieldLabel>
+                      <FieldLabel required>Monthly Rental (₱)</FieldLabel>
                       <input
-                        type="number"
-                        min={0}
+                        inputMode="decimal"
                         value={form.monthly_rental}
-                        onChange={(e) => update('monthly_rental', e.target.value)}
+                        onChange={(e) => update('monthly_rental', formatAmountInput(e.target.value))}
+                        onBlur={() => touch('monthly_rental')}
                         placeholder="0.00"
-                        className={inputCls}
+                        className={`${inputCls} tnum`}
+                        aria-invalid={Boolean(fieldErrors.monthly_rental)}
                       />
+                      {fieldErrors.monthly_rental && (
+                        <p className="mt-1 text-xs font-medium text-s-red">
+                          {fieldErrors.monthly_rental}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1655,22 +1921,37 @@ export function ApplyWizard() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <FieldLabel>Emergency Contact Person</FieldLabel>
+                  <FieldLabel required>Emergency Contact Person</FieldLabel>
                   <input
                     value={form.emergency_contact_name}
                     onChange={(e) => update('emergency_contact_name', e.target.value)}
+                    onBlur={() => touch('emergency_contact_name')}
                     placeholder="Who to reach in an emergency"
                     className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
                   />
+                  {fieldErrors.emergency_contact_name && (
+                    <p className="mt-1 text-xs font-medium text-s-red">
+                      {fieldErrors.emergency_contact_name}
+                    </p>
+                  )}
                 </div>
                 <div>
-                  <FieldLabel>Emergency Contact Number</FieldLabel>
+                  <FieldLabel required>Emergency Contact Number</FieldLabel>
                   <input
+                    inputMode="tel"
                     value={form.emergency_contact_number}
                     onChange={(e) => update('emergency_contact_number', e.target.value)}
+                    onBlur={() => touch('emergency_contact_number')}
                     placeholder="09XX XXX XXXX"
                     className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
                   />
+                  {fieldErrors.emergency_contact_number && (
+                    <p className="mt-1 text-xs font-medium text-s-red">
+                      {fieldErrors.emergency_contact_number}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -1733,50 +2014,63 @@ export function ApplyWizard() {
               requiredDocs.map((dt) => {
                 const done = uploaded[dt.id]
                 const busy = uploadingType === dt.id
+                const removing = done && removingDoc === done.id
                 return (
-                  <label
+                  <div
                     key={dt.id}
-                    className={`flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
-                      busy ? 'opacity-60' : ''
+                    className={`flex items-center gap-4 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 ${
+                      busy || removing ? 'opacity-60' : ''
                     }`}
                   >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
-                      <UploadIcon size={18} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold text-ink">
-                        {dt.name}
-                        {dt.is_required === false ? (
-                          <span className="ml-1 font-normal text-ink-muted">(optional)</span>
-                        ) : (
-                          <span className="text-s-red"> *</span>
-                        )}
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 transition-colors">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+                        <UploadIcon size={18} />
                       </span>
-                      <span className="block truncate text-xs text-ink-muted">
-                        {done
-                          ? `${done.name} · ${formatBytes(done.size)} · click to replace`
-                          : busy
-                            ? 'Uploading…'
-                            : dt.help_text || 'file type: png, jpg, pdf only'}
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-bold text-ink">
+                          {dt.name}
+                          {dt.is_required === false ? (
+                            <span className="ml-1 font-normal text-ink-muted">(optional)</span>
+                          ) : (
+                            <span className="text-s-red"> *</span>
+                          )}
+                        </span>
+                        <span className="block truncate text-xs text-ink-muted">
+                          {done
+                            ? `${done.name} · ${formatBytes(done.size)} · click to replace`
+                            : busy
+                              ? 'Uploading…'
+                              : dt.help_text || 'file type: png, jpg, pdf only'}
+                        </span>
                       </span>
-                    </span>
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        className="sr-only"
+                        disabled={busy || Boolean(removing)}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (file) void handleUpload(dt.id, file)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
                     {done && (
-                      <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
-                        <CheckIcon size={16} /> Uploaded
-                      </span>
+                      <>
+                        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+                          <CheckIcon size={16} /> Uploaded
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void handleRemoveDocument(done, dt.id)}
+                          disabled={Boolean(removing)}
+                          className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                        >
+                          {removing ? 'Removing…' : 'Remove'}
+                        </button>
+                      </>
                     )}
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png"
-                      className="sr-only"
-                      disabled={busy}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0]
-                        if (file) void handleUpload(dt.id, file)
-                        e.target.value = ''
-                      }}
-                    />
-                  </label>
+                  </div>
                 )
               })
             )}
@@ -1793,9 +2087,9 @@ export function ApplyWizard() {
               </p>
               {otherDocs.length > 0 && (
                 <ul className="mt-3 space-y-2">
-                  {otherDocs.map((f, i) => (
+                  {otherDocs.map((f) => (
                     <li
-                      key={`${f.name}-${i}`}
+                      key={f.id}
                       className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5"
                     >
                       <span className="text-s-green">
@@ -1803,6 +2097,14 @@ export function ApplyWizard() {
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm text-ink">{f.name}</span>
                       <span className="tnum shrink-0 text-xs text-ink-muted">{formatBytes(f.size)}</span>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveDocument(f)}
+                        disabled={removingDoc === f.id}
+                        className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                      >
+                        {removingDoc === f.id ? 'Removing…' : 'Remove'}
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -1918,13 +2220,6 @@ export function ApplyWizard() {
                 Submit
               </PillButton>
             )}
-            <PillButton
-              onClick={() => void saveDraft()}
-              disabled={saving}
-              className="bg-white !text-royal border-2 border-royal hover:bg-royal-tint"
-            >
-              Save draft
-            </PillButton>
             {stepIndex > 0 && (
               <button
                 type="button"
@@ -1945,7 +2240,6 @@ export function ApplyWizard() {
               Tick the Data Privacy Consent in Documentary Requirements before submitting.
             </p>
           )}
-          {draftNote && <p className="max-w-md text-xs font-medium text-royal">{draftNote}</p>}
         </div>
         <div className="mx-auto w-full max-w-md">
           <div className="h-2.5 overflow-hidden rounded-full bg-ink-secondary/80">
