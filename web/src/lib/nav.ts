@@ -6,6 +6,7 @@ import {
   HistoryIcon,
   HomeIcon,
   InboxIcon,
+  MailIcon,
   SearchIcon,
   ShieldCheckIcon,
   TrackIcon,
@@ -35,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Home', icon: HomeIcon, to: '/dashboard', mobile: true },
   // Business owner
   { label: 'Track', icon: TrackIcon, to: '/applications', permission: 'application.view_own', mobile: true },
+  { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
   { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
   // Officer / staff
