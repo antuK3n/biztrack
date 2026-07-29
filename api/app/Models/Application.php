@@ -18,7 +18,7 @@ class Application extends Model
     protected $fillable = [
         'tracking_id', 'business_id', 'applicant_user_id', 'application_type',
         'status', 'prior_permit_id', 'submitted_at', 'deadline_at', 'decided_at',
-        'rejection_reason', 'fee_profile',
+        'rejection_reason', 'fee_profile', 'payment_mode',
     ];
 
     protected $casts = [

@@ -15,6 +15,7 @@ class ApplicationResource extends JsonResource
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
             'application_type' => $this->application_type?->value,
+            'payment_mode' => $this->payment_mode,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'business' => $this->whenLoaded('business', fn () => new BusinessResource($this->business)),

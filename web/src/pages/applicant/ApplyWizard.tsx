@@ -137,6 +137,14 @@ interface FormState {
   longitude: number | null
   lines: LineDraft[]
   permit_type_ids: number[]
+  /* Unified form: premises and emergency contact. */
+  is_rented: boolean
+  lessor_name: string
+  lessor_address: string
+  lessor_contact: string
+  monthly_rental: string
+  emergency_contact_name: string
+  emergency_contact_number: string
 }
 
 const EMPTY: FormState = {
@@ -148,6 +156,13 @@ const EMPTY: FormState = {
   line1: '',
   line2: '',
   barangay_id: '',
+  is_rented: false,
+  lessor_name: '',
+  lessor_address: '',
+  lessor_contact: '',
+  monthly_rental: '',
+  emergency_contact_name: '',
+  emergency_contact_number: '',
   latitude: null,
   longitude: null,
   lines: [],
@@ -434,6 +449,9 @@ export function ApplyWizard() {
   const [searchParams] = useSearchParams()
   const rawType = searchParams.get('type')
   // Draft reopening (?draft=ID) may override the type once the draft loads.
+  // Ordinance Sec. 2N: pay the business tax in full by January 20, or in four
+  // quarterly instalments. The ordinance offers no semi-annual option.
+  const [paymentMode, setPaymentMode] = useState<'annual' | 'quarterly'>('annual')
   const [applicationType, setApplicationType] = useState<ApplicationType>(
     rawType === 'renewal' || rawType === 'amendment' ? rawType : 'new',
   )
@@ -536,6 +554,13 @@ export function ApplyWizard() {
         line1: b.address.line1 ?? '',
         line2: b.address.line2 ?? '',
         barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
+        is_rented: b.is_rented ?? false,
+        lessor_name: b.lessor_name ?? '',
+        lessor_address: b.lessor_address ?? '',
+        lessor_contact: b.lessor_contact ?? '',
+        monthly_rental: b.monthly_rental ?? '',
+        emergency_contact_name: b.emergency_contact_name ?? '',
+        emergency_contact_number: b.emergency_contact_number ?? '',
         latitude: b.address.latitude ?? null,
         longitude: b.address.longitude ?? null,
         lines: b.lines.map((l) => ({
@@ -708,6 +733,12 @@ export function ApplyWizard() {
         const missing: string[] = []
         if (!form.line1.trim()) missing.push('House No. & Street Name')
         if (!form.barangay_id) missing.push('Barangay')
+        // Only when renting: the API enforces the same three with required_if.
+        if (form.is_rented) {
+          if (!form.lessor_name.trim()) missing.push("Lessor's Name")
+          if (!form.lessor_address.trim()) missing.push("Lessor's Address")
+          if (!form.monthly_rental.trim()) missing.push('Monthly Rental')
+        }
         return missing
       }
       case 'documents': {
@@ -748,6 +779,15 @@ export function ApplyWizard() {
       registration_type: form.registration_type || undefined,
       registration_number: form.registration_number.trim() || undefined,
       tin: form.tin.trim() || undefined,
+      is_rented: form.is_rented,
+      // Only sent when renting: an owner-occupied shop has no lessor, and the
+      // API requires these precisely and only when is_rented is true.
+      lessor_name: form.is_rented ? form.lessor_name.trim() || undefined : undefined,
+      lessor_address: form.is_rented ? form.lessor_address.trim() || undefined : undefined,
+      lessor_contact: form.is_rented ? form.lessor_contact.trim() || undefined : undefined,
+      monthly_rental: form.is_rented ? form.monthly_rental.trim() || undefined : undefined,
+      emergency_contact_name: form.emergency_contact_name.trim() || undefined,
+      emergency_contact_number: form.emergency_contact_number.trim() || undefined,
       address: {
         line1: form.line1.trim(),
         line2: form.line2.trim() || undefined,
@@ -782,6 +822,7 @@ export function ApplyWizard() {
     const app = await applications.create({
       business_id: bid,
       application_type: applicationType,
+      payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
     })
@@ -910,9 +951,10 @@ export function ApplyWizard() {
         await applications.update(id, {
           permit_type_ids: form.permit_type_ids,
           fee_profile: feeProfile,
+          payment_mode: paymentMode,
         })
       } else {
-        await applications.update(id, { fee_profile: feeProfile })
+        await applications.update(id, { fee_profile: feeProfile, payment_mode: paymentMode })
       }
       for (const code of selectedOfficeCodes) {
         const data = officeData[code]
@@ -1041,6 +1083,13 @@ export function ApplyWizard() {
           line1: b.address?.line1 ?? '',
           line2: b.address?.line2 ?? '',
           barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
+          is_rented: b.is_rented ?? false,
+          lessor_name: b.lessor_name ?? '',
+          lessor_address: b.lessor_address ?? '',
+          lessor_contact: b.lessor_contact ?? '',
+          monthly_rental: b.monthly_rental ?? '',
+          emergency_contact_name: b.emergency_contact_name ?? '',
+          emergency_contact_number: b.emergency_contact_number ?? '',
           latitude: b.address?.latitude ?? null,
           longitude: b.address?.longitude ?? null,
           lines: (b.lines ?? []).map((l) => ({
@@ -1052,6 +1101,7 @@ export function ApplyWizard() {
           })),
           permit_type_ids: ids,
         })
+        setPaymentMode(app.payment_mode === 'quarterly' ? 'quarterly' : 'annual')
         setFeeDraft(feeProfileToDraft(app.fee_profile, lineIds))
         // Restore uploaded documents by document-type code.
         const codeToId = new Map<string, number>()
@@ -1539,6 +1589,109 @@ export function ApplyWizard() {
                   className={inputCls}
                 />
               </div>
+
+              {/*
+                * Unified form asks who owns the premises. Only a renter has a
+                * lessor, so the block stays closed until they say so rather
+                * than showing four fields most applicants must leave blank.
+                */}
+              <div>
+                <FieldLabel>Are the premises rented?</FieldLabel>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { rented: false, label: 'Owned or occupied by me' },
+                    { rented: true, label: 'Rented' },
+                  ].map((opt) => {
+                    const selected = form.is_rented === opt.rented
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        aria-pressed={selected}
+                        onClick={() => update('is_rented', opt.rented)}
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-royal bg-input text-ink'
+                            : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                        }`}
+                      >
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full border-2 ${
+                            selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                          }`}
+                        />
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              {form.is_rented && (
+                <div className="flex flex-col gap-4 rounded-xl border border-line p-4">
+                  <div>
+                    <FieldLabel required>Lessor's Name</FieldLabel>
+                    <input
+                      value={form.lessor_name}
+                      onChange={(e) => update('lessor_name', e.target.value)}
+                      placeholder="Who you pay rent to"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel required>Lessor's Address</FieldLabel>
+                    <input
+                      value={form.lessor_address}
+                      onChange={(e) => update('lessor_address', e.target.value)}
+                      placeholder="Lessor's address"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel>Lessor's Contact Number</FieldLabel>
+                      <input
+                        value={form.lessor_contact}
+                        onChange={(e) => update('lessor_contact', e.target.value)}
+                        placeholder="09XX XXX XXXX"
+                        className={inputCls}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel required>Monthly Rental (P)</FieldLabel>
+                      <input
+                        type="number"
+                        min={0}
+                        value={form.monthly_rental}
+                        onChange={(e) => update('monthly_rental', e.target.value)}
+                        placeholder="0.00"
+                        className={inputCls}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <FieldLabel>Emergency Contact Person</FieldLabel>
+                  <input
+                    value={form.emergency_contact_name}
+                    onChange={(e) => update('emergency_contact_name', e.target.value)}
+                    placeholder="Who to reach in an emergency"
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <FieldLabel>Emergency Contact Number</FieldLabel>
+                  <input
+                    value={form.emergency_contact_number}
+                    onChange={(e) => update('emergency_contact_number', e.target.value)}
+                    placeholder="09XX XXX XXXX"
+                    className={inputCls}
+                  />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1739,6 +1892,8 @@ export function ApplyWizard() {
               lines={feeLines}
               value={feeDraft}
               onChange={setFeeDraft}
+              paymentMode={paymentMode}
+              onPaymentModeChange={setPaymentMode}
             />
           </div>
         </FormSheet>

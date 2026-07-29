@@ -173,3 +173,87 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
 
     expect($deptCodes)->toContain('CPDO')->toContain('BPLO');
 });
+
+/* ── Unified form fields (checklist item 2) ─────────────────────────────── */
+
+it('requires the lessor block only when the premises are rented', function () {
+    $payload = [
+        'name' => 'Rented Shop',
+        'registration_type' => 'sole_proprietorship',
+        'registration_number' => 'DTI-2026-5001',
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '1 Test St', 'barangay_id' => 1],
+        'lines' => [['psic_code_id' => 1]],
+        'is_rented' => true,
+    ];
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', $payload)
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['lessor_name', 'lessor_address', 'monthly_rental']);
+
+    // Owner-occupied: the same payload without the rented flag sails through,
+    // because an owner has no lessor to name.
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', array_merge($payload, ['is_rented' => false, 'name' => 'Owned Shop']))
+        ->assertCreated();
+});
+
+it('stores and returns the lessor and emergency contact block', function () {
+    $res = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', [
+            'name' => 'Lessor Detail Shop',
+            'registration_type' => 'sole_proprietorship',
+            'registration_number' => 'DTI-2026-5002',
+            'tin' => '123-456-789-000',
+            'address' => ['line1' => '2 Test St', 'barangay_id' => 1],
+            'lines' => [['psic_code_id' => 1]],
+            'is_rented' => true,
+            'lessor_name' => 'Aling Nena',
+            'lessor_address' => '9 Rizal Ave, Malabon',
+            'lessor_contact' => '09171234567',
+            'monthly_rental' => 12000,
+            'emergency_contact_name' => 'Mang Tonyo',
+            'emergency_contact_number' => '09181234567',
+        ])
+        ->assertCreated();
+
+    expect($res->json('data.is_rented'))->toBeTrue()
+        ->and($res->json('data.lessor_name'))->toBe('Aling Nena')
+        ->and((float) $res->json('data.monthly_rental'))->toBe(12000.0)
+        ->and($res->json('data.emergency_contact_name'))->toBe('Mang Tonyo');
+});
+
+it('accepts annual and quarterly payment modes and nothing else', function () {
+    // Ordinance Sec. 2N offers exactly these two; a semi-annual option would be
+    // the system inventing a payment schedule the ordinance does not grant.
+    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+    $base = [
+        'business_id' => $business->id,
+        'application_type' => 'new',
+        'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+    ];
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'quarterly'])
+        ->assertCreated()
+        ->assertJsonPath('data.payment_mode', 'quarterly');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'semi_annual'])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['payment_mode']);
+});
+
+it('defaults the payment mode to annual', function () {
+    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/applications', [
+            'business_id' => $business->id,
+            'application_type' => 'new',
+            'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+        ])
+        ->assertCreated()
+        ->assertJsonPath('data.payment_mode', 'annual');
+});
