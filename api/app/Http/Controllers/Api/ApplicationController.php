@@ -7,11 +7,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationListResource;
 use App\Http\Resources\ApplicationResource;
 use App\Models\Application;
+use App\Models\ApplicationDocument;
 use App\Models\Business;
 use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -60,13 +62,16 @@ class ApplicationController extends Controller
         $data = $request->validate([
             'business_id' => ['required', 'exists:businesses,id'],
             'application_type' => ['required', 'in:new,renewal,amendment'],
+            // The applicant's own name for this filing; blank falls back to the
+            // business name everywhere it is displayed.
+            'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             // Ordinance Sec. 2N: annual (first 20 days of January) or quarterly
             // (first 20 days of Jan/Apr/Jul/Oct). No semi-annual option exists.
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
-            ...$this->feeProfileRules(),
+            ...$this->feeProfileRules($request),
         ]);
 
         $business = Business::findOrFail($data['business_id']);
@@ -88,6 +93,7 @@ class ApplicationController extends Controller
             'business_id' => $business->id,
             'applicant_user_id' => $request->user()->id,
             'application_type' => $data['application_type'],
+            'title' => $this->cleanTitle($data['title'] ?? null),
             'status' => ApplicationStatus::Draft,
             'prior_permit_id' => $data['prior_permit_id'] ?? null,
             'payment_mode' => $data['payment_mode'] ?? 'annual',
@@ -122,12 +128,16 @@ class ApplicationController extends Controller
 
         $data = $request->validate([
             'business_id' => ['sometimes', 'exists:businesses,id'],
+            'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
-            ...$this->feeProfileRules(),
+            ...$this->feeProfileRules($request),
         ]);
 
+        if (array_key_exists('title', $data)) {
+            $application->update(['title' => $this->cleanTitle($data['title'])]);
+        }
         if (isset($data['business_id'])) {
             $business = Business::findOrFail($data['business_id']);
             abort_unless($business->owner_user_id === $request->user()->id, 403, 'This business is not yours.');
@@ -235,6 +245,35 @@ class ApplicationController extends Controller
         return response()->json(['data' => $data]);
     }
 
+    /**
+     * Remove one uploaded requirement (tester checklist item 47).
+     *
+     * The wizard could replace a file but never take one back, so a document
+     * attached to the wrong requirement stayed attached. Only the applicant
+     * may remove one, only while the application is still theirs to edit, and
+     * the stored file goes with the row — a "removed" document that still sits
+     * on disk is not removed.
+     */
+    public function destroyDocument(Request $request, Application $application, ApplicationDocument $document): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+        abort_unless($document->application_id === $application->id, 404, 'That document is not part of this application.');
+        abort_unless(
+            in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true),
+            422,
+            'Documents can only be removed while the application is a draft or has been returned to you.'
+        );
+
+        Audit::log('document.removed', $document);
+
+        if ($document->stored_path && Storage::disk('local')->exists($document->stored_path)) {
+            Storage::disk('local')->delete($document->stored_path);
+        }
+        $document->delete();
+
+        return response()->json(['data' => ['id' => $document->id]]);
+    }
+
     // --- authorization helpers ----------------------------------------------
     private function authorizeOwner(Request $request, Application $application): void
     {
@@ -253,35 +292,63 @@ class ApplicationController extends Controller
         abort_unless($request->user()->hasPermission('application.view_all'), 403, 'You may not view this application.');
     }
 
+    /** Trimmed title, or null so readers fall back to the business name. */
+    private function cleanTitle(?string $title): ?string
+    {
+        $trimmed = trim((string) $title);
+
+        return $trimmed === '' ? null : $trimmed;
+    }
+
     /**
      * Fee-profile facts the revenue-code calculator consumes
      * (docs/revenue-code-extract.md Appendix B; database/data/revenue_code/SCHEMA.md).
+     *
+     * Everything stays optional because drafts autosave half-typed: what the
+     * rules enforce is that whatever IS present is a sane number. Negatives,
+     * words in money fields, and amounts past the sanity ceiling are rejected
+     * here as well as in the wizard (tester checklist item 39) — the browser
+     * is not the only way into this endpoint.
      */
-    private function feeProfileRules(): array
+    private function feeProfileRules(Request $request): array
     {
+        // Peso amounts: 10 billion is far beyond any Malabon filing and still
+        // clear of the decimal(14,2) columns the assessment lands in.
+        $money = ['nullable', 'numeric', 'min:0', 'max:10000000000'];
+        $count = ['nullable', 'integer', 'min:0', 'max:100000'];
+
         return [
             'fee_profile' => ['sometimes', 'nullable', 'array'],
             'fee_profile.lines' => ['sometimes', 'array'],
             // Ties a line back to the PSIC selection so reopened drafts restore.
             'fee_profile.lines.*.psic_code_id' => ['nullable', 'integer'],
             'fee_profile.lines.*.category' => ['required_with:fee_profile.lines', 'string', 'max:80'],
-            'fee_profile.lines.*.gross_sales' => ['nullable', 'numeric', 'min:0'],
-            'fee_profile.lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
-            'fee_profile.gross_sales' => ['nullable', 'numeric', 'min:0'],
-            'fee_profile.capitalization' => ['nullable', 'numeric', 'min:0'],
-            'fee_profile.floor_area_sqm' => ['nullable', 'numeric', 'min:0'],
-            'fee_profile.employees' => ['nullable', 'integer', 'min:0'],
-            // Unified form asks how many of those live in the city.
-            'fee_profile.employees_in_lgu' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.lines.*.gross_sales' => $money,
+            'fee_profile.lines.*.capitalization' => $money,
+            'fee_profile.gross_sales' => $money,
+            'fee_profile.capitalization' => $money,
+            'fee_profile.floor_area_sqm' => ['nullable', 'numeric', 'min:0', 'max:1000000'],
+            'fee_profile.employees' => $count,
+            // Unified form asks how many of those live in the city — which can
+            // never be more than the headcount it is a subset of.
+            'fee_profile.employees_in_lgu' => [
+                ...$count,
+                function (string $attribute, mixed $value, callable $fail) use ($request) {
+                    $total = $request->input('fee_profile.employees');
+                    if (is_numeric($total) && is_numeric($value) && (int) $value > (int) $total) {
+                        $fail('Employees residing in Malabon can’t be more than your total number of employees.');
+                    }
+                },
+            ],
             'fee_profile.tax_incentive_grantor' => ['nullable', 'string', 'max:120'],
-            'fee_profile.storeys' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.doors' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.rooms' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.beds' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.stall_count' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.delivery_vehicles_motorized' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.delivery_vehicles_other' => ['nullable', 'integer', 'min:0'],
-            'fee_profile.construction_cost' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.storeys' => ['nullable', 'integer', 'min:0', 'max:200'],
+            'fee_profile.doors' => $count,
+            'fee_profile.rooms' => $count,
+            'fee_profile.beds' => $count,
+            'fee_profile.stall_count' => $count,
+            'fee_profile.delivery_vehicles_motorized' => $count,
+            'fee_profile.delivery_vehicles_other' => $count,
+            'fee_profile.construction_cost' => $money,
             'fee_profile.business_structure' => ['nullable', 'in:sole_proprietorship,partnership,corporation,cooperative'],
             'fee_profile.goods_class' => ['nullable', 'in:flammables,chemicals,dry_goods,perishables'],
             'fee_profile.office_location' => ['nullable', 'in:within,outside'],

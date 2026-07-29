@@ -74,12 +74,17 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Documents
-    Route::middleware('permission:document.upload_own')
-        ->post('applications/{application}/documents', [DocumentController::class, 'store']);
+    Route::middleware('permission:document.upload_own')->group(function () {
+        Route::post('applications/{application}/documents', [DocumentController::class, 'store']);
+        // Take an attachment back off a draft (owner only, checked in controller).
+        Route::delete('applications/{application}/documents/{document}', [ApplicationController::class, 'destroyDocument']);
+    });
     Route::get('documents/{document}/download', [DocumentController::class, 'download']);
 
     // Messaging (per-application thread; participant check in controller)
     Route::middleware('permission:message.participate')->group(function () {
+        // Inbox for the dedicated Messages page: one row per conversation.
+        Route::get('message-threads', [MessageController::class, 'threads']);
         Route::get('applications/{application}/messages', [MessageController::class, 'index']);
         Route::post('applications/{application}/messages', [MessageController::class, 'store']);
         Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
