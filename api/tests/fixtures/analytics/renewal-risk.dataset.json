@@ -1,7 +1,7 @@
 {
     "params": {
         "days": 365,
-        "limit": 25
+        "limit": 100
     },
     "now": "2025-08-11T09:00:00.000Z",
     "lapsed_grace_days": 60,
@@ -468,6 +468,40 @@
             "permit_id": 22,
             "permit_number": "BP-2025-0022",
             "business_id": 122,
+            "business": "Punctuality 1/8",
+            "barangay": "Longos",
+            "permit_type": "Business Permit",
+            "valid_until": "2025-09-01",
+            "days_to_expiry": 45,
+            "renewal_stage": "none",
+            "renewal_tracking_id": null,
+            "prior_renewals": 8,
+            "late_renewals": 1,
+            "open_findings": 0,
+            "fee_state": "settled",
+            "reminders_sent": 0
+        },
+        {
+            "permit_id": 23,
+            "permit_number": "BP-2025-0023",
+            "business_id": 123,
+            "business": "Punctuality 3/8",
+            "barangay": "Longos",
+            "permit_type": "Business Permit",
+            "valid_until": "2025-09-01",
+            "days_to_expiry": 45,
+            "renewal_stage": "none",
+            "renewal_tracking_id": null,
+            "prior_renewals": 8,
+            "late_renewals": 3,
+            "open_findings": 0,
+            "fee_state": "settled",
+            "reminders_sent": 0
+        },
+        {
+            "permit_id": 24,
+            "permit_number": "BP-2025-0024",
+            "business_id": 124,
             "business": "Findings 0",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -482,9 +516,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 23,
-            "permit_number": "BP-2025-0023",
-            "business_id": 123,
+            "permit_id": 25,
+            "permit_number": "BP-2025-0025",
+            "business_id": 125,
             "business": "Findings 1",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -499,9 +533,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 24,
-            "permit_number": "BP-2025-0024",
-            "business_id": 124,
+            "permit_id": 26,
+            "permit_number": "BP-2025-0026",
+            "business_id": 126,
             "business": "Findings 2",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -516,9 +550,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 25,
-            "permit_number": "BP-2025-0025",
-            "business_id": 125,
+            "permit_id": 27,
+            "permit_number": "BP-2025-0027",
+            "business_id": 127,
             "business": "Findings 3",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -533,9 +567,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 26,
-            "permit_number": "BP-2025-0026",
-            "business_id": 126,
+            "permit_id": 28,
+            "permit_number": "BP-2025-0028",
+            "business_id": 128,
             "business": "Findings 9",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -550,9 +584,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 27,
-            "permit_number": "BP-2025-0027",
-            "business_id": 127,
+            "permit_id": 29,
+            "permit_number": "BP-2025-0029",
+            "business_id": 129,
             "business": "Fees settled",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -567,9 +601,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 28,
-            "permit_number": "BP-2025-0028",
-            "business_id": 128,
+            "permit_id": 30,
+            "permit_number": "BP-2025-0030",
+            "business_id": 130,
             "business": "Fees pending",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -584,9 +618,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 29,
-            "permit_number": "BP-2025-0029",
-            "business_id": 129,
+            "permit_id": 31,
+            "permit_number": "BP-2025-0031",
+            "business_id": 131,
             "business": "Fees unpaid",
             "barangay": "Longos",
             "permit_type": "Business Permit",
@@ -601,9 +635,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 30,
-            "permit_number": "BP-2025-0030",
-            "business_id": 130,
+            "permit_id": 32,
+            "permit_number": "BP-2025-0032",
+            "business_id": 132,
             "business": "No barangay",
             "barangay": null,
             "permit_type": "Business Permit",
@@ -618,9 +652,9 @@
             "reminders_sent": 0
         },
         {
-            "permit_id": 31,
-            "permit_number": "BP-2025-0031",
-            "business_id": 131,
+            "permit_id": 33,
+            "permit_number": "BP-2025-0033",
+            "business_id": 133,
             "business": "Unknown stage",
             "barangay": "Longos",
             "permit_type": "Business Permit",

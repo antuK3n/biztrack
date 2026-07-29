@@ -344,7 +344,9 @@ final class RenewalRiskScoring
         }
 
         $late = max(0, min($priorRenewals, $lateRenewals));
-        $points = (int) round(($late / $priorRenewals) * self::WEIGHTS['punctuality']);
+        // Half to even, matching R — 1 late of 8 is 2.5 points, which PHP's
+        // default rounding would make 3 and R's would make 2. See Rounding.
+        $points = (int) Rounding::statistic(($late / $priorRenewals) * self::WEIGHTS['punctuality'], 0);
 
         return self::driver('punctuality', 'Past punctuality', $points,
             $late === 0
