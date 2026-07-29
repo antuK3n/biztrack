@@ -10,6 +10,8 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Support\AnalyticsDatasets;
+use App\Support\AnalyticsResolver;
 use App\Support\BusinessGrowthAnalytics;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
@@ -24,10 +26,26 @@ use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Dashboard aggregates. Plain SQL/Eloquent only (guardrail: no R/Python) —
- * including Features 6 and 7, which used to live in the standalone r/ project.
- * The statistics are ported into App\Support\Spc and computed here from the
- * live register; nothing shells out to Rscript or calls the plumber API.
+ * Dashboard aggregates and the R-computed analytics screens.
+ *
+ * Laravel owns all SQL; R is the statistics engine and stays a separate program
+ * (docs/r-integration-spec.md). Nothing here calls R, though — the architecture
+ * is batch. `analytics:refresh` pushes register rows to plumber, R computes, and
+ * Laravel persists the result; these endpoints read that persisted result. So an
+ * analytics page load costs one indexed read and cannot be slowed or broken by
+ * the R service being slow or down.
+ *
+ * When no snapshot exists, the PHP port computes the figures instead and the
+ * response says so in `meta`. Both engines emit the same schema, so the only way
+ * a screen can tell them apart is that `meta`, which is exactly why every
+ * analytics response carries it and every screen displays it. Serving fallback
+ * numbers as R output would make the drift between two implementations
+ * invisible.
+ *
+ * `meta.computed_at` is not decoration either. Figures are as fresh as the last
+ * refresh, so a tester's brand-new application legitimately will not appear
+ * until the next one — the timestamp on screen is what stops that reading as a
+ * bug.
  *
  * Every route in this controller sits behind `analytics.view`, which only the
  * super admin holds. That matters: these aggregates read every office's
@@ -44,17 +62,18 @@ class AnalyticsController extends Controller
     /** Feature 7: per-department control charts over weekly review turnaround. */
     public function processingTime(Request $request): JsonResponse
     {
-        return response()->json(['data' => ProcessingTimeAnalytics::build($this->weeks($request))]);
+        return $this->serve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);
     }
 
     /** Printable Permit Processing Time Monitoring report. */
     public function processingTimeReport(Request $request): Response
     {
-        $data = ProcessingTimeAnalytics::build($this->weeks($request));
+        $resolved = $this->resolve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);
 
         $pdf = Pdf::loadView('pdf.processing-time-report', [
-            'report' => $data,
-            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+            'report' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
         ])->setPaper('a4');
 
         // Render once: a second ->output() corrupts the font streams (see PdfFile).
@@ -64,17 +83,18 @@ class AnalyticsController extends Controller
     /** Feature: business growth analysis over the register. */
     public function businessGrowth(Request $request): JsonResponse
     {
-        return response()->json(['data' => BusinessGrowthAnalytics::build($this->months($request))]);
+        return $this->serve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
     }
 
     /** Printable Business Growth Analysis report. */
     public function businessGrowthReport(Request $request): Response
     {
-        $data = BusinessGrowthAnalytics::build($this->months($request));
+        $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
 
         $pdf = Pdf::loadView('pdf.business-growth-report', [
-            'report' => $data,
-            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+            'report' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
         ])->setPaper('a4');
 
         return PdfFile::render($pdf)->download('business-growth-analysis.pdf');
@@ -88,25 +108,61 @@ class AnalyticsController extends Controller
      */
     public function renewalRisk(Request $request): JsonResponse
     {
-        return response()->json([
-            'data' => RenewalRiskAnalytics::build(
-                $this->horizonDays($request),
-                $this->limit($request),
-            ),
+        return $this->serve(AnalyticsDatasets::RENEWAL_RISK, [
+            'days' => $this->horizonDays($request),
+            'limit' => $this->limit($request),
         ]);
     }
 
     /** Printable Renewal Risk report. */
     public function renewalRiskReport(Request $request): Response
     {
-        $data = RenewalRiskAnalytics::build($this->horizonDays($request), $this->limit($request));
+        $resolved = $this->resolve(AnalyticsDatasets::RENEWAL_RISK, [
+            'days' => $this->horizonDays($request),
+            'limit' => $this->limit($request),
+        ]);
 
         $pdf = Pdf::loadView('pdf.renewal-risk-report', [
-            'report' => $data,
-            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+            'report' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
         ])->setPaper('a4');
 
         return PdfFile::render($pdf)->download('renewal-risk.pdf');
+    }
+
+    /**
+     * Read a dataset's persisted statistics, or compute them locally.
+     *
+     * @param  array<string, int>  $params
+     * @return array{data: array<string, mixed>, meta: array<string, mixed>}
+     */
+    private function resolve(string $dataset, array $params): array
+    {
+        $definition = AnalyticsDatasets::get($dataset);
+
+        return AnalyticsResolver::resolve(
+            $dataset,
+            $params,
+            static fn (): array => ($definition['local'])($params),
+        );
+    }
+
+    /**
+     * `meta` sits beside `data` rather than inside it so the payload R returns
+     * stays exactly the payload R returned — the provenance of a figure is not
+     * one of the figures.
+     *
+     * @param  array<string, int>  $params
+     */
+    private function serve(string $dataset, array $params): JsonResponse
+    {
+        $resolved = $this->resolve($dataset, $params);
+
+        return response()->json([
+            'data' => $resolved['data'],
+            'meta' => $resolved['meta'],
+        ]);
     }
 
     /*

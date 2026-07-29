@@ -20,8 +20,12 @@ suppressWarnings(suppressMessages({
 #' stable mean).
 #'
 #' @param assignments Assignments tibble.
+#' @param min_n Minimum completions for a week to be kept. Defaults to 3, the
+#'   value the prototype was written and validated against. It is a parameter
+#'   only so the plumber service can be handed the rule by its caller instead of
+#'   two engines each hardcoding it — see R/service.R.
 #' @return tibble: department_code, week_start (Monday), n, mean_days.
-weekly_turnaround <- function(assignments) {
+weekly_turnaround <- function(assignments, min_n = 3L) {
   assignments |>
     filter(!is.na(completed_at)) |>
     mutate(
@@ -31,7 +35,7 @@ weekly_turnaround <- function(assignments) {
     ) |>
     group_by(department_code, week_start) |>
     summarise(n = n(), mean_days = mean(turnaround), .groups = "drop") |>
-    filter(n >= 3) |>
+    filter(n >= min_n) |>
     arrange(department_code, week_start)
 }
 
@@ -43,12 +47,14 @@ weekly_turnaround <- function(assignments) {
 #'
 #' @param weekly Output of weekly_turnaround().
 #' @param department_code Department to fit.
-#' @return tibble: department_code, center, LCL, UCL, calib_weeks.
-compute_control_limits <- function(weekly, department_code) {
+#' @param calib_cap Most weeks to fit on. Defaults to 24, as validated; a
+#'   parameter for the same reason min_n is one.
+#' @return tibble: department_code, center, sigma, LCL, UCL, calib_weeks.
+compute_control_limits <- function(weekly, department_code, calib_cap = 24L) {
   dc <- department_code
   w  <- weekly |> filter(department_code == dc) |> arrange(week_start)
   vals    <- w$mean_days
-  calib_n <- min(24L, length(vals))
+  calib_n <- min(calib_cap, length(vals))
   calib   <- vals[seq_len(calib_n)]
 
   q <- qcc::qcc(calib, type = "xbar.one", plot = FALSE)
@@ -56,6 +62,9 @@ compute_control_limits <- function(weekly, department_code) {
   tibble(
     department_code = dc,
     center      = as.numeric(q$center),
+    # qcc's sigma estimate: mean moving range over tabulated d2 = 1.128. Exposed
+    # because the screen reports it, not just the limits derived from it.
+    sigma       = as.numeric(q$std.dev),
     LCL         = max(0, as.numeric(lim[1, "LCL"])),
     UCL         = as.numeric(lim[1, "UCL"]),
     calib_weeks = calib_n

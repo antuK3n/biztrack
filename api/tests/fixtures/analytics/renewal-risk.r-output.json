@@ -1,0 +1,902 @@
+{
+  "generated_at": "2025-08-11T09:00:00.000Z",
+  "horizon_days": 365,
+  "lapsed_grace_days": 60,
+  "window_start": "2025-06-12",
+  "window_end": "2026-08-11",
+  "scored_permits": 31,
+  "counts": {
+    "high": 5,
+    "moderate": 6,
+    "low": 20
+  },
+  "reminders_sent": 7,
+  "at_risk": [
+    {
+      "permit_id": 1,
+      "permit_number": "BP-2025-0001",
+      "business_id": 101,
+      "business": "Expiry -14d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": -14,
+      "score": 55,
+      "band": "high",
+      "band_label": "High",
+      "action": "immediate_follow_up",
+      "action_label": "Immediate follow-up",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 30,
+          "max": 30,
+          "detail": "Lapsed 14 days ago"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        }
+      ]
+    },
+    {
+      "permit_id": 2,
+      "permit_number": "BP-2025-0002",
+      "business_id": 102,
+      "business": "Expiry 0d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 0,
+      "score": 55,
+      "band": "high",
+      "band_label": "High",
+      "action": "immediate_follow_up",
+      "action_label": "Immediate follow-up",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 30,
+          "max": 30,
+          "detail": "Expires in 0 days"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        }
+      ]
+    },
+    {
+      "permit_id": 3,
+      "permit_number": "BP-2025-0003",
+      "business_id": 103,
+      "business": "Expiry 1d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 1,
+      "score": 55,
+      "band": "high",
+      "band_label": "High",
+      "action": "immediate_follow_up",
+      "action_label": "Immediate follow-up",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 30,
+          "max": 30,
+          "detail": "Expires in 1 day"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        }
+      ]
+    },
+    {
+      "permit_id": 31,
+      "permit_number": "BP-2025-0031",
+      "business_id": 131,
+      "business": "Unknown stage",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 5,
+      "score": 50,
+      "band": "high",
+      "band_label": "High",
+      "action": "immediate_follow_up",
+      "action_label": "Immediate follow-up",
+      "renewal_stage": "cancelled",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 25,
+          "max": 30,
+          "detail": "Expires in 5 days"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        }
+      ]
+    },
+    {
+      "permit_id": 4,
+      "permit_number": "BP-2025-0004",
+      "business_id": 104,
+      "business": "Expiry 7d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 7,
+      "score": 50,
+      "band": "high",
+      "band_label": "High",
+      "action": "immediate_follow_up",
+      "action_label": "Immediate follow-up",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 25,
+          "max": 30,
+          "detail": "Expires in 7 days"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        }
+      ]
+    },
+    {
+      "permit_id": 10,
+      "permit_number": "BP-2025-0010",
+      "business_id": 110,
+      "business": "Stage none",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 43,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "none",
+      "renewal_tracking_id": "TRK-NONE",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 14,
+      "permit_number": "BP-2025-0014",
+      "business_id": 114,
+      "business": "Stage rejected",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 43,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "rejected",
+      "renewal_tracking_id": "TRK-REJECTED",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "Renewal rejected \u2014 must be refiled"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 5,
+      "permit_number": "BP-2025-0005",
+      "business_id": 105,
+      "business": "Expiry 15d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 15,
+      "score": 43,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 15 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 11,
+      "permit_number": "BP-2025-0011",
+      "business_id": 111,
+      "business": "Stage draft",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 38,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "draft",
+      "renewal_tracking_id": "TRK-DRAFT",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 20,
+          "max": 25,
+          "detail": "Renewal started but never submitted"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 13,
+      "permit_number": "BP-2025-0013",
+      "business_id": 113,
+      "business": "Stage returned",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 36,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "returned",
+      "renewal_tracking_id": "TRK-RETURNED",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 18,
+          "max": 25,
+          "detail": "Renewal returned to the applicant"
+        }
+      ]
+    },
+    {
+      "permit_id": 6,
+      "permit_number": "BP-2025-0006",
+      "business_id": 106,
+      "business": "Expiry 30d",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 30,
+      "score": 35,
+      "band": "moderate",
+      "band_label": "Moderate",
+      "action": "send_reminder",
+      "action_label": "Send reminder",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 25,
+          "max": 25,
+          "detail": "No renewal filed yet"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 10,
+          "max": 30,
+          "detail": "Expires in 30 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 20,
+      "permit_number": "BP-2025-0020",
+      "business_id": 120,
+      "business": "Punctuality 3/3",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 24,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "punctuality",
+          "label": "Past punctuality",
+          "points": 20,
+          "max": 20,
+          "detail": "3 of 3 earlier renewals filed late"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 21,
+      "permit_number": "BP-2025-0021",
+      "business_id": 121,
+      "business": "Punctuality 5/2",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 24,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "punctuality",
+          "label": "Past punctuality",
+          "points": 20,
+          "max": 20,
+          "detail": "2 of 2 earlier renewals filed late"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 12,
+      "permit_number": "BP-2025-0012",
+      "business_id": 112,
+      "business": "Stage in_progress",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 23,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "in_progress",
+      "renewal_tracking_id": "TRK-IN_PROGRESS",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        },
+        {
+          "rule": "progress",
+          "label": "Renewal progress",
+          "points": 5,
+          "max": 25,
+          "detail": "Renewal filed and in the queue"
+        }
+      ]
+    },
+    {
+      "permit_id": 25,
+      "permit_number": "BP-2025-0025",
+      "business_id": 125,
+      "business": "Findings 3",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 19,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "findings",
+          "label": "Open compliance findings",
+          "points": 15,
+          "max": 15,
+          "detail": "3 open findings"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 26,
+      "permit_number": "BP-2025-0026",
+      "business_id": 126,
+      "business": "Findings 9",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 19,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "findings",
+          "label": "Open compliance findings",
+          "points": 15,
+          "max": 15,
+          "detail": "9 open findings"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 15,
+      "permit_number": "BP-2025-0015",
+      "business_id": 115,
+      "business": "Stage approved",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 10,
+      "score": 18,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "approved",
+      "renewal_tracking_id": "TRK-APPROVED",
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 18,
+          "max": 30,
+          "detail": "Expires in 10 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 17,
+      "permit_number": "BP-2025-0017",
+      "business_id": 117,
+      "business": "Punctuality 0/0",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 14,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "punctuality",
+          "label": "Past punctuality",
+          "points": 10,
+          "max": 20,
+          "detail": "First renewal cycle \u2014 no punctuality record either way"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 29,
+      "permit_number": "BP-2025-0029",
+      "business_id": 129,
+      "business": "Fees unpaid",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 14,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "fees",
+          "label": "Unsettled fees",
+          "points": 10,
+          "max": 10,
+          "detail": "Assessed fee with no payment recorded"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 23,
+      "permit_number": "BP-2025-0023",
+      "business_id": 123,
+      "business": "Findings 1",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 12,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "findings",
+          "label": "Open compliance findings",
+          "points": 8,
+          "max": 15,
+          "detail": "1 open finding"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 24,
+      "permit_number": "BP-2025-0024",
+      "business_id": 124,
+      "business": "Findings 2",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 12,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "findings",
+          "label": "Open compliance findings",
+          "points": 8,
+          "max": 15,
+          "detail": "2 open findings"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 19,
+      "permit_number": "BP-2025-0019",
+      "business_id": 119,
+      "business": "Punctuality 1/3",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 11,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "punctuality",
+          "label": "Past punctuality",
+          "points": 7,
+          "max": 20,
+          "detail": "1 of 3 earlier renewals filed late"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 28,
+      "permit_number": "BP-2025-0028",
+      "business_id": 128,
+      "business": "Fees pending",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 10,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "fees",
+          "label": "Unsettled fees",
+          "points": 6,
+          "max": 10,
+          "detail": "Payment recorded but not yet cleared"
+        },
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 18,
+      "permit_number": "BP-2025-0018",
+      "business_id": 118,
+      "business": "Punctuality 0/3",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 4,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    },
+    {
+      "permit_id": 22,
+      "permit_number": "BP-2025-0022",
+      "business_id": 122,
+      "business": "Findings 0",
+      "barangay": "Longos",
+      "permit_type": "Business Permit",
+      "valid_until": "2025-09-01",
+      "days_to_expiry": 45,
+      "score": 4,
+      "band": "low",
+      "band_label": "Low",
+      "action": "monitor",
+      "action_label": "Monitor",
+      "renewal_stage": "none",
+      "renewal_tracking_id": null,
+      "reminders_sent": 0,
+      "drivers": [
+        {
+          "rule": "expiry",
+          "label": "Time to expiry",
+          "points": 4,
+          "max": 30,
+          "detail": "Expires in 45 days"
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "action": "immediate_follow_up",
+      "label": "Immediate follow-up",
+      "band": "high",
+      "count": 5
+    },
+    {
+      "action": "send_reminder",
+      "label": "Send reminder",
+      "band": "moderate",
+      "count": 6
+    },
+    {
+      "action": "monitor",
+      "label": "Monitor",
+      "band": "low",
+      "count": 20
+    }
+  ],
+  "rulebook": [
+    {
+      "rule": "expiry",
+      "label": "Time to expiry",
+      "max": 30,
+      "description": "Stepped on the expiry-monitoring marks \u2014 30, 15, 7 and 1 day out. Full weight once the permit has lapsed or expires tomorrow, nothing beyond 90 days out."
+    },
+    {
+      "rule": "progress",
+      "label": "Renewal progress",
+      "max": 25,
+      "description": "Full weight when a renewal is due within 30 days and none has been filed, or when one was rejected and must be refiled. A permit not yet due scores nothing here, and neither does one already renewed."
+    },
+    {
+      "rule": "punctuality",
+      "label": "Past punctuality",
+      "max": 20,
+      "description": "The share of this business's earlier renewals filed after the old permit expired. A first renewal cycle has no record and takes half weight."
+    },
+    {
+      "rule": "findings",
+      "label": "Open compliance findings",
+      "max": 15,
+      "description": "Unticked requirements and failed or conditional inspections that would block issuance even on a punctual filing."
+    },
+    {
+      "rule": "fees",
+      "label": "Unsettled fees",
+      "max": 10,
+      "description": "An assessed fee with no completed payment against it."
+    }
+  ],
+  "thresholds": {
+    "high": 50,
+    "moderate": 25
+  },
+  "methodology": "Risk scores are a weighted rule set over the register, not a statistical prediction. Each of five signals contributes a fixed maximum number of points; the total ranks permits by how many known risk signals they carry. The score is not a probability and does not estimate how likely a renewal is to be late."
+}
