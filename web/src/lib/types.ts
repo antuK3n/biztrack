@@ -448,6 +448,51 @@ export interface ProcessingTimeDepartment {
   }
 }
 
+/*
+ * Where an analytics figure came from, and when.
+ *
+ * R is the statistics engine and it runs as a separate program. The analytics
+ * are computed in batch — `php artisan analytics:refresh` pushes register rows to
+ * R and stores the result — so a screen is showing figures as of `computed_at`,
+ * not as of now. That has to be on screen: a tester who files an application and
+ * does not see it in the dashboard has found the designed behaviour, and the
+ * timestamp is what says so.
+ *
+ * When R could not be reached and no stored result existed, the server computed
+ * the figures with its own PHP port instead. `source` is then 'local' and
+ * `notice` carries a sentence to show. Never present those as R's output: two
+ * implementations of the same statistics can drift, and hiding which one ran is
+ * what would make the drift invisible.
+ */
+export type AnalyticsSource = 'r' | 'local'
+
+export type AnalyticsFallbackReason =
+  /** R has no endpoint for this dataset yet, so refreshing would not help. */
+  | 'no_r_endpoint'
+  /** The refresh has not run yet, or its last run failed for this view. */
+  | 'not_yet_refreshed'
+  /** This window is not one of the precomputed ones (see config/analytics.php). */
+  | 'window_not_precomputed'
+  /** R is switched off for this environment. */
+  | 'r_disabled'
+
+export interface AnalyticsProvenance {
+  source: AnalyticsSource
+  engine: string
+  engine_version: string | null
+  computed_at: string
+  stale: boolean
+  stale_after_hours: number
+  fallback_reason: AnalyticsFallbackReason | null
+  notice: string | null
+}
+
+/** An analytics payload together with its provenance. Both must reach the screen. */
+export interface Computed<T> {
+  data: T
+  meta: AnalyticsProvenance
+}
+
 /** An office with reviews on record but no week that cleared the minimum. */
 export interface ThinDepartment {
   code: string

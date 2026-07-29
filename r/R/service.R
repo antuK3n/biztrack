@@ -133,43 +133,62 @@ service_processing_time <- function(payload) {
       next
     }
 
-    charted[[length(charted) + 1]] <- .spc_department(w, dc, name, done, weekly, calib_cap)
+    shaped <- .spc_department(w, dc, name, done, weekly, calib_cap)
+
+    # No variation in the calibration window means no estimate of variation, so
+    # there is no control chart to draw. Say that, rather than draw a chart whose
+    # limits sit exactly on the centre line — with a zero-width band every week
+    # that is not identical to the others reads as out of control, which is an
+    # artifact of the arithmetic and not a finding about the office.
+    if (is.null(shaped)) {
+      thin[[length(thin) + 1]] <- list(
+        code             = .s(dc),
+        name             = .s(name),
+        completed_reviews = .i(done),
+        reason           = .s(paste("Weekly turnaround did not vary across the",
+                                    "calibration window, so no control limits can be fitted."))
+      )
+      next
+    }
+
+    charted[[length(charted) + 1]] <- shaped
   }
 
   c(frame, list(departments = charted, thin = thin))
 }
 
 #' One department's control chart, flags and drift reading.
+#'
+#' Returns NULL when the calibration window has no variation — see the caller.
 #' @keywords internal
 .spc_department <- function(w, dc, name, completed, weekly, calib_cap) {
   lim  <- compute_control_limits(weekly, dc, calib_cap = calib_cap)
   vals <- w$mean_days
 
+  # qcc's sigma is the mean moving range over d2, so zero means every
+  # calibration week had the identical mean and there is nothing to chart.
+  if (!is.finite(lim$sigma) || lim$sigma <= 0) return(NULL)
+
   beyond <- vals > lim$UCL | vals < lim$LCL
 
   # EWMA on the same clean calibration window. lambda 0.2 / 3 sigma (qcc's
   # defaults) catches a run of small increases that no single week flags.
-  calib   <- vals[seq_len(lim$calib_weeks)]
+  calib    <- vals[seq_len(lim$calib_weeks)]
   sd_calib <- if (length(calib) > 1) stats::sd(calib) else 0
   z <- ucl <- lcl <- rep(NA_real_, length(vals))
   drift <- rep(FALSE, length(vals))
 
-  if (sd_calib > 0) {
-    e <- tryCatch(
-      qcc::ewma(vals, center = lim$center, std.dev = sd_calib,
-                lambda = 0.2, nsigmas = 3, plot = FALSE),
-      error = function(err) NULL
-    )
-    if (!is.null(e)) {
-      z   <- as.numeric(e$y)
-      lcl <- as.numeric(e$limits[, "LCL"])
-      ucl <- as.numeric(e$limits[, "UCL"])
-      if (length(e$violations)) drift[as.integer(e$violations)] <- TRUE
-    }
-  }
-  # No spread in the calibration window means no EWMA band to breach: the
-  # smoothed series still moves, so report it and flag nothing.
-  if (all(is.na(z))) {
+  e <- tryCatch(
+    qcc::ewma(vals, center = lim$center, std.dev = sd_calib,
+              lambda = 0.2, nsigmas = 3, plot = FALSE),
+    error = function(err) NULL
+  )
+  if (!is.null(e)) {
+    z   <- as.numeric(e$y)
+    lcl <- as.numeric(e$limits[, "LCL"])
+    ucl <- as.numeric(e$limits[, "UCL"])
+    if (length(e$violations)) drift[as.integer(e$violations)] <- TRUE
+  } else {
     z   <- .ewma_series(vals, lim$center, 0.2)
     lcl <- rep(lim$center, length(vals))
     ucl <- rep(lim$center, length(vals))

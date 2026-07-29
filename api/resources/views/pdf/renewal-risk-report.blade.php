@@ -31,10 +31,12 @@
 
     <h1>RENEWAL RISK</h1>
     <div class="meta">
-        Generated {{ $generated_at }} &middot;
+        @include('pdf.partials.computed-by') &middot;
         Permits expiring on or before {{ $report['window_end'] }} &middot;
         Includes permits that lapsed since {{ $report['window_start'] }}
     </div>
+
+    @include('pdf.partials.local-notice')
 
     {{--
         The methodology sentence travels with the numbers on purpose. A table of

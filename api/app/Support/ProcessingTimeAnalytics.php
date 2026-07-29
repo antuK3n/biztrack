@@ -126,7 +126,11 @@ final class ProcessingTimeAnalytics
      */
     public static function compute(array $dataset): array
     {
-        $now = CarbonImmutable::parse($dataset['now']);
+        // Echoed, not re-parsed. Round-tripping it through Carbon re-formats the
+        // fractional seconds (".000Z" becomes ".000000Z"), which is the same
+        // instant but not the same bytes R returns — and the two engines have to
+        // be indistinguishable.
+        $now = (string) $dataset['now'];
         $windowWeeks = (int) $dataset['params']['weeks'];
         $windowStart = (string) $dataset['window_start'];
 
@@ -164,8 +168,9 @@ final class ProcessingTimeAnalytics
             $code = $department['code'];
             $weeks = $byDepartment[$code] ?? [];
 
+            $completed = $completionsPerDepartment[$code] ?? 0;
+
             if ($weeks === []) {
-                $completed = $completionsPerDepartment[$code] ?? 0;
                 if ($completed > 0) {
                     $thin[] = [
                         'code' => $code,
@@ -178,11 +183,30 @@ final class ProcessingTimeAnalytics
                 continue;
             }
 
-            $charted[] = self::shape($code, $names[$code] ?? $code, $weeks, $completionsPerDepartment[$code] ?? 0);
+            $shaped = self::shape($code, $names[$code] ?? $code, $weeks, $completed);
+
+            // No variation in the calibration window means no estimate of
+            // variation, so there is no control chart to draw. Say that, rather
+            // than draw a chart whose limits sit exactly on the centre line — with
+            // a zero-width band every week that is not identical to the others
+            // reads as out of control, which is an artifact of the arithmetic and
+            // not a finding about the office.
+            if ($shaped === null) {
+                $thin[] = [
+                    'code' => $code,
+                    'name' => $department['name'],
+                    'completed_reviews' => $completed,
+                    'reason' => 'Weekly turnaround did not vary across the calibration window, so no control limits can be fitted.',
+                ];
+
+                continue;
+            }
+
+            $charted[] = $shaped;
         }
 
         return [
-            'generated_at' => $now->toISOString(),
+            'generated_at' => $now,
             'window_weeks' => $windowWeeks,
             'window_start' => $windowStart,
             'min_completions_per_week' => (int) $dataset['min_completions_per_week'],
@@ -195,28 +219,34 @@ final class ProcessingTimeAnalytics
 
     /**
      * @param  list<array{week_start: string, n: int, mean_days: float}>  $weeks
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null  null when no control limits can be fitted
      */
-    private static function shape(string $code, string $name, array $weeks, int $completedReviews): array
+    private static function shape(string $code, string $name, array $weeks, int $completedReviews): ?array
     {
         $result = Spc::analyse($weeks);
         $limits = $result['limits'];
         $rows = $result['weeks'];
 
+        // Sigma comes from the mean moving range of the calibration window, so
+        // zero means every calibration week had the identical mean. See the caller.
+        if ($limits['sigma'] <= 0.0) {
+            return null;
+        }
+
         $points = array_map(static fn (array $row) => [
             'week_start' => $row['week_start'],
             'reviews' => $row['n'],
-            'mean_days' => round($row['mean_days'], 3),
-            'deviation_days' => round($row['deviation_days'], 3),
-            'ewma' => round($row['ewma'], 3),
+            'mean_days' => Rounding::statistic($row['mean_days'], 3),
+            'deviation_days' => Rounding::statistic($row['deviation_days'], 3),
+            'ewma' => Rounding::statistic($row['ewma'], 3),
             'status' => $row['status'],
             'rule_hit' => $row['rule_hit'],
         ], $rows);
 
         $flagged = array_values(array_map(static fn (array $row) => [
             'week_start' => $row['week_start'],
-            'mean_days' => round($row['mean_days'], 3),
-            'deviation_days' => round($row['deviation_days'], 2),
+            'mean_days' => Rounding::statistic($row['mean_days'], 3),
+            'deviation_days' => Rounding::statistic($row['deviation_days'], 2),
             'rule_hit' => $row['rule_hit'],
         ], array_filter($rows, static fn (array $row) => $row['status'] === 'out_of_control')));
 
@@ -226,23 +256,23 @@ final class ProcessingTimeAnalytics
             'code' => $code,
             'name' => $name,
             'completed_reviews' => $completedReviews,
-            'center' => round($limits['center'], 3),
-            'lcl' => round($limits['lcl'], 3),
-            'ucl' => round($limits['ucl'], 3),
-            'sigma' => round($limits['sigma'], 4),
+            'center' => Rounding::statistic($limits['center'], 3),
+            'lcl' => Rounding::statistic($limits['lcl'], 3),
+            'ucl' => Rounding::statistic($limits['ucl'], 3),
+            'sigma' => Rounding::statistic($limits['sigma'], 4),
             'calibration_weeks' => $limits['calibration_weeks'],
             // "Outside" / "Inside" on the Process Status Indicator: the reading is
             // about the most recent week, not the history.
             'status' => $latest['status'] === 'out_of_control' ? 'outside' : 'inside',
             'latest_week' => $latest['week_start'],
-            'latest_mean_days' => round($latest['mean_days'], 3),
+            'latest_mean_days' => Rounding::statistic($latest['mean_days'], 3),
             'points' => $points,
             'flagged' => $flagged,
             'trend' => [
                 'direction' => $result['trend']['direction'],
-                'magnitude' => round($result['trend']['magnitude'], 4),
-                'ewma' => round($result['trend']['ewma'], 3),
-                'deviation_days' => round($result['trend']['deviation_days'], 2),
+                'magnitude' => Rounding::statistic($result['trend']['magnitude'], 4),
+                'ewma' => Rounding::statistic($result['trend']['ewma'], 3),
+                'deviation_days' => Rounding::statistic($result['trend']['deviation_days'], 2),
                 'drift_flagged' => $result['trend']['drift_flagged'],
             ],
         ];
