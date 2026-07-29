@@ -6,6 +6,7 @@ import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { RenewalRiskReport, RenewalRiskRow, RiskBand } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
+import { ComputedAt } from './ComputedAt'
 
 /*
  * Renewal Risk (mockup 118).
@@ -238,7 +239,16 @@ export function RenewalRiskPage() {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  const { data, loading, error, reload } = useAsync(() => analytics.renewalRisk(Number(days)), [days])
+  // Resolves to { data, meta } — see AnalyticsProvenance and ComputedAt.
+  const {
+    data: result,
+    loading,
+    error,
+    reload,
+  } = useAsync(() => analytics.renewalRisk(Number(days)), [days])
+
+  const data = result?.data
+  const meta = result?.meta
 
   async function generateReport() {
     setDownloading(true)
@@ -276,6 +286,8 @@ export function RenewalRiskPage() {
       </PageTitle>
 
       <AnalyticsTabs />
+
+      {meta && <ComputedAt meta={meta} />}
 
       {downloadError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">

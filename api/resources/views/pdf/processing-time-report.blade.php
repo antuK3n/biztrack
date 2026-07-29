@@ -31,10 +31,12 @@
 
     <h1>PERMIT PROCESSING TIME MONITORING</h1>
     <div class="meta">
-        Generated {{ $generated_at }} &middot;
+        @include('pdf.partials.computed-by') &middot;
         Window: {{ $report['window_weeks'] }} weeks from {{ $report['window_start'] }} &middot;
         {{ $report['completed_reviews'] }} completed reviews
     </div>
+
+    @include('pdf.partials.local-notice')
 
     <div class="note">
         Weekly mean review turnaround per office, on an individuals control chart. A week counts only

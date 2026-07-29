@@ -186,7 +186,8 @@ final class RenewalRiskAnalytics
      */
     public static function compute(array $dataset): array
     {
-        $now = CarbonImmutable::parse($dataset['now']);
+        // Echoed, not re-parsed: see the note in ProcessingTimeAnalytics::compute().
+        $now = (string) $dataset['now'];
         $limit = (int) $dataset['params']['limit'];
         $driversPerRow = (int) ($dataset['drivers_per_row'] ?? self::DRIVERS_PER_ROW);
 
@@ -238,7 +239,7 @@ final class RenewalRiskAnalytics
         usort($rows, static fn (array $a, array $b) => [$b['score'], $a['days_to_expiry']] <=> [$a['score'], $b['days_to_expiry']]);
 
         return [
-            'generated_at' => $now->toISOString(),
+            'generated_at' => $now,
             'horizon_days' => (int) $dataset['params']['days'],
             'lapsed_grace_days' => (int) $dataset['lapsed_grace_days'],
             'window_start' => (string) $dataset['window_start'],
