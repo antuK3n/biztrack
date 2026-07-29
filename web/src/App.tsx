@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-route
 import { AppShell } from './components/AppShell'
 import { Spinner } from './components/icons'
 import { DashboardPage } from './pages/DashboardPage'
+import { MessagesPage } from './pages/MessagesPage'
 import { NotificationsPage } from './pages/NotificationsPage'
 import { VerifyPage } from './pages/VerifyPage'
 import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage'
@@ -26,6 +27,7 @@ import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
+import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { loginPathFor } from './lib/api'
@@ -130,7 +132,9 @@ export default function App() {
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/permits" element={<PermitsPage />} />
           <Route path="/permits/:id" element={<PermitDetailPage />} />
+          <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/requests" element={<RequestsPage />} />
           {/* Officer */}
