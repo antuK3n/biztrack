@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Arr;
 
 /** Full application resource (single-record view). */
 class ApplicationResource extends JsonResource
@@ -41,7 +42,7 @@ class ApplicationResource extends JsonResource
                 ])->values()
                 : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
-                'line_items' => $this->feeAssessment->line_items,
+                'line_items' => $this->feeLineItems($request),
                 'total_amount' => $this->feeAssessment->total_amount,
             ] : null,
             'payments' => $this->relationLoaded('payments')
@@ -58,5 +59,27 @@ class ApplicationResource extends JsonResource
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];
+    }
+
+    /**
+     * Fee lines, with the revenue-code citations stripped for applicants.
+     *
+     * Officers need `Sec. 3A.02 · A10-2016` to defend an assessment; an
+     * applicant reading their bill does not, and the LGU asked that ordinance
+     * sections not be surfaced to the public. The UI already hides them, but
+     * leaving them in the payload just moves the leak to the network tab.
+     */
+    private function feeLineItems(Request $request): array
+    {
+        $items = $this->feeAssessment->line_items ?? [];
+
+        if ($request->user()?->hasPermission('application.review')) {
+            return $items;
+        }
+
+        return array_map(
+            fn ($item) => is_array($item) ? Arr::except($item, ['section', 'source']) : $item,
+            $items,
+        );
     }
 }
