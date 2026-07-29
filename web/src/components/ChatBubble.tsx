@@ -4,7 +4,16 @@ import { api } from '../lib/api'
 import { PlusIcon, XIcon } from './icons'
 
 /* Chatbot bubble + slide-in panel (owner screens, p7-p8). Rule-based assistant
- * backed by /chatbot/messages; one conversation per user. */
+ * backed by /chatbot/messages; one conversation per user.
+ *
+ * The thread lives on the server, so this component only mirrors it. Two things
+ * used to make it look like it did not:
+ *   - history was fetched once and marked loaded even when the request failed,
+ *     so a single blip left the panel blank for the rest of the page load;
+ *   - the response replaced state wholesale, so a turn sent while the fetch was
+ *     still in flight vanished from view the moment the fetch landed.
+ * History now loads on mount, retries on the next open if it failed, and merges
+ * by message id rather than overwriting. */
 
 type ChatMessage = {
   id: number | string
@@ -12,14 +21,26 @@ type ChatMessage = {
   body: string
 }
 
+/**
+ * Server history plus anything sent since the request went out. Turns already
+ * saved server-side arrive with a real id, so matching on id keeps a message
+ * that raced the fetch without ever showing it twice.
+ */
+function mergeThread(history: ChatMessage[], local: ChatMessage[]): ChatMessage[] {
+  const known = new Set(history.map((m) => String(m.id)))
+  return [...history, ...local.filter((m) => !known.has(String(m.id)))]
+}
+
 const WELCOME =
-  "Kumusta! I'm the BizTrack assistant. Ask me about one permit at a time (requirements, fees, processing time, renewal) and I'll keep the answer short. You can also send me a tracking number like BIZ-2026-00123."
+  "Kumusta! I'm the BizTrack assistant. Ask me about one permit at a time (requirements, fees, processing time, renewal), or what a field on an application form is for, and I'll keep the answer short. You can also send me a tracking number like BIZ-2026-00123."
 
 /* Starter questions, shown only on an empty thread. They double as a hint that
- * naming the permit gets a scoped answer instead of a rundown of all of them. */
+ * naming the permit gets a scoped answer instead of a rundown of all of them,
+ * and that a question about a box on a form is fair game too. */
 const STARTERS = [
   'Requirements for a sanitary permit',
   'How much is the fire safety fee?',
+  'What is the water source field for?',
   'Where is my application?',
 ]
 
@@ -57,30 +78,37 @@ function TypingDots() {
 export function ChatBubble() {
   const [open, setOpen] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // History loads once, on first open.
+  /* History loads on mount, so the thread is already there when the panel opens.
+   * loaded is set on success only: a failed load leaves it false so the next
+   * open tries again instead of showing an empty thread for the whole session. */
   useEffect(() => {
-    if (!open || loaded) return
+    if (loaded) return
     let cancelled = false
     api
       .get<{ data: ChatMessage[] }>('/chatbot/messages')
       .then((res) => {
-        if (!cancelled) setMessages(res.data.data)
+        if (cancelled) return
+        setMessages((prev) => mergeThread(res.data.data, prev))
+        setLoaded(true)
       })
       .catch(() => {
-        /* History is a nicety; the welcome bubble still shows. */
-      })
-      .finally(() => {
-        if (!cancelled) setLoaded(true)
+        /* Leave loaded false: opening the panel retries. */
       })
     return () => {
       cancelled = true
     }
+  }, [loaded, attempt])
+
+  // Retry a history load that never landed, each time the panel is opened.
+  useEffect(() => {
+    if (open && !loaded) setAttempt((n) => n + 1)
   }, [open, loaded])
 
   useEffect(() => {
@@ -90,11 +118,21 @@ export function ChatBubble() {
 
   async function send(body: string) {
     if (!body || sending) return
-    setMessages((prev) => [...prev, { id: `tmp-${Date.now()}`, sender: 'user', body }])
+    const pendingId = `tmp-${Date.now()}`
+    setMessages((prev) => [...prev, { id: pendingId, sender: 'user', body }])
     setSending(true)
     try {
-      const res = await api.post<{ data: ChatMessage }>('/chatbot/messages', { message: body })
-      setMessages((prev) => [...prev, res.data.data])
+      const res = await api.post<{ data: ChatMessage; meta?: { user_message?: ChatMessage } }>(
+        '/chatbot/messages',
+        { message: body },
+      )
+      const asked = res.data.meta?.user_message
+      // Take the saved id for the bubble we drew ahead of the round trip, so a
+      // history load landing later recognises this turn instead of repeating it.
+      setMessages((prev) => [
+        ...prev.map((m) => (m.id === pendingId && asked ? asked : m)),
+        res.data.data,
+      ])
     } catch {
       setMessages((prev) => [
         ...prev,

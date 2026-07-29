@@ -13,6 +13,15 @@ class ChatbotConversation extends Model
 
     protected $casts = ['started_at' => 'datetime'];
 
+    /**
+     * The user's one thread, or null if they have never written. Ordered so the
+     * answer never depends on how the storage engine happens to scan the index.
+     */
+    public static function forUser(int $userId): ?self
+    {
+        return static::where('user_id', $userId)->orderBy('id')->first();
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
