@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\Permit;
+use App\Support\PdfFile;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -65,13 +66,16 @@ class PermitController extends Controller
             'qr' => QrCode::svgDataUri($verifyUrl),
         ]);
 
+        // Render once: a second ->output() corrupts the font streams (see PdfFile).
+        $file = PdfFile::render($pdf);
+
         $path = "private/permits/{$permit->id}.pdf";
-        Storage::disk('local')->put($path, $pdf->output());
+        Storage::disk('local')->put($path, $file->content);
         if ($permit->pdf_path !== $path) {
             $permit->update(['pdf_path' => $path]);
         }
 
-        return $pdf->download("permit-{$permit->permit_number}.pdf");
+        return $file->download("permit-{$permit->permit_number}.pdf");
     }
 
     private function authorizeView(Request $request, Permit $permit): void

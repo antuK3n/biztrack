@@ -14,10 +14,16 @@ import {
 import type { ChipTone } from '../components/ui/Proto'
 import { toApiError } from '../lib/api'
 import { formatDate, formatDateTime } from '../lib/format'
-import { applications, documents, requests } from '../lib/resources'
+import { applications, documents, reference, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
-import type { ApplicationListItem, OfficerRequest, RequestStatus, RequestType } from '../lib/types'
+import type {
+  ApplicationListItem,
+  Department,
+  OfficerRequest,
+  RequestStatus,
+  RequestType,
+} from '../lib/types'
 
 /*
  * Other Requirements — PDF p23–25, now wired to the real /requests feed.
@@ -332,6 +338,16 @@ function ComposeModal({
   onCreated: (created: OfficerRequest) => void
 }) {
   const [appId, setAppId] = useState('')
+  /*
+   * Which office the applicant sees this from. Defaults to the requester's own,
+   * but the super admin has no department, so without an explicit choice their
+   * requests reach the applicant attributed to nobody.
+   */
+  const user = useAuth((s) => s.user)
+  const departments = useAsync(() => reference.departments(), [])
+  const [departmentId, setDepartmentId] = useState(
+    user?.department ? String(user.department.id) : '',
+  )
   const [type, setType] = useState<RequestType>('document')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -339,7 +355,7 @@ function ComposeModal({
   const [error, setError] = useState<string | null>(null)
 
   async function submit() {
-    if (!appId || !subject.trim() || !body.trim()) return
+    if (!appId || !departmentId || !subject.trim() || !body.trim()) return
     setBusy(true)
     setError(null)
     try {
@@ -347,6 +363,7 @@ function ComposeModal({
         request_type: type,
         subject: subject.trim(),
         body: body.trim(),
+        ...(departmentId ? { department_id: Number(departmentId) } : {}),
       })
       onCreated(created)
     } catch (err) {
@@ -363,7 +380,7 @@ function ComposeModal({
       confirmLabel="Send request"
       onCancel={onClose}
       onConfirm={submit}
-      confirmDisabled={busy || !appId || !subject.trim() || !body.trim()}
+      confirmDisabled={busy || !appId || !departmentId || !subject.trim() || !body.trim()}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
         Ask an applicant for a document or send them a message.
@@ -377,6 +394,21 @@ function ComposeModal({
             {apps.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.business.name} · {a.tracking_id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <FieldLabel required>From office</FieldLabel>
+          <select
+            className={inputCls}
+            value={departmentId}
+            onChange={(e) => setDepartmentId(e.target.value)}
+          >
+            <option value="">Select an office…</option>
+            {(departments.data ?? []).map((d: Department) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
               </option>
             ))}
           </select>
