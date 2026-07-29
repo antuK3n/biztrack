@@ -365,6 +365,78 @@ export function SortFilter({
   )
 }
 
+export interface FilterField {
+  label: string
+  value: string
+  options: SortFilterOption[]
+  onChange: (value: string) => void
+}
+
+/**
+ * The slider-glyph filter control the analytics screens carry in their header
+ * (p105/p106). The glyph is the prototype's affordance; the panel behind it
+ * holds real labelled selects, because a control you cannot name is a control
+ * you cannot use with a screen reader.
+ */
+export function FilterMenu({ fields, label = 'Filter' }: { fields: FilterField[]; label?: string }) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <span className="relative">
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen(!open)}
+        className={`flex h-10 w-10 items-center justify-center rounded-lg border transition-colors ${
+          open ? 'border-royal bg-royal-tint text-royal' : 'border-transparent text-royal hover:bg-royal-tint'
+        }`}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <circle cx="15" cy="7" r="2.2" fill="#d1dbeb" stroke="currentColor" strokeWidth="2" />
+          <circle cx="9" cy="12" r="2.2" fill="#d1dbeb" stroke="currentColor" strokeWidth="2" />
+          <circle cx="13" cy="17" r="2.2" fill="#d1dbeb" stroke="currentColor" strokeWidth="2" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            aria-label="Close filter"
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 cursor-default"
+            tabIndex={-1}
+          />
+          <div
+            role="dialog"
+            aria-label={label}
+            className="absolute right-0 top-full z-40 mt-2 w-64 space-y-3 rounded-lg border border-line bg-white p-4 text-left shadow-overlay"
+          >
+            {fields.map((field) => (
+              <label key={field.label} className="block">
+                <FieldLabel>{field.label}</FieldLabel>
+                <select
+                  value={field.value}
+                  onChange={(e) => field.onChange(e.target.value)}
+                  className={inputCls}
+                >
+                  {field.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 /** White shadow card — the prototype's base surface. */
 export function ProtoCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <div className={`rounded-2xl bg-white shadow-card ${className}`}>{children}</div>

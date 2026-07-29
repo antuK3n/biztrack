@@ -393,6 +393,125 @@ export interface AnalyticsSummary {
   simulated_revenue: number
 }
 
+/*
+ * Permit Processing Time Monitoring (Feature 7). Statistical process control
+ * over weekly review turnaround, computed server-side in App\Support\Spc — the
+ * PHP port of the retired standalone R project. These shapes mirror it exactly.
+ */
+
+export type SpcStatus = 'in_control' | 'out_of_control'
+export type TrendDirection = 'rising' | 'steady' | 'easing'
+
+export interface ProcessingTimePoint {
+  week_start: string
+  reviews: number
+  mean_days: number
+  /** Signed distance from the centre line, in days. */
+  deviation_days: number
+  /** Weighted (EWMA) trend value for the week. */
+  ewma: number
+  status: SpcStatus
+  /** `beyond_limits`, `ewma_drift`, or both joined by `+`. */
+  rule_hit: string | null
+}
+
+export interface FlaggedWeek {
+  week_start: string
+  mean_days: number
+  deviation_days: number
+  rule_hit: string | null
+}
+
+export interface ProcessingTimeDepartment {
+  code: string
+  name: string
+  completed_reviews: number
+  /** Centre line, and the normal operating range around it. */
+  center: number
+  lcl: number
+  ucl: number
+  sigma: number
+  calibration_weeks: number
+  /** Where the most recent week sits: the Process Status Indicator. */
+  status: 'inside' | 'outside'
+  latest_week: string
+  latest_mean_days: number
+  points: ProcessingTimePoint[]
+  flagged: FlaggedWeek[]
+  trend: {
+    direction: TrendDirection
+    /** 0 to 1: how far the weighted trend has walked towards its own limit. */
+    magnitude: number
+    ewma: number
+    deviation_days: number
+    drift_flagged: boolean
+  }
+}
+
+/** An office with reviews on record but no week that cleared the minimum. */
+export interface ThinDepartment {
+  code: string
+  name: string
+  completed_reviews: number
+  reason: string
+}
+
+export interface ProcessingTimeReport {
+  generated_at: string
+  window_weeks: number
+  window_start: string
+  min_completions_per_week: number
+  calibration_weeks_cap: number
+  completed_reviews: number
+  departments: ProcessingTimeDepartment[]
+  thin: ThinDepartment[]
+}
+
+/* Business Growth Analysis. */
+
+export interface BusinessStatusRow {
+  status: 'active' | 'expired' | 'inactive' | 'closed'
+  label: string
+  count: number
+  share: number
+}
+
+export interface BarangayGrowthRow {
+  barangay: string
+  registrations: number
+  prior: number
+  delta: number
+  /** Null when the prior period was empty: a change from zero is not a rate. */
+  growth_rate: number | null
+}
+
+export interface IndustryGrowthRow {
+  industry: string
+  psic_code: string
+  count: number
+  registrations: number
+  prior: number
+  delta: number
+  direction: 'growing' | 'declining' | 'steady'
+}
+
+export interface BusinessGrowthReport {
+  generated_at: string
+  period_months: number
+  period_start: string
+  period_end: string
+  prior_period_start: string
+  registrations: number
+  registrations_prior: number
+  growth_rate: number | null
+  renewal_performance: { rate: number | null; approved: number; decided: number }
+  closures: number
+  status_summary: BusinessStatusRow[]
+  top_barangays: BarangayGrowthRow[]
+  closure_trend: { month: string; closures: number }[]
+  industry_growth: IndustryGrowthRow[]
+}
+
 /* ── Admin ────────────────────────────────────────────────────────────── */
 
 export interface AdminUser extends User {}

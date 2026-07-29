@@ -24,6 +24,8 @@ import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { InspectionsPage, InspectionDetailPage } from './pages/officer/InspectionsPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
+import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
+import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
@@ -176,6 +178,27 @@ export default function App() {
             element={
               <RequirePermission permission="analytics.view">
                 <AnalyticsPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            Features 6/7 came out of the standalone R project and into the site.
+            Same permission as the overview: analytics.view is super-admin only,
+            and these aggregate every office's queue.
+          */}
+          <Route
+            path="/analytics/processing-time"
+            element={
+              <RequirePermission permission="analytics.view">
+                <ProcessingTimePage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/analytics/business-growth"
+            element={
+              <RequirePermission permission="analytics.view">
+                <BusinessGrowthPage />
               </RequirePermission>
             }
           />
