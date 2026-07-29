@@ -17,9 +17,11 @@ import type {
   DocumentType,
   FeeAssessment,
   FeeLineItem,
+  FeeProfile,
   Inspection,
   InspectionResult,
   Message,
+  MessageThreadSummary,
   Notification,
   OfficeForm,
   OfficerRequest,
@@ -62,6 +64,20 @@ async function downloadBlob(url: string, filename: string): Promise<void> {
   URL.revokeObjectURL(objectUrl)
 }
 
+/**
+ * Authenticated inline view: fetch the endpoint as a blob, then point a tab at
+ * the object URL so PDFs and images render instead of downloading. Pass a tab
+ * opened synchronously from the click handler so popup blockers stay quiet.
+ */
+async function viewBlob(url: string, target?: Window | null): Promise<void> {
+  const res = await api.get(url, { responseType: 'blob' })
+  const objectUrl = URL.createObjectURL(res.data as Blob)
+  if (target && !target.closed) target.location.replace(objectUrl)
+  else window.open(objectUrl, '_blank', 'noopener')
+  // The tab needs the URL to survive the handoff; reclaim it a minute later.
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+}
+
 /* ── Reference ────────────────────────────────────────────────────────── */
 
 export const reference = {
@@ -99,12 +115,26 @@ export const applications = {
   create: (body: {
     business_id: number
     application_type: ApplicationType
+    /** Applicant's own name for the filing (blank keeps the business name). */
+    title?: string
     permit_type_ids: number[]
     /** Set on renewal/amendment to link the prior permit (v2). */
     prior_permit_id?: number
+    /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
+    fee_profile?: FeeProfile
+    /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
+    payment_mode?: 'annual' | 'quarterly'
   }) => unwrap<Application>(api.post('/applications', body)),
-  update: (id: number, body: { business_id?: number; permit_type_ids?: number[] }) =>
-    unwrap<Application>(api.put(`/applications/${id}`, body)),
+  update: (
+    id: number,
+    body: {
+      business_id?: number
+      title?: string
+      permit_type_ids?: number[]
+      fee_profile?: FeeProfile | null
+      payment_mode?: 'annual' | 'quarterly'
+    },
+  ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
@@ -145,12 +175,22 @@ export const documents = {
       }),
     )
   },
+  /** Take an attachment back off a draft; deletes the stored file too. */
+  remove: (applicationId: number, documentId: number) =>
+    unwrap<{ id: number }>(api.delete(`/applications/${applicationId}/documents/${documentId}`)),
   downloadUrl: (id: number) => `${api.defaults.baseURL}/documents/${id}/download`,
+  /** Authenticated save-to-disk (the plain downloadUrl has no bearer header). */
+  download: (id: number, filename: string) =>
+    downloadBlob(`/documents/${id}/download`, filename),
+  /** Authenticated open-in-a-tab: PDFs and images render, nothing is saved. */
+  view: (id: number, target?: Window | null) => viewBlob(`/documents/${id}/download`, target),
 }
 
 /* ── Messaging (per-application thread; v2) ───────────────────────────── */
 
 export const messages = {
+  /** Inbox for the Messages page: one row per conversation, newest first. */
+  threads: () => unwrap<MessageThreadSummary[]>(api.get('/message-threads')),
   list: (applicationId: number) =>
     unwrap<Message[]>(api.get(`/applications/${applicationId}/messages`)),
   /** Send a message; optional attachment is posted as multipart. */
@@ -167,6 +207,12 @@ export const messages = {
     }
     return unwrap<Message>(api.post(`/applications/${applicationId}/messages`, { body }))
   },
+  /** Attachment save-to-disk (the resource's download_url carries no bearer). */
+  attachmentDownload: (id: number, filename: string) =>
+    downloadBlob(`/message-attachments/${id}/download`, filename),
+  /** Attachment open-in-a-tab, same bearer-fetch trick as documents.view. */
+  attachmentView: (id: number, target?: Window | null) =>
+    viewBlob(`/message-attachments/${id}/download`, target),
 }
 
 /* ── Officer requests / Other Requirements (v2) ───────────────────────── */
@@ -176,7 +222,13 @@ export const requests = {
   /** Officer creates a request against an application. */
   create: (
     applicationId: number,
-    body: { request_type: RequestType; subject: string; body: string },
+    body: {
+      request_type: RequestType
+      subject: string
+      body: string
+      /** Office the applicant sees this from; defaults to the requester's own. */
+      department_id?: number
+    },
   ) => unwrap<OfficerRequest>(api.post(`/applications/${applicationId}/requests`, body)),
   /** Owner responds; optional document is posted as multipart. */
   respond: (id: number, body: string, document?: File | null, documentTypeId?: number) => {

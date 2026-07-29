@@ -14,16 +14,31 @@ pest()->extend(TestCase::class)->in('Unit');
 
 /**
  * Log in a seeded demo account and return its bearer token.
+ *
+ * Staff and business owners sign in through separate portals, so the portal is
+ * inferred from the account's roles unless a caller pins it deliberately (which
+ * is how the wrong-door rejection gets tested).
  */
-function loginToken(string $email, string $password = 'biztrack1'): string
+function loginToken(string $email, string $password = 'biztrack1', ?string $portal = null): string
 {
     $res = test()->postJson('/api/v1/auth/login', [
         'email' => $email,
         'password' => $password,
+        'portal' => $portal ?? portalFor($email),
     ]);
     $res->assertOk();
 
     return $res->json('data.token');
+}
+
+/** Which sign-in door a seeded account belongs to. */
+function portalFor(string $email): string
+{
+    $user = User::where('email', $email)->first();
+
+    return $user && $user->roles->pluck('name')->contains(fn ($r) => $r !== 'business_owner')
+        ? 'staff'
+        : 'public';
 }
 
 /**

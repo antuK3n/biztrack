@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\OfficerRequestStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class OfficerRequest extends Model
 {
@@ -45,5 +46,14 @@ class OfficerRequest extends Model
     public function document(): BelongsTo
     {
         return $this->belongsTo(ApplicationDocument::class, 'application_document_id');
+    }
+
+    /**
+     * Every applicant reply, oldest first. The parent's applicant_response /
+     * submitted_at columns mirror the latest of these for v2-contract clients.
+     */
+    public function responses(): HasMany
+    {
+        return $this->hasMany(OfficerRequestResponse::class)->oldest('id');
     }
 }

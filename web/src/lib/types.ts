@@ -60,6 +60,12 @@ export interface DocumentType {
   help_text: string | null
   /** Present when nested under a permit type. */
   is_required?: boolean
+  /**
+   * When this requirement applies: 'all', or an application type / permit
+   * context that has to match. A renewal-only document must never be asked
+   * of a new business, which has no prior permit to produce.
+   */
+  context?: string
 }
 
 export interface PermitType {
@@ -90,6 +96,9 @@ export interface BusinessLine {
   id: number
   psic_code: PsicCode
   capitalization: string | null
+  /** Free text, set when the applicant picked "Other (not listed)". */
+  line_of_business: string | null
+  products_services: string | null
 }
 
 export interface Business {
@@ -101,6 +110,13 @@ export interface Business {
   tin: string | null
   ban: string | null
   is_active: boolean
+  is_rented?: boolean
+  lessor_name?: string | null
+  lessor_address?: string | null
+  lessor_contact?: string | null
+  monthly_rental?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_number?: string | null
   /**
    * Access status. Optional because the owner `/businesses` list resource
    * (BusinessResource) does not currently expose `status` — only `ban` and
@@ -117,6 +133,13 @@ export interface BusinessPayload {
   registration_type?: string
   registration_number?: string
   tin?: string
+  is_rented?: boolean
+  lessor_name?: string
+  lessor_address?: string
+  lessor_contact?: string
+  monthly_rental?: string
+  emergency_contact_name?: string
+  emergency_contact_number?: string
   address: {
     line1: string
     line2?: string
@@ -147,6 +170,8 @@ export interface ApplicationListItem {
   id: number
   tracking_id: string
   application_type: ApplicationType
+  /** The applicant's own name for the filing; null falls back to the business name. */
+  title: string | null
   status: ApplicationStatus
   status_label: string
   business: { id: number; name: string }
@@ -165,14 +190,84 @@ export interface AppDocument {
   download_url: string
 }
 
+/**
+ * One Tax Order of Payment line. Legacy assessments carry only
+ * { label, amount }; revenue-code assessments add the citation fields
+ * (code/office/group/section/source), the requires_officer marker for
+ * lines finalized during review, and any computed defects. Render
+ * defensively — every field beyond label/amount may be absent.
+ */
 export interface FeeLineItem {
   label: string
-  amount: string
+  amount: string | number
+  code?: string
+  /** Collecting office: BPLO, CTO, CHO, CENRO, OBO, BFP, CMO-MARKET. */
+  office?: string
+  group?: string
+  /** Revenue-code citation, e.g. "Sec. 2A.01". */
+  section?: string
+  /** Legal source, e.g. "Ord. A10-2016". */
+  source?: string
+  /** True when an officer must complete this line during review. */
+  requires_officer?: boolean
+  defects?: string[] | null
 }
 
 export interface FeeAssessment {
   line_items: FeeLineItem[]
   total_amount: string
+}
+
+/* ── Fee profile (revenue-code inputs; draft applications only) ────────── */
+
+export interface FeeProfileLine {
+  /** Ties the line back to the Part 2 PSIC selection (draft restore). */
+  psic_code_id?: number
+  /** Revenue-code business category slug (e.g. retailer, carinderia). */
+  category: string
+  /** Preceding-calendar-year gross sales (renewals). */
+  gross_sales?: number
+  /** Initial capital (new businesses). */
+  capitalization?: number
+}
+
+export type BusinessStructure =
+  | 'sole_proprietorship'
+  | 'partnership'
+  | 'corporation'
+  | 'cooperative'
+
+/**
+ * Applicant-declared inputs the API's FeeCalculator uses to compute the
+ * itemized Tax Order of Payment from the Malabon Revenue Code. All fields
+ * optional; sent on POST/PUT /applications while the draft is editable.
+ */
+export interface FeeProfile {
+  lines?: FeeProfileLine[]
+  gross_sales?: number
+  capitalization?: number
+  floor_area_sqm?: number
+  construction_cost?: number
+  employees?: number
+  /** How many of those live in Malabon (unified form). */
+  employees_in_lgu?: number
+  storeys?: number
+  doors?: number
+  rooms?: number
+  beds?: number
+  stall_count?: number
+  delivery_vehicles_motorized?: number
+  delivery_vehicles_other?: number
+  business_structure?: BusinessStructure
+  goods_class?: 'flammables' | 'chemicals' | 'dry_goods' | 'perishables'
+  office_location?: 'within' | 'outside'
+  warehouse_location?: 'within' | 'outside'
+  factory_location?: 'within' | 'outside'
+  property_use?: 'residential' | 'non_residential'
+  /** Occupancy group slug: a1, a2, b, c, d, e, f, g, h, i, j1, j2. */
+  occupancy_group?: string
+  /** Feature flags, e.g. sells_liquor, has_signage, no_gross_sales_declared. */
+  flags?: string[]
 }
 
 export type PaymentMethod = 'gcash' | 'maya' | 'card'
@@ -248,8 +343,16 @@ export interface Permit {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /** How the business tax is settled: in full by Jan 20, or in four quarters. */
+  payment_mode?: 'annual' | 'quarterly'
+  /** Full resource embeds the complete business (address + lines). */
+  business: Business
   documents: AppDocument[]
   fee_assessment: FeeAssessment | null
+  /** Applicant-declared revenue-code inputs (null when never filled). */
+  fee_profile?: FeeProfile | null
+  /** Submitted per-office form payloads (full application payload). */
+  office_forms?: OfficeForm[]
   payments: Payment[]
   assignments: Assignment[]
   inspections: Inspection[]
@@ -333,11 +436,38 @@ export interface Message {
   created_at: string
 }
 
+/** One conversation row in the Messages inbox (GET /message-threads). */
+export interface MessageThreadSummary {
+  application_id: number
+  tracking_id: string | null
+  business_name: string | null
+  status: string | null
+  /** Whoever the reader is talking to: the applicant, or the officer/office. */
+  counterparty: { name: string; subtitle: string | null; is_officer: boolean }
+  messages_count: number
+  last_message: {
+    body: string
+    sender_name: string | null
+    mine: boolean
+    created_at: string
+  } | null
+  updated_at: string | null
+}
+
 /* ── Officer requests (Other Requirements; v2 CONTRACT) ───────────────── */
 
 export type RequestType = 'document' | 'message'
 
 export type RequestStatus = 'pending' | 'submitted' | 'fulfilled' | 'rejected'
+
+/** One applicant reply; a request can collect several. */
+export interface OfficerRequestResponse {
+  id: number
+  body: string | null
+  author: { name: string | null }
+  document: { id: number; filename: string | null } | null
+  created_at: string
+}
 
 export interface OfficerRequest {
   id: number
@@ -348,7 +478,9 @@ export interface OfficerRequest {
   status_label: string
   created_by: { name: string; department: string | null }
   application: { id: number; tracking_id: string; business_name: string }
+  /** Latest reply, mirrored for older clients; `responses` is the full thread. */
   response_body: string | null
+  responses: OfficerRequestResponse[]
   created_at: string
   responded_at: string | null
 }
@@ -396,6 +528,10 @@ export interface AdminBusiness {
 /** Opaque free-form JSON keyed by permit type; stored verbatim by the API. */
 export interface OfficeForm {
   permit_type_code: string
+  /** Present on the full application payload (officer review). */
+  permit_type_name?: string
+  /** Issuing department code (BPLO, CHO, BFP, ...) on the full payload. */
+  department_code?: string
   form_data: Record<string, unknown>
 }
 

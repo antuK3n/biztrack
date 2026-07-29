@@ -14,14 +14,23 @@ import {
 import type { ChipTone } from '../components/ui/Proto'
 import { toApiError } from '../lib/api'
 import { formatDate, formatDateTime } from '../lib/format'
-import { applications, requests } from '../lib/resources'
+import { applications, documents, reference, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
-import type { ApplicationListItem, OfficerRequest, RequestStatus, RequestType } from '../lib/types'
+import type {
+  ApplicationListItem,
+  Department,
+  OfficerRequest,
+  RequestStatus,
+  RequestType,
+} from '../lib/types'
 
 /*
  * Other Requirements — PDF p23–25, now wired to the real /requests feed.
  * Owner view: read a request letter, then respond (textarea + optional file).
+ * A request accepts MANY responses — one requirement often needs several
+ * uploads or a follow-up note — so replies render as a chronological thread
+ * and stay open until the officer closes the request.
  * Officer view (request.create): the same list plus a "Request" compose modal
  * and fulfil/reject close actions on submitted requests.
  */
@@ -106,7 +115,9 @@ function LetterView({
   const [error, setError] = useState<string | null>(null)
 
   const chip = STATUS_CHIP[request.status]
-  const canRespond = !isOfficer && request.status === 'pending'
+  const thread = request.responses ?? []
+  // An applicant may keep replying until the officer closes the request.
+  const canRespond = !isOfficer && (request.status === 'pending' || request.status === 'submitted')
   const canClose = isOfficer && request.status === 'submitted'
 
   async function submitResponse() {
@@ -174,15 +185,37 @@ function LetterView({
           <p className="whitespace-pre-wrap">{request.body}</p>
         </div>
 
-        {request.response_body && (
-          <div className="mt-6 rounded-xl bg-input px-5 py-4 sm:ml-16">
-            <p className="text-xs font-bold uppercase tracking-wide text-royal">Applicant response</p>
-            <p className="mt-1.5 whitespace-pre-wrap text-sm text-ink">{request.response_body}</p>
-            {request.responded_at && (
-              <p className="mt-2 text-xs italic text-ink-muted">
-                Responded {formatDateTime(request.responded_at)}
-              </p>
-            )}
+        {thread.length > 0 && (
+          <div className="mt-6 sm:ml-16">
+            <h2 className="text-xs font-bold uppercase tracking-wide text-royal">
+              {thread.length === 1 ? 'Applicant response' : `Applicant responses (${thread.length})`}
+            </h2>
+            <ol className="mt-2 flex flex-col gap-3">
+              {thread.map((r, i) => (
+                <li key={r.id} className="rounded-xl bg-input px-5 py-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                    <span className="text-sm font-bold text-ink">
+                      {thread.length > 1 && (
+                        <span className="mr-1.5 font-semibold text-ink-muted">{i + 1}.</span>
+                      )}
+                      {r.author.name ?? 'Applicant'}
+                    </span>
+                    <span className="text-xs italic text-ink-muted">{formatDateTime(r.created_at)}</span>
+                  </div>
+                  {r.body && <p className="mt-1.5 whitespace-pre-wrap text-sm text-ink">{r.body}</p>}
+                  {r.document && (
+                    <button
+                      type="button"
+                      onClick={() => documents.download(r.document!.id, r.document!.filename ?? 'attachment')}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-royal underline hover:text-royal-hover"
+                    >
+                      <DownloadIcon size={14} />
+                      {r.document.filename ?? 'Attachment'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
           </div>
         )}
 
@@ -190,9 +223,16 @@ function LetterView({
 
         <div className="mt-8 flex flex-wrap items-center gap-4 sm:pl-16">
           {canRespond && !replying && (
-            <PillButton onClick={() => setReplying(true)} className="px-9">
-              Respond
-            </PillButton>
+            <>
+              <PillButton onClick={() => setReplying(true)} className="px-9">
+                {thread.length > 0 ? 'Add another response' : 'Respond'}
+              </PillButton>
+              {thread.length > 0 && (
+                <p className="text-sm text-ink-secondary">
+                  You can keep adding responses until this office closes the request.
+                </p>
+              )}
+            </>
           )}
           {canClose && (
             <>
@@ -298,6 +338,16 @@ function ComposeModal({
   onCreated: (created: OfficerRequest) => void
 }) {
   const [appId, setAppId] = useState('')
+  /*
+   * Which office the applicant sees this from. Defaults to the requester's own,
+   * but the super admin has no department, so without an explicit choice their
+   * requests reach the applicant attributed to nobody.
+   */
+  const user = useAuth((s) => s.user)
+  const departments = useAsync(() => reference.departments(), [])
+  const [departmentId, setDepartmentId] = useState(
+    user?.department ? String(user.department.id) : '',
+  )
   const [type, setType] = useState<RequestType>('document')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
@@ -305,7 +355,7 @@ function ComposeModal({
   const [error, setError] = useState<string | null>(null)
 
   async function submit() {
-    if (!appId || !subject.trim() || !body.trim()) return
+    if (!appId || !departmentId || !subject.trim() || !body.trim()) return
     setBusy(true)
     setError(null)
     try {
@@ -313,6 +363,7 @@ function ComposeModal({
         request_type: type,
         subject: subject.trim(),
         body: body.trim(),
+        ...(departmentId ? { department_id: Number(departmentId) } : {}),
       })
       onCreated(created)
     } catch (err) {
@@ -329,7 +380,7 @@ function ComposeModal({
       confirmLabel="Send request"
       onCancel={onClose}
       onConfirm={submit}
-      confirmDisabled={busy || !appId || !subject.trim() || !body.trim()}
+      confirmDisabled={busy || !appId || !departmentId || !subject.trim() || !body.trim()}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
         Ask an applicant for a document or send them a message.
@@ -343,6 +394,21 @@ function ComposeModal({
             {apps.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.business.name} · {a.tracking_id}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
+          <FieldLabel required>From office</FieldLabel>
+          <select
+            className={inputCls}
+            value={departmentId}
+            onChange={(e) => setDepartmentId(e.target.value)}
+          >
+            <option value="">Select an office…</option>
+            {(departments.data ?? []).map((d: Department) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
               </option>
             ))}
           </select>
@@ -470,7 +536,14 @@ export function RequestsPage() {
                     <span className="font-bold">{r.subject} - </span>
                     {r.body}
                   </span>
-                  <StatusDot status={r.status} label={chip.label} />
+                  <StatusDot
+                    status={r.status}
+                    label={
+                      r.responses?.length
+                        ? `${chip.label} · ${r.responses.length} ${r.responses.length === 1 ? 'response' : 'responses'}`
+                        : chip.label
+                    }
+                  />
                   <span className="hidden shrink-0 text-sm italic text-ink-muted sm:inline">
                     {formatDate(r.created_at)}
                   </span>

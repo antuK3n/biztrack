@@ -30,35 +30,114 @@ function PaperclipIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size
 /*
  * Shared per-application message thread (v2 messaging contract), used by the
  * applicant ApplicationDetailPage and the officer ReviewPage. Chat-style: the
- * viewer's own bubbles are right-aligned royal, the other party's are white
- * (p52 attribution language). Polls every 30s while mounted.
+ * viewer's own bubbles are right-aligned royal and attributed to "You", the
+ * other party's are left-aligned white cards behind an avatar and carry the
+ * sender's name and role (p52 attribution language). Sender identity is the
+ * user id, so the same thread mirrors exactly for whoever is reading it.
+ * Polls every 30s while mounted.
  */
 
 const POLL_MS = 30_000
 
-function AttachmentChip({
-  attachment,
-}: {
-  attachment: Message['attachments'][number]
-}) {
+/** Person glyph in a royal circle, the prototype's attribution avatar (p56/p71). */
+function SenderAvatar() {
   return (
-    <a
-      href={attachment.download_url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="mt-2 inline-flex max-w-full items-center gap-2 rounded-lg border border-white/40 bg-white/15 px-3 py-1.5 text-xs font-medium hover:bg-white/25"
+    <span
+      aria-hidden="true"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-royal text-white"
     >
-      <PaperclipIcon size={14} className="shrink-0" />
-      <span className="truncate">{attachment.original_filename}</span>
-      <DownloadIcon size={14} className="shrink-0" />
-    </a>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 4.5V20h14v-1.5C19 16 16 14 12 14Z" />
+      </svg>
+    </span>
   )
 }
 
-function Bubble({ message, mine }: { message: Message; mine: boolean }) {
+function AttachmentChip({
+  attachment,
+  mine,
+  onError,
+}: {
+  attachment: Message['attachments'][number]
+  mine: boolean
+  onError: (message: string) => void
+}) {
+  const name = attachment.original_filename
+
+  // The API needs the bearer token, so both actions fetch the file first: a
+  // plain link would open the 401 JSON envelope in a new tab.
+  function view() {
+    const tab = window.open('', '_blank')
+    messagesApi.attachmentView(attachment.id, tab).catch((err) => {
+      tab?.close()
+      onError(toApiError(err).message)
+    })
+  }
+
+  function save() {
+    messagesApi.attachmentDownload(attachment.id, name).catch((err) => {
+      onError(toApiError(err).message)
+    })
+  }
+
+  const tone = mine
+    ? 'border-white/40 bg-white/15 text-white hover:bg-white/25'
+    : 'border-line bg-canvas text-ink-secondary hover:bg-royal-tint'
+
+  return (
+    <span className={`mt-2 inline-flex max-w-full items-center gap-1 rounded-lg border ${tone}`}>
+      <button
+        type="button"
+        onClick={view}
+        title={`View ${name}`}
+        className="flex min-w-0 items-center gap-2 py-1.5 pl-3 text-xs font-medium underline underline-offset-2"
+      >
+        <PaperclipIcon size={14} className="shrink-0" />
+        <span className="truncate">{name}</span>
+      </button>
+      <button
+        type="button"
+        onClick={save}
+        aria-label={`Download ${name}`}
+        title={`Download ${name}`}
+        className="py-1.5 pr-3 pl-1"
+      >
+        <DownloadIcon size={14} className="shrink-0" />
+      </button>
+    </span>
+  )
+}
+
+/** What to call the other party in the thread, from the viewer's seat. */
+function roleLabel(sender: Message['sender']): string {
+  return sender.is_officer ? 'Officer' : 'Applicant'
+}
+
+function Bubble({
+  message,
+  mine,
+  onAttachmentError,
+}: {
+  message: Message
+  mine: boolean
+  onAttachmentError: (message: string) => void
+}) {
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
-      <div className="max-w-[80%]">
+      <div className="max-w-[80%] min-w-0">
+        {mine ? (
+          <p className="mb-1 text-right text-xs font-semibold text-ink-secondary">You</p>
+        ) : (
+          <div className="mb-1 flex items-center gap-2">
+            <SenderAvatar />
+            <p className="min-w-0 truncate text-xs font-bold text-royal">
+              {message.sender.name}
+              <span className="ml-1 font-normal italic text-ink-muted">
+                · {roleLabel(message.sender)}
+              </span>
+            </p>
+          </div>
+        )}
         <div
           className={`rounded-2xl px-4 py-2.5 text-sm ${
             mine
@@ -66,17 +145,9 @@ function Bubble({ message, mine }: { message: Message; mine: boolean }) {
               : 'rounded-bl-sm border border-line bg-white text-ink'
           }`}
         >
-          {!mine && (
-            <p className="mb-0.5 text-xs font-bold text-royal">
-              {message.sender.name}
-              {message.sender.is_officer && (
-                <span className="ml-1 font-normal italic text-ink-muted">· Officer</span>
-              )}
-            </p>
-          )}
           {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
           {message.attachments.map((a) => (
-            <AttachmentChip key={a.id} attachment={a} />
+            <AttachmentChip key={a.id} attachment={a} mine={mine} onError={onAttachmentError} />
           ))}
         </div>
         <p className={`mt-1 text-[11px] text-ink-muted ${mine ? 'text-right' : 'text-left'}`}>
@@ -87,9 +158,33 @@ function Bubble({ message, mine }: { message: Message; mine: boolean }) {
   )
 }
 
-export function MessagesPanel({ applicationId }: { applicationId: number }) {
+/**
+ * The conversation itself: scrollback plus composer, with no chrome of its own.
+ * The in-page panel wraps it in its card; the dedicated Messages page drops it
+ * straight into the right-hand pane.
+ */
+export function MessageThreadView({
+  applicationId,
+  className = '',
+  scrollClassName = 'max-h-96',
+  onSent,
+}: {
+  applicationId: number
+  className?: string
+  scrollClassName?: string
+  onSent?: () => void
+}) {
   const user = useAuth((s) => s.user)
   const viewerIsOfficer = Boolean(user?.permissions.includes('application.view_all'))
+
+  /*
+   * Outbound is "this account sent it". The old side-of-the-house test
+   * (officer vs applicant) mislabelled anyone whose seat did not match their
+   * department — the super admin has no department, so their own messages came
+   * back as inbound. Fall back to it only when the session has not loaded.
+   */
+  const isMine = (message: Message) =>
+    user ? message.sender.id === user.id : message.sender.is_officer === viewerIsOfficer
 
   const { data, loading, error, reload, setData } = useAsync<Message[]>(
     () => messagesApi.list(applicationId),
@@ -125,6 +220,7 @@ export function MessagesPanel({ applicationId }: { applicationId: number }) {
       setData((prev) => [...(prev ?? []), sent])
       setBody('')
       setAttachment(null)
+      onSent?.()
     } catch (err) {
       setSendError(toApiError(err).message)
     } finally {
@@ -133,90 +229,105 @@ export function MessagesPanel({ applicationId }: { applicationId: number }) {
   }
 
   return (
+    <div className={`flex min-h-0 flex-col ${className}`}>
+      <div className={`flex-1 space-y-4 overflow-y-auto pr-1 ${scrollClassName}`}>
+        {loading ? (
+          <p className="py-6 text-center text-sm text-ink-muted">Loading messages…</p>
+        ) : error ? (
+          <p className="py-6 text-center text-sm text-s-red">
+            {toApiError(error).message}{' '}
+            <button type="button" onClick={reload} className="font-semibold underline">
+              Retry
+            </button>
+          </p>
+        ) : list.length === 0 ? (
+          <p className="py-8 text-center text-sm text-ink-muted">
+            No messages yet. Start the conversation below.
+          </p>
+        ) : (
+          list.map((m) => (
+            <Bubble key={m.id} message={m} mine={isMine(m)} onAttachmentError={setSendError} />
+          ))
+        )}
+        <div ref={endRef} />
+      </div>
+
+      <div className="mt-4 border-t border-line pt-4">
+        {sendError && <p className="mb-2 text-xs font-medium text-s-red">{sendError}</p>}
+        {attachment && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-ink-secondary">
+            <PaperclipIcon size={14} />
+            <span className="truncate">
+              {attachment.name} · {formatBytes(attachment.size)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAttachment(null)}
+              className="font-semibold text-s-red underline"
+            >
+              Remove
+            </button>
+          </div>
+        )}
+        <div className="flex items-end gap-2.5">
+          <textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onKeyDown={(e) => {
+              // Enter sends (so does the old Cmd/Ctrl+Enter habit);
+              // Shift+Enter writes a new line. Never cut an IME composition
+              // short — Enter is how those candidates get committed.
+              if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
+              e.preventDefault()
+              void send()
+            }}
+            rows={2}
+            placeholder="Write a message…"
+            aria-label="Message"
+            aria-describedby="message-send-hint"
+            className="min-w-0 flex-1 resize-none rounded-lg border border-input-border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+          />
+          <label
+            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-input-border bg-white text-ink-secondary hover:bg-canvas"
+            aria-label="Attach a file"
+          >
+            <PaperclipIcon size={18} />
+            <input
+              type="file"
+              className="sr-only"
+              onChange={(e) => {
+                setAttachment(e.target.files?.[0] ?? null)
+                e.target.value = ''
+              }}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={sending || (!body.trim() && !attachment)}
+            className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+          >
+            {sending ? 'Sending…' : 'Send'}
+          </button>
+        </div>
+        <p id="message-send-hint" className="mt-2 text-[11px] text-ink-muted">
+          Press Enter to send. Shift + Enter starts a new line.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Per-application thread as a section of the application/review screen. */
+export function MessagesPanel({ applicationId }: { applicationId: number }) {
+  return (
     <section className="mt-10">
       <div className="mb-4 border-b border-ink/50 pb-2">
         <h2 className="text-xl font-bold text-ink">Messages</h2>
       </div>
 
       <div className="rounded-2xl bg-canvas/60 p-4 shadow-card sm:p-5">
-        <div className="max-h-96 space-y-4 overflow-y-auto pr-1">
-          {loading ? (
-            <p className="py-6 text-center text-sm text-ink-muted">Loading messages…</p>
-          ) : error ? (
-            <p className="py-6 text-center text-sm text-s-red">
-              {toApiError(error).message}{' '}
-              <button type="button" onClick={reload} className="font-semibold underline">
-                Retry
-              </button>
-            </p>
-          ) : list.length === 0 ? (
-            <p className="py-8 text-center text-sm text-ink-muted">
-              No messages yet. Start the conversation below.
-            </p>
-          ) : (
-            list.map((m) => (
-              <Bubble key={m.id} message={m} mine={m.sender.is_officer === viewerIsOfficer} />
-            ))
-          )}
-          <div ref={endRef} />
-        </div>
-
-        <div className="mt-4 border-t border-line pt-4">
-          {sendError && <p className="mb-2 text-xs font-medium text-s-red">{sendError}</p>}
-          {attachment && (
-            <div className="mb-2 flex items-center gap-2 text-xs text-ink-secondary">
-              <PaperclipIcon size={14} />
-              <span className="truncate">
-                {attachment.name} · {formatBytes(attachment.size)}
-              </span>
-              <button
-                type="button"
-                onClick={() => setAttachment(null)}
-                className="font-semibold text-s-red underline"
-              >
-                Remove
-              </button>
-            </div>
-          )}
-          <div className="flex items-end gap-2.5">
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault()
-                  void send()
-                }
-              }}
-              rows={2}
-              placeholder="Write a message…"
-              aria-label="Message"
-              className="min-w-0 flex-1 resize-none rounded-lg border border-input-border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
-            />
-            <label
-              className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-input-border bg-white text-ink-secondary hover:bg-canvas"
-              aria-label="Attach a file"
-            >
-              <PaperclipIcon size={18} />
-              <input
-                type="file"
-                className="sr-only"
-                onChange={(e) => {
-                  setAttachment(e.target.files?.[0] ?? null)
-                  e.target.value = ''
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={sending || (!body.trim() && !attachment)}
-              className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-            >
-              {sending ? 'Sending…' : 'Send'}
-            </button>
-          </div>
-        </div>
+        <MessageThreadView applicationId={applicationId} />
       </div>
     </section>
   )

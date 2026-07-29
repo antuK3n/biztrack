@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\OfficerRequestResource;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
+use App\Models\DocumentType;
 use App\Models\OfficerRequest;
 use App\Services\NotificationService;
 use App\Support\Audit;
@@ -41,6 +42,13 @@ class OfficerRequestController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'due_date' => ['nullable', 'date'],
+            /*
+             * Which office the applicant should see this coming from. Defaults
+             * to the requester's own, but the super admin has no department, so
+             * without this their requests reach the applicant attributed to
+             * nobody. Officers may also raise one on another office's behalf.
+             */
+            'department_id' => ['nullable', 'exists:departments,id'],
             // Meeting fields (officer-provided; no live calendar call — future work).
             'meeting_scheduled_at' => ['nullable', 'date', 'required_if:request_type,meeting'],
             'meeting_duration_minutes' => ['nullable', 'integer', 'min:5', 'max:480'],
@@ -51,7 +59,7 @@ class OfficerRequestController extends Controller
         $officerRequest = OfficerRequest::create([
             'application_id' => $application->id,
             'requested_by_user_id' => $request->user()->id,
-            'department_id' => $request->user()->department_id,
+            'department_id' => $data['department_id'] ?? $request->user()->department_id,
             'request_type' => $data['request_type'],
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
@@ -100,7 +108,12 @@ class OfficerRequestController extends Controller
         return response()->json(['data' => OfficerRequestResource::collection($requests)]);
     }
 
-    /** Applicant responds (request.respond), optionally attaching a document. */
+    /**
+     * Applicant responds (request.respond), optionally attaching a document.
+     * Repeatable: one request often needs several uploads or a follow-up note,
+     * so every reply is appended to officer_request_responses and the request
+     * simply stays `submitted` until the officer closes it.
+     */
     public function respond(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant', 'createdBy');
@@ -109,14 +122,18 @@ class OfficerRequestController extends Controller
             403,
             'This request is not yours to respond to.'
         );
-        if ($officerRequest->status !== OfficerRequestStatus::Pending) {
-            throw ValidationException::withMessages(['status' => ['This request has already been answered.']]);
+        // Only a closed request stops accepting replies; pending and submitted both do.
+        if (in_array($officerRequest->status, [OfficerRequestStatus::Fulfilled, OfficerRequestStatus::Rejected], true)) {
+            throw ValidationException::withMessages(['status' => ['This request is closed, so you can no longer respond to it.']]);
         }
 
         $data = $request->validate([
-            'body' => ['required', 'string', 'max:5000'],
+            // A file-only reply is valid, which is what the Respond form already allows.
+            'body' => ['required_without:document', 'nullable', 'string', 'max:5000'],
             'document' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
-            'document_type_id' => ['required_with:document', 'exists:document_types,id'],
+            // Optional: the Respond form has no type picker, so an unlabelled
+            // upload files itself under the "Other Requirements" type.
+            'document_type_id' => ['nullable', 'exists:document_types,id'],
         ]);
 
         DB::transaction(function () use ($request, $officerRequest, $data) {
@@ -132,7 +149,8 @@ class OfficerRequestController extends Controller
 
                 $doc = ApplicationDocument::create([
                     'application_id' => $app->id,
-                    'document_type_id' => $data['document_type_id'],
+                    'document_type_id' => $data['document_type_id']
+                        ?? DocumentType::where('code', 'OTHER')->value('id'),
                     'original_filename' => $file->getClientOriginalName(),
                     'stored_path' => "{$dir}/{$filename}",
                     'mime_type' => $file->getClientMimeType(),
@@ -144,14 +162,31 @@ class OfficerRequestController extends Controller
                 $filePath = $doc->stored_path;
             }
 
-            $officerRequest->update([
-                'status' => OfficerRequestStatus::Submitted,
-                'applicant_response' => $data['body'],
+            $officerRequest->responses()->create([
+                'user_id' => $request->user()->id,
+                'body' => $data['body'] ?? null,
                 'application_document_id' => $documentId,
                 'file_name' => $fileName,
                 'file_path' => $filePath,
-                'submitted_at' => now(),
             ]);
+
+            // Mirror the latest reply onto the parent for v2-contract clients
+            // (response_body / responded_at).
+            $mirror = [
+                'status' => OfficerRequestStatus::Submitted,
+                'applicant_response' => $data['body'] ?? null,
+                'submitted_at' => now(),
+            ];
+            // The document pointer only moves when this reply carried a file,
+            // so a later text-only reply does not orphan an earlier upload.
+            if ($documentId !== null) {
+                $mirror += [
+                    'application_document_id' => $documentId,
+                    'file_name' => $fileName,
+                    'file_path' => $filePath,
+                ];
+            }
+            $officerRequest->update($mirror);
         });
 
         Audit::log('request.responded', $officerRequest);
@@ -190,6 +225,6 @@ class OfficerRequestController extends Controller
 
     private function eager(): array
     {
-        return ['createdBy.department', 'application.business:id,name'];
+        return ['createdBy.department', 'application.business:id,name', 'responses.author:id,name'];
     }
 }

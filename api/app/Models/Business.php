@@ -15,9 +15,14 @@ class Business extends Model
     protected $fillable = [
         'owner_user_id', 'name', 'trade_name', 'registration_type',
         'registration_number', 'tin', 'ban', 'is_active', 'status',
+        'is_rented', 'lessor_name', 'lessor_address', 'lessor_contact',
+        'monthly_rental', 'emergency_contact_name', 'emergency_contact_number',
     ];
 
-    protected $casts = ['is_active' => 'boolean'];
+    protected $casts = [
+        'is_active' => 'boolean',
+        'is_rented' => 'boolean',
+    ];
 
     /** Statuses that bar the owner from filing new applications. */
     public function isBlockedFromApplying(): bool

@@ -47,6 +47,7 @@ class AssignmentController extends Controller
             'application.business.address.barangay', 'application.business.lines.psicCode',
             'application.applicant', 'application.permitTypes',
             'application.documents.documentType', 'application.feeAssessment',
+            'application.officeForms.permitType.department',
             'application.payments', 'application.assignments.department',
             'application.assignments.officer', 'application.inspections.department',
             'application.inspections.inspector', 'application.permits.permitType',

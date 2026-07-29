@@ -14,6 +14,8 @@ class ApplicationListResource extends JsonResource
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
             'application_type' => $this->application_type?->value,
+            // Null falls back to the business name on the Drafts page.
+            'title' => $this->title,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'business' => $this->relationLoaded('business') && $this->business ? [

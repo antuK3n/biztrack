@@ -41,6 +41,13 @@ class BusinessController extends Controller
                 'registration_type' => $data['registration_type'] ?? null,
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
                 'ban' => Numbering::ban(),
                 'is_active' => true,
             ]);
@@ -78,6 +85,13 @@ class BusinessController extends Controller
                 'registration_type' => $data['registration_type'] ?? null,
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
+                'is_rented' => (bool) ($data['is_rented'] ?? false),
+                'lessor_name' => $data['lessor_name'] ?? null,
+                'lessor_address' => $data['lessor_address'] ?? null,
+                'lessor_contact' => $data['lessor_contact'] ?? null,
+                'monthly_rental' => $data['monthly_rental'] ?? null,
+                'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
+                'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
             ]);
             $this->syncAddressAndLines($business, $data);
         });
@@ -134,12 +148,22 @@ class BusinessController extends Controller
 
     private function validateBusiness(Request $request): array
     {
+        // Normalise the TIN before the rule runs, so applicants may type the
+        // separators they are used to (123 456 789 000, 123.456.789, plain
+        // digits) and we still store one canonical form.
+        if (filled($request->input('tin'))) {
+            $request->merge(['tin' => self::normalizeTin((string) $request->input('tin'))]);
+        }
+
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
+            // Trade name stays optional: most sole proprietors have none.
             'trade_name' => ['nullable', 'string', 'max:255'],
-            'registration_type' => ['nullable', 'string', 'max:50'],
-            'registration_number' => ['nullable', 'string', 'max:100'],
-            'tin' => ['nullable', 'string', 'max:50'],
+            'registration_type' => ['required', 'string', 'max:50'],
+            'registration_number' => ['required', 'string', 'max:100'],
+            // Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
+            // the taxpayer has one. Normalised above into hyphenated groups.
+            'tin' => ['required', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
             'address' => ['required', 'array'],
             'address.line1' => ['required', 'string', 'max:255'],
             'address.line2' => ['nullable', 'string', 'max:255'],
@@ -149,11 +173,55 @@ class BusinessController extends Controller
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.psic_code_id' => ['required', 'exists:psic_codes,id'],
             'lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
+            // Free text for the "Other (not listed)" PSIC row, and optional
+            // detail for any line.
+            'lines.*.line_of_business' => ['nullable', 'string', 'max:255'],
+            'lines.*.products_services' => ['nullable', 'string', 'max:1000'],
+            /*
+             * Unified form, lessor block. Only required once the applicant says
+             * the premises are rented; an owner-occupied shop has no lessor and
+             * must not be asked to invent one.
+             */
+            'is_rented' => ['sometimes', 'boolean'],
+            'lessor_name' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
+            'lessor_address' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
+            'lessor_contact' => ['nullable', 'string', 'max:40'],
+            'monthly_rental' => ['nullable', 'required_if:is_rented,true', 'numeric', 'min:0'],
+            'emergency_contact_name' => ['nullable', 'string', 'max:255'],
+            'emergency_contact_number' => ['nullable', 'string', 'max:40'],
         ], [
+            'lessor_name.required_if' => "Enter the lessor's name, or set the premises to owner-occupied.",
+            'lessor_address.required_if' => "Enter the lessor's address, or set the premises to owner-occupied.",
+            'monthly_rental.required_if' => 'Enter the monthly rental, or set the premises to owner-occupied.',
             'lines.required' => 'Add at least one line of business.',
             'lines.min' => 'Add at least one line of business.',
             'address.required' => 'A business address is required.',
+            'registration_type.required' => 'Choose your type of registration.',
+            'registration_number.required' => 'Enter your DTI, SEC, or CDA registration number.',
+            'tin.required' => 'Enter your Tax Identification Number.',
+            'tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.',
         ]);
+    }
+
+    /**
+     * Digits-and-separators in, canonical "123-456-789[-000]" out. Anything
+     * that is not a recognisable TIN comes back untouched so the regex rule
+     * reports it instead of us silently mangling it.
+     */
+    private static function normalizeTin(string $raw): string
+    {
+        $trimmed = trim($raw);
+        if (! preg_match('/^[\d\s.\-]+$/', $trimmed)) {
+            return $trimmed;
+        }
+        $digits = preg_replace('/\D/', '', $trimmed);
+        $length = strlen($digits);
+        if ($length !== 9 && ($length < 12 || $length > 14)) {
+            return $trimmed;
+        }
+        $tin = substr($digits, 0, 3).'-'.substr($digits, 3, 3).'-'.substr($digits, 6, 3);
+
+        return $length > 9 ? $tin.'-'.substr($digits, 9) : $tin;
     }
 
     private function syncAddressAndLines(Business $business, array $data): void
@@ -168,10 +236,19 @@ class BusinessController extends Controller
 
         $business->lines()->delete();
         foreach ($data['lines'] as $line) {
-            $business->lines()->create([
+            $row = $business->lines()->make([
                 'psic_code_id' => $line['psic_code_id'],
                 'capitalization' => $line['capitalization'] ?? null,
             ]);
+            // Free text for the "Other (not listed)" PSIC row; not mass
+            // assignable on BusinessLine, so set it explicitly.
+            $row->line_of_business = filled($line['line_of_business'] ?? null)
+                ? trim($line['line_of_business'])
+                : null;
+            $row->products_services = filled($line['products_services'] ?? null)
+                ? trim($line['products_services'])
+                : null;
+            $row->save();
         }
     }
 

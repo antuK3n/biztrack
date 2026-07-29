@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import type { SVGProps } from 'react'
-import { ChevronRightIcon, EyeIcon, EyeOffIcon } from '../components/icons'
+import { ChevronRightIcon } from '../components/icons'
+import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
+import { api, toApiError } from '../lib/api'
+import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 
 /* Settings — PDF p11–13: two royal bars opening the Edit Profile / Change Password modals. */
@@ -41,38 +44,6 @@ function ProfileAvatar() {
   )
 }
 
-/** Filled password input with the prototype's eye toggle (PDF p13). */
-function PasswordInput({ id, placeholder, value, onChange }: {
-  id: string
-  placeholder: string
-  value: string
-  onChange: (v: string) => void
-}) {
-  const [visible, setVisible] = useState(false)
-  return (
-    <div className="relative">
-      <input
-        id={id}
-        type={visible ? 'text' : 'password'}
-        autoComplete="new-password"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={`${inputCls} pr-11`}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? 'Hide password' : 'Show password'}
-        aria-pressed={visible}
-        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-secondary hover:text-ink"
-      >
-        {visible ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
-      </button>
-    </div>
-  )
-}
-
 /** Full-width royal bar row (PDF p11). */
 function SettingsBar({ label, onClick }: { label: string; onClick: () => void }) {
   return (
@@ -87,30 +58,94 @@ function SettingsBar({ label, onClick }: { label: string; onClick: () => void })
   )
 }
 
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null
+  return (
+    <p id={id} className="mt-1.5 text-sm font-medium text-s-red">
+      {message}
+    </p>
+  )
+}
+
 type OpenModal = 'profile' | 'password' | null
 
 export function SettingsPage() {
   const user = useAuth((s) => s.user)
+  const setUser = useAuth((s) => s.setUser)
   const [open, setOpen] = useState<OpenModal>(null)
   const [note, setNote] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
 
   const [firstName, setFirstName] = useState(user?.first_name ?? '')
   const [lastName, setLastName] = useState(user?.last_name ?? '')
+  const [phone, setPhone] = useState(user?.mobile_number ?? '')
+  const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
 
   function openProfile() {
     setFirstName(user?.first_name ?? '')
     setLastName(user?.last_name ?? '')
+    setPhone(user?.mobile_number ?? '')
     setNote(null)
+    setFormError(null)
+    setFieldErrors({})
     setOpen('profile')
   }
 
   function openPassword() {
+    setCurrentPassword('')
     setPassword('')
     setConfirm('')
     setNote(null)
+    setFormError(null)
+    setFieldErrors({})
     setOpen('password')
+  }
+
+  async function saveProfile() {
+    setSaving(true)
+    setFormError(null)
+    setFieldErrors({})
+    try {
+      const { data } = await api.put<{ data: User }>('/auth/profile', {
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        mobile_number: phone.trim(),
+      })
+      setUser(data.data)
+      setOpen(null)
+      setNote('Profile changes saved.')
+    } catch (error) {
+      const apiError = toApiError(error)
+      setFieldErrors(apiError.errors)
+      if (Object.keys(apiError.errors).length === 0) setFormError(apiError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function savePassword() {
+    setSaving(true)
+    setFormError(null)
+    setFieldErrors({})
+    try {
+      await api.put('/auth/password', {
+        current_password: currentPassword,
+        password,
+        password_confirmation: confirm,
+      })
+      setOpen(null)
+      setNote('Password updated. Any other signed-in devices have been logged out.')
+    } catch (error) {
+      const apiError = toApiError(error)
+      setFieldErrors(apiError.errors)
+      if (Object.keys(apiError.errors).length === 0) setFormError(apiError.message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -132,13 +167,10 @@ export function SettingsPage() {
         <ProtoModal
           title="Edit Profile"
           cancelLabel="Cancel"
-          confirmLabel="Save Changes"
+          confirmLabel={saving ? 'Saving…' : 'Save Changes'}
           onCancel={() => setOpen(null)}
-          onConfirm={() => {
-            setOpen(null)
-            setNote('Profile changes saved.')
-          }}
-          confirmDisabled={!firstName.trim() || !lastName.trim()}
+          onConfirm={saveProfile}
+          confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !phone.trim()}
         >
           <div className="flex flex-col items-center gap-2">
             <ProfileAvatar />
@@ -146,6 +178,11 @@ export function SettingsPage() {
               Edit Profile Picture <PencilIcon className="text-royal" />
             </button>
           </div>
+          {formError && (
+            <p role="alert" className="mt-4 text-center text-sm font-medium text-s-red">
+              {formError}
+            </p>
+          )}
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
             <div>
               <FieldLabel>First Name</FieldLabel>
@@ -154,10 +191,13 @@ export function SettingsPage() {
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   placeholder="First Name"
+                  aria-invalid={fieldErrors.first_name ? true : undefined}
+                  aria-describedby={fieldErrors.first_name ? 'profile-first-error' : undefined}
                   className={`${inputCls} pr-10`}
                 />
                 <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
               </div>
+              <FieldError id="profile-first-error" message={fieldErrors.first_name?.[0]} />
             </div>
             <div>
               <FieldLabel>Last Name</FieldLabel>
@@ -166,10 +206,37 @@ export function SettingsPage() {
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   placeholder="Last Name"
+                  aria-invalid={fieldErrors.last_name ? true : undefined}
+                  aria-describedby={fieldErrors.last_name ? 'profile-last-error' : undefined}
                   className={`${inputCls} pr-10`}
                 />
                 <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
               </div>
+              <FieldError id="profile-last-error" message={fieldErrors.last_name?.[0]} />
+            </div>
+            <div>
+              <FieldLabel>Mobile Number</FieldLabel>
+              <div className="relative">
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="09XX XXX XXXX"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  aria-invalid={fieldErrors.mobile_number ? true : undefined}
+                  aria-describedby={fieldErrors.mobile_number ? 'profile-phone-error' : undefined}
+                  className={`${inputCls} pr-10`}
+                />
+                <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
+              </div>
+              <FieldError id="profile-phone-error" message={fieldErrors.mobile_number?.[0]} />
+            </div>
+            <div>
+              <FieldLabel>Email</FieldLabel>
+              <input value={user?.email ?? ''} readOnly aria-readonly="true" className={`${inputCls} bg-canvas text-ink-muted`} />
+              <p className="mt-1.5 text-xs text-ink-muted">
+                Your email is your sign-in ID and can't be changed here. Contact the City BPLO to update it.
+              </p>
             </div>
           </div>
         </ProtoModal>
@@ -179,26 +246,57 @@ export function SettingsPage() {
         <ProtoModal
           title="Change Password"
           cancelLabel="Cancel"
-          confirmLabel="Save Changes"
+          confirmLabel={saving ? 'Saving…' : 'Save Changes'}
           onCancel={() => setOpen(null)}
-          onConfirm={() => {
-            setOpen(null)
-            setNote('Password changes saved.')
-          }}
-          confirmDisabled={password.length < 8 || password !== confirm}
+          onConfirm={savePassword}
+          confirmDisabled={saving || !currentPassword || password.length < 8 || password !== confirm}
         >
+          {formError && (
+            <p role="alert" className="mb-4 text-center text-sm font-medium text-s-red">
+              {formError}
+            </p>
+          )}
           <div className="grid gap-5 py-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <FieldLabel>Current Password</FieldLabel>
+              <PasswordInput
+                id="settings-current"
+                placeholder="Current Password"
+                value={currentPassword}
+                onChange={setCurrentPassword}
+                autoComplete="current-password"
+                invalid={!!fieldErrors.current_password}
+                describedBy={fieldErrors.current_password ? 'settings-current-error' : undefined}
+                iconSize={18}
+              />
+              <FieldError id="settings-current-error" message={fieldErrors.current_password?.[0]} />
+            </div>
             <div>
               <FieldLabel>Enter New Password</FieldLabel>
-              <PasswordInput id="settings-password" placeholder="Password" value={password} onChange={setPassword} />
+              <PasswordInput
+                id="settings-password"
+                placeholder="Password"
+                value={password}
+                onChange={setPassword}
+                invalid={!!fieldErrors.password}
+                describedBy={fieldErrors.password ? 'settings-password-error' : undefined}
+                iconSize={18}
+              />
+              <FieldError id="settings-password-error" message={fieldErrors.password?.[0]} />
             </div>
             <div>
               <FieldLabel>Confirm New Password</FieldLabel>
-              <PasswordInput id="settings-confirm" placeholder="Confirm Password" value={confirm} onChange={setConfirm} />
+              <PasswordInput
+                id="settings-confirm"
+                placeholder="Confirm Password"
+                value={confirm}
+                onChange={setConfirm}
+                iconSize={18}
+              />
             </div>
           </div>
           <p className="text-center text-xs text-ink-muted">
-            At least 8 characters. Both fields must match to save.
+            At least 8 characters. Both fields must match to save. Saving signs out your other devices.
           </p>
         </ProtoModal>
       )}

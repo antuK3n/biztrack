@@ -4,7 +4,8 @@ import { api, toApiError } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
-import { BellIcon, CheckIcon, LogOutIcon, MailIcon, PlusIcon, XIcon } from './icons'
+import { ChatBubble } from './ChatBubble'
+import { BellIcon, CheckIcon, LogOutIcon, MailIcon } from './icons'
 
 const ROLE_LABELS: Record<string, string> = {
   business_owner: 'Business owner',
@@ -105,7 +106,8 @@ function Rail({ user }: { user: User }) {
               >
                 {[
                   { label: 'Settings', to: '/settings' },
-                  { label: 'Profile', to: '/permits' },
+                  // Profile reads the account record; Settings edits it.
+                  { label: 'Profile', to: '/profile' },
                 ].map((l) => (
                   <button
                     key={l.label}
@@ -199,61 +201,6 @@ function Bell() {
     >
       <BellIcon size={24} />
     </NavLink>
-  )
-}
-
-/* Chatbot bubble + slide-in panel stub (owner screens, p7–p8). */
-function ChatBubble() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button
-        type="button"
-        aria-label={open ? 'Close BizTrack ChatBot' : 'Open BizTrack ChatBot'}
-        onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-royal shadow-raised transition-transform hover:scale-105"
-      >
-        {open ? (
-          <XIcon size={24} className="text-white" />
-        ) : (
-          <svg viewBox="0 0 24 24" width={26} height={26} fill="none" aria-hidden="true">
-            <path
-              d="M4 6a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v7a3 3 0 0 1-3 3H9l-4.2 3.36A.75.75 0 0 1 3.6 18.8V16A3 3 0 0 1 4 13V6Z"
-              fill="#fff"
-            />
-          </svg>
-        )}
-      </button>
-      {open && (
-        <div className="fixed bottom-0 right-0 top-0 z-30 flex w-80 flex-col bg-chatbody shadow-overlay">
-          <div className="flex items-center justify-between bg-royal px-4 py-3">
-            <span className="flex items-center gap-2 text-sm font-bold text-white">
-              <span className="flex h-6 w-6 items-center justify-center rounded bg-white/20 text-[10px]">🤖</span>
-              BizTrack ChatBot
-            </span>
-            <button type="button" aria-label="Close" onClick={() => setOpen(false)}>
-              <XIcon size={18} className="text-white" />
-            </button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            <div className="max-w-[85%] rounded-xl bg-white/85 px-3 py-2 text-sm text-ink shadow-card">
-              Kumusta! I'm the BizTrack assistant. Ask me about requirements, fees, or where your
-              application is. (Coming soon. For now, message your assigned office from any application.)
-            </div>
-          </div>
-          <div className="flex items-center gap-2 p-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-royal">
-              <PlusIcon size={18} />
-            </span>
-            <input
-              disabled
-              placeholder="Type here…"
-              className="h-9 flex-1 rounded-full bg-white/85 px-4 text-sm outline-none"
-            />
-          </div>
-        </div>
-      )}
-    </>
   )
 }
 

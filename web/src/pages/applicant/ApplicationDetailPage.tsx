@@ -9,6 +9,7 @@ import {
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { MessagesPanel } from '../../components/MessagesPanel'
+import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
@@ -133,15 +134,9 @@ function FeeDialog({ app, onClose }: { app: Application; onClose: () => void }) 
           <span>Description</span>
           <span>Charge</span>
         </div>
-        <ul className="mt-3 min-h-24 space-y-2">
-          {(fee?.line_items ?? []).map((li, i) => (
-            <li key={i} className="flex items-baseline justify-between text-base text-ink">
-              <span>{li.label}</span>
-              <span className="tnum">{formatMoney(li.amount)}</span>
-            </li>
-          ))}
-          {!fee && <li className="text-sm text-ink-muted">No fees assessed yet.</li>}
-        </ul>
+        <div className="mt-3 max-h-[50vh] overflow-y-auto pr-1">
+          <TaxOrderBreakdown fee={fee} />
+        </div>
         <div className="display-serif mt-6 flex items-baseline justify-between border-t border-ink/40 pt-4 text-2xl text-ink">
           <span>Total Amount:</span>
           <span className="tnum">{formatMoney(fee?.total_amount)}</span>

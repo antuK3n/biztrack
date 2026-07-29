@@ -70,6 +70,12 @@ Full steps, env vars, and the restore drill: `docs/runbook-deploy.md`.
 
 ## Honest scope notes
 
+Fees are computed from the New Revenue Code of Malabon 2016 (Ord. A10-2016) via
+~420 seeded rules with per-line citations; the extraction, verification trail,
+and every source-print defect are in `docs/revenue-code-extract.md`. Amounts the
+ordinance leaves discretionary or unprinted (PIL, market stall rates) surface as
+officer-assessed lines rather than invented numbers.
+
 Payments, SMS, and email use simulated drivers by design; each one swaps for a
 real provider behind an interface with no schema change. Zoning validation is
 excluded until the city releases official zone polygons (the CPDO department is

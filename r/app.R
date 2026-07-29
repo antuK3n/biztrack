@@ -94,7 +94,7 @@ ui <- page_navbar(
   header = tags$head(tags$style(HTML("
     .value-box { border: 1px solid #e3e6ec; }
     .card { border: 1px solid #e3e6ec; }
-    .anomaly-note { background:#eef2fc; border:1px solid #d1dbeb;
+    .method-note { background:#eef2fc; border:1px solid #d1dbeb;
       border-radius:6px; padding:12px 16px; }
     body { background:#f7f8fa; }
     h2, .h2 { font-weight:600; }
@@ -132,8 +132,8 @@ ui <- page_navbar(
                   format(nrow(applications), big.mark = ","),
                   p(glue("{format(nrow(assignments), big.mark=',')} reviews · ",
                          "{nrow(scenarios)} DES scenarios"))),
-        value_box("SPC anomaly", glue("{nrow(cho_window)} weeks"),
-                  p("CHO slowdown detected"))
+        value_box("Weeks outside range", glue("{nrow(cho_window)} weeks"),
+                  p("CHO sustained slowdown"))
       ),
       layout_columns(
         col_widths = c(6, 6),
@@ -159,12 +159,12 @@ ui <- page_navbar(
 
   # ---------------- SPC ----------------
   nav_panel(
-    "Anomaly Detection",
+    "Processing Time Monitoring",
     div(class = "container-fluid py-3",
       div(class = "kicker mb-1",
-          "Feature 6 · Permit Processing Time Anomaly Detection"),
+          "Feature 6 · Permit Processing Time Monitoring"),
       h2("Weekly review turnaround"),
-      div(class = "anomaly-note mb-3",
+      div(class = "method-note mb-3",
         strong("● Injected → detected. "),
         glue("A x1.8 slowdown was deliberately injected into CHO's most recent ",
              "{ANOMALY_WEEKS} weeks (from {format(anomaly_start)}). The monitor ",
@@ -178,20 +178,22 @@ ui <- page_navbar(
                    "slowdown can't inflate its own limits."),
           width = 260
         ),
-        # Row 2 (Process Status Indicator) + Row 4 (Gradual Slowdown Detector)
+        # Top row — the three at-a-glance readings, equal width. These answer
+        # "is it in range", "how long has it been out", "is it drifting" before
+        # the reader reaches the chart.
         layout_columns(
-          fill = FALSE, col_widths = c(6, 6),
+          fill = FALSE, col_widths = c(4, 4, 4),
           uiOutput("spc_status_box"),
+          uiOutput("spc_streak_box"),
           uiOutput("spc_gradual_box")
         ),
-        # Row 5 — Slowdown Alert
         uiOutput("spc_alert"),
-        # Row 1 — Department Processing Time Chart
+        # Chart gets the full width: the shaded normal range is the whole point
+        # of the view and it is unreadable when squeezed into a column.
         card(full_screen = TRUE,
           card_header("Department Processing Time Chart"),
-          plotOutput("spc_plot", height = "400px")),
-        # Row 3 — Flagged Weeks List
-        card(card_header("Flagged Weeks List (weeks outside the normal range)"),
+          plotOutput("spc_plot", height = "440px")),
+        card(card_header("Weeks Outside the Normal Range"),
           DTOutput("tbl_flags"))
       )
     )
@@ -239,7 +241,7 @@ ui <- page_navbar(
 # ---- server -----------------------------------------------------------------
 server <- function(input, output, session) {
 
-  # One reactive computes everything the five anomaly-detection panels need.
+  # One reactive computes everything the five monitoring panels need.
   spc_state <- reactive({
     dc  <- input$dept
     w   <- weekly |> filter(department_code == dc) |> arrange(week_start)
@@ -275,27 +277,44 @@ server <- function(input, output, session) {
     .spc_chart(weekly, flags, input$dept)
   }, res = 96)
 
-  # Row 2 — Process Status Indicator
+  # Card 1 — Process Status Indicator. Named with the department so the reading
+  # can never be mistaken for a different one than the chart below it.
   output$spc_status_box <- renderUI({
     s  <- spc_state()
     ok <- s$run_len == 0
     value_box(
-      title = "Process Status Indicator",
+      title = glue("Process Status · {input$dept}"),
       value = if (ok) "Within Normal Range" else "Outside Normal Range",
-      p(if (ok) "recent weeks inside the normal range"
-        else glue("{s$run_len} consecutive week(s) {s$direction} the range")),
+      p(if (ok) "Latest weeks sit inside this department's usual range."
+        else glue("Latest week is {s$direction} the range.")),
       theme = if (ok) "success" else "danger"
     )
   })
 
-  # Row 4 — Gradual Slowdown Detector
+  # Card 2 — how long it has been out. This was previously only inferable by
+  # counting rows in the table.
+  output$spc_streak_box <- renderUI({
+    s <- spc_state()
+    n <- s$run_len
+    value_box(
+      title = "Consecutive Weeks Outside",
+      value = as.character(n),
+      p(if (n == 0) "No unbroken run at present."
+        else if (n == 1) "One week so far. Worth watching."
+        else "A sustained run, not a one-off spike."),
+      theme = if (n == 0) "success" else if (n < 2) "warning" else "danger"
+    )
+  })
+
+  # Card 3 — Gradual Slowdown Detector.
   output$spc_gradual_box <- renderUI({
     s  <- spc_state()
     on <- s$ewma_active
     value_box(
-      title = "Gradual Slowdown Detector",
+      title = "Gradual Slowdown (EWMA)",
       value = if (on) "Drift detected" else "No drift",
-      p("EWMA weights the most recent weeks more heavily"),
+      p(if (on) "Small week-on-week increases are accumulating."
+        else "No steady downward trend in speed."),
       theme = if (on) "warning" else "secondary"
     )
   })

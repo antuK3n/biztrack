@@ -16,9 +16,9 @@ class Application extends Model
     use SoftDeletes;
 
     protected $fillable = [
-        'tracking_id', 'business_id', 'applicant_user_id', 'application_type',
+        'tracking_id', 'business_id', 'applicant_user_id', 'application_type', 'title',
         'status', 'prior_permit_id', 'submitted_at', 'deadline_at', 'decided_at',
-        'rejection_reason',
+        'rejection_reason', 'fee_profile', 'payment_mode',
     ];
 
     protected $casts = [
@@ -27,6 +27,7 @@ class Application extends Model
         'submitted_at' => 'datetime',
         'deadline_at' => 'datetime',
         'decided_at' => 'datetime',
+        'fee_profile' => 'array',
     ];
 
     public function business(): BelongsTo
@@ -92,5 +93,10 @@ class Application extends Model
     public function officerRequests(): HasMany
     {
         return $this->hasMany(OfficerRequest::class);
+    }
+
+    public function officeForms(): HasMany
+    {
+        return $this->hasMany(ApplicationOfficeForm::class);
     }
 }

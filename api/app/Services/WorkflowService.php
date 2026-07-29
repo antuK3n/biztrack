@@ -149,6 +149,7 @@ class WorkflowService
     {
         $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
         $this->transition($app, ApplicationStatus::Rejected, $reason);
+        $this->notify->applicationRejected($app, $reason);
     }
 
     /** Owner resubmits a returned application → back to under_review. */
@@ -285,6 +286,9 @@ class WorkflowService
             }
             $app->update(['decided_at' => now()]);
             $this->transition($app, ApplicationStatus::Approved, 'All requirements met. Permit(s) issued.');
+            // The generic status ping is suppressed for the two end states, so
+            // approval says so plainly and points at the issued permit.
+            $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
         });
     }

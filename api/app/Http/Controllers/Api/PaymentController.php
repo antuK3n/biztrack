@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use App\Support\PdfFile;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -75,6 +76,7 @@ class PaymentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $payments = Payment::whereHas('application', fn ($q) => $q->where('applicant_user_id', $request->user()->id))
+            ->with('application:id,tracking_id')
             ->orderByDesc('paid_at')
             ->get();
 
@@ -92,6 +94,7 @@ class PaymentController extends Controller
         abort_unless($isOwner || $isOfficer, 403, 'This receipt is not yours.');
 
         $fee = $app?->feeAssessment;
+        $items = $fee?->line_items ?? [['label' => 'Permit fees', 'amount' => $payment->amount]];
 
         $pdf = Pdf::loadView('pdf.receipt', [
             'reference_number' => $payment->reference_number,
@@ -99,17 +102,37 @@ class PaymentController extends Controller
             'business_name' => $app?->business?->name ?? '',
             'method' => $payment->method?->value ?? '',
             'paid_at' => optional($payment->paid_at)->format('F j, Y g:i A'),
-            'line_items' => $fee?->line_items ?? [['label' => 'Permit fees', 'amount' => $payment->amount]],
+            'line_items' => array_map(fn (array $item) => [
+                'label' => self::receiptLabel($item['label'] ?? 'Fee'),
+                'amount' => $item['amount'] ?? 0,
+            ], $items),
             'total_amount' => $payment->amount,
         ]);
 
+        // Render once: a second ->output() corrupts the font streams (see PdfFile).
+        $file = PdfFile::render($pdf);
+
         $path = "private/receipts/{$payment->id}.pdf";
-        Storage::disk('local')->put($path, $pdf->output());
+        Storage::disk('local')->put($path, $file->content);
         if ($payment->receipt_path !== $path) {
             $payment->update(['receipt_path' => $path]);
         }
 
-        return $pdf->download("receipt-{$payment->reference_number}.pdf");
+        return $file->download("receipt-{$payment->reference_number}.pdf");
+    }
+
+    /**
+     * Receipt-only label tidy-up (tester item 58). The ordinance wording in
+     * database/data/revenue_code/*.json carries a parenthetical that explains
+     * which schedule a rate came from — useful in the fee breakdown, noise on a
+     * receipt. Only a bracket that follows a space is dropped, so codes written
+     * inline (for example "Schedule S(5)") survive.
+     */
+    private static function receiptLabel(string $label): string
+    {
+        $stripped = preg_replace('/\s+\([^()]*\)/u', '', $label) ?? $label;
+
+        return trim(preg_replace('/\s{2,}/u', ' ', $stripped) ?? $stripped);
     }
 
     /** Officer adjusts the fee (permission fee.adjust on the route). */

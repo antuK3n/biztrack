@@ -21,6 +21,9 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
     $psicId = PsicCode::first()->id;
     $bizRes = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Test Diner',
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-77001',
+        'tin' => '123-456-789-000',
         'address' => ['line1' => '1 Test St.', 'barangay_id' => $barangayId],
         'lines' => [['psic_code_id' => $psicId, 'capitalization' => 100000]],
     ])->assertCreated();
@@ -79,19 +82,23 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
     expect($days)->toBe(365);
 });
 
-it('issues a 6-office application to all six department queues', function () {
+it('issues an all-office application to every department queue', function () {
     $owner = authAs('owner@biztrack.local');
 
     $barangayId = Barangay::first()->id;
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Six Office Mart',
+        'registration_type' => 'SEC',
+        'registration_number' => 'SEC-77002',
+        'tin' => '123-456-789-000',
         'address' => ['line1' => '6 Office Rd.', 'barangay_id' => $barangayId],
         'lines' => [['psic_code_id' => $psicId]],
     ])->assertCreated()->json('data.id');
 
+    // BPLO, CHO, BFP, OBO, CENRO, CMO-MARKET, CPDO (zoning).
     $allTypeIds = PermitType::pluck('id')->all();
-    expect($allTypeIds)->toHaveCount(6);
+    expect($allTypeIds)->toHaveCount(7);
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
@@ -102,6 +109,6 @@ it('issues a 6-office application to all six department queues', function () {
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
-    // One assignment per issuing department => 6 queues hit.
-    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(6);
+    // One assignment per issuing department => 7 queues hit.
+    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(7);
 });

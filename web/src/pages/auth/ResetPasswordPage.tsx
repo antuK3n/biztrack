@@ -2,14 +2,15 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
-import { CheckCircleIcon, EyeIcon, EyeOffIcon } from '../../components/icons'
+import { CheckCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
-import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
+import { PasswordInput } from '../../components/ui/PasswordInput'
+import { FieldLabel, PillButton } from '../../components/ui/Proto'
 import { api, toApiError } from '../../lib/api'
 import { validatePassword, validatePasswordConfirmation } from '../../lib/validation'
 
-/** Filled password input with the prototype's eye toggle. */
-function PasswordInput({
+/** The shared eye-toggle input plus this screen's inline error line. */
+function PasswordField({
   id,
   placeholder,
   autoComplete,
@@ -28,32 +29,18 @@ function PasswordInput({
   error?: string
   errorId: string
 }) {
-  const [visible, setVisible] = useState(false)
   return (
     <div>
-      <div className="relative">
-        <input
-          id={id}
-          type={visible ? 'text' : 'password'}
-          autoComplete={autoComplete}
-          placeholder={placeholder}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
-          className={`${inputCls} pr-11`}
-        />
-        <button
-          type="button"
-          onClick={() => setVisible((v) => !v)}
-          aria-label={visible ? 'Hide password' : 'Show password'}
-          aria-pressed={visible}
-          className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-secondary hover:text-ink"
-        >
-          {visible ? <EyeOffIcon size={20} /> : <EyeIcon size={20} />}
-        </button>
-      </div>
+      <PasswordInput
+        id={id}
+        autoComplete={autoComplete}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        onBlur={onBlur}
+        invalid={!!error}
+        describedBy={error ? errorId : undefined}
+      />
       {error && (
         <p id={errorId} className="mt-1.5 text-sm font-medium text-s-red">
           {error}
@@ -166,7 +153,7 @@ export function ResetPasswordPage() {
         )}
         <div>
           <FieldLabel>Enter New Password</FieldLabel>
-          <PasswordInput
+          <PasswordField
             id="reset-password"
             placeholder="Password"
             autoComplete="new-password"
@@ -186,7 +173,7 @@ export function ResetPasswordPage() {
         </div>
         <div>
           <FieldLabel>Confirm New Password</FieldLabel>
-          <PasswordInput
+          <PasswordField
             id="reset-confirm"
             placeholder="Confirm Password"
             autoComplete="new-password"

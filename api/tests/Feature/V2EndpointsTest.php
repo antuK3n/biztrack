@@ -84,7 +84,9 @@ it('lets an officer adjust the fee before payment', function () {
     $barangayId = Barangay::first()->id;
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
-        'name' => 'FeeAdjust Co', 'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
+        'name' => 'FeeAdjust Co', 'registration_type' => 'DTI',
+        'registration_number' => 'DTI-99001', 'tin' => '123-456-789-000',
+        'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
         'lines' => [['psic_code_id' => $psicId]],
     ])->json('data.id');
     $typeId = PermitType::where('code', 'BUSINESS')->value('id');
@@ -132,7 +134,9 @@ it('upserts and reads a per-office application form', function () {
     $barangayId = Barangay::first()->id;
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
-        'name' => 'FormCo', 'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
+        'name' => 'FormCo', 'registration_type' => 'DTI',
+        'registration_number' => 'DTI-99002', 'tin' => '123-456-789-000',
+        'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
         'lines' => [['psic_code_id' => $psicId]],
     ])->json('data.id');
     $typeId = PermitType::where('code', 'OCCUPANCY')->value('id');

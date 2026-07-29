@@ -37,8 +37,8 @@ class RbacSeeder extends Seeder
                 'display_name' => 'BPLO Staff',
                 'description' => 'Reviews applications, adjusts fees, and issues business permits.',
                 'permissions' => [
-                    'application.view_all', 'application.review', 'fee.adjust',
-                    'permit.view_all', 'permit.issue', 'request.create',
+                    'application.view_all', 'application.review', 'application.reject',
+                    'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create',
                     'message.participate', 'compliance.view', 'zoning.evaluate',
                 ],
             ],
@@ -79,8 +79,8 @@ class RbacSeeder extends Seeder
                 'display_name' => 'Administrator',
                 'description' => 'Super admin: full system access, user management, and audit.',
                 'permissions' => [
-                    'application.view_all', 'application.review', 'fee.adjust',
-                    'inspection.manage', 'permit.view_all', 'permit.issue',
+                    'application.view_all', 'application.review', 'application.reject',
+                    'fee.adjust', 'inspection.manage', 'permit.view_all', 'permit.issue',
                     'request.create', 'message.participate', 'compliance.view',
                     'analytics.view', 'zoning.evaluate', 'user.manage',
                     'owner.manage_status', 'oic.assign', 'reference.manage', 'audit.view',

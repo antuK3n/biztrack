@@ -17,6 +17,10 @@ class PaymentResource extends JsonResource
             'method' => $this->method?->value,
             'status' => $this->status?->value,
             'paid_at' => optional($this->paid_at)->toISOString(),
+            'application' => $this->whenLoaded('application', fn () => [
+                'id' => $this->application->id,
+                'tracking_id' => $this->application->tracking_id,
+            ]),
         ];
     }
 }

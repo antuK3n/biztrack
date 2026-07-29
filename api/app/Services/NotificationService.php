@@ -18,6 +18,11 @@ use Illuminate\Support\Facades\Mail;
  * (log driver) via the simulation pattern (§5.5). Generic payloads only
  * (guardrail §9.5) — no PII beyond the tracking id.
  */
+/*
+ * Link targets must be real routes in web/src/App.tsx. `/track/{id}` and
+ * `/review/{id}` were never routes, so every notification bounced the reader
+ * to the sign-in redirect instead of the thing it was about.
+ */
 class NotificationService
 {
     public function __construct(private SmsChannel $sms) {}
@@ -39,14 +44,55 @@ class NotificationService
         if (! $app->applicant) {
             return;
         }
+        // The two end states get their own message (approved/rejected below),
+        // so the applicant is not told the same thing twice.
+        if ($to === ApplicationStatus::Approved || $to === ApplicationStatus::Rejected) {
+            return;
+        }
         $this->push(
             $app->applicant,
             'status_change',
             'Application update',
             "{$app->tracking_id} is now “{$to->label()}”.".($note ? " $note" : ''),
-            "/track/{$app->id}",
+            "/applications/{$app->id}",
         );
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is now {$to->label()}.");
+    }
+
+    /** End state: the application cleared every office (tester item 51). */
+    public function applicationApproved(Application $app): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'decision',
+            'Application approved',
+            "{$app->tracking_id} is approved. Every office has cleared it, so nothing more is "
+                .'needed from you. Your permit has been issued and is waiting under Permits.',
+            '/permits',
+        );
+        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is approved. Your permit is ready under Permits.");
+    }
+
+    /** End state: BPLO or the super admin ended the application. */
+    public function applicationRejected(Application $app, ?string $reason = null): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'decision',
+            'Application rejected',
+            "{$app->tracking_id} was rejected.".($reason ? " Reason: {$reason}" : '')
+                .' You can message the office about it, or file a new application once the issue is settled.',
+            "/applications/{$app->id}",
+        );
+        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} was rejected. Open BizTrack for the reason.");
     }
 
     public function permitsIssued(Application $app): void
@@ -73,7 +119,7 @@ class NotificationService
             'message',
             'New message',
             "You have a new message on {$app->tracking_id}.",
-            "/track/{$app->id}",
+            "/applications/{$app->id}",
         );
         $this->fanOut($recipient, "BizTrack: new message on {$app->tracking_id}.");
     }
@@ -87,7 +133,7 @@ class NotificationService
             'request',
             'Additional requirement requested',
             "An officer requested: {$request->title} on {$app->tracking_id}.",
-            "/track/{$app->id}",
+            "/applications/{$app->id}",
         );
         $this->fanOut($recipient, "BizTrack: new requirement requested on {$app->tracking_id}.");
     }
@@ -100,7 +146,7 @@ class NotificationService
             'request',
             'Requirement response received',
             "The applicant responded to “{$request->title}” on {$app->tracking_id}.",
-            "/review/{$app->id}",
+            "/queue/{$app->id}",
         );
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }
@@ -113,7 +159,7 @@ class NotificationService
             'request',
             'Requirement '.$request->status->label(),
             "Your response to “{$request->title}” on {$app->tracking_id} was {$request->status->label()}.",
-            "/track/{$app->id}",
+            "/applications/{$app->id}",
         );
         $this->fanOut($recipient, "BizTrack: requirement on {$app->tracking_id} {$request->status->label()}.");
     }
