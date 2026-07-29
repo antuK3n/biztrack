@@ -103,8 +103,18 @@ class AnalyticsHistorySeeder extends Seeder
     /** Businesses this seeder owns, tagged independently of the account. */
     public const REGISTRATION_PREFIX = 'AHS-';
 
-    /** Shown in staff-facing lists so a demo row reads as one at a glance. */
-    public const LABEL = '[demo history]';
+    /**
+     * Optional visible marker appended to generated free text.
+     *
+     * Empty on purpose: these rows appear in screenshots that go into the
+     * client's paper, and a "[demo history]" suffix on every business name
+     * reads as scaffolding there. Identification does not depend on it —
+     * isSeeded() and purge() match on EMAIL_DOMAIN and REGISTRATION_PREFIX,
+     * which are structural and cannot be edited away by a staff user renaming
+     * a business. Set this to a non-empty string to make demo rows obvious in
+     * staff-facing lists again; every call site tolerates either.
+     */
+    public const LABEL = '';
 
     /* ── shape (see r/config.R) ───────────────────────────────────────────── */
 
@@ -442,7 +452,7 @@ class AnalyticsHistorySeeder extends Seeder
         ?Department $department = null,
     ): User {
         $user = User::create([
-            'name' => "$first $last ".self::LABEL,
+            'name' => rtrim("$first $last ".self::LABEL),
             'first_name' => $first,
             'last_name' => $last,
             'gender' => $gender,
@@ -1031,7 +1041,7 @@ class AnalyticsHistorySeeder extends Seeder
             fn () => sprintf('%s %s Center', $this->prefixWord(), $this->tradeWord($line)),
         ];
 
-        return $patterns[$sequence % count($patterns)]().' '.self::LABEL;
+        return $patterns[$sequence % count($patterns)]().self::LABEL;
     }
 
     private function tradeWord(array $line): string
@@ -1072,7 +1082,7 @@ class AnalyticsHistorySeeder extends Seeder
             'BFP' => 'Fire safety requirements verified. Cleared for FSIC.',
             'CPDO' => 'Locational clearance consistent with the zoning ordinance.',
             default => 'Office review cleared.',
-        }.' '.self::LABEL;
+        }.self::LABEL;
     }
 
     private function returnRemark(): string
@@ -1084,7 +1094,7 @@ class AnalyticsHistorySeeder extends Seeder
             'Latest community tax certificate is not attached.',
         ];
 
-        return $remarks[mt_rand(0, count($remarks) - 1)].' '.self::LABEL;
+        return $remarks[mt_rand(0, count($remarks) - 1)].self::LABEL;
     }
 
     private function rejectionReason(): string
@@ -1096,7 +1106,7 @@ class AnalyticsHistorySeeder extends Seeder
             'Sanitary deficiencies were not corrected on re-inspection.',
         ];
 
-        return $reasons[mt_rand(0, count($reasons) - 1)].' '.self::LABEL;
+        return $reasons[mt_rand(0, count($reasons) - 1)].self::LABEL;
     }
 
     /* ── plumbing ─────────────────────────────────────────────────────────── */
