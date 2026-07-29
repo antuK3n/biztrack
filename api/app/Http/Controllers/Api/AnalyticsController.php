@@ -13,6 +13,7 @@ use App\Models\Permit;
 use App\Support\BusinessGrowthAnalytics;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
+use App\Support\RenewalRiskAnalytics;
 use App\Support\Spc;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
@@ -77,6 +78,58 @@ class AnalyticsController extends Controller
         ])->setPaper('a4');
 
         return PdfFile::render($pdf)->download('business-growth-analysis.pdf');
+    }
+
+    /**
+     * Renewal Risk: permits near expiry, ranked by a weighted rule score.
+     *
+     * Not a prediction endpoint. See RenewalRiskScoring for what the number is
+     * and, more importantly, what it is not.
+     */
+    public function renewalRisk(Request $request): JsonResponse
+    {
+        return response()->json([
+            'data' => RenewalRiskAnalytics::build(
+                $this->horizonDays($request),
+                $this->limit($request),
+            ),
+        ]);
+    }
+
+    /** Printable Renewal Risk report. */
+    public function renewalRiskReport(Request $request): Response
+    {
+        $data = RenewalRiskAnalytics::build($this->horizonDays($request), $this->limit($request));
+
+        $pdf = Pdf::loadView('pdf.renewal-risk-report', [
+            'report' => $data,
+            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+        ])->setPaper('a4');
+
+        return PdfFile::render($pdf)->download('renewal-risk.pdf');
+    }
+
+    /*
+     * There is deliberately no staffing-simulation endpoint. App\Support\Des is
+     * a complete, validated port of r/R/des.R, but docs/r-integration-spec.md
+     * puts the discrete-event simulation out of scope for the delivered flow.
+     * See the note in routes/workflow.php.
+     */
+
+    /** How far ahead the renewal watchlist looks, in days. */
+    private function horizonDays(Request $request): int
+    {
+        $days = (int) $request->query('days', (string) RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS);
+
+        return max(7, min(365, $days));
+    }
+
+    /** Rows in the watchlist table. */
+    private function limit(Request $request): int
+    {
+        $limit = (int) $request->query('limit', (string) RenewalRiskAnalytics::DEFAULT_LIMIT);
+
+        return max(1, min(200, $limit));
     }
 
     /** Chart window in weeks, clamped so a stray query string cannot scan the table. */

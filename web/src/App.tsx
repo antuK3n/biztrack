@@ -26,6 +26,7 @@ import { InspectionsPage, InspectionDetailPage } from './pages/officer/Inspectio
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
+import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
@@ -199,6 +200,19 @@ export default function App() {
             element={
               <RequirePermission permission="analytics.view">
                 <BusinessGrowthPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            Renewal Risk ranks every business's permits by a weighted rule score,
+            so it sits on the same super-admin permission as the rest of
+            analytics rather than being visible to an office reviewer.
+          */}
+          <Route
+            path="/analytics/renewal-risk"
+            element={
+              <RequirePermission permission="analytics.view">
+                <RenewalRiskPage />
               </RequirePermission>
             }
           />

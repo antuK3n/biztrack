@@ -173,6 +173,22 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
         Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
+        /*
+         * Renewal Risk reads every business's permits, filings, findings and
+         * payments to rank them, so it belongs on the same super-admin
+         * permission as the rest — a barangay-level watchlist of who is about to
+         * fall out of compliance is not an office reviewer's business.
+         */
+        Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
+        Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
+        /*
+         * No staffing-simulation route. App\Support\Des is a complete, tested
+         * port of r/R/des.R, but docs/r-integration-spec.md puts the discrete-
+         * event simulation out of scope for the delivered flow: the client's
+         * paper has six features and DES is not one of them. The port stays on
+         * disk with its unit tests; wiring it up is a two-line change here plus
+         * the controller if the feature is ever brought back.
+         */
     });
 
     // Admin — user management (user.manage) + activation toggle (owner.manage_status)
