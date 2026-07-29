@@ -139,6 +139,19 @@ export const applications = {
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
   timeline: (id: number) => unwrap<TimelineEntry[]>(api.get(`/applications/${id}/timeline`)),
+  /**
+   * Which permit a renewal/amendment is for. Separate from update() because a
+   * business holds several permits with different expiry dates, so the choice
+   * outlives the moment the draft was created and has to be re-readable.
+   */
+  priorPermit: (id: number) =>
+    unwrap<{ prior_permit_id: number | null; prior_permit: Permit | null }>(
+      api.get(`/applications/${id}/prior-permit`),
+    ),
+  setPriorPermit: (id: number, priorPermitId: number | null) =>
+    unwrap<{ prior_permit_id: number | null; prior_permit: Permit | null }>(
+      api.put(`/applications/${id}/prior-permit`, { prior_permit_id: priorPermitId }),
+    ),
   reject: (id: number, reason: string) =>
     unwrap<Application>(api.post(`/applications/${id}/reject`, { reason })),
   /** Adjust the fee assessment (permission fee.adjust; v2). */
@@ -164,9 +177,21 @@ export const officeForms = {
 /* ── Documents ────────────────────────────────────────────────────────── */
 
 export const documents = {
-  upload: (applicationId: number, documentTypeId: number, file: File) => {
+  /**
+   * Attach a file to a draft. Pass `permitTypeId` instead of a document type
+   * for a clearance the applicant already holds and is submitting rather than
+   * applying for (checklist item 59); the API names the attachment after that
+   * permit so the reviewing office can read the list without decoding it.
+   */
+  upload: (
+    applicationId: number,
+    documentTypeId: number | null,
+    file: File,
+    permitTypeId?: number,
+  ) => {
     const form = new FormData()
-    form.append('document_type_id', String(documentTypeId))
+    if (documentTypeId !== null) form.append('document_type_id', String(documentTypeId))
+    if (permitTypeId !== undefined) form.append('permit_type_id', String(permitTypeId))
     form.append('file', file)
     // Response may carry ocr_suggestions for PDFs (v2 OCR-lite).
     return unwrap<import('./types').UploadedDocument>(
