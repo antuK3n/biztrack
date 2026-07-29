@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -69,7 +70,10 @@ class OfficeFormController extends Controller
     {
         $user = $request->user();
         $isOwner = $application->applicant_user_id === $user->id;
-        $isReviewer = $user->hasPermission('application.review');
+        // A reviewer may record issuance dates only on a filing its office is
+        // part of; the permission alone is no longer enough (checklist item 56).
+        $isReviewer = $user->hasPermission('application.review')
+            && ApplicationVisibility::canView($user, $application);
 
         abort_unless($isOwner || $isReviewer, 403, 'This application is not yours.');
         if ($isOwner) {
@@ -180,14 +184,12 @@ class OfficeFormController extends Controller
         return $derived + $formData;
     }
 
+    /** Owner, an office routed this filing, or BPLO/admin (checklist item 56). */
     private function authorizeView(Request $request, Application $application): void
     {
-        if ($application->applicant_user_id === $request->user()->id) {
-            return;
-        }
-        abort_unless(
-            $request->user()->hasPermission('application.view_all'),
-            403,
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $application,
             'You may not view this application.'
         );
     }

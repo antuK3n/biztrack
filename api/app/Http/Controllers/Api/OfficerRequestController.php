@@ -10,6 +10,7 @@ use App\Models\ApplicationDocument;
 use App\Models\DocumentType;
 use App\Models\OfficerRequest;
 use App\Services\NotificationService;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +31,14 @@ class OfficerRequestController extends Controller
     /** Officer creates a request against an application (request.create). */
     public function store(Request $request, Application $application): JsonResponse
     {
+        // An office may only ask for requirements on a filing it is part of;
+        // asking is itself a read of the application (checklist item 56).
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $application,
+            'You may not raise a requirement on another office’s application.'
+        );
+
         // Compat: web/mobile send subject/body (docs/api-contract.md); the paper
         // schema uses title/description. Accept either name for each.
         $request->merge([
@@ -89,7 +98,9 @@ class OfficerRequestController extends Controller
         $query = OfficerRequest::with($this->eager());
         $user = $request->user();
 
-        if ($user->hasPermission('application.view_all')) {
+        if (ApplicationVisibility::readsEveryOffice($user)) {
+            // BPLO and the super admin coordinate every office's requests.
+        } elseif ($user->hasPermission('application.view_all')) {
             // Officer: requests they created OR on applications in their department queue.
             $deptId = $user->department_id;
             $query->where(function ($q) use ($user, $deptId) {
@@ -203,6 +214,14 @@ class OfficerRequestController extends Controller
     public function close(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant');
+        // Closing a request reads and decides on the filing behind it, so the
+        // same office boundary applies (checklist item 56).
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $officerRequest->application,
+            'This request belongs to another office’s application.'
+        );
+
         $data = $request->validate([
             'outcome' => ['required', 'in:fulfilled,rejected'],
         ]);

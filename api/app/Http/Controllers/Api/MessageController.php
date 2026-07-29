@@ -10,6 +10,7 @@ use App\Models\MessageAttachment;
 use App\Models\MessageThread;
 use App\Models\User;
 use App\Services\NotificationService;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -31,8 +32,8 @@ class MessageController extends Controller
      * Inbox for the dedicated Messages page (checklist item 49): one row per
      * conversation, newest first, named after whoever the reader is talking to.
      * Applicants see their own applications (including ones with no thread yet,
-     * so they can open the conversation); officers who may read every
-     * application see every conversation, which matches the thread check below.
+     * so they can open the conversation); an officer sees the conversations on
+     * the filings its office may read, which matches the thread check below.
      */
     public function threads(Request $request): JsonResponse
     {
@@ -40,10 +41,7 @@ class MessageController extends Controller
         $isOfficer = $user->hasPermission('application.view_all');
 
         $threads = MessageThread::query()
-            ->when(! $isOfficer, fn ($q) => $q->whereHas(
-                'application',
-                fn ($a) => $a->where('applicant_user_id', $user->id)
-            ))
+            ->tap(fn ($q) => ApplicationVisibility::scope($q, $user, 'application'))
             ->with([
                 'application.business:id,name',
                 'application.applicant:id,name',
@@ -236,14 +234,16 @@ class MessageController extends Controller
     }
 
     // --- helpers -------------------------------------------------------------
+    /**
+     * The applicant, an office the filing was routed to, or BPLO/admin. An
+     * office that was never part of the filing is not in the conversation
+     * either (checklist item 56).
+     */
     private function authorizeParticipant(Request $request, Application $application): void
     {
-        if ($application->applicant_user_id === $request->user()->id) {
-            return;
-        }
-        abort_unless(
-            $request->user()->hasPermission('application.view_all'),
-            403,
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $application,
             'You are not a participant in this conversation.'
         );
     }
