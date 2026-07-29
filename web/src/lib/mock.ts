@@ -185,6 +185,22 @@ function handle(config: InternalAxiosRequestConfig): MockResponse {
         return { status: 422, data: { message: 'Invalid credentials.', errors: {} } }
       }
       if (!user.is_active) return { status: 403, data: { message: 'Account is deactivated.', errors: {} } }
+      // Mirror AuthController: staff and owners have separate sign-in doors,
+      // and the wrong one is refused after the password has already checked out.
+      const wantsStaff = body.portal === 'staff'
+      const isStaff = !user.roles.includes('business_owner')
+      if (isStaff !== wantsStaff) {
+        return {
+          status: 409,
+          data: {
+            message: wantsStaff
+              ? 'This is the LGU staff sign-in. Business owners sign in on the main BizTrack page.'
+              : 'LGU staff accounts sign in through the staff portal.',
+            portal: wantsStaff ? 'public' : 'staff',
+            errors: {},
+          },
+        }
+      }
       user.failed_attempts = 0
       user.locked_until = null
       return { status: 200, data: { data: { token: issueToken(user), user: publicUser(user) } } }

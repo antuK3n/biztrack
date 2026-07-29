@@ -163,7 +163,8 @@ export function RegisterPage() {
         password_confirmation: values.password_confirmation,
         data_privacy_consent: values.data_privacy_consent,
       })
-      setSession(data.data.token, data.data.user)
+      // Self-registration is always a business owner, so always the public portal.
+      setSession(data.data.token, data.data.user, 'public')
       navigate('/dashboard', { replace: true })
     } catch (error) {
       const apiError = toApiError(error)

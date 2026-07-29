@@ -28,6 +28,7 @@ import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { loginPathFor } from './lib/api'
 import { useAuth } from './stores/auth'
 
 function FullPageSpinner() {
@@ -39,10 +40,20 @@ function FullPageSpinner() {
 }
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, bootstrapped } = useAuth()
+  const { user, portal, bootstrapped } = useAuth()
   const location = useLocation()
   if (!bootstrapped) return <FullPageSpinner />
-  if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />
+  if (!user) return <Navigate to={loginPathFor(portal)} state={{ from: location.pathname }} replace />
+  return children
+}
+
+/**
+ * Routes the API would 403 anyway, hidden at the router so nobody lands on an
+ * officer or admin screen they can't use. Defence in depth, not the defence.
+ */
+function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
+  const { user } = useAuth()
+  if (!user?.permissions.includes(permission)) return <Navigate to="/dashboard" replace />
   return children
 }
 
@@ -70,6 +81,15 @@ export default function App() {
           element={
             <RedirectIfAuthed>
               <LoginPage />
+            </RedirectIfAuthed>
+          }
+        />
+        {/* Staff and super admin sign in through their own door (see AuthController). */}
+        <Route
+          path="/staff/login"
+          element={
+            <RedirectIfAuthed>
+              <LoginPage portal="staff" />
             </RedirectIfAuthed>
           }
         />
@@ -114,15 +134,71 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/requests" element={<RequestsPage />} />
           {/* Officer */}
-          <Route path="/queue" element={<QueuePage />} />
-          <Route path="/queue/:id" element={<ReviewPage />} />
-          <Route path="/inspections" element={<InspectionsPage />} />
-          <Route path="/inspections/:id" element={<InspectionDetailPage />} />
+          <Route
+            path="/queue"
+            element={
+              <RequirePermission permission="application.review">
+                <QueuePage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/queue/:id"
+            element={
+              <RequirePermission permission="application.review">
+                <ReviewPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/inspections"
+            element={
+              <RequirePermission permission="inspection.manage">
+                <InspectionsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/inspections/:id"
+            element={
+              <RequirePermission permission="inspection.manage">
+                <InspectionDetailPage />
+              </RequirePermission>
+            }
+          />
           {/* Admin */}
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/admin/users" element={<UsersPage />} />
-          <Route path="/admin/owners" element={<OwnersPage />} />
-          <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
+          <Route
+            path="/analytics"
+            element={
+              <RequirePermission permission="analytics.view">
+                <AnalyticsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/users"
+            element={
+              <RequirePermission permission="user.manage">
+                <UsersPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/owners"
+            element={
+              <RequirePermission permission="owner.manage_status">
+                <OwnersPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/audit-logs"
+            element={
+              <RequirePermission permission="audit.view">
+                <AuditLogsPage />
+              </RequirePermission>
+            }
+          />
         </Route>
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
