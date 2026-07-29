@@ -10,19 +10,89 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Support\BusinessGrowthAnalytics;
+use App\Support\PdfFile;
+use App\Support\ProcessingTimeAnalytics;
+use App\Support\Spc;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Dashboard aggregates. Plain SQL/Eloquent only (guardrail: no R/Python).
+ * Dashboard aggregates. Plain SQL/Eloquent only (guardrail: no R/Python) —
+ * including Features 6 and 7, which used to live in the standalone r/ project.
+ * The statistics are ported into App\Support\Spc and computed here from the
+ * live register; nothing shells out to Rscript or calls the plumber API.
+ *
+ * Every route in this controller sits behind `analytics.view`, which only the
+ * super admin holds. That matters: these aggregates read every office's
+ * assignments, so exposing them to an office reviewer would hand them a summary
+ * of filings ApplicationVisibility deliberately keeps out of their queue.
  */
 class AnalyticsController extends Controller
 {
     public function summary(): JsonResponse
     {
         return response()->json(['data' => $this->buildSummary()]);
+    }
+
+    /** Feature 7: per-department control charts over weekly review turnaround. */
+    public function processingTime(Request $request): JsonResponse
+    {
+        return response()->json(['data' => ProcessingTimeAnalytics::build($this->weeks($request))]);
+    }
+
+    /** Printable Permit Processing Time Monitoring report. */
+    public function processingTimeReport(Request $request): Response
+    {
+        $data = ProcessingTimeAnalytics::build($this->weeks($request));
+
+        $pdf = Pdf::loadView('pdf.processing-time-report', [
+            'report' => $data,
+            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+        ])->setPaper('a4');
+
+        // Render once: a second ->output() corrupts the font streams (see PdfFile).
+        return PdfFile::render($pdf)->download('processing-time-monitoring.pdf');
+    }
+
+    /** Feature: business growth analysis over the register. */
+    public function businessGrowth(Request $request): JsonResponse
+    {
+        return response()->json(['data' => BusinessGrowthAnalytics::build($this->months($request))]);
+    }
+
+    /** Printable Business Growth Analysis report. */
+    public function businessGrowthReport(Request $request): Response
+    {
+        $data = BusinessGrowthAnalytics::build($this->months($request));
+
+        $pdf = Pdf::loadView('pdf.business-growth-report', [
+            'report' => $data,
+            'generated_at' => Carbon::parse($data['generated_at'])->format('F j, Y g:i A'),
+        ])->setPaper('a4');
+
+        return PdfFile::render($pdf)->download('business-growth-analysis.pdf');
+    }
+
+    /** Chart window in weeks, clamped so a stray query string cannot scan the table. */
+    private function weeks(Request $request): int
+    {
+        $weeks = (int) $request->query('weeks', (string) ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS);
+
+        return max(Spc::MIN_COMPLETIONS_PER_WEEK, min(104, $weeks));
+    }
+
+    /** Growth period in months, clamped to a sane range. */
+    private function months(Request $request): int
+    {
+        $months = (int) $request->query('months', (string) BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS);
+
+        return max(1, min(36, $months));
     }
 
     /** CSV download of the summary (status counts, monthly, KPIs). */
