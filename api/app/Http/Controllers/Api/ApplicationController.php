@@ -63,6 +63,7 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
+            ...$this->feeProfileRules(),
         ]);
 
         $business = Business::findOrFail($data['business_id']);
@@ -86,6 +87,7 @@ class ApplicationController extends Controller
             'application_type' => $data['application_type'],
             'status' => ApplicationStatus::Draft,
             'prior_permit_id' => $data['prior_permit_id'] ?? null,
+            'fee_profile' => $data['fee_profile'] ?? null,
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
 
@@ -118,6 +120,7 @@ class ApplicationController extends Controller
             'business_id' => ['sometimes', 'exists:businesses,id'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
+            ...$this->feeProfileRules(),
         ]);
 
         if (isset($data['business_id'])) {
@@ -127,6 +130,9 @@ class ApplicationController extends Controller
         }
         if (isset($data['permit_type_ids'])) {
             $application->permitTypes()->sync($data['permit_type_ids']);
+        }
+        if (array_key_exists('fee_profile', $data)) {
+            $application->update(['fee_profile' => $data['fee_profile']]);
         }
 
         Audit::log('application.updated', $application);
@@ -237,5 +243,44 @@ class ApplicationController extends Controller
             return;
         }
         abort_unless($request->user()->hasPermission('application.view_all'), 403, 'You may not view this application.');
+    }
+
+    /**
+     * Fee-profile facts the revenue-code calculator consumes
+     * (docs/revenue-code-extract.md Appendix B; database/data/revenue_code/SCHEMA.md).
+     */
+    private function feeProfileRules(): array
+    {
+        return [
+            'fee_profile' => ['sometimes', 'nullable', 'array'],
+            'fee_profile.lines' => ['sometimes', 'array'],
+            // Ties a line back to the PSIC selection so reopened drafts restore.
+            'fee_profile.lines.*.psic_code_id' => ['nullable', 'integer'],
+            'fee_profile.lines.*.category' => ['required_with:fee_profile.lines', 'string', 'max:80'],
+            'fee_profile.lines.*.gross_sales' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.gross_sales' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.capitalization' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.floor_area_sqm' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.employees' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.storeys' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.doors' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.rooms' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.beds' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.stall_count' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.delivery_vehicles_motorized' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.delivery_vehicles_other' => ['nullable', 'integer', 'min:0'],
+            'fee_profile.construction_cost' => ['nullable', 'numeric', 'min:0'],
+            'fee_profile.business_structure' => ['nullable', 'in:sole_proprietorship,partnership,corporation,cooperative'],
+            'fee_profile.goods_class' => ['nullable', 'in:flammables,chemicals,dry_goods,perishables'],
+            'fee_profile.office_location' => ['nullable', 'in:within,outside'],
+            'fee_profile.warehouse_location' => ['nullable', 'in:within,outside'],
+            'fee_profile.factory_location' => ['nullable', 'in:within,outside'],
+            'fee_profile.property_use' => ['nullable', 'in:residential,non_residential'],
+            'fee_profile.building_type' => ['nullable', 'string', 'max:40'],
+            'fee_profile.occupancy_group' => ['nullable', 'string', 'max:20'],
+            'fee_profile.flags' => ['sometimes', 'array'],
+            'fee_profile.flags.*' => ['string', 'max:60'],
+        ];
     }
 }

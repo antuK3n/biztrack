@@ -10,13 +10,14 @@ import {
 } from '../../components/icons'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
+import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { admin, applications, assignments, documents } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { AdminUser, AppDocument, Application } from '../../lib/types'
+import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
 
 /*
  * Admin Review sheet (PDF p56, p67–p76): the officer reads the application as
@@ -239,6 +240,63 @@ function ReviewSkeleton() {
   )
 }
 
+/** "floor_area_sqm" / "floorAreaSqm" → "Floor Area Sqm". */
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Render an opaque office-form answer as display text. */
+function formValueText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.map((v) => formValueText(v)).join(', ')
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${humanizeKey(k)}: ${formValueText(v)}`)
+      .join(' · ')
+  }
+  return String(value)
+}
+
+const LOCATION_LABELS: Record<string, string> = {
+  within: 'Within the city',
+  outside: 'Outside the city',
+}
+
+/** Present fee-profile facts as labeled read-only values (absent fields skipped). */
+function feeProfileFacts(profile: FeeProfile): { label: string; value: string }[] {
+  const facts: { label: string; value: string }[] = []
+  const put = (label: string, value: string | null | undefined) => {
+    if (value) facts.push({ label, value })
+  }
+  const money = (n?: number) => (n == null ? null : formatMoney(n))
+  const count = (n?: number) => (n == null ? null : String(n))
+  put('Gross Sales (Preceding Year)', money(profile.gross_sales))
+  put('Capitalization', money(profile.capitalization))
+  put('Construction Cost', money(profile.construction_cost))
+  put('Floor Area', profile.floor_area_sqm == null ? null : `${profile.floor_area_sqm} sqm`)
+  put('Employees', count(profile.employees))
+  put('Storeys', count(profile.storeys))
+  put('Doors', count(profile.doors))
+  put('Rooms', count(profile.rooms))
+  put('Beds', count(profile.beds))
+  put('Market Stalls', count(profile.stall_count))
+  put('Delivery Vehicles (Motorized)', count(profile.delivery_vehicles_motorized))
+  put('Delivery Vehicles (Other)', count(profile.delivery_vehicles_other))
+  put('Business Structure', profile.business_structure ? humanizeKey(profile.business_structure) : null)
+  put('Goods Class', profile.goods_class ? humanizeKey(profile.goods_class) : null)
+  put('Office Location', profile.office_location ? LOCATION_LABELS[profile.office_location] : null)
+  put('Warehouse Location', profile.warehouse_location ? LOCATION_LABELS[profile.warehouse_location] : null)
+  put('Factory Location', profile.factory_location ? LOCATION_LABELS[profile.factory_location] : null)
+  put('Property Use', profile.property_use ? humanizeKey(profile.property_use) : null)
+  put('Occupancy Group', profile.occupancy_group ? profile.occupancy_group.toUpperCase() : null)
+  return facts
+}
+
 /** "24 Mabini Street" → { house: "24", street: "Mabini Street" }. */
 function splitLine1(line1: string | null | undefined): { house: string; street: string } {
   const raw = (line1 ?? '').trim()
@@ -317,6 +375,18 @@ export function ReviewPage() {
   const address = business.address ?? null
   const { house, street } = splitLine1(address?.line1)
   const officerName = data.officer?.name ?? data.department.name
+
+  // Submitted per-office form answers: the reviewing office's form(s) first.
+  const officeForms = [...(app.office_forms ?? [])].sort(
+    (a, b) =>
+      Number(b.department_code === data.department.code) -
+      Number(a.department_code === data.department.code),
+  )
+  const feeProfile = app.fee_profile ?? null
+  const feeFacts = feeProfile ? feeProfileFacts(feeProfile) : []
+  const feeLines = feeProfile?.lines ?? []
+  const feeFlags = feeProfile?.flags ?? []
+  const hasFeeDeclaration = feeFacts.length > 0 || feeLines.length > 0 || feeFlags.length > 0
 
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
@@ -548,6 +618,100 @@ export function ReviewPage() {
             )}
           </section>
 
+          {/* D — Submitted office-form answers (per permit type) */}
+          <section className="mt-9">
+            <SectionHeading letter="D">Office Form Answers</SectionHeading>
+            {officeForms.length === 0 ? (
+              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
+                The applicant did not fill any per-office forms for this application.
+              </p>
+            ) : (
+              officeForms.map((form, formIndex) => {
+                const entries = Object.entries(form.form_data ?? {})
+                const reviewingHere = form.department_code === data.department.code
+                return (
+                  <div key={form.permit_type_code ?? formIndex}>
+                    <div className={`mb-3 flex items-center gap-2 ${formIndex === 0 ? 'mt-1' : 'mt-6'}`}>
+                      <span className="h-4 w-1 rounded-full bg-royal" aria-hidden="true" />
+                      <h3 className="text-sm font-bold text-ink">
+                        {form.permit_type_name ?? form.permit_type_code}
+                      </h3>
+                      {reviewingHere && (
+                        <span className="rounded-md bg-royal-tint px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
+                          Your office
+                        </span>
+                      )}
+                    </div>
+                    {entries.length === 0 ? (
+                      <p className="text-sm text-ink-muted">No answers were recorded on this form.</p>
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {entries.map(([key, value]) => (
+                          <Field key={key} label={humanizeKey(key)} value={formValueText(value)} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </section>
+
+          {/* E — Applicant-declared fee inputs (revenue-code profile) */}
+          <section className="mt-9">
+            <SectionHeading letter="E">Fee Declaration</SectionHeading>
+            {!hasFeeDeclaration ? (
+              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
+                No fee declaration was submitted with this application.
+              </p>
+            ) : (
+              <>
+                {feeLines.length > 0 && (
+                  <div className="space-y-4">
+                    {feeLines.map((line, i) => (
+                      <div key={i} className="grid gap-4 sm:grid-cols-3">
+                        <Field
+                          label={`Business Category ${feeLines.length > 1 ? i + 1 : ''}`.trim()}
+                          value={humanizeKey(line.category)}
+                        />
+                        <Field
+                          label="Gross Sales (Preceding Year)"
+                          value={line.gross_sales == null ? '' : formatMoney(line.gross_sales)}
+                        />
+                        <Field
+                          label="Capitalization"
+                          value={line.capitalization == null ? '' : formatMoney(line.capitalization)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {feeFacts.length > 0 && (
+                  <div className={`grid gap-4 sm:grid-cols-3 ${feeLines.length > 0 ? 'mt-4' : ''}`}>
+                    {feeFacts.map((fact) => (
+                      <Field key={fact.label} label={fact.label} value={fact.value} />
+                    ))}
+                  </div>
+                )}
+                {feeFlags.length > 0 && (
+                  <div className="mt-4">
+                    <FieldLabel>Declared Flags</FieldLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {feeFlags.map((flag) => (
+                        <span
+                          key={flag}
+                          className="rounded-md bg-canvas px-2.5 py-1 text-xs font-semibold text-ink-secondary"
+                        >
+                          {humanizeKey(flag)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
           {/* Consent note (p72) */}
           <div className="mt-6 rounded-md border border-s-green bg-s-green-tint px-4 py-3">
             <p className="flex items-center gap-2 text-sm font-bold text-s-green">
@@ -660,6 +824,22 @@ export function ReviewPage() {
               </label>
             </div>
           </div>
+
+          {/* Itemized Tax Order of Payment (revenue-code assessment) */}
+          {(app.fee_assessment?.line_items?.length ?? 0) > 0 && (
+            <div className="mt-6 rounded-lg border border-line bg-white px-5 py-5">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
+                Tax Order of Payment
+              </p>
+              <div className="mt-4">
+                <TaxOrderBreakdown fee={app.fee_assessment} showCitations />
+              </div>
+              <div className="mt-4 flex items-baseline justify-between border-t border-ink/40 pt-3 text-base font-bold text-ink">
+                <span>Total Amount</span>
+                <span className="tnum">{formatMoney(app.fee_assessment?.total_amount)}</span>
+              </div>
+            </div>
+          )}
 
           {/* Assign officer (oic.assign) — v2 */}
           {canAssign && !decided && (

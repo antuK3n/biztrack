@@ -165,14 +165,82 @@ export interface AppDocument {
   download_url: string
 }
 
+/**
+ * One Tax Order of Payment line. Legacy assessments carry only
+ * { label, amount }; revenue-code assessments add the citation fields
+ * (code/office/group/section/source), the requires_officer marker for
+ * lines finalized during review, and any computed defects. Render
+ * defensively — every field beyond label/amount may be absent.
+ */
 export interface FeeLineItem {
   label: string
-  amount: string
+  amount: string | number
+  code?: string
+  /** Collecting office: BPLO, CTO, CHO, CENRO, OBO, BFP, CMO-MARKET. */
+  office?: string
+  group?: string
+  /** Revenue-code citation, e.g. "Sec. 2A.01". */
+  section?: string
+  /** Legal source, e.g. "Ord. A10-2016". */
+  source?: string
+  /** True when an officer must complete this line during review. */
+  requires_officer?: boolean
+  defects?: string[] | null
 }
 
 export interface FeeAssessment {
   line_items: FeeLineItem[]
   total_amount: string
+}
+
+/* ── Fee profile (revenue-code inputs; draft applications only) ────────── */
+
+export interface FeeProfileLine {
+  /** Ties the line back to the Part 2 PSIC selection (draft restore). */
+  psic_code_id?: number
+  /** Revenue-code business category slug (e.g. retailer, carinderia). */
+  category: string
+  /** Preceding-calendar-year gross sales (renewals). */
+  gross_sales?: number
+  /** Initial capital (new businesses). */
+  capitalization?: number
+}
+
+export type BusinessStructure =
+  | 'sole_proprietorship'
+  | 'partnership'
+  | 'corporation'
+  | 'cooperative'
+
+/**
+ * Applicant-declared inputs the API's FeeCalculator uses to compute the
+ * itemized Tax Order of Payment from the Malabon Revenue Code. All fields
+ * optional; sent on POST/PUT /applications while the draft is editable.
+ */
+export interface FeeProfile {
+  lines?: FeeProfileLine[]
+  gross_sales?: number
+  capitalization?: number
+  floor_area_sqm?: number
+  construction_cost?: number
+  employees?: number
+  storeys?: number
+  doors?: number
+  rooms?: number
+  beds?: number
+  stall_count?: number
+  delivery_vehicles_motorized?: number
+  delivery_vehicles_other?: number
+  business_structure?: BusinessStructure
+  goods_class?: 'flammables' | 'chemicals' | 'dry_goods' | 'perishables'
+  office_location?: 'within' | 'outside'
+  warehouse_location?: 'within' | 'outside'
+  factory_location?: 'within' | 'outside'
+  property_use?: 'residential' | 'non_residential'
+  /** Occupancy group slug: a1, a2, b, c, d, e, f, g, h, i, j1, j2. */
+  occupancy_group?: string
+  /** Feature flags, e.g. sells_liquor, has_signage, no_gross_sales_declared. */
+  flags?: string[]
 }
 
 export type PaymentMethod = 'gcash' | 'maya' | 'card'
@@ -248,8 +316,14 @@ export interface Permit {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /** Full resource embeds the complete business (address + lines). */
+  business: Business
   documents: AppDocument[]
   fee_assessment: FeeAssessment | null
+  /** Applicant-declared revenue-code inputs (null when never filled). */
+  fee_profile?: FeeProfile | null
+  /** Submitted per-office form payloads (full application payload). */
+  office_forms?: OfficeForm[]
   payments: Payment[]
   assignments: Assignment[]
   inspections: Inspection[]
@@ -396,6 +470,10 @@ export interface AdminBusiness {
 /** Opaque free-form JSON keyed by permit type; stored verbatim by the API. */
 export interface OfficeForm {
   permit_type_code: string
+  /** Present on the full application payload (officer review). */
+  permit_type_name?: string
+  /** Issuing department code (BPLO, CHO, BFP, ...) on the full payload. */
+  department_code?: string
   form_data: Record<string, unknown>
 }
 

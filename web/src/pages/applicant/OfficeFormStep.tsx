@@ -24,7 +24,7 @@ export const OFFICE_FORM_META: Record<
   SANITARY: {
     kicker: 'City Health Office · Sanitation Division',
     title: 'Application for Sanitary Permit to Operate',
-    ref: 'Pursuant to PD 856 — Code on Sanitation of the Philippines',
+    ref: 'Pursuant to PD 856, Code on Sanitation of the Philippines',
   },
   CEC: {
     kicker: 'City Environmental & Natural Resources Office',
@@ -48,16 +48,53 @@ export function hasOfficeForm(code: string): code is OfficeFormCode {
   return (OFFICE_FORM_CODES as readonly string[]).includes(code)
 }
 
+/** Today as a local-timezone YYYY-MM-DD string (input[type=date] max). */
+export function todayISO(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/**
+ * Required-field check per office form. Returns the labels still missing (or
+ * invalid) so the wizard can disable Next and list what is left. Counts and
+ * reference numbers stay optional; only the core decisions are required.
+ */
+export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): string[] {
+  const has = (key: string) => typeof data[key] === 'string' && (data[key] as string).trim() !== ''
+  const missing: string[] = []
+  if (code === 'SANITARY') {
+    if (!has('application_type')) missing.push('Type of Application')
+    if (!has('sanitary_classification')) missing.push('Sanitary Classification')
+  }
+  if (code === 'CEC') {
+    if (!has('application_type')) missing.push('Type of Application')
+    if (has('owner_birthday') && (data.owner_birthday as string) >= todayISO()) {
+      missing.push('Owner birthday must be a past date')
+    }
+  }
+  if (code === 'FSIC') {
+    if (!has('certificate_applied_for')) missing.push('Certificate Applied For')
+  }
+  if (code === 'OCCUPANCY') {
+    if (!has('application_type')) missing.push('Application Type')
+  }
+  return missing
+}
+
 /* ── Shared field primitives (prototype chip pills, read-only control no.) ── */
 
 /** Royal square with white section letter, matching the wizard's SectionMarker. */
-function SectionMarker({ letter, label }: { letter: string; label: string }) {
+function SectionMarker({ letter, label, required }: { letter: string; label: string; required?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
       <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-royal text-[13px] font-bold text-white">
         {letter}
       </span>
-      <h2 className="text-[15px] font-bold text-ink">{label}</h2>
+      <h2 className="text-[15px] font-bold text-ink">
+        {label}
+        {required && <span className="text-s-red"> *</span>}
+      </h2>
     </div>
   )
 }
@@ -280,22 +317,36 @@ function CecFields({
         </div>
         <div className="sm:w-1/2 sm:pr-2.5">
           <FieldLabel>Birthday of Owner</FieldLabel>
+          {/* Birthdays can never be in the future: capped here and re-checked by the API. */}
           <input
             type="date"
+            max={todayISO()}
             value={get(data, 'owner_birthday')}
             onChange={(e) => set('owner_birthday', e.target.value)}
             className={inputCls}
+            aria-invalid={get(data, 'owner_birthday') !== '' && get(data, 'owner_birthday') >= todayISO()}
           />
+          {get(data, 'owner_birthday') !== '' && get(data, 'owner_birthday') >= todayISO() && (
+            <p className="mt-1 text-xs font-medium text-s-red">
+              The birthday must be a date in the past.
+            </p>
+          )}
         </div>
       </section>
     </div>
   )
 }
 
+/*
+ * "Certificate Applied For" stays applicant-side on purpose: verified against
+ * the standard BFP FSIC application form (BFP-QSF-FSED-002), where the
+ * applicant ticks FSEC vs FSIC-new vs FSIC-renewal. It is the applicant's
+ * decision, not the issuing office's.
+ */
 const FSIC_CERTIFICATES = [
   'FSIC for Certificate of Occupancy',
-  'FSIC for Business Permit — For New Business',
-  'FSIC for Business Permit — For Renewal of Business',
+  'FSIC for Business Permit (New Business)',
+  'FSIC for Business Permit (Renewal of Business)',
 ]
 
 function FsicFields({
@@ -332,7 +383,7 @@ function FsicFields({
       </section>
 
       <section className="space-y-4">
-        <SectionMarker letter="B" label="Certificate Applied For" />
+        <SectionMarker letter="B" label="Certificate Applied For" required />
         <p className="-mt-2 text-xs text-ink-muted">Select one.</p>
         <ChipList
           options={FSIC_CERTIFICATES}
@@ -364,15 +415,11 @@ function OccupancyFields({
               onChange={(v) => set('application_type', v)}
             />
           </div>
-          <div>
-            <FieldLabel>Application Date</FieldLabel>
-            <input
-              type="date"
-              value={get(data, 'application_date')}
-              onChange={(e) => set('application_date', e.target.value)}
-              className={inputCls}
-            />
-          </div>
+          {/*
+           * No applicant-entered dates here: the application date comes from
+           * submitted_at server-side, and "Date Issued" values are recorded by
+           * the issuing office at issuance. The API also strips these keys.
+           */}
           <div>
             <FieldLabel>Building Permit No.</FieldLabel>
             <input
@@ -382,28 +429,10 @@ function OccupancyFields({
             />
           </div>
           <div>
-            <FieldLabel>Building Permit — Date Issued</FieldLabel>
-            <input
-              type="date"
-              value={get(data, 'building_permit_date')}
-              onChange={(e) => set('building_permit_date', e.target.value)}
-              className={inputCls}
-            />
-          </div>
-          <div>
             <FieldLabel>FSEC No.</FieldLabel>
             <input
               value={get(data, 'fsec_no')}
               onChange={(e) => set('fsec_no', e.target.value)}
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <FieldLabel>FSEC — Date Issued</FieldLabel>
-            <input
-              type="date"
-              value={get(data, 'fsec_date')}
-              onChange={(e) => set('fsec_date', e.target.value)}
               className={inputCls}
             />
           </div>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
@@ -24,9 +24,18 @@ import {
   OFFICE_FORM_CODES,
   OfficeFormSheet,
   hasOfficeForm,
+  officeFormMissing,
   type OfficeFormCode,
   type OfficeFormData,
 } from './OfficeFormStep'
+import {
+  EMPTY_FEE_PROFILE,
+  FeeProfileStep,
+  buildFeeProfile,
+  feeProfileMissing,
+  feeProfileToDraft,
+  type FeeProfileDraft,
+} from './FeeProfileStep'
 import type {
   ApplicationType,
   Barangay,
@@ -34,26 +43,50 @@ import type {
   BusinessPayload,
   DocumentType,
   OcrSuggestions,
-  PermitType,
   PsicCode,
 } from '../../lib/types'
 
 /*
  * Prototype-fidelity wizard (PDF p26–47): persistent draft chrome (clipboard +
- * title + "All Changes Saved" cloud + Clear All), bottom bar with royal pill
- * Next/Submit + green "Part n of 8" progress, zoning map step, white form
- * sheets with lettered sections, dashed upload bars + Data Privacy Consent,
- * serif "LGU Section" permit cards, CONFIRMATION modal before submit.
- * The working steps/data/submit flow is unchanged — only the framing is new.
+ * title + saved cloud + Clear All), bottom bar with royal pill Next/Submit +
+ * green "Part n of N" progress, zoning map step, white form sheets with
+ * lettered sections, dashed upload bars + Data Privacy Consent, serif
+ * "LGU Section" permit cards, CONFIRMATION modal before submit.
+ *
+ * Flow rework (user testing): the applicant picks permit types FIRST, and the
+ * wizard then shows the COMPLETE map of every section that application will
+ * require, upfront and navigable, like the paper form's fixed sections. No
+ * section ever appears for the first time mid-flow.
  */
 
 /*
- * Base wizard phases. Per-office form steps (SANITARY/CEC/FSIC/OCCUPANCY) are
- * inserted dynamically between Permits and Documents, so the running sequence
- * and the "Part n of N" count adjust to the selected inspection-office permits.
+ * Base wizard phases. Permits come first (the one choice that shapes the
+ * form), then the fixed sections. Per-office form steps (SANITARY/CEC/FSIC/
+ * OCCUPANCY) are inserted after Location & Zoning, so the full sequence is
+ * known the moment permits are picked.
  */
-type BasePhase = 'business' | 'lines' | 'address' | 'permits' | 'documents' | 'review'
-const BASE_PHASES: BasePhase[] = ['business', 'lines', 'address', 'permits', 'documents', 'review']
+type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'fees' | 'review'
+const BASE_PHASES: BasePhase[] = ['permits', 'business', 'lines', 'address', 'documents', 'fees', 'review']
+
+const BASE_LABELS: Record<BasePhase, string> = {
+  permits: 'Permits & Certificates',
+  business: 'Business Information',
+  lines: 'Line of Business',
+  address: 'Location & Zoning',
+  documents: 'Documentary Requirements',
+  fees: 'Business & Tax Profile',
+  review: 'Review & Submit',
+}
+
+const OFFICE_LABELS: Record<OfficeFormCode, string> = {
+  SANITARY: 'Sanitary Permit Form',
+  CEC: 'Environmental Clearance Form',
+  FSIC: 'Fire Safety (FSIC) Form',
+  OCCUPANCY: 'Occupancy Permit Form',
+}
+
+/** Document-type code for the repeatable "Other Requirements" uploads. */
+const OTHER_DOC_CODE = 'OTHER'
 
 /** A single running step: either a base phase or one office form sheet. */
 type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
@@ -107,6 +140,17 @@ const REGISTRATION_TYPES = [
   { value: 'cooperative', label: 'Cooperative' },
 ]
 
+/**
+ * Philippine TIN: 9 digits (individual) or 12 digits (with branch code),
+ * optionally hyphen-grouped in threes, e.g. 123-456-789 or 123-456-789-000.
+ * Mirrored by the API's regex rule on POST/PUT /businesses.
+ */
+function tinValid(raw: string): boolean {
+  return /^\d{3}-?\d{3}-?\d{3}(-?\d{3})?$/.test(raw.trim())
+}
+
+const TIN_ERROR = 'Enter a valid TIN: 9 or 12 digits, like 123-456-789 or 123-456-789-000.'
+
 /* ── Small prototype glyphs ───────────────────────────────────────────── */
 
 function CloudSavedIcon({ size = 26 }: { size?: number }) {
@@ -154,7 +198,12 @@ function FormSheet({
   )
 }
 
-/* ── PSIC picker (Part 2) ─────────────────────────────────────────────── */
+/* ── PSIC picker (Line of Business) ───────────────────────────────────── */
+/*
+ * "Does Line of Business have choices?" Yes: this is a searchable picklist of
+ * the seeded PSIC codes (reference/psic-codes), never free text. The separate
+ * fee-profile category field stays a datalist by design.
+ */
 function LinesStep({
   codes,
   lines,
@@ -277,21 +326,14 @@ function LinesStep({
   )
 }
 
-/* ── Requirements helper ──────────────────────────────────────────────── */
-function requiredDocsFor(permitTypes: PermitType[], selectedIds: number[]): DocumentType[] {
-  const map = new Map<number, DocumentType>()
-  permitTypes
-    .filter((pt) => selectedIds.includes(pt.id))
-    .forEach((pt) => pt.document_types.forEach((dt) => map.set(dt.id, dt)))
-  return [...map.values()]
-}
-
 export function ApplyWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const rawType = searchParams.get('type')
-  const applicationType: ApplicationType =
-    rawType === 'renewal' || rawType === 'amendment' ? rawType : 'new'
+  // Draft reopening (?draft=ID) may override the type once the draft loads.
+  const [applicationType, setApplicationType] = useState<ApplicationType>(
+    rawType === 'renewal' || rawType === 'amendment' ? rawType : 'new',
+  )
   const typeMeta = TYPE_META[applicationType]
 
   const isReuse = applicationType === 'renewal' || applicationType === 'amendment'
@@ -303,12 +345,17 @@ export function ApplyWizard() {
   const zoningDenied = searchParams.get('zoning') === 'deny'
 
   const [step, setStep] = useState(0)
+  // Highest step index the applicant has reached; the map is clickable up to here.
+  const [maxVisited, setMaxVisited] = useState(0)
   const [form, setForm] = useState<FormState>(EMPTY)
   // Per-office form payloads keyed by permit-type code (prototype Parts 4-7).
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
-  const [errors, setErrors] = useState<Record<string, string>>({})
+  // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
+  const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [draftNote, setDraftNote] = useState<string | null>(null)
 
   // Renewal/amendment prefill (v2): reuse an existing business + link prior permit.
   const [prefillBusinessId, setPrefillBusinessId] = useState<number | null>(null)
@@ -325,9 +372,12 @@ export function ApplyWizard() {
     [isReuse],
   )
 
-  // Created draft ids (populated once we reach the documents step).
+  // Persisted draft ids (business + application) once the draft exists.
+  const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
   const [uploaded, setUploaded] = useState<Record<number, { name: string; size: number }>>({})
+  // "Other Requirements" allows multiple files (repeatable uploads).
+  const [otherDocs, setOtherDocs] = useState<{ name: string; size: number }[]>([])
   const [uploadingType, setUploadingType] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
 
@@ -335,8 +385,6 @@ export function ApplyWizard() {
   const [showClear, setShowClear] = useState(false)
   const [showZoning, setShowZoning] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
-  const [submissionFor, setSubmissionFor] = useState<PermitType | null>(null)
-  const [submissionFile, setSubmissionFile] = useState<string | null>(null)
   const [consent, setConsent] = useState(false)
 
   const refs = useAsync(
@@ -344,30 +392,37 @@ export function ApplyWizard() {
       barangays: await reference.barangays(),
       psic: await reference.psicCodes(),
       permitTypes: await reference.permitTypes(),
+      documentTypes: await reference.documentTypes(),
     }),
     [],
   )
 
+  const draftIdParam = searchParams.get('draft')
+  const [hydrating, setHydrating] = useState<boolean>(Boolean(draftIdParam))
+  const hydratedRef = useRef(false)
+
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
-    if (errors[key as string]) setErrors((e) => ({ ...e, [key as string]: '' }))
   }
 
+  const touch = (key: string) => setTouched((t) => ({ ...t, [key]: true }))
+
   /** Renewal/amendment: pull the prior permit + prefill fields for a business. */
-  async function selectBusinessForReuse(businessId: number | null) {
-    setPrefillBusinessId(businessId)
+  async function selectBusinessForReuse(selectedId: number | null) {
+    setPrefillBusinessId(selectedId)
     setPriorPermitId(null)
     setPrefillNote(null)
-    if (!businessId) {
-      setForm(EMPTY)
+    if (!selectedId) {
+      // Keep the permit selection: the section map never changes mid-flow.
+      setForm((f) => ({ ...EMPTY, permit_type_ids: f.permit_type_ids }))
       return
     }
     setPrefilling(true)
     setSubmitError(null)
     try {
-      const result = await businesses.prefill(businessId, applicationType as 'renewal' | 'amendment')
+      const result = await businesses.prefill(selectedId, applicationType as 'renewal' | 'amendment')
       const b = result.business
-      setForm({
+      setForm((f) => ({
         name: b.name,
         trade_name: b.trade_name ?? '',
         registration_type: b.registration_type ?? '',
@@ -382,8 +437,10 @@ export function ApplyWizard() {
           psic_code_id: l.psic_code.id,
           capitalization: l.capitalization ?? '',
         })),
-        permit_type_ids: result.suggested_permit_type_ids,
-      })
+        // The permits picked in Part 1 win; suggestions only fill a blank choice.
+        permit_type_ids:
+          f.permit_type_ids.length > 0 ? f.permit_type_ids : result.suggested_permit_type_ids,
+      }))
       setPriorPermitId(result.last_permit?.id ?? null)
       if (result.last_permit) {
         setPrefillNote(`Prefilled from your last permit ${result.last_permit.permit_number}.`)
@@ -408,71 +465,202 @@ export function ApplyWizard() {
     setOcr(null)
   }
 
-  function validateStep(): boolean {
-    const next: Record<string, string> = {}
-    if (phase === 'business') {
-      if (!form.name.trim()) next.name = 'Enter your business name.'
-    }
-    if (phase === 'lines' && form.lines.length === 0) next.lines = 'Pick at least one line of business.'
-    if (phase === 'address') {
-      if (!form.line1.trim()) next.line1 = 'Enter your street address.'
-      if (!form.barangay_id) next.barangay_id = 'Choose your barangay.'
-    }
-    if (phase === 'permits' && form.permit_type_ids.length === 0)
-      next.permit_type_ids = 'Apply for at least one permit.'
-    setErrors(next)
-    return Object.keys(next).length === 0
-  }
+  const permitTypes = refs.data?.permitTypes ?? []
+  const barangays: Barangay[] = refs.data?.barangays ?? []
+  const psic: PsicCode[] = refs.data?.psic ?? []
+  const otherType: DocumentType | undefined = (refs.data?.documentTypes ?? []).find(
+    (dt) => dt.code === OTHER_DOC_CODE,
+  )
+  const requiredDocs = useMemo(() => {
+    const map = new Map<number, DocumentType>()
+    permitTypes
+      .filter((pt) => form.permit_type_ids.includes(pt.id))
+      .forEach((pt) => pt.document_types.forEach((dt) => map.set(dt.id, dt)))
+    return [...map.values()]
+  }, [permitTypes, form.permit_type_ids])
+  const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
 
-  /* Persist business + application draft once, when leaving the permits step. */
-  async function ensureDraft(): Promise<number | null> {
-    if (applicationId) return applicationId
-    setSaving(true)
-    setSubmitError(null)
-    try {
-      const payload: BusinessPayload = {
-        name: form.name.trim(),
-        trade_name: form.trade_name.trim() || undefined,
-        registration_type: form.registration_type || undefined,
-        registration_number: form.registration_number.trim() || undefined,
-        tin: form.tin.trim() || undefined,
-        address: {
-          line1: form.line1.trim(),
-          line2: form.line2.trim() || undefined,
-          barangay_id: Number(form.barangay_id),
-          latitude: form.latitude ?? undefined,
-          longitude: form.longitude ?? undefined,
-        },
-        lines: form.lines.map((l) => ({
-          psic_code_id: l.psic_code_id,
-          capitalization: l.capitalization.trim() || undefined,
-        })),
+  /*
+   * Codes of the selected inspection-office permits that have a prototype form,
+   * in the canonical office order (SANITARY, CEC, FSIC, OCCUPANCY). Each gets
+   * its own step, and all of them show in the map the moment they are picked.
+   */
+  const selectedOfficeCodes: OfficeFormCode[] = useMemo(() => {
+    const chosen = new Set(
+      permitTypes.filter((pt) => form.permit_type_ids.includes(pt.id)).map((pt) => pt.code),
+    )
+    return OFFICE_FORM_CODES.filter((c) => chosen.has(c))
+  }, [permitTypes, form.permit_type_ids])
+
+  /*
+   * Full step sequence, fixed from the moment permits are chosen (step 1).
+   * Office forms slot in after Location & Zoning. Because permits are the
+   * first choice, no section ever appears for the first time mid-flow.
+   */
+  const sequence: StepNode[] = useMemo(() => {
+    const nodes: StepNode[] = []
+    for (const p of BASE_PHASES) {
+      nodes.push({ kind: 'base', phase: p })
+      if (p === 'address') {
+        for (const code of selectedOfficeCodes) nodes.push({ kind: 'office', code })
       }
-      // Renewal/amendment reuse the chosen existing business; new applications
-      // create one inline.
-      const businessId = prefillBusinessId ?? (await businesses.create(payload)).id
-      const app = await applications.create({
-        business_id: businessId,
-        application_type: applicationType,
-        permit_type_ids: form.permit_type_ids,
-        ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
-      })
-      setApplicationId(app.id)
-      return app.id
-    } catch (err) {
-      setSubmitError(toApiError(err).message)
-      return null
-    } finally {
-      setSaving(false)
+    }
+    return nodes
+  }, [selectedOfficeCodes])
+
+  const totalParts = sequence.length
+  const stepIndex = Math.min(step, sequence.length - 1)
+  const node = sequence[stepIndex]
+  const phase: BasePhase | null = node.kind === 'base' ? node.phase : null
+  const officeCode: OfficeFormCode | null = node.kind === 'office' ? node.code : null
+  const isLast = stepIndex === sequence.length - 1
+
+  /* Keep the visited pointer valid if the permit selection shrinks. */
+  useEffect(() => {
+    setMaxVisited((m) => Math.min(m, sequence.length - 1))
+  }, [sequence.length])
+
+  const feeLines = useMemo(
+    () =>
+      form.lines.map((l) => ({
+        id: l.psic_code_id,
+        title: psic.find((c) => c.id === l.psic_code_id)?.title ?? `PSIC #${l.psic_code_id}`,
+      })),
+    [form.lines, psic],
+  )
+
+  /*
+   * Required fields still missing on the CURRENT step. Next stays disabled
+   * until this is empty; the list doubles as the "what's left" summary.
+   */
+  const stepMissing: string[] = useMemo(() => {
+    if (node.kind === 'office') return officeFormMissing(node.code, officeData[node.code] ?? {})
+    switch (node.phase) {
+      case 'permits':
+        return form.permit_type_ids.length > 0 ? [] : ['Select at least one permit or certificate']
+      case 'business': {
+        const missing: string[] = []
+        if (!form.name.trim()) missing.push('Business Name')
+        if (form.tin.trim() && !tinValid(form.tin)) missing.push('A valid TIN (9 or 12 digits)')
+        return missing
+      }
+      case 'lines':
+        return form.lines.length > 0 ? [] : ['Select at least one line of business']
+      case 'address': {
+        const missing: string[] = []
+        if (!form.line1.trim()) missing.push('House No. & Street Name')
+        if (!form.barangay_id) missing.push('Barangay')
+        return missing
+      }
+      case 'documents': {
+        const missing = requiredDocs
+          .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
+          .map((dt) => dt.name)
+        if (!consent) missing.push('Data Privacy Consent')
+        return missing
+      }
+      case 'fees':
+        return feeProfileMissing(feeDraft, { applicationType, lines: feeLines })
+      case 'review':
+        return []
+    }
+  }, [node, form, officeData, requiredDocs, uploaded, consent, feeDraft, applicationType, feeLines])
+
+  const fieldErrors = {
+    name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
+    tin: form.tin.trim() && !tinValid(form.tin) ? TIN_ERROR : '',
+    line1: touched.line1 && !form.line1.trim() ? 'Enter your street address.' : '',
+    barangay_id: touched.barangay_id && !form.barangay_id ? 'Choose your barangay.' : '',
+  }
+
+  function businessPayload(): BusinessPayload {
+    return {
+      name: form.name.trim(),
+      trade_name: form.trade_name.trim() || undefined,
+      registration_type: form.registration_type || undefined,
+      registration_number: form.registration_number.trim() || undefined,
+      tin: form.tin.trim() || undefined,
+      address: {
+        line1: form.line1.trim(),
+        line2: form.line2.trim() || undefined,
+        barangay_id: Number(form.barangay_id),
+        latitude: form.latitude ?? undefined,
+        longitude: form.longitude ?? undefined,
+      },
+      lines: form.lines.map((l) => ({
+        psic_code_id: l.psic_code_id,
+        capitalization: l.capitalization.trim() || undefined,
+      })),
     }
   }
 
-  /** Persist the current office-form step's opaque JSON (draft/returned only). */
-  async function saveOfficeForm(id: number, code: OfficeFormCode): Promise<boolean> {
+  /**
+   * Create the business + application draft if it does not exist yet (throws
+   * on API errors so callers surface one message). Reused businesses get their
+   * edited fields pushed at the same time.
+   */
+  async function ensureDraftRaw(): Promise<number> {
+    if (applicationId) return applicationId
+    let bid = businessId ?? prefillBusinessId
+    if (!bid) {
+      bid = (await businesses.create(businessPayload())).id
+    } else {
+      await businesses.update(bid, businessPayload())
+    }
+    setBusinessId(bid)
+    const app = await applications.create({
+      business_id: bid,
+      application_type: applicationType,
+      permit_type_ids: form.permit_type_ids,
+      ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
+    })
+    setApplicationId(app.id)
+    return app.id
+  }
+
+  /**
+   * Persist whatever the CURRENT step owns before leaving it, so every Next
+   * (and every map jump) saves: permit selection, business fields, office
+   * forms, and the fee profile all round-trip through the API.
+   */
+  async function persistOnLeave(): Promise<boolean> {
     setSaving(true)
     setSubmitError(null)
     try {
-      await officeForms.save(id, code, officeData[code] ?? {})
+      if (officeCode) {
+        const id = await ensureDraftRaw()
+        await officeForms.save(id, officeCode, officeData[officeCode] ?? {})
+      } else if (phase === 'permits') {
+        // Re-sync permits on an existing draft; otherwise the office forms
+        // 422 with "not part of this application" (the bug behind "no form
+        // is presented once a certificate is clicked").
+        if (applicationId) {
+          await applications.update(applicationId, { permit_type_ids: form.permit_type_ids })
+        }
+      } else if (phase === 'business' || phase === 'lines') {
+        if (applicationId) {
+          const bid = businessId ?? prefillBusinessId
+          if (bid) await businesses.update(bid, businessPayload())
+        }
+      } else if (phase === 'address') {
+        if (applicationId) {
+          const bid = businessId ?? prefillBusinessId
+          if (bid) await businesses.update(bid, businessPayload())
+        } else {
+          await ensureDraftRaw()
+        }
+      } else if (phase === 'fees') {
+        const id = await ensureDraftRaw()
+        await applications.update(id, {
+          fee_profile: buildFeeProfile(feeDraft, {
+            applicationType,
+            permitCodes: permitTypes
+              .filter((pt) => form.permit_type_ids.includes(pt.id))
+              .map((pt) => pt.code),
+            lineIds: form.lines.map((l) => l.psic_code_id),
+          }),
+        })
+      }
       return true
     } catch (err) {
       setSubmitError(toApiError(err).message)
@@ -483,23 +671,15 @@ export function ApplyWizard() {
   }
 
   async function advance() {
-    // Leaving Permits → first office form (or Documents): persist the draft first.
-    if (phase === 'permits') {
-      const id = await ensureDraft()
-      if (!id) return
-    }
-    // Leaving an office-form step: PUT its payload before moving on.
-    if (officeCode) {
-      const id = applicationId ?? (await ensureDraft())
-      if (!id) return
-      const ok = await saveOfficeForm(id, officeCode)
-      if (!ok) return
-    }
-    setStep((s) => Math.min(s + 1, sequence.length - 1))
+    const ok = await persistOnLeave()
+    if (!ok) return
+    const target = Math.min(stepIndex + 1, sequence.length - 1)
+    setStep(target)
+    setMaxVisited((m) => Math.max(m, target))
   }
 
   async function next() {
-    if (!validateStep()) return
+    if (stepMissing.length > 0) return
     // Zoning result (p30) — presentational congratulations before leaving the map step.
     if (phase === 'address') {
       setShowZoning(true)
@@ -510,6 +690,66 @@ export function ApplyWizard() {
 
   function back() {
     setStep((s) => Math.max(s - 1, 0))
+  }
+
+  /** Jump to any already-visited section from the map (persisting first). */
+  async function goTo(index: number) {
+    if (saving || index === stepIndex || index > maxVisited) return
+    // Moving forward re-checks the current step exactly like Next would.
+    if (index > stepIndex && stepMissing.length > 0) return
+    const ok = await persistOnLeave()
+    if (!ok) return
+    setStep(index)
+  }
+
+  const canCreateDraft =
+    form.permit_type_ids.length > 0 &&
+    form.name.trim() !== '' &&
+    form.lines.length > 0 &&
+    form.line1.trim() !== '' &&
+    form.barangay_id !== ''
+
+  /** Explicit "Save draft": pushes every section entered so far in one go. */
+  async function saveDraft() {
+    setDraftNote(null)
+    setSubmitError(null)
+    if (!applicationId && !canCreateDraft) {
+      setDraftNote(
+        'To save a draft, first complete Permits & Certificates, Business Information, Line of Business, and Location & Zoning.',
+      )
+      return
+    }
+    setSaving(true)
+    try {
+      const hadDraft = applicationId !== null
+      const id = await ensureDraftRaw()
+      const feeProfile = buildFeeProfile(feeDraft, {
+        applicationType,
+        permitCodes: permitTypes
+          .filter((pt) => form.permit_type_ids.includes(pt.id))
+          .map((pt) => pt.code),
+        lineIds: form.lines.map((l) => l.psic_code_id),
+      })
+      if (hadDraft) {
+        const bid = businessId ?? prefillBusinessId
+        if (bid) await businesses.update(bid, businessPayload())
+        await applications.update(id, {
+          permit_type_ids: form.permit_type_ids,
+          fee_profile: feeProfile,
+        })
+      } else {
+        await applications.update(id, { fee_profile: feeProfile })
+      }
+      for (const code of selectedOfficeCodes) {
+        const data = officeData[code]
+        if (data && Object.keys(data).length > 0) await officeForms.save(id, code, data)
+      }
+      setDraftNote('Draft saved. You can pick it up anytime from your Drafts page.')
+    } catch (err) {
+      setSubmitError(toApiError(err).message)
+    } finally {
+      setSaving(false)
+    }
   }
 
   /** "Clear All" (p35) — clears the inputs for the current part only. */
@@ -527,12 +767,14 @@ export function ApplyWizard() {
       setForm((f) => ({ ...f, lines: [] }))
     } else if (phase === 'address') {
       setForm((f) => ({ ...f, line1: '', line2: '', barangay_id: '', latitude: null, longitude: null }))
-    } else if (phase === 'permits' && !applicationId) {
+    } else if (phase === 'permits') {
       setForm((f) => ({ ...f, permit_type_ids: [] }))
     } else if (phase === 'documents') {
       setConsent(false)
+    } else if (phase === 'fees') {
+      setFeeDraft(EMPTY_FEE_PROFILE)
     }
-    setErrors({})
+    setTouched({})
     setShowClear(false)
   }
 
@@ -554,6 +796,21 @@ export function ApplyWizard() {
     }
   }
 
+  /** "Other Requirements": each upload APPENDS, so multiple files are kept. */
+  async function handleOtherUpload(file: File) {
+    if (!applicationId || !otherType) return
+    setUploadingType(otherType.id)
+    setSubmitError(null)
+    try {
+      await documents.upload(applicationId, otherType.id, file)
+      setOtherDocs((d) => [...d, { name: file.name, size: file.size }])
+    } catch (err) {
+      setSubmitError(toApiError(err).message)
+    } finally {
+      setUploadingType(null)
+    }
+  }
+
   async function submit() {
     if (!applicationId) return
     setSaving(true)
@@ -568,42 +825,83 @@ export function ApplyWizard() {
     }
   }
 
-  const permitTypes = refs.data?.permitTypes ?? []
-  const barangays: Barangay[] = refs.data?.barangays ?? []
-  const psic: PsicCode[] = refs.data?.psic ?? []
-  const requiredDocs = requiredDocsFor(permitTypes, form.permit_type_ids)
-  const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
-
   /*
-   * Codes of the selected inspection-office permits that have a prototype form,
-   * in the canonical office order (SANITARY, CEC, FSIC, OCCUPANCY). Drives one
-   * office-form step each, inserted between Permits and Documents.
+   * Reopen a saved draft (?draft=ID): restore the business fields, permit
+   * selection, fee profile, uploaded documents, and make the whole section
+   * map navigable. Office-form payloads load in the effect below.
    */
-  const selectedOfficeCodes: OfficeFormCode[] = useMemo(() => {
-    const chosen = new Set(
-      permitTypes.filter((pt) => form.permit_type_ids.includes(pt.id)).map((pt) => pt.code),
-    )
-    return OFFICE_FORM_CODES.filter((c) => chosen.has(c))
-  }, [permitTypes, form.permit_type_ids])
-
-  /* Running step sequence: office forms slot in after the Permits phase. */
-  const sequence: StepNode[] = useMemo(() => {
-    const nodes: StepNode[] = []
-    for (const phase of BASE_PHASES) {
-      nodes.push({ kind: 'base', phase })
-      if (phase === 'permits') {
-        for (const code of selectedOfficeCodes) nodes.push({ kind: 'office', code })
+  useEffect(() => {
+    const draftId = Number(draftIdParam)
+    const refData = refs.data
+    if (!draftIdParam || Number.isNaN(draftId) || !refData || hydratedRef.current) return
+    hydratedRef.current = true
+    let active = true
+    ;(async () => {
+      try {
+        const app = await applications.get(draftId)
+        if (!active) return
+        if (app.status !== 'draft') {
+          navigate(`/applications/${app.id}`, { replace: true })
+          return
+        }
+        const pts = refData.permitTypes
+        const ids = pts
+          .filter((pt) => app.permit_types.some((p) => p.code === pt.code))
+          .map((pt) => pt.id)
+        const b = app.business
+        const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
+        setApplicationType(app.application_type)
+        setApplicationId(app.id)
+        setBusinessId(b.id)
+        if (app.application_type !== 'new') setPrefillBusinessId(b.id)
+        setForm({
+          name: b.name ?? '',
+          trade_name: b.trade_name ?? '',
+          registration_type: b.registration_type ?? '',
+          registration_number: b.registration_number ?? '',
+          tin: b.tin ?? '',
+          line1: b.address?.line1 ?? '',
+          line2: b.address?.line2 ?? '',
+          barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
+          latitude: b.address?.latitude ?? null,
+          longitude: b.address?.longitude ?? null,
+          lines: (b.lines ?? []).map((l) => ({
+            psic_code_id: l.psic_code.id,
+            capitalization: l.capitalization ?? '',
+          })),
+          permit_type_ids: ids,
+        })
+        setFeeDraft(feeProfileToDraft(app.fee_profile, lineIds))
+        // Restore uploaded documents by document-type code.
+        const codeToId = new Map<string, number>()
+        for (const dt of refData.documentTypes) codeToId.set(dt.code, dt.id)
+        const restored: Record<number, { name: string; size: number }> = {}
+        const others: { name: string; size: number }[] = []
+        for (const doc of app.documents ?? []) {
+          const code = doc.document_type?.code
+          if (!code) continue
+          if (code === OTHER_DOC_CODE) {
+            others.push({ name: doc.original_filename, size: doc.size_bytes })
+          } else {
+            const dtId = codeToId.get(code)
+            if (dtId != null) restored[dtId] = { name: doc.original_filename, size: doc.size_bytes }
+          }
+        }
+        setUploaded(restored)
+        setOtherDocs(others)
+        // Everything was visited when the draft was saved: open the whole map.
+        const officeCount = pts.filter((pt) => ids.includes(pt.id) && hasOfficeForm(pt.code)).length
+        setMaxVisited(BASE_PHASES.length + officeCount - 1)
+      } catch (err) {
+        if (active) setSubmitError(toApiError(err).message)
+      } finally {
+        if (active) setHydrating(false)
       }
+    })()
+    return () => {
+      active = false
     }
-    return nodes
-  }, [selectedOfficeCodes])
-
-  const totalParts = sequence.length
-  const stepIndex = Math.min(step, sequence.length - 1)
-  const node = sequence[stepIndex]
-  const phase: BasePhase | null = node.kind === 'base' ? node.phase : null
-  const officeCode: OfficeFormCode | null = node.kind === 'office' ? node.code : null
-  const isLast = stepIndex === sequence.length - 1
+  }, [draftIdParam, refs.data, navigate])
 
   /* Load any previously-saved office-form payloads once the draft exists. */
   useEffect(() => {
@@ -632,6 +930,34 @@ export function ApplyWizard() {
     }
   }, [applicationId])
 
+  /*
+   * Entering the Business & Tax Profile step: seed structure from the business
+   * section's registration type and per-line capitalization from the Line of
+   * Business step (once, without clobbering anything the user already typed).
+   */
+  useEffect(() => {
+    if (phase !== 'fees') return
+    setFeeDraft((d) => {
+      let nextDraft = d
+      if (!d.business_structure && form.registration_type) {
+        nextDraft = { ...nextDraft, business_structure: form.registration_type }
+      }
+      const categories = { ...nextDraft.categories }
+      let seeded = false
+      for (const line of form.lines) {
+        if (!categories[line.psic_code_id]) {
+          categories[line.psic_code_id] = {
+            category: '',
+            gross_sales: '',
+            capitalization: line.capitalization ?? '',
+          }
+          seeded = true
+        }
+      }
+      return seeded ? { ...nextDraft, categories } : nextDraft
+    })
+  }, [phase, form.registration_type, form.lines])
+
   /* Success screen after submit (kept). */
   if (tracking) {
     return (
@@ -658,7 +984,7 @@ export function ApplyWizard() {
     )
   }
 
-  if (refs.loading) {
+  if (refs.loading || hydrating) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-6 w-64" />
@@ -675,7 +1001,7 @@ export function ApplyWizard() {
   return (
     <div className="mx-auto max-w-5xl pb-4">
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
-      <div className="mb-6 flex items-center gap-4">
+      <div className="mb-5 flex items-center gap-4">
         <ClipboardIcon size={34} className="shrink-0 text-royal" />
         {form.name.trim() ? (
           <span className="truncate text-xl font-bold text-ink">{form.name}</span>
@@ -685,8 +1011,16 @@ export function ApplyWizard() {
           </span>
         )}
         <span className="ml-3 flex items-center gap-2">
-          <CloudSavedIcon />
-          <span className="text-xs italic text-ink-muted">All Changes Saved</span>
+          {saving ? (
+            <span className="text-xs italic text-ink-muted">Saving…</span>
+          ) : applicationId ? (
+            <>
+              <CloudSavedIcon />
+              <span className="text-xs italic text-ink-muted">Draft saved</span>
+            </>
+          ) : (
+            <span className="text-xs italic text-ink-muted">Not saved yet</span>
+          )}
         </span>
         <span className="flex-1" />
         <button
@@ -698,13 +1032,98 @@ export function ApplyWizard() {
         </button>
       </div>
 
+      {/* ── Full section map: every step this application requires ─────── */}
+      <ol className="mb-3 flex flex-wrap gap-2" aria-label="Application sections">
+        {sequence.map((n, i) => {
+          const label = n.kind === 'base' ? BASE_LABELS[n.phase] : OFFICE_LABELS[n.code]
+          const current = i === stepIndex
+          const reachable = i <= maxVisited
+          return (
+            <li key={n.kind === 'base' ? n.phase : n.code}>
+              <button
+                type="button"
+                onClick={() => void goTo(i)}
+                disabled={!reachable || current}
+                aria-current={current ? 'step' : undefined}
+                className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  current
+                    ? 'border-royal bg-royal text-white'
+                    : reachable
+                      ? 'border-royal/40 bg-white text-royal hover:bg-royal-tint'
+                      : 'border-input-border bg-white text-ink-muted'
+                }`}
+              >
+                <span className="tnum">{i + 1}</span>
+                {label}
+                {i < stepIndex && <CheckIcon size={12} />}
+              </button>
+            </li>
+          )
+        })}
+      </ol>
+      {phase === 'permits' && (
+        <p className="mb-5 text-xs text-ink-secondary">
+          This is the complete list of sections your application will go through, just like the
+          paper form. Selecting a certificate below adds its office form to the list right away,
+          never in the middle of the flow.
+        </p>
+      )}
+      {phase !== 'permits' && <div className="mb-5" />}
+
       {submitError && (
         <div className="mb-4">
           <Alert variant="error">{submitError}</Alert>
         </div>
       )}
 
-      {/* ── Part 1 · Business information (form sheet, p32) ────────────── */}
+      {/* ── Part 1 · LGU Section — permit type cards (p37) ─────────────── */}
+      {phase === 'permits' && (
+        <div>
+          <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Section</h1>
+          <div className="mb-6 h-px bg-ink/40" />
+          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            {permitTypes.map((pt) => {
+              const selected = form.permit_type_ids.includes(pt.id)
+              return (
+                <div key={pt.id} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
+                  <p className="text-lg font-bold leading-snug text-ink">{pt.name}</p>
+                  <p className="display-serif mt-2 text-sm italic text-ink-secondary">
+                    {pt.department.name}
+                  </p>
+                  {hasOfficeForm(pt.code) && (
+                    <p className="mt-2 text-xs text-ink-muted">
+                      Adds its own application form section above.
+                    </p>
+                  )}
+                  <div className="mt-5 flex flex-1 items-end">
+                    <button
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() =>
+                        update(
+                          'permit_type_ids',
+                          selected
+                            ? form.permit_type_ids.filter((id) => id !== pt.id)
+                            : [...form.permit_type_ids, pt.id],
+                        )
+                      }
+                      className={`w-full rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors ${
+                        selected
+                          ? 'border-2 border-royal bg-white text-royal'
+                          : 'bg-royal text-white hover:bg-royal-hover'
+                      }`}
+                    >
+                      {selected ? 'Applied ✓' : 'Apply'}
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Business information (form sheet, p32) ─────────────────────── */}
       {phase === 'business' && (
         <FormSheet meta={typeMeta}>
           <SectionMarker letter="A" label="Business Information & Registration" />
@@ -752,22 +1171,30 @@ export function ApplyWizard() {
                 <FieldLabel>Tax Identification Number (TIN)</FieldLabel>
                 <input
                   inputMode="numeric"
+                  maxLength={15}
+                  pattern="\d{3}-?\d{3}-?\d{3}(-?\d{3})?"
                   value={form.tin}
                   onChange={(e) => update('tin', e.target.value)}
-                  placeholder="000-000-000-000"
+                  onBlur={() => touch('tin')}
+                  placeholder="123-456-789-000"
                   className={inputCls}
+                  aria-invalid={Boolean(fieldErrors.tin)}
                 />
+                {fieldErrors.tin && (
+                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.tin}</p>
+                )}
               </div>
               <div>
                 <FieldLabel required>Business Name</FieldLabel>
                 <input
                   value={form.name}
                   onChange={(e) => update('name', e.target.value)}
+                  onBlur={() => touch('name')}
                   placeholder="Registered business name"
                   className={inputCls}
-                  aria-invalid={Boolean(errors.name)}
+                  aria-invalid={Boolean(fieldErrors.name)}
                 />
-                {errors.name && <p className="mt-1 text-xs font-medium text-s-red">{errors.name}</p>}
+                {fieldErrors.name && <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.name}</p>}
               </div>
             </div>
             <div>
@@ -811,22 +1238,33 @@ export function ApplyWizard() {
         </FormSheet>
       )}
 
-      {/* ── Part 2 · Lines of business (form sheet) ────────────────────── */}
+      {/* ── Lines of business (form sheet) ─────────────────────────────── */}
       {phase === 'lines' && (
         <FormSheet meta={typeMeta}>
           <SectionMarker letter="B" label="Line of Business" />
           <div className="mt-4">
-            {errors.lines && <p className="mb-3 text-sm font-medium text-s-red">{errors.lines}</p>}
             <LinesStep codes={psic} lines={form.lines} onChange={(lines) => update('lines', lines)} />
           </div>
         </FormSheet>
       )}
 
-      {/* ── Part 3 · Zoning — Selecting Business Location (p27) ────────── */}
+      {/* ── Zoning clearance — Selecting Business Location (p27) ───────── */}
+      {/*
+       * This step is location CAPTURE for the zoning / locational clearance,
+       * not a zoning decision: the system has no city zone polygons, so
+       * conformance is evaluated by the Zoning Office (CPDO) during
+       * processing. The copy here says "zoning clearance", never "Mayor's
+       * permit" (user-testing feedback).
+       */}
       {phase === 'address' && (
         <div>
-          <h1 className="mb-1 text-2xl font-bold text-ink">Zoning - Selecting Business Location</h1>
-          <div className="mb-6 h-px bg-ink/40" />
+          <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
+          <div className="mb-2 h-px bg-ink/40" />
+          <p className="mb-6 text-xs text-ink-secondary">
+            Pin your exact location and enter your address. These details go to the City Planning
+            and Development Office (CPDO), which evaluates your zoning / locational clearance
+            during processing.
+          </p>
           <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
             <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
               <MapPicker
@@ -847,7 +1285,7 @@ export function ApplyWizard() {
                   <option>
                     {form.lines.length > 0
                       ? psic.find((c) => c.id === form.lines[0].psic_code_id)?.title ?? 'Line of Business'
-                      : 'Selected in Part 2'}
+                      : 'Selected in the Line of Business section'}
                   </option>
                 </select>
               </div>
@@ -856,19 +1294,21 @@ export function ApplyWizard() {
                 <input
                   value={form.line1}
                   onChange={(e) => update('line1', e.target.value)}
+                  onBlur={() => touch('line1')}
                   placeholder="House No. and Street Name"
                   className={inputCls}
-                  aria-invalid={Boolean(errors.line1)}
+                  aria-invalid={Boolean(fieldErrors.line1)}
                 />
-                {errors.line1 && <p className="mt-1 text-xs font-medium text-s-red">{errors.line1}</p>}
+                {fieldErrors.line1 && <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.line1}</p>}
               </div>
               <div>
                 <FieldLabel required>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
                   onChange={(e) => update('barangay_id', e.target.value)}
+                  onBlur={() => touch('barangay_id')}
                   className={inputCls}
-                  aria-invalid={Boolean(errors.barangay_id)}
+                  aria-invalid={Boolean(fieldErrors.barangay_id)}
                 >
                   <option value="">Barangay Name</option>
                   {barangays.map((b) => (
@@ -877,8 +1317,8 @@ export function ApplyWizard() {
                     </option>
                   ))}
                 </select>
-                {errors.barangay_id && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{errors.barangay_id}</p>
+                {fieldErrors.barangay_id && (
+                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
               <div>
@@ -895,59 +1335,7 @@ export function ApplyWizard() {
         </div>
       )}
 
-      {/* ── LGU Section — permit type cards (p37) ─────────────────────── */}
-      {phase === 'permits' && (
-        <div>
-          <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Section</h1>
-          <div className="mb-6 h-px bg-ink/40" />
-          {errors.permit_type_ids && (
-            <p className="mb-4 text-sm font-medium text-s-red">{errors.permit_type_ids}</p>
-          )}
-          <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {permitTypes.map((pt) => {
-              const selected = form.permit_type_ids.includes(pt.id)
-              return (
-                <div key={pt.id} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
-                  <p className="text-lg font-bold leading-snug text-ink">{pt.name}</p>
-                  <p className="display-serif mt-2 text-sm italic text-ink-secondary">
-                    {pt.department.name}
-                  </p>
-                  <div className="mt-5 grid flex-1 grid-cols-2 items-end gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setSubmissionFor(pt)}
-                      className="rounded-sm bg-royal px-3 py-2 text-sm font-semibold text-white underline underline-offset-2 hover:bg-royal-hover"
-                    >
-                      Submit
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() =>
-                        update(
-                          'permit_type_ids',
-                          selected
-                            ? form.permit_type_ids.filter((id) => id !== pt.id)
-                            : [...form.permit_type_ids, pt.id],
-                        )
-                      }
-                      className={`rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors ${
-                        selected
-                          ? 'border-2 border-royal bg-white text-royal'
-                          : 'bg-royal text-white hover:bg-royal-hover'
-                      }`}
-                    >
-                      {selected ? 'Applied ✓' : 'Apply'}
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── Per-office application forms (Parts 4-7, p040-043) ─────────── */}
+      {/* ── Per-office application forms (p040-043) ────────────────────── */}
       {officeCode && (
         <OfficeFormSheet
           code={officeCode}
@@ -961,7 +1349,9 @@ export function ApplyWizard() {
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <SectionMarker letter="C" label="Documentary Requirements" />
           <p className="mt-2 text-xs text-ink-muted">
-            Upload each requirement as a PDF or image (max 10 MB). You can change files before submitting.
+            Upload each requirement as a PDF or image (max 10 MB). Items marked with{' '}
+            <span className="font-semibold text-s-red">*</span> are required. You can change files
+            before submitting.
           </p>
 
           {/* OCR-lite suggestion banner (v2) — dismissible, suggestions only. */}
@@ -1013,8 +1403,10 @@ export function ApplyWizard() {
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold text-ink">
                         {dt.name}
-                        {dt.is_required === false && (
+                        {dt.is_required === false ? (
                           <span className="ml-1 font-normal text-ink-muted">(optional)</span>
+                        ) : (
+                          <span className="text-s-red"> *</span>
                         )}
                       </span>
                       <span className="block truncate text-xs text-ink-muted">
@@ -1047,6 +1439,61 @@ export function ApplyWizard() {
             )}
           </div>
 
+          {/* Other Requirements — repeatable: add as many files as needed. */}
+          {otherType && (
+            <div className="mt-7">
+              <p className="text-sm font-bold text-ink">
+                Other Requirements <span className="font-normal text-ink-muted">(optional)</span>
+              </p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Attach any other supporting documents. You can add more than one file.
+              </p>
+              {otherDocs.length > 0 && (
+                <ul className="mt-3 space-y-2">
+                  {otherDocs.map((f, i) => (
+                    <li
+                      key={`${f.name}-${i}`}
+                      className="flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5"
+                    >
+                      <span className="text-s-green">
+                        <CheckIcon size={16} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-ink">{f.name}</span>
+                      <span className="tnum shrink-0 text-xs text-ink-muted">{formatBytes(f.size)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <label
+                className={`mt-3 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3 transition-colors hover:bg-input ${
+                  uploadingType === otherType.id ? 'opacity-60' : ''
+                }`}
+              >
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+                  <UploadIcon size={16} />
+                </span>
+                <span className="text-sm font-semibold text-royal">
+                  {uploadingType === otherType.id
+                    ? 'Uploading…'
+                    : otherDocs.length > 0
+                      ? 'Add another file'
+                      : 'Add a file'}
+                </span>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  className="sr-only"
+                  disabled={uploadingType === otherType.id}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) void handleOtherUpload(file)
+                    e.target.value = ''
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
           {/* Data Privacy Consent box — gates the wizard from moving on. */}
           <div className="mt-7 rounded-md border border-input-border bg-white px-5 py-4">
             <p className="text-sm font-bold uppercase tracking-wide text-royal">Data Privacy Consent</p>
@@ -1065,9 +1512,27 @@ export function ApplyWizard() {
                 className="h-4 w-4 accent-royal"
               />
               I have read and agree to the Data Privacy Consent above.
+              <span className="text-s-red">*</span>
             </label>
           </div>
         </div>
+      )}
+
+      {/* ── Business & Tax Profile (revenue-code fee inputs) ───────────── */}
+      {phase === 'fees' && (
+        <FormSheet meta={typeMeta}>
+          <div className="mt-1">
+            <FeeProfileStep
+              applicationType={applicationType}
+              permitCodes={permitTypes
+                .filter((pt) => form.permit_type_ids.includes(pt.id))
+                .map((pt) => pt.code)}
+              lines={feeLines}
+              value={feeDraft}
+              onChange={setFeeDraft}
+            />
+          </div>
+        </FormSheet>
       )}
 
       {/* ── LGU Section — all clearances applied (p46) ─────────────────── */}
@@ -1087,27 +1552,55 @@ export function ApplyWizard() {
         </div>
       )}
 
-      {/* ── Bottom bar: pill button + green progress + Part n of 8 ─────── */}
-      <div className="mt-10 grid items-center gap-6 sm:grid-cols-[minmax(9rem,auto)_1fr_minmax(9rem,auto)]">
-        <div className="flex items-center gap-4">
-          {!isLast ? (
-            <PillButton onClick={next} disabled={saving || (phase === 'documents' && !consent)} className="min-w-28">
-              {saving ? 'Saving…' : 'Next'}
-            </PillButton>
-          ) : (
-            <PillButton onClick={() => setShowConfirm(true)} disabled={saving} className="min-w-28">
-              Submit
-            </PillButton>
-          )}
-          {step > 0 && (
-            <button
-              type="button"
-              onClick={back}
-              className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+      {/* ── Bottom bar: pill buttons + green progress + Part n of N ────── */}
+      <div className="mt-10 grid items-start gap-6 sm:grid-cols-[minmax(9rem,auto)_1fr_minmax(9rem,auto)]">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-4">
+            {!isLast ? (
+              <PillButton
+                onClick={() => void next()}
+                disabled={saving || stepMissing.length > 0}
+                className="min-w-28"
+              >
+                {saving ? 'Saving…' : 'Next'}
+              </PillButton>
+            ) : (
+              <PillButton
+                onClick={() => setShowConfirm(true)}
+                disabled={saving || !consent}
+                className="min-w-28"
+              >
+                Submit
+              </PillButton>
+            )}
+            <PillButton
+              onClick={() => void saveDraft()}
+              disabled={saving}
+              className="bg-white !text-royal border-2 border-royal hover:bg-royal-tint"
             >
-              Back
-            </button>
+              Save draft
+            </PillButton>
+            {stepIndex > 0 && (
+              <button
+                type="button"
+                onClick={back}
+                className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+              >
+                Back
+              </button>
+            )}
+          </div>
+          {!isLast && stepMissing.length > 0 && (
+            <p className="max-w-md text-xs text-ink-muted">
+              Still needed on this part: {stepMissing.join(', ')}
+            </p>
           )}
+          {isLast && !consent && (
+            <p className="max-w-md text-xs text-ink-muted">
+              Tick the Data Privacy Consent in Documentary Requirements before submitting.
+            </p>
+          )}
+          {draftNote && <p className="max-w-md text-xs font-medium text-royal">{draftNote}</p>}
         </div>
         <div className="mx-auto w-full max-w-md">
           <div className="h-2.5 overflow-hidden rounded-full bg-ink-secondary/80">
@@ -1145,13 +1638,13 @@ export function ApplyWizard() {
             onCancel={() => setShowZoning(false)}
           >
             <p className="text-base leading-relaxed">
-              The new business for{' '}
+              The declared use for{' '}
               <span className="font-bold underline underline-offset-2">{form.name || 'your business'}</span>{' '}
-              is non-conforming / not within the allowed use for{' '}
+              appears non-conforming for{' '}
               <span className="font-bold uppercase underline underline-offset-2">
                 {barangayName ?? 'Area Location'}
               </span>
-              .
+              . The Zoning Office (CPDO) makes the final determination on your zoning clearance.
             </p>
           </ProtoModal>
         ) : (
@@ -1167,55 +1660,17 @@ export function ApplyWizard() {
             }}
           >
             <p className="text-base leading-relaxed">
-              The new business for{' '}
+              The location for{' '}
               <span className="font-bold underline underline-offset-2">{form.name || 'your business'}</span>{' '}
-              is conforming / within the allowed use for{' '}
+              in{' '}
               <span className="font-bold uppercase underline underline-offset-2">
                 {barangayName ?? 'Area Location'}
-              </span>
-              . You may now proceed with the processing of your Business Permit Application.
+              </span>{' '}
+              has been recorded for your zoning clearance. The Zoning Office (CPDO) evaluates
+              conformance during processing. You may now proceed with your application.
             </p>
           </ProtoModal>
         ))}
-
-      {/* ── SUBMISSION · per-permit upload (p39) — presentational ──────── */}
-      {submissionFor && (
-        <ProtoModal
-          title="SUBMISSION"
-          cancelLabel="Cancel"
-          confirmLabel="Submit"
-          onCancel={() => {
-            setSubmissionFor(null)
-            setSubmissionFile(null)
-          }}
-          onConfirm={() => {
-            // Files are actually uploaded in the Documents part — this modal is
-            // the prototype's per-clearance framing; no separate API exists.
-            setSubmissionFor(null)
-            setSubmissionFile(null)
-          }}
-        >
-          <p className="text-xl font-medium text-ink">{submissionFor.name}</p>
-          <p className="mt-1 text-sm italic text-ink-muted">file type: png, jpg, pdf only</p>
-          <label className="mt-5 flex cursor-pointer items-stretch overflow-hidden rounded-lg border border-input-border">
-            <span className="flex-1 bg-input px-4 py-3 text-sm text-ink-muted">
-              {submissionFile ?? 'Upload file.'}
-            </span>
-            <span className="flex items-center bg-royal px-3.5 text-white">
-              <UploadIcon size={18} />
-            </span>
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              className="sr-only"
-              onChange={(e) => setSubmissionFile(e.target.files?.[0]?.name ?? null)}
-            />
-          </label>
-          <p className="mt-3 text-xs text-ink-muted">
-            You can also attach this document in the Documents part before submitting.
-          </p>
-        </ProtoModal>
-      )}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}
       {showConfirm && (

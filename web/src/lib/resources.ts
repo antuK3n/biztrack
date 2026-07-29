@@ -17,6 +17,7 @@ import type {
   DocumentType,
   FeeAssessment,
   FeeLineItem,
+  FeeProfile,
   Inspection,
   InspectionResult,
   Message,
@@ -102,9 +103,13 @@ export const applications = {
     permit_type_ids: number[]
     /** Set on renewal/amendment to link the prior permit (v2). */
     prior_permit_id?: number
+    /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
+    fee_profile?: FeeProfile
   }) => unwrap<Application>(api.post('/applications', body)),
-  update: (id: number, body: { business_id?: number; permit_type_ids?: number[] }) =>
-    unwrap<Application>(api.put(`/applications/${id}`, body)),
+  update: (
+    id: number,
+    body: { business_id?: number; permit_type_ids?: number[]; fee_profile?: FeeProfile | null },
+  ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
