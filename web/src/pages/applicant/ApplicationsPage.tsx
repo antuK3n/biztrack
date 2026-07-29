@@ -23,9 +23,21 @@ import type {
  * Permit Tracking (PDF p48–49): type filter pills, white accordion rows per
  * application with an orange "Pay Online" / green "Paid" block, and expanded
  * per-permit rows with a status chip + submitted date + message icon.
+ *
+ * This list is the applicant's open work. An approved filing has no next step
+ * left, so it moves to Profile, where the permits it produced are listed under
+ * "Approved Businesses" (tester item 44). The count of what moved is shown
+ * below the list so nothing silently disappears.
  */
 
 type TypeFilter = '' | 'new' | 'renewal' | 'amendment'
+
+/**
+ * Finished filings: approval and issuance happen in one transaction
+ * (WorkflowService::approveAndIssue), so an approved application always has its
+ * permits waiting in Profile. Rejected stays here — it still needs a re-apply.
+ */
+const FINISHED: ApplicationStatus[] = ['approved', 'issued']
 
 const FILTERS: { label: string; value: TypeFilter }[] = [
   { label: 'All', value: '' },
@@ -216,9 +228,23 @@ export function ApplicationsPage() {
       })
   }
 
-  // Drafts have their own page; keep this list to submitted work.
-  const items = (data ?? []).filter(
-    (a) => a.status !== 'draft' && (!type || a.application_type === type),
+  // Drafts have their own page; keep this list to submitted work still in play.
+  const submitted = (data ?? []).filter((a) => a.status !== 'draft')
+  const byType = (a: ApplicationListItem) => !type || a.application_type === type
+  const items = submitted.filter((a) => !FINISHED.includes(a.status)).filter(byType)
+  const finishedCount = submitted.filter((a) => FINISHED.includes(a.status)).filter(byType).length
+
+  /** Pointer to where an approved filing went, so it is never simply gone. */
+  const movedNote = finishedCount > 0 && (
+    <p className="mt-6 text-sm text-ink-secondary">
+      {finishedCount === 1
+        ? '1 approved application is now in your '
+        : `${finishedCount} approved applications are now in your `}
+      <Link to="/permits" className="font-semibold text-royal underline underline-offset-2 hover:no-underline">
+        Profile
+      </Link>
+      , with the permits they produced.
+    </p>
   )
 
   return (
@@ -234,27 +260,41 @@ export function ApplicationsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={TrackIcon}
-          title={type ? 'Nothing matches this filter' : 'No applications yet'}
-          description={
-            type
-              ? 'Try a different filter, or start a new application.'
-              : 'When you submit an application, it appears here with its live status and next step.'
-          }
-        />
+        <>
+          <EmptyState
+            icon={TrackIcon}
+            title={
+              finishedCount > 0
+                ? 'Nothing needs your attention'
+                : type
+                  ? 'Nothing matches this filter'
+                  : 'No applications yet'
+            }
+            description={
+              finishedCount > 0
+                ? 'Every application you have filed has been approved. The permits are in your Profile.'
+                : type
+                  ? 'Try a different filter, or start a new application.'
+                  : 'When you submit an application, it appears here with its live status and next step.'
+            }
+          />
+          {movedNote}
+        </>
       ) : (
-        <ul className="space-y-4">
-          {items.map((app) => (
-            <ApplicationRow
-              key={app.id}
-              app={app}
-              permitTypesByCode={permitTypesByCode}
-              detail={detailCache[app.id]}
-              onExpand={loadDetail}
-            />
-          ))}
-        </ul>
+        <>
+          <ul className="space-y-4">
+            {items.map((app) => (
+              <ApplicationRow
+                key={app.id}
+                app={app}
+                permitTypesByCode={permitTypesByCode}
+                detail={detailCache[app.id]}
+                onExpand={loadDetail}
+              />
+            ))}
+          </ul>
+          {movedNote}
+        </>
       )}
     </div>
   )
