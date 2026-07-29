@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
@@ -16,9 +16,9 @@ import {
   ProtoModal,
   inputCls,
 } from '../../components/ui/Proto'
-import { formatBytes } from '../../lib/format'
+import { formatBytes, formatDate } from '../../lib/format'
 import { toApiError } from '../../lib/api'
-import { applications, businesses, documents, officeForms, reference } from '../../lib/resources'
+import { applications, businesses, documents, officeForms, permits, reference } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import {
   OFFICE_FORM_CODES,
@@ -44,6 +44,7 @@ import type {
   BusinessPayload,
   DocumentType,
   OcrSuggestions,
+  Permit,
   PsicCode,
 } from '../../lib/types'
 
@@ -103,9 +104,38 @@ const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120',
 /** A single running step: either a base phase or one office form sheet. */
 type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
 
+/**
+ * Stable identity for a step. Positions shift the moment a certificate is
+ * ticked or unticked — its form sheet slots into the middle of the map — so
+ * anything remembered about a step has to be remembered by name. Remembering
+ * it by index is how a sheet nobody had opened inherited the state of the one
+ * that used to sit at that number.
+ */
+function stepKey(n: StepNode): string {
+  return n.kind === 'base' ? n.phase : `office:${n.code}`
+}
+
+/**
+ * Document-type code prefix the API gives a clearance the applicant already
+ * holds (DocumentController::heldPermitDocumentType). The suffix is the
+ * permit-type code, which is how a reopened draft knows which card to mark.
+ */
+const HELD_DOC_PREFIX = 'HELD_'
+
 /** An attachment already on the draft: the id is what a removal needs. */
 interface UploadedFile {
   id: number
+  name: string
+  size: number
+}
+
+/**
+ * A clearance the applicant already holds, submitted instead of applied for.
+ * `id` is null while the file waits for a draft to attach itself to: the LGU
+ * Section comes long before there is enough on the form to create one.
+ */
+interface HeldPermitFile {
+  id: number | null
   name: string
   size: number
 }
@@ -501,8 +531,15 @@ export function ApplyWizard() {
   const zoningDenied = searchParams.get('zoning') === 'deny'
 
   const [step, setStep] = useState(0)
-  // Highest step index the applicant has reached; the map is clickable up to here.
-  const [maxVisited, setMaxVisited] = useState(0)
+  /*
+   * Sections the applicant has actually opened, by name (see stepKey). The map
+   * is clickable for these. A TICK is a different question entirely: it means
+   * the section is complete, and is computed fresh from the answers every
+   * render, so it can never outlive the answers that earned it.
+   */
+  const [visited, setVisited] = useState<string[]>([BASE_PHASES[0]])
+  const markVisited = (key: string) =>
+    setVisited((v) => (v.includes(key) ? v : [...v, key]))
   const [form, setForm] = useState<FormState>(EMPTY)
   /*
    * The applicant's own name for this filing. Blank is normal and means "call
@@ -538,6 +575,16 @@ export function ApplyWizard() {
     () => (isReuse ? businesses.list() : Promise.resolve([])),
     [isReuse],
   )
+  /*
+   * Item 50 — the permits the owner already holds, so a renewal can name the
+   * one it is for instead of "this business, and whatever it happens to have".
+   * A shop with a Mayor's Permit expiring in January and a sanitary permit
+   * expiring in June is renewing one of them, not both.
+   */
+  const ownedPermits = useAsync<Permit[]>(
+    () => (isReuse ? permits.list() : Promise.resolve([])),
+    [isReuse],
+  )
 
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
@@ -549,6 +596,22 @@ export function ApplyWizard() {
   const [uploadingType, setUploadingType] = useState<number | null>(null)
   const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
+
+  /*
+   * Item 59 — clearances the applicant already holds, keyed by permit-type
+   * code. Submitting the certificate is the alternative to applying: the
+   * office gets the copy, the applicant is not walked through that office's
+   * form, and no assignment or fee is raised for a clearance nobody is being
+   * asked to issue.
+   */
+  const [held, setHeld] = useState<Record<string, HeldPermitFile>>({})
+  /* Files chosen before a draft existed; flushed by the effect below. */
+  const pendingHeldRef = useRef<Record<string, File>>({})
+  const heldInFlightRef = useRef<Set<string>>(new Set())
+  /* The permit card whose SUBMISSION dialog is open (p041). */
+  const [heldPrompt, setHeldPrompt] = useState<{ id: number; code: string; name: string } | null>(null)
+  const [heldPromptFile, setHeldPromptFile] = useState<File | null>(null)
+  const [heldBusy, setHeldBusy] = useState<string | null>(null)
 
   // Prototype presentational modals — none of these fabricate API calls.
   const [showClear, setShowClear] = useState(false)
@@ -631,6 +694,20 @@ export function ApplyWizard() {
       setPrefillBusinessId(null)
     } finally {
       setPrefilling(false)
+    }
+  }
+
+  /**
+   * Item 50 — name the permit this filing is for. Choosing one ticks its
+   * clearance in the LGU Section: renewing a sanitary permit nobody has asked
+   * the City Health Office to look at is not a renewal of anything.
+   */
+  function choosePriorPermit(permit: Permit | null) {
+    setPriorPermitId(permit?.id ?? null)
+    if (!permit) return
+    const pt = permitTypes.find((t) => t.code === permit.permit_type?.code)
+    if (pt && !form.permit_type_ids.includes(pt.id)) {
+      update('permit_type_ids', [...form.permit_type_ids, pt.id])
     }
   }
 
@@ -717,9 +794,9 @@ export function ApplyWizard() {
   const officeCode: OfficeFormCode | null = node.kind === 'office' ? node.code : null
   const isLast = stepIndex === sequence.length - 1
 
-  /* Keep the visited pointer valid if the permit selection shrinks. */
+  /* Unticking a certificate removes its sheet: don't leave `step` past the end. */
   useEffect(() => {
-    setMaxVisited((m) => Math.min(m, sequence.length - 1))
+    setStep((s) => Math.min(s, sequence.length - 1))
   }, [sequence.length])
 
   /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
@@ -742,103 +819,166 @@ export function ApplyWizard() {
   )
 
   /*
-   * Required fields still missing on the CURRENT step. Next stays disabled
-   * until this is empty; the list doubles as the "what's left" summary.
+   * Item 50 — the permits the chosen business currently holds, soonest to
+   * expire first: that is the one somebody opening a renewal came here about.
+   * A business with nothing issued yet has no list to show.
    */
-  const stepMissing: string[] = useMemo(() => {
-    if (node.kind === 'office') return officeFormMissing(node.code, officeData[node.code] ?? {})
-    switch (node.phase) {
-      case 'permits':
-        /*
-         * The clearance cards are additive, not a required pick: the Mayor's /
-         * Business Permit is attached implicitly, and applying for it alone is
-         * a real case (the seeded renewal storyline is exactly that). So the
-         * only thing that can block here is reference data that arrived
-         * without the BUSINESS permit type.
-         */
-        return form.permit_type_ids.length > 0
-          ? []
-          : ['Permit types could not be loaded. Reload the page and try again.']
-      case 'business': {
-        const missing: string[] = []
-        if (!form.name.trim()) missing.push('Business Name')
-        if (!form.registration_number.trim()) missing.push('DTI / SEC / CDA Registration Number')
-        if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
-        else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
-        if (!form.registration_type) missing.push('Type of Registration')
-        return missing
-      }
-      case 'lines': {
-        if (form.lines.length === 0) return ['Select at least one line of business']
-        const missing: string[] = []
-        const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
-        const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
-        if (otherLine && !otherLine.line_of_business.trim()) {
-          missing.push('Your line of business (typed in, for “Other”)')
-        }
-        if (form.lines.some((l) => !l.capitalization.trim())) {
-          missing.push('Capital for every line of business')
-        }
-        return missing
-      }
-      case 'address': {
-        const missing: string[] = []
-        if (!form.line1.trim()) missing.push('House No. & Street Name')
-        if (!form.barangay_id) missing.push('Barangay')
-        // CPDO rules on the zoning clearance from where the business actually
-        // is, so the pin is part of the answer, not a nicety.
-        if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
-        // Only when renting: the API enforces the same three with required_if.
-        if (form.is_rented) {
-          if (!form.lessor_name.trim()) missing.push("Lessor's Name")
-          if (!form.lessor_address.trim()) missing.push("Lessor's Address")
-          if (!form.monthly_rental.trim()) missing.push('Monthly Rental')
-          else if (!Number.isFinite(Number(plainAmount(form.monthly_rental)))) {
-            missing.push('A monthly rental in pesos')
+  const renewablePermits: Permit[] = useMemo(() => {
+    if (!isReuse || prefillBusinessId === null) return []
+    return (ownedPermits.data ?? [])
+      .filter((p) => p.business?.id === prefillBusinessId)
+      .slice()
+      .sort((a, b) => (a.valid_until ?? '').localeCompare(b.valid_until ?? ''))
+  }, [isReuse, prefillBusinessId, ownedPermits.data])
+
+  const priorPermitChoice: Permit | null = useMemo(
+    () => renewablePermits.find((p) => p.id === priorPermitId) ?? null,
+    [renewablePermits, priorPermitId],
+  )
+
+  /*
+   * Required fields still missing on ANY step. This used to answer only for
+   * the step being displayed, which meant the map had no way of knowing
+   * whether a section was finished and fell back to "is it behind us?" — the
+   * source of every tick that was showing on an empty section.
+   */
+  const missingFor = useCallback(
+    (n: StepNode): string[] => {
+      if (n.kind === 'office') return officeFormMissing(n.code, officeData[n.code] ?? {})
+      switch (n.phase) {
+        case 'permits':
+          /*
+           * The clearance cards are additive, not a required pick: the Mayor's /
+           * Business Permit is attached implicitly, and applying for it alone is
+           * a real case (the seeded renewal storyline is exactly that). So the
+           * only thing that can block here is reference data that arrived
+           * without the BUSINESS permit type.
+           */
+          return form.permit_type_ids.length > 0
+            ? []
+            : ['Permit types could not be loaded. Reload the page and try again.']
+        case 'business': {
+          const missing: string[] = []
+          if (isReuse && prefillBusinessId === null) {
+            missing.push(applicationType === 'renewal' ? 'The business you are renewing' : 'The business you are amending')
           }
-          if (form.lessor_contact.trim() && !phoneValid(form.lessor_contact)) {
-            missing.push("A valid Lessor's Contact Number")
+          // Item 50: a business holds several permits with different expiry
+          // dates, so "renew this business" names nothing an office can act on.
+          if (applicationType === 'renewal' && renewablePermits.length > 0 && priorPermitId === null) {
+            missing.push('Which permit you are renewing')
           }
+          if (!form.name.trim()) missing.push('Business Name')
+          if (!form.registration_number.trim()) missing.push('DTI / SEC / CDA Registration Number')
+          if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
+          else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
+          if (!form.registration_type) missing.push('Type of Registration')
+          return missing
         }
-        // Inspectors turn up unannounced; somebody has to be reachable.
-        if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
-        if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
-        else if (!phoneValid(form.emergency_contact_number)) {
-          missing.push('A valid Emergency Contact Number')
+        case 'lines': {
+          if (form.lines.length === 0) return ['Select at least one line of business']
+          const missing: string[] = []
+          const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
+          const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
+          if (otherLine && !otherLine.line_of_business.trim()) {
+            missing.push('Your line of business (typed in, for “Other”)')
+          }
+          if (form.lines.some((l) => !l.capitalization.trim())) {
+            missing.push('Capital for every line of business')
+          }
+          return missing
         }
-        return missing
+        case 'address': {
+          const missing: string[] = []
+          if (!form.line1.trim()) missing.push('House No. & Street Name')
+          if (!form.barangay_id) missing.push('Barangay')
+          // CPDO rules on the zoning clearance from where the business actually
+          // is, so the pin is part of the answer, not a nicety.
+          if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
+          // Only when renting: the API enforces the same three with required_if.
+          if (form.is_rented) {
+            if (!form.lessor_name.trim()) missing.push("Lessor's Name")
+            if (!form.lessor_address.trim()) missing.push("Lessor's Address")
+            if (!form.monthly_rental.trim()) missing.push('Monthly Rental')
+            else if (!Number.isFinite(Number(plainAmount(form.monthly_rental)))) {
+              missing.push('A monthly rental in pesos')
+            }
+            if (form.lessor_contact.trim() && !phoneValid(form.lessor_contact)) {
+              missing.push("A valid Lessor's Contact Number")
+            }
+          }
+          // Inspectors turn up unannounced; somebody has to be reachable.
+          if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
+          if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
+          else if (!phoneValid(form.emergency_contact_number)) {
+            missing.push('A valid Emergency Contact Number')
+          }
+          return missing
+        }
+        case 'documents': {
+          const missing = requiredDocs
+            .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
+            .map((dt) => dt.name)
+          if (!consent) missing.push('Data Privacy Consent')
+          return missing
+        }
+        case 'fees':
+          return feeProfileMissing(feeDraft, {
+            applicationType,
+            permitCodes: permitTypes
+              .filter((pt) => form.permit_type_ids.includes(pt.id))
+              .map((pt) => pt.code),
+            lines: feeLines,
+          })
+        case 'review':
+          return []
       }
-      case 'documents': {
-        const missing = requiredDocs
-          .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
-          .map((dt) => dt.name)
-        if (!consent) missing.push('Data Privacy Consent')
-        return missing
-      }
-      case 'fees':
-        return feeProfileMissing(feeDraft, {
-          applicationType,
-          permitCodes: permitTypes
-            .filter((pt) => form.permit_type_ids.includes(pt.id))
-            .map((pt) => pt.code),
-          lines: feeLines,
-        })
-      case 'review':
-        return []
-    }
-  }, [
-    node,
-    form,
-    officeData,
-    requiredDocs,
-    uploaded,
-    consent,
-    feeDraft,
-    applicationType,
-    feeLines,
-    psic,
-    permitTypes,
-  ])
+    },
+    [
+      form,
+      officeData,
+      requiredDocs,
+      uploaded,
+      consent,
+      feeDraft,
+      applicationType,
+      feeLines,
+      psic,
+      permitTypes,
+      isReuse,
+      prefillBusinessId,
+      priorPermitId,
+      renewablePermits,
+    ],
+  )
+
+  /** What is still missing on the step being displayed. */
+  const stepMissing: string[] = useMemo(() => missingFor(node), [missingFor, node])
+
+  /*
+   * Which sections are finished, asked of every section rather than inferred
+   * from where the applicant happens to be standing. Review is the one section
+   * with nothing of its own to fill in, so it counts as done exactly when
+   * everything it reviews is.
+   */
+  const stepComplete: boolean[] = useMemo(() => {
+    const flags = sequence.map((n) => missingFor(n).length === 0)
+    const last = flags.length - 1
+    if (last >= 0) flags[last] = flags.slice(0, last).every(Boolean)
+    return flags
+  }, [sequence, missingFor])
+
+  /**
+   * True when jumping forward to `index` would step over an unfinished
+   * section. Next has always refused to leave an incomplete step; the map used
+   * to check only the step you were on, so a hop back and a hop forward walked
+   * straight past everything in between — and every section skipped that way
+   * came out the other side wearing a tick.
+   */
+  function jumpBlocked(index: number): boolean {
+    if (index <= stepIndex) return false
+    for (let i = stepIndex; i < index; i++) if (!stepComplete[i]) return true
+    return false
+  }
 
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
@@ -1004,7 +1144,7 @@ export function ApplyWizard() {
     if (!ok) return
     const target = Math.min(stepIndex + 1, sequence.length - 1)
     setStep(target)
-    setMaxVisited((m) => Math.max(m, target))
+    markVisited(stepKey(sequence[target]))
   }
 
   async function next() {
@@ -1021,14 +1161,16 @@ export function ApplyWizard() {
     setStep((s) => Math.max(s - 1, 0))
   }
 
-  /** Jump to any already-visited section from the map (persisting first). */
+  /** Jump to any already-opened section from the map (persisting first). */
   async function goTo(index: number) {
-    if (saving || index === stepIndex || index > maxVisited) return
-    // Moving forward re-checks the current step exactly like Next would.
-    if (index > stepIndex && stepMissing.length > 0) return
+    if (saving || index === stepIndex) return
+    if (!visited.includes(stepKey(sequence[index]))) return
+    // Moving forward re-checks every section being skipped, not just this one.
+    if (jumpBlocked(index)) return
     const ok = await persistOnLeave()
     if (!ok) return
     setStep(index)
+    markVisited(stepKey(sequence[index]))
   }
 
   /*
@@ -1051,7 +1193,14 @@ export function ApplyWizard() {
     (!form.is_rented ||
       (form.lessor_name.trim() !== '' &&
         form.lessor_address.trim() !== '' &&
-        form.monthly_rental.trim() !== ''))
+        form.monthly_rental.trim() !== '')) &&
+    /*
+     * Item 50: prefill fills a renewal's whole business section in one go, so
+     * without this the draft would be created (and its prior permit fixed)
+     * a second after the business is picked — before the applicant has said
+     * which of its permits they are renewing.
+     */
+    (applicationType !== 'renewal' || renewablePermits.length === 0 || priorPermitId !== null)
 
   /** Push every section entered so far in one go. */
   async function autosave(target: string) {
@@ -1081,6 +1230,9 @@ export function ApplyWizard() {
           fee_profile: feeProfile,
           payment_mode: paymentMode,
         })
+        // Which permit is being renewed can change after the draft exists, and
+        // it is not part of the general application update (item 50).
+        if (isReuse) await applications.setPriorPermit(id, priorPermitId)
       } else {
         await applications.update(id, { fee_profile: feeProfile, payment_mode: paymentMode })
       }
@@ -1172,6 +1324,9 @@ export function ApplyWizard() {
     } else if (phase === 'permits') {
       // Clearances only: the Mayor's / Business Permit is never cleared.
       setForm((f) => ({ ...f, permit_type_ids: businessTypeId === null ? [] : [businessTypeId] }))
+      // Certificates submitted as already-held are inputs of this part too, so
+      // "clear all inputs for this part" has to take them with it.
+      for (const code of Object.keys(held)) void removeHeldPermit(code)
     } else if (phase === 'documents') {
       setConsent(false)
     } else if (phase === 'fees') {
@@ -1206,6 +1361,85 @@ export function ApplyWizard() {
       setUploadingType(null)
     }
   }
+
+  /*
+   * ── Item 59 · a clearance the applicant already holds ─────────────────
+   *
+   * "Submit" on a permit card means "I hold this one already, here is the
+   * certificate"; "Apply" means "issue me one". They are opposites, so
+   * choosing either clears the other. Submitting attaches the copy to the
+   * application against its permit type — BPLO reads it with the rest of the
+   * file — and takes the clearance out of what is being applied for, which is
+   * what spares the applicant that office's form, its assignment, and its fee.
+   *
+   * The LGU Section runs long before there is enough on the form to create a
+   * draft, so the file waits in `pendingHeldRef` and is attached by the effect
+   * below the moment there is an application to attach it to.
+   */
+  function submitHeldPermit(pt: { id: number; code: string; name: string }, file: File) {
+    pendingHeldRef.current = { ...pendingHeldRef.current, [pt.code]: file }
+    setHeld((h) => ({ ...h, [pt.code]: { id: null, name: file.name, size: file.size } }))
+    setForm((f) => ({ ...f, permit_type_ids: f.permit_type_ids.filter((id) => id !== pt.id) }))
+    setHeldPrompt(null)
+  }
+
+  /** Take a submitted certificate back off (and stop claiming to hold it). */
+  async function removeHeldPermit(code: string) {
+    const entry = held[code]
+    if (!entry) return
+    setHeldBusy(code)
+    setSubmitError(null)
+    try {
+      if (entry.id !== null && applicationId) await documents.remove(applicationId, entry.id)
+      const { [code]: _dropped, ...restFiles } = pendingHeldRef.current
+      pendingHeldRef.current = restFiles
+      setHeld((h) => {
+        const next = { ...h }
+        delete next[code]
+        return next
+      })
+    } catch (err) {
+      setSubmitError(toApiError(err).message)
+    } finally {
+      setHeldBusy((b) => (b === code ? null : b))
+    }
+  }
+
+  /** Attach any certificate chosen before the draft existed. */
+  useEffect(() => {
+    if (!applicationId) return
+    const waiting = Object.keys(pendingHeldRef.current).filter(
+      (code) => !heldInFlightRef.current.has(code),
+    )
+    if (waiting.length === 0) return
+    for (const code of waiting) {
+      const file = pendingHeldRef.current[code]
+      const pt = permitTypes.find((p) => p.code === code)
+      if (!file || !pt) continue
+      heldInFlightRef.current.add(code)
+      setHeldBusy(code)
+      documents
+        .upload(applicationId, null, file, pt.id)
+        .then((doc) => {
+          setHeld((h) => (h[code] ? { ...h, [code]: { ...h[code], id: doc.id } } : h))
+        })
+        .catch((err) => {
+          // Never leave a card claiming a certificate the API refused.
+          setHeld((h) => {
+            const next = { ...h }
+            delete next[code]
+            return next
+          })
+          setSubmitError(toApiError(err).message)
+        })
+        .finally(() => {
+          const { [code]: _done, ...rest } = pendingHeldRef.current
+          pendingHeldRef.current = rest
+          heldInFlightRef.current.delete(code)
+          setHeldBusy((b) => (b === code ? null : b))
+        })
+    }
+  }, [applicationId, held, permitTypes])
 
   /** "Other Requirements": each upload APPENDS, so multiple files are kept. */
   async function handleOtherUpload(file: File) {
@@ -1330,11 +1564,16 @@ export function ApplyWizard() {
         for (const dt of refData.documentTypes) codeToId.set(dt.code, dt.id)
         const restored: Record<number, UploadedFile> = {}
         const others: UploadedFile[] = []
+        const restoredHeld: Record<string, HeldPermitFile> = {}
         for (const doc of app.documents ?? []) {
           const code = doc.document_type?.code
           if (!code) continue
           const file = { id: doc.id, name: doc.original_filename, size: doc.size_bytes }
-          if (code === OTHER_DOC_CODE) {
+          if (code.startsWith(HELD_DOC_PREFIX)) {
+            // "HELD_SANITARY" is the sanitary clearance the applicant already
+            // holds; the suffix is the permit-type code the card is keyed by.
+            restoredHeld[code.slice(HELD_DOC_PREFIX.length)] = file
+          } else if (code === OTHER_DOC_CODE) {
             others.push(file)
           } else {
             const dtId = codeToId.get(code)
@@ -1343,9 +1582,30 @@ export function ApplyWizard() {
         }
         setUploaded(restored)
         setOtherDocs(others)
-        // Everything was visited when the draft was saved: open the whole map.
-        const officeCount = pts.filter((pt) => ids.includes(pt.id) && hasOfficeForm(pt.code)).length
-        setMaxVisited(BASE_PHASES.length + officeCount - 1)
+        setHeld(restoredHeld)
+        /*
+         * Every section of a saved draft has been opened, so the whole map is
+         * clickable. Which of them count as DONE is a separate question, asked
+         * of the answers themselves each render — a draft saved with no
+         * documents uploaded shows Documentary Requirements unticked, which is
+         * the truth about it.
+         */
+        const officeKeys = pts
+          .filter((pt) => ids.includes(pt.id) && hasOfficeForm(pt.code))
+          .map((pt) => `office:${pt.code}`)
+        setVisited([...BASE_PHASES, ...officeKeys])
+        // Item 50: which permit this renewal is for, chosen when the draft was
+        // started and re-choosable now.
+        if (app.application_type !== 'new') {
+          void applications
+            .priorPermit(app.id)
+            .then((r) => {
+              if (active) setPriorPermitId(r.prior_permit_id)
+            })
+            .catch(() => {
+              /* Non-fatal: the picker just opens with nothing chosen. */
+            })
+        }
       } catch (err) {
         if (active) setSubmitError(toApiError(err).message)
       } finally {
@@ -1506,25 +1766,38 @@ export function ApplyWizard() {
         {sequence.map((n, i) => {
           const label = n.kind === 'base' ? BASE_LABELS[n.phase] : OFFICE_LABELS[n.code]
           const current = i === stepIndex
-          const reachable = i <= maxVisited
+          const opened = visited.includes(stepKey(n))
+          const blocked = jumpBlocked(i)
+          // A tick says "this section is finished", not "you have walked past
+          // it": it comes from the answers, so clearing a section takes its
+          // tick with it and a section skipped over never gets one.
+          const done = opened && stepComplete[i]
           return (
-            <li key={n.kind === 'base' ? n.phase : n.code}>
+            <li key={stepKey(n)}>
               <button
                 type="button"
                 onClick={() => void goTo(i)}
-                disabled={!reachable || current}
+                disabled={!opened || blocked || current}
                 aria-current={current ? 'step' : undefined}
+                title={
+                  blocked && opened ? 'Finish the sections before this one first.' : undefined
+                }
                 className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors ${
                   current
                     ? 'border-royal bg-royal text-white'
-                    : reachable
+                    : opened && !blocked
                       ? 'border-royal/40 bg-white text-royal hover:bg-royal-tint'
                       : 'border-input-border bg-white text-ink-muted'
                 }`}
               >
                 <span className="tnum">{i + 1}</span>
                 {label}
-                {i < stepIndex && <CheckIcon size={12} />}
+                {done && (
+                  <>
+                    <CheckIcon size={12} />
+                    <span className="sr-only">(complete)</span>
+                  </>
+                )}
               </button>
             </li>
           )
@@ -1547,36 +1820,82 @@ export function ApplyWizard() {
             (permit_type_ids) and BPLO always receives the file. Only the
             supporting clearances are cards.
           */}
+          <p className="mb-5 max-w-2xl text-sm text-ink-secondary">
+            <span className="font-semibold text-ink">Apply</span> to have the office issue this
+            clearance. Already hold a valid one?{' '}
+            <span className="font-semibold text-ink">Submit</span> a copy instead and skip that
+            office’s form.
+          </p>
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
             {clearanceTypes.map((pt) => {
               const selected = form.permit_type_ids.includes(pt.id)
+              const onFile = held[pt.code]
+              const busy = heldBusy === pt.code
               return (
                 <div key={pt.id} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
                   <p className="text-lg font-bold leading-snug text-ink">{pt.name}</p>
                   <p className="display-serif mt-2 text-sm italic text-ink-secondary">
                     {pt.department.name}
                   </p>
-                  {hasOfficeForm(pt.code) && (
+                  {hasOfficeForm(pt.code) && !onFile && (
                     <p className="mt-2 text-xs text-ink-muted">
                       Adds its own application form section above.
                     </p>
                   )}
-                  <div className="mt-5 flex flex-1 items-end">
+                  {onFile && (
+                    <div className="mt-3 rounded-md border border-s-green/40 bg-s-green/10 px-3 py-2">
+                      <p className="flex items-center gap-1.5 text-xs font-bold text-s-green">
+                        <CheckIcon size={13} /> On file, not applied for
+                      </p>
+                      <p className="mt-1 truncate text-xs text-ink-secondary" title={onFile.name}>
+                        {onFile.name} · {formatBytes(onFile.size)}
+                        {onFile.id === null && ' · saving'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void removeHeldPermit(pt.code)}
+                        disabled={busy}
+                        className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                      >
+                        {busy ? 'Removing…' : 'Remove'}
+                      </button>
+                    </div>
+                  )}
+                  <div className="mt-5 flex flex-1 items-end gap-2.5">
+                    <button
+                      type="button"
+                      aria-pressed={Boolean(onFile)}
+                      disabled={busy}
+                      onClick={() => {
+                        if (onFile) void removeHeldPermit(pt.code)
+                        else setHeldPrompt({ id: pt.id, code: pt.code, name: pt.name })
+                      }}
+                      className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
+                        onFile
+                          ? 'border-2 border-royal bg-white text-royal'
+                          : 'border-2 border-royal-deep bg-royal-deep text-white hover:bg-royal'
+                      }`}
+                    >
+                      {onFile ? 'Submitted ✓' : 'Submit'}
+                    </button>
                     <button
                       type="button"
                       aria-pressed={selected}
-                      onClick={() =>
+                      disabled={busy}
+                      onClick={() => {
+                        // Applying for it and already holding it are opposites.
+                        if (!selected && onFile) void removeHeldPermit(pt.code)
                         update(
                           'permit_type_ids',
                           selected
                             ? form.permit_type_ids.filter((id) => id !== pt.id)
                             : [...form.permit_type_ids, pt.id],
                         )
-                      }
-                      className={`w-full rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors ${
+                      }}
+                      className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
                         selected
                           ? 'border-2 border-royal bg-white text-royal'
-                          : 'bg-royal text-white hover:bg-royal-hover'
+                          : 'border-2 border-royal bg-royal text-white hover:bg-royal-hover'
                       }`}
                     >
                       {selected ? 'Applied ✓' : 'Apply'}
@@ -1619,6 +1938,84 @@ export function ApplyWizard() {
                 <p className="mt-2 text-xs text-ink-secondary">
                   You have no registered businesses yet. Start a new application instead.
                 </p>
+              )}
+
+              {/* Item 50 — which permit, not just which business. */}
+              {prefillBusinessId !== null && !prefilling && (
+                <div className="mt-5">
+                  <FieldLabel required={applicationType === 'renewal' && renewablePermits.length > 0}>
+                    Which permit are you {applicationType === 'renewal' ? 'renewing' : 'amending'}?
+                  </FieldLabel>
+                  {ownedPermits.loading ? (
+                    <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
+                  ) : renewablePermits.length === 0 ? (
+                    <p className="text-xs text-ink-secondary">
+                      This business has no permit issued through BizTrack yet. Carry on, and upload
+                      your paper permit under Documentary Requirements.
+                    </p>
+                  ) : (
+                    <ul
+                      role="radiogroup"
+                      aria-label={`Which permit are you ${applicationType === 'renewal' ? 'renewing' : 'amending'}?`}
+                      className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
+                    >
+                      {renewablePermits.map((p) => {
+                        const chosen = priorPermitId === p.id
+                        const days = p.days_until_expiry
+                        // Never colour alone: the word says expired or not.
+                        const state =
+                          days === null
+                            ? null
+                            : days < 0
+                              ? { label: `Expired ${formatDate(p.valid_until)}`, cls: 'text-s-red' }
+                              : days <= 60
+                                ? { label: `Expires soon · ${formatDate(p.valid_until)}`, cls: 'text-ink' }
+                                : { label: `Valid to ${formatDate(p.valid_until)}`, cls: 'text-ink-secondary' }
+                        return (
+                          // Presentational so the radios are the radiogroup's
+                          // own children, not list items wrapping them.
+                          <li key={p.id} role="presentation">
+                            <button
+                              type="button"
+                              role="radio"
+                              aria-checked={chosen}
+                              onClick={() => choosePriorPermit(chosen ? null : p)}
+                              className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                                chosen ? 'bg-input' : 'hover:bg-royal-tint'
+                              }`}
+                            >
+                              <span
+                                className={`h-4 w-4 shrink-0 rounded-full border-2 ${
+                                  chosen ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                                }`}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm font-medium text-ink">
+                                  {p.permit_type?.name ?? 'Permit'}
+                                </span>
+                                <span className="tnum block text-xs text-ink-secondary">
+                                  {p.permit_number}
+                                </span>
+                              </span>
+                              {state && (
+                                <span className={`shrink-0 text-xs font-semibold ${state.cls}`}>
+                                  {state.label}
+                                </span>
+                              )}
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                  {priorPermitChoice && (
+                    <p className="mt-2 text-xs text-ink-secondary">
+                      This application {applicationType === 'renewal' ? 'renews' : 'amends'}{' '}
+                      {priorPermitChoice.permit_number}. Its clearance is ticked for you in the LGU
+                      Section; add any others there.
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -2187,7 +2584,7 @@ export function ApplyWizard() {
         <div>
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Section</h1>
           <div className="mb-6 h-px bg-ink/40" />
-          <div className="flex min-h-64 flex-col items-center justify-center gap-2 py-10">
+          <div className="flex min-h-64 flex-col items-center justify-center gap-2 py-10 text-center">
             <p className="text-lg font-medium text-royal">All clearances are applied for</p>
             <p className="text-sm text-ink-muted">
               {permitTypes
@@ -2195,6 +2592,23 @@ export function ApplyWizard() {
                 .map((pt) => pt.name)
                 .join(' · ')}
             </p>
+            {Object.keys(held).length > 0 && (
+              <>
+                <p className="mt-6 text-lg font-medium text-royal">Already held, copies submitted</p>
+                <p className="text-sm text-ink-muted">
+                  {permitTypes
+                    .filter((pt) => held[pt.code])
+                    .map((pt) => pt.name)
+                    .join(' · ')}
+                </p>
+              </>
+            )}
+            {priorPermitChoice && (
+              <p className="tnum mt-6 text-sm text-ink-secondary">
+                {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
+                {priorPermitChoice.permit_number}
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -2254,6 +2668,58 @@ export function ApplyWizard() {
         </div>
         <span aria-hidden="true" />
       </div>
+
+      {/* ── SUBMISSION · a permit already held (p041, item 59) ─────────── */}
+      {heldPrompt && (
+        <ProtoModal
+          title="SUBMISSION"
+          cancelLabel="Cancel"
+          confirmLabel="Submit"
+          confirmDisabled={!heldPromptFile}
+          onCancel={() => {
+            setHeldPrompt(null)
+            setHeldPromptFile(null)
+          }}
+          onConfirm={() => {
+            if (heldPromptFile) submitHeldPermit(heldPrompt, heldPromptFile)
+            setHeldPromptFile(null)
+          }}
+        >
+          <p className="text-xl font-bold text-ink">{heldPrompt.name}</p>
+          <p className="display-serif mt-1 text-sm italic text-ink-secondary">
+            file type: png, jpg, pdf only
+          </p>
+          <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
+              <UploadIcon size={18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-ink">
+                {heldPromptFile ? heldPromptFile.name : 'Choose your certificate'}
+              </span>
+              <span className="block text-xs text-ink-secondary">
+                {heldPromptFile
+                  ? formatBytes(heldPromptFile.size)
+                  : 'The copy you already hold, up to 10 MB.'}
+              </span>
+            </span>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              className="sr-only"
+              onChange={(e) => {
+                setHeldPromptFile(e.target.files?.[0] ?? null)
+                e.target.value = ''
+              }}
+            />
+          </label>
+          <p className="mt-4 text-xs leading-relaxed text-ink-secondary">
+            Submitting a certificate you already hold is not an application: you skip this office’s
+            form, nothing is charged for it, and your copy goes to the reviewers with the rest of
+            your file.
+          </p>
+        </ProtoModal>
+      )}
 
       {/* ── WARNING · Clear All (p35) ──────────────────────────────────── */}
       {showClear && (
