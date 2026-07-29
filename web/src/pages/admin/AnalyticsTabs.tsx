@@ -1,15 +1,19 @@
 import { NavLink } from 'react-router-dom'
 
 /*
- * The three admin analytics screens share one rail entry, so they need a way to
- * reach each other. A tab strip keeps the sidebar uncluttered and makes the
- * relationship between the overview, Feature 7, and growth analysis obvious.
+ * The admin analytics screens share one rail entry, so they need a way to reach
+ * each other. A tab strip keeps the sidebar uncluttered and makes the
+ * relationship between the overview and the individual analyses obvious.
+ *
+ * Order follows docs/r-integration-spec.md's screen inventory, so the tabs read
+ * in the same sequence as the spec and the client's paper.
  */
 
 const TABS = [
   { to: '/analytics', label: 'Overview', end: true },
-  { to: '/analytics/processing-time', label: 'Processing Time', end: false },
+  { to: '/analytics/renewal-risk', label: 'Renewal Risk', end: false },
   { to: '/analytics/business-growth', label: 'Business Growth', end: false },
+  { to: '/analytics/processing-time', label: 'Processing Time', end: false },
 ]
 
 export function AnalyticsTabs() {
