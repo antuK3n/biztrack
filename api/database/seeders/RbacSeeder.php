@@ -20,6 +20,15 @@ class RbacSeeder extends Seeder
         //                     zoning_officer, obo_staff, cenro_officer, market_admin
         //   Super Admin    -> admin
         // The granular roles refine the paper's "Office Admin" per office queue.
+        /*
+         * `application.view_all` means "may read filings other than your own".
+         * It does NOT mean "may read every filing": App\Support\ApplicationVisibility
+         * narrows the holder to the applications routed to their own department
+         * (tester checklist item 56 — "no they cant see what theyre not included
+         * in"). Only `application.view_any_office` lifts that boundary, and only
+         * BPLO, the issuing office that coordinates every other office's
+         * clearance, and the super admin hold it.
+         */
         $review = ['application.view_all', 'application.review', 'permit.view_all',
             'request.create', 'message.participate', 'compliance.view'];
 
@@ -37,7 +46,8 @@ class RbacSeeder extends Seeder
                 'display_name' => 'BPLO Staff',
                 'description' => 'Reviews applications, adjusts fees, and issues business permits.',
                 'permissions' => [
-                    'application.view_all', 'application.review', 'application.reject',
+                    'application.view_all', 'application.view_any_office',
+                    'application.review', 'application.reject',
                     'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create',
                     'message.participate', 'compliance.view', 'zoning.evaluate',
                 ],
@@ -79,19 +89,30 @@ class RbacSeeder extends Seeder
                 'display_name' => 'Administrator',
                 'description' => 'Super admin: full system access, user management, and audit.',
                 'permissions' => [
-                    'application.view_all', 'application.review', 'application.reject',
+                    'application.view_all', 'application.view_any_office',
+                    'application.review', 'application.reject',
                     'fee.adjust', 'inspection.manage', 'permit.view_all', 'permit.issue',
                     'request.create', 'message.participate', 'compliance.view',
                     'analytics.view', 'zoning.evaluate', 'user.manage',
                     'owner.manage_status', 'oic.assign', 'reference.manage', 'audit.view',
                 ],
             ],
+            /*
+             * Tester checklist item 75: zoning had no `request.create`, so the
+             * one office that most often needs a missing sketch or lot plan was
+             * the only one that could not ask for it. That was an oversight, not
+             * a policy — the role already approves and returns its own
+             * assignment via application.review, so it was never "view-only",
+             * and without the request its only recourse to one missing document
+             * was to return the entire filing.
+             */
             'zoning_officer' => [
                 'display_name' => 'Zoning Officer',
-                'description' => 'Reviews zoning/locational clearance (view-only review set).',
+                'description' => 'Reviews zoning/locational clearance for the CPDO.',
                 'permissions' => [
                     'application.view_all', 'application.review', 'zoning.evaluate',
-                    'permit.view_all', 'message.participate', 'compliance.view',
+                    'permit.view_all', 'request.create', 'message.participate',
+                    'compliance.view',
                 ],
             ],
         ];
