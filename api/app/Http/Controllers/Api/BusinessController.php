@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
 use App\Models\Business;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\Numbering;
 use Illuminate\Http\JsonResponse;
@@ -12,8 +13,8 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Business registry. Owners manage their own; officers with application.view_all
- * may read any (via the application context on the frontend).
+ * Business registry. Owners manage their own; an officer may read the record
+ * behind any filing their office is allowed to open.
  */
 class BusinessController extends Controller
 {
@@ -257,11 +258,26 @@ class BusinessController extends Controller
         abort_unless($business->owner_user_id === $request->user()->id, 403, 'This business is not yours to manage.');
     }
 
+    /**
+     * Owner, or an officer who may read at least one of this business's
+     * filings. The officer only ever reaches this route from an application
+     * they already have open, so the office boundary that governs the
+     * application governs the registry record behind it (checklist item 56).
+     */
     private function authorizeOwnerOrOfficer(Request $request, Business $business): void
     {
-        if ($business->owner_user_id === $request->user()->id) {
+        $user = $request->user();
+        if ($business->owner_user_id === $user->id) {
             return;
         }
-        abort_unless($request->user()->hasPermission('application.view_all'), 403, 'You may not view this business.');
+        if (ApplicationVisibility::readsEveryOffice($user)) {
+            return;
+        }
+
+        $visible = $business->applications()
+            ->tap(fn ($q) => ApplicationVisibility::scope($q, $user))
+            ->exists();
+
+        abort_unless($visible, 403, 'You may not view this business.');
     }
 }
