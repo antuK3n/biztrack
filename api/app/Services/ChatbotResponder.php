@@ -17,6 +17,12 @@ use Illuminate\Support\Collection;
  * and every answer is scoped to the permit type or office the user actually
  * named. The full six-permit rundown only comes out for genuinely broad asks.
  *
+ * On top of the permit intents there is a field layer: someone in the middle of
+ * the wizard asks what a box on the form is for, not what a permit costs. Those
+ * questions are answered from FIELD_RULES before the permit intents get a look,
+ * because "in the sanitary permit application, what is the water source for?"
+ * names a permit but is not a question about the permit.
+ *
  * Tracking-id lookups are scoped to the asking user's own applications only.
  */
 class ChatbotResponder
@@ -84,6 +90,184 @@ class ChatbotResponder
         'units' => 'the unit counts you declare (vehicles, signs, machines and the like)',
     ];
 
+    /**
+     * The boxes on the forms, and what to put in them. 'codes' names the permit
+     * forms a field belongs to (empty means it lives in the main wizard, so it
+     * applies whichever permits you picked). When two fields answer to the same
+     * words, the one on the form the user named wins; otherwise the longest
+     * alias does, the same tie-break the permit aliases use.
+     *
+     * Fields come from web/src/pages/applicant/OfficeFormStep.tsx and the wizard
+     * steps. Keep the answers to what the form actually does: say where the box
+     * is, what to type, and who reads it.
+     *
+     * @var array<int, array{label: string, codes: array<int, string>, aliases: array<int, string>, answer: string}>
+     */
+    private const FIELD_RULES = [
+        [
+            'label' => 'Water Source',
+            'codes' => ['SANITARY'],
+            'aliases' => ['water source', 'source of water', 'water supply', 'sources of water', 'tubig'],
+            'answer' => 'Water Source is on the Sanitary Permit sheet, under Establishment Sanitation Profile. '
+                ."It records where your premises gets the water it uses, because the water supply is part of what the City Health Office inspects.\n"
+                .'Pick one: Level III (Waterworks), Deep Well, Bottled / Refill, or Other.',
+        ],
+        [
+            'label' => 'Sanitary Classification',
+            'codes' => ['SANITARY'],
+            'aliases' => ['sanitary classification', 'classification', 'food establishment', 'non-food establishment'],
+            'answer' => 'Sanitary Classification is the one required answer on the Sanitary Permit sheet. '
+                ."It says what kind of establishment you run, which decides the sanitation checklist the City Health Office inspects you against.\n"
+                .'Pick one: Food Establishment, Non-Food Establishment, Personal / Public Service, or Industrial.',
+        ],
+        [
+            'label' => 'No. of Workers Requiring Health Certificates',
+            'codes' => ['SANITARY'],
+            'aliases' => [
+                'no. of workers requiring health certificates', 'workers requiring health certificates',
+                'workers needing health certificates', 'number of workers', 'no. of workers', 'workers',
+            ],
+            'answer' => 'No. of Workers Requiring Health Certificates is a count on the Sanitary Permit sheet. '
+                ."Enter how many of your staff need their own health certificate: the ones who handle food or deal with customers face to face.\n"
+                .'Type 0 if none of them do. The field is optional, so you can leave it blank and settle it with the City Health Office at inspection.',
+        ],
+        [
+            'label' => 'Certificate Applied For',
+            'codes' => ['FSIC'],
+            'aliases' => ['certificate applied for', 'certificate applied'],
+            'answer' => 'Certificate Applied For is on the Bureau of Fire Protection sheet, and you do not type it. '
+                ."BizTrack fills it in from the permits you ticked in Permit Selection and whether this is a new application or a renewal.\n"
+                .'To change it, go back to Permit Selection and change what you are applying for.',
+        ],
+        [
+            'label' => 'Authorized Representative',
+            'codes' => ['FSIC'],
+            'aliases' => ['authorized representative', 'authorised representative', 'representative'],
+            'answer' => 'Authorized Representative is on the Bureau of Fire Protection sheet: the person BFP can deal with at the premises if you are not there yourself. '
+                ."Enter their full name.\n"
+                .'Leave it blank and BizTrack uses the name on your business permit.',
+        ],
+        [
+            'label' => 'Application Type (occupancy scope)',
+            'codes' => ['OCCUPANCY'],
+            'aliases' => ['application type', 'full or partial', 'partial occupancy', 'full occupancy', 'occupancy scope'],
+            'answer' => 'Application Type on the Occupancy sheet is the occupancy scope, and it is required. '
+                ."Choose Full if the whole building will be occupied, Partial if only a part of it will be.\n"
+                .'The Office of the Building Official inspects against what you pick, so it has to match what you will actually occupy.',
+        ],
+        [
+            'label' => 'Building Permit No.',
+            'codes' => ['OCCUPANCY'],
+            'aliases' => ['building permit no', 'building permit number', 'building permit'],
+            'answer' => 'Building Permit No. is on the Occupancy sheet. '
+                ."Enter the number printed on the building permit the Office of the Building Official issued for the structure.\n"
+                .'Give the number only. The date it was issued is filled in by the reviewing office, not by you.',
+        ],
+        [
+            'label' => 'FSEC No.',
+            'codes' => ['OCCUPANCY'],
+            'aliases' => ['fsec no', 'fsec number', 'fsec', 'fire safety evaluation clearance'],
+            'answer' => 'FSEC No. is on the Occupancy sheet: the Fire Safety Evaluation Clearance number the Bureau of Fire Protection issued when your building plans were cleared. '
+                ."Enter the number only.\n"
+                .'The reviewing office records the date it was issued, so leave that to them.',
+        ],
+        [
+            'label' => 'Birthday of Owner',
+            'codes' => ['CEC'],
+            'aliases' => ['birthday of owner', 'owner birthday', 'birthday', 'birthdate', 'date of birth', 'kaarawan'],
+            'answer' => "Birthday of Owner is on the CENRO sheet. Enter the owner's date of birth.\n"
+                .'It has to be a date in the past, so BizTrack will not accept today or later.',
+        ],
+        [
+            'label' => 'Type of Application',
+            'codes' => ['SANITARY', 'CEC'],
+            'aliases' => ['type of application', 'new or renewal'],
+            'answer' => 'Type of Application is read-only on the office sheets. '
+                ."It shows whether this is a new application or a renewal, taken from the application you started, so you never retype it.\n"
+                .'It follows Permit Selection, which is where you would change it.',
+        ],
+        [
+            'label' => 'Date of Application',
+            'codes' => [],
+            'aliases' => ['date of application', 'application date', 'date filed', 'filing date'],
+            'answer' => 'Date of Application is filled in by BizTrack the moment you submit, so it stays read-only and blank until then. '
+                .'It is not the date the permit is issued: the issuing office records that during review.',
+        ],
+        [
+            'label' => 'auto-generated control numbers',
+            'codes' => [],
+            'aliases' => [
+                'sanitary permit no', 'sanitary permit number', 'control no', 'control number',
+                'fsic application number', 'fsic number', 'auto-generated',
+            ],
+            'answer' => 'Sanitary Permit No., Control No. and FSIC Application Number are all auto-generated, which is why they are greyed out. '
+                ."Leave them alone: the issuing office mints the real number when your permit is released.\n"
+                .'The number you use to follow your application in the meantime is your tracking number, which reads like BIZ-2026-00123.',
+        ],
+        [
+            'label' => 'Capital',
+            'codes' => [],
+            'aliases' => ['capital', 'capitalization', 'capitalisation', 'puhunan'],
+            'answer' => 'Capital sits under each line of business in the Line of Business step, and it is required. '
+                ."Enter, in pesos, what you have put into that line.\n"
+                .'For a new business it is what your business tax is assessed on, because there is no full year of gross sales to go on yet.',
+        ],
+        [
+            'label' => 'Gross Sales, Preceding Year',
+            'codes' => [],
+            'aliases' => ['gross sales', 'gross receipt', 'gross receipts', 'gross income', 'benta', 'sales'],
+            'answer' => 'Gross Sales, Preceding Year is in the Business & Tax Profile step, one figure per line of business. '
+                ."Enter your total sales for last year, before you take any expenses off.\n"
+                .'A renewal is assessed on this figure. If the line is brand new, leave it and your capitalization is used instead.',
+        ],
+        [
+            'label' => 'Line of Business',
+            'codes' => [],
+            'aliases' => ['line of business', 'psic', 'psic code', 'nature of business'],
+            'answer' => 'Line of Business is what you actually sell or do, chosen from the PSIC list in the Line of Business step. '
+                ."Search for the closest description and pick it.\n"
+                .'It sets the tax rate for that line, so pick the one that matches the activity. You can add more than one line if you do more than one thing.',
+        ],
+        [
+            'label' => 'Tax Identification Number (TIN)',
+            'codes' => [],
+            'aliases' => ['tin', 'tin number', 'tax identification number', 'tax identification'],
+            'answer' => 'Tax Identification Number (TIN) is in the Business Information step and it is required. '
+                ."Enter the 9 digits the BIR issued you, plus your 3 to 5 digit branch code if you have one, like 123-456-789-000.\n"
+                .'It is the number on your BIR Certificate of Registration, not your business permit number.',
+        ],
+        [
+            'label' => 'Floor Area',
+            'codes' => [],
+            'aliases' => ['floor area', 'square meter', 'square meters', 'square metre', 'sqm', 'laki ng lugar'],
+            'answer' => 'Floor Area is in the Business & Tax Profile step. '
+                ."Enter the floor space your business occupies at the premises, in square metres.\n"
+                .'Some fees are charged per square metre, so this figure feeds straight into your assessment. Give the space you occupy, not the whole building.',
+        ],
+        [
+            'label' => 'Number of Employees',
+            'codes' => [],
+            'aliases' => ['number of employees', 'no. of employees', 'employee', 'employees', 'headcount', 'staff', 'manggagawa'],
+            'answer' => 'Number of Employees is in the Business & Tax Profile step: your total headcount at this location. '
+                ."Employees Residing in Malabon is a subset of that number, so it can never be higher.\n"
+                .'Some fees are computed from staff counts, which is why both are asked.',
+        ],
+    ];
+
+    /** A message shaped like "what does this box want from me". */
+    private const FIELD_QUESTION_TERMS = [
+        'what is', 'what are', 'what does', 'what do i', 'what should i', 'what to', 'what for',
+        "what's", 'whats', 'what', 'ano', 'anong', 'para saan', 'para san',
+        'mean', 'means', 'meaning', 'explain', 'define', 'definition',
+        'fill', 'fill in', 'fill out', 'enter', 'put', 'ilagay', 'ilalagay',
+        'required', 'optional', 'why', 'bakit',
+    ];
+
+    /** Words that say the question is about the form itself, not the permit. */
+    private const FORM_CONTEXT_TERMS = [
+        'field', 'box', 'blank', 'form', 'sheet', 'section', 'item', 'question', 'kahon', 'sagutan',
+    ];
+
     public function reply(User $user, string $message): string
     {
         $text = mb_strtolower(trim($message));
@@ -109,6 +293,13 @@ class ChatbotResponder
         $office = $permitType ? null : $this->office($text);
         if ($office) {
             return $this->zoning($office);
+        }
+
+        // "What is the water source for?" names a permit but asks about a box on
+        // its form, so the field layer gets first refusal on the answer.
+        $field = $this->fieldAnswer($text, $permitType);
+        if ($field !== null) {
+            return $field;
         }
 
         $broad = ! $permitType && $this->mentionsAny($text, self::BROAD_TERMS);
@@ -197,6 +388,77 @@ class ChatbotResponder
         }
 
         return $code ? PermitType::with('department', 'documentTypes')->where('code', $code)->first() : null;
+    }
+
+    /**
+     * "What is this box for?" Answers a named field on a named form, or admits
+     * it does not know the field rather than inventing a definition.
+     *
+     * Returns null when the message is not about a form field at all, so the
+     * permit intents below carry on untouched.
+     */
+    private function fieldAnswer(string $text, ?PermitType $type): ?string
+    {
+        $asking = $this->mentionsAny($text, self::FIELD_QUESTION_TERMS);
+        $field = $this->field($text, $type?->code);
+
+        if ($field) {
+            // A bare "water source" is still a field question: nothing else in
+            // the message claims it, so answer the field instead of the menu.
+            return $asking || $this->intent($text) === 'fallback' ? $field['answer'] : null;
+        }
+
+        // Names no field I know, but is plainly asking about one.
+        if ($asking && $this->mentionsAny($text, self::FORM_CONTEXT_TERMS)) {
+            return $this->fieldFallback($type);
+        }
+
+        return null;
+    }
+
+    /**
+     * The field the message names. A field on the form the user named beats one
+     * from another form; after that the longest matched alias wins.
+     *
+     * @return array{label: string, codes: array<int, string>, aliases: array<int, string>, answer: string}|null
+     */
+    private function field(string $text, ?string $permitCode): ?array
+    {
+        $best = null;
+        $bestScore = 0;
+
+        foreach (self::FIELD_RULES as $rule) {
+            $length = 0;
+            foreach ($rule['aliases'] as $alias) {
+                if ($this->mentions($text, $alias)) {
+                    $length = max($length, mb_strlen($alias));
+                }
+            }
+            if ($length === 0) {
+                continue;
+            }
+
+            // Scoped fields outrank unscoped ones only when the form matches.
+            $onNamedForm = $permitCode !== null && in_array($permitCode, $rule['codes'], true);
+            $score = $length + ($onNamedForm ? 1000 : 0);
+            if ($score > $bestScore) {
+                $best = $rule;
+                $bestScore = $score;
+            }
+        }
+
+        return $best;
+    }
+
+    /** Asked about a field I have no note on. Say so; do not make one up. */
+    private function fieldFallback(?PermitType $type): string
+    {
+        $department = $type?->department?->name;
+        $office = $department ? "the {$department}" : 'the office reviewing your application';
+
+        return "I do not have a note on that field, and I would rather not guess at what it means.\n"
+            ."Give me the form and the exact label and I will try again, like \"what is the water source on the sanitary permit form\".\n"
+            ."If it is specific to your application, message {$office} from the application page. They can tell you exactly what they need in that box.";
     }
 
     private function office(string $text): ?Department
@@ -510,6 +772,7 @@ class ChatbotResponder
             ."• Its document requirements\n"
             ."• Its fee\n"
             ."• Its processing time and whether it needs an inspection\n"
+            ."• What any field on its application form is for\n"
             .'Which one would you like?';
     }
 
@@ -522,6 +785,7 @@ class ChatbotResponder
             ."• \"Requirements for a sanitary permit\"\n"
             ."• \"How much is the fire safety fee\"\n"
             ."• \"When is the renewal deadline\"\n"
+            ."• \"What is the water source on the sanitary permit form\"\n"
             ."• A tracking number like BIZ-2026-00123 for a status check\n"
             .'What would you like to know?';
     }
@@ -539,6 +803,7 @@ class ChatbotResponder
             ."• \"How much is the occupancy permit\"\n"
             ."• \"Who reviews the fire safety certificate\"\n"
             ."• \"When is the renewal deadline\"\n"
+            ."• \"What do I put in the water source field\"\n"
             ."• A tracking number like BIZ-2026-00123 for a status check\n"
             .'For anything specific to your case, you can also message your assigned office from any application page.';
     }

@@ -1,7 +1,9 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ChatbotConversation;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 function ownedTrackingId(string $email): string
 {
@@ -288,6 +290,78 @@ it('explains the tracking number format instead of guessing on a partial one', f
         ->not->toContain('currently:');
 });
 
+// --- form fields: what a box on the form is for -------------------------------
+
+it('explains a form field instead of offering the permit menu', function () {
+    // The reported bug, verbatim: this used to come back as the permit menu.
+    $body = ask('In the sanitary permit application, what is the water source for?');
+
+    expect($body)->toContain('Water Source')
+        ->toContain('Sanitary Permit sheet')
+        ->toContain('Level III (Waterworks)')
+        ->toContain('Deep Well')
+        ->not->toContain('Which one would you like?');
+});
+
+it('explains the other sanitary form fields', function () {
+    expect(ask('what is the sanitary classification field?'))
+        ->toContain('Sanitary Classification')
+        ->toContain('Food Establishment')
+        ->toContain('Industrial');
+
+    expect(ask('what do I put in no. of workers requiring health certificates?'))
+        ->toContain('Workers Requiring Health Certificates')
+        ->toContain('health certificate')
+        ->toContain('0');
+});
+
+it('explains fields on the fire and occupancy sheets', function () {
+    expect(ask('what is certificate applied for?'))
+        ->toContain('Certificate Applied For')
+        ->toContain('Permit Selection');
+
+    expect(ask('what does application type mean on the occupancy permit form?'))
+        ->toContain('occupancy scope')
+        ->toContain('Full')
+        ->toContain('Partial');
+
+    expect(ask('what is the building permit no field for?'))
+        ->toContain('Building Permit No.')
+        ->toContain('Office of the Building Official');
+});
+
+it('explains the main wizard fields', function () {
+    expect(ask('what is capital?'))->toContain('Capital')->toContain('Line of Business step');
+    expect(ask('what is gross sales?'))->toContain('Gross Sales')->toContain('before you take any expenses off');
+    expect(ask('what is line of business?'))->toContain('Line of Business')->toContain('PSIC');
+    expect(ask('what should I enter for TIN?'))->toContain('Tax Identification Number')->toContain('123-456-789-000');
+    expect(ask('what is floor area for?'))->toContain('Floor Area')->toContain('square metres');
+});
+
+it('answers a bare field name without a question word', function () {
+    expect(ask('water source'))->toContain('Water Source')->toContain('Deep Well');
+});
+
+it('says it does not know a field rather than inventing one', function () {
+    $body = ask('what is the hazard grading field on the sanitary form for?');
+
+    expect($body)->toContain('do not have a note on that field')
+        ->toContain('City Health Office')
+        ->not->toContain('Which one would you like?');
+});
+
+it('keeps permit questions out of the field layer', function () {
+    // "how much" is still a fee question even though gross sales is a field.
+    expect(ask('how much is the sanitary permit'))
+        ->toContain('Sanitary Permit / Health Certificate')
+        ->toContain('Tax Order of Payment')
+        ->not->toContain('Business & Tax Profile step');
+
+    expect(ask('what documents do I need for a sanitary permit'))
+        ->toContain('Sanitary Requirements')
+        ->not->toContain('do not have a note on that field');
+});
+
 it('persists the exchange and returns it on GET', function () {
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/chatbot/messages', ['message' => 'hello'])
@@ -309,4 +383,58 @@ it('persists the exchange and returns it on GET', function () {
         ->assertOk()
         ->json('data');
     expect($other)->toHaveCount(0);
+});
+
+it('returns the stored user turn alongside the reply', function () {
+    // The panel draws the user's bubble before the round trip; it needs the row
+    // id back so a later history load does not show the same turn twice.
+    $meta = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => 'what is floor area for?'])
+        ->assertCreated()
+        ->json('meta.user_message');
+
+    expect($meta['sender'])->toBe('user');
+    expect($meta['body'])->toBe('what is floor area for?');
+    expect($meta['id'])->toBeInt();
+});
+
+it('keeps the whole thread across separate requests and a new token', function () {
+    // Three turns, each its own request, exactly as a reload or a re-login does.
+    foreach (['what is the water source for?', 'requirements for a sanitary permit', 'hello'] as $message) {
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson('/api/v1/chatbot/messages', ['message' => $message])
+            ->assertCreated();
+    }
+
+    // authAs() mints a fresh token, so this reads back the way a re-login does.
+    $data = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/chatbot/messages')
+        ->assertOk()
+        ->json('data');
+
+    expect($data)->toHaveCount(6);
+    expect(array_column($data, 'body'))->toContain('what is the water source for?')
+        ->toContain('requirements for a sanitary permit')
+        ->toContain('hello');
+    expect(array_column($data, 'sender'))->toBe(['user', 'bot', 'user', 'bot', 'user', 'bot']);
+
+    // One thread per user, and it is the one the reads come back from.
+    expect(ChatbotConversation::where(
+        'user_id',
+        User::where('email', 'owner@biztrack.local')->value('id'),
+    )->count())->toBe(1);
+});
+
+it('never splits a user thread across two conversations', function () {
+    $userId = User::where('email', 'owner@biztrack.local')->value('id');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/chatbot/messages', ['message' => 'hello'])
+        ->assertCreated();
+
+    // A second conversation row is what used to hide half a thread from GET.
+    expect(fn () => ChatbotConversation::create([
+        'user_id' => $userId,
+        'started_at' => now(),
+    ]))->toThrow(UniqueConstraintViolationException::class);
 });
