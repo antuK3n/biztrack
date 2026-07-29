@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -133,41 +133,80 @@ function Field({ label, value, className = '' }: { label: string; value: string;
   )
 }
 
+/*
+ * Uploaded requirement. Both actions fetch the file with the session's bearer
+ * token: linking straight at the API opened the 401 JSON envelope in a new tab
+ * instead of the document. View renders the PDF or image in a tab, Download
+ * saves it.
+ */
 function DocumentRow({ doc }: { doc: AppDocument }) {
-  const url = documents.downloadUrl(doc.id)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'view' | 'download' | null>(null)
+
+  async function view() {
+    // The tab has to be opened inside the click, before any await, or the
+    // popup blocker eats it.
+    const tab = window.open('', '_blank')
+    setBusy('view')
+    setError(null)
+    try {
+      await documents.view(doc.id, tab)
+    } catch (err) {
+      tab?.close()
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function save() {
+    setBusy('download')
+    setError(null)
+    try {
+      await documents.download(doc.id, doc.original_filename)
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-4 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
-          <FileGlyph />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-ink">{doc.document_type.name}</p>
-          <p className="truncate text-xs text-ink-muted">
-            {doc.original_filename} · {formatBytes(doc.size_bytes)}
-          </p>
+    <li className="rounded-lg border border-line bg-white px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
+            <FileGlyph />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-ink">{doc.document_type.name}</p>
+            <p className="truncate text-xs text-ink-muted">
+              {doc.original_filename} · {formatBytes(doc.size_bytes)}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={view}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
+          >
+            <EyeIcon size={14} />
+            {busy === 'view' ? 'Opening…' : 'View'}
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 rounded-md bg-royal px-3 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+          >
+            <DownloadIcon size={14} />
+            {busy === 'download' ? 'Saving…' : 'Download'}
+          </button>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
-        >
-          <EyeIcon size={14} />
-          View
-        </a>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md bg-royal px-3 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-        >
-          <DownloadIcon size={14} />
-          Download
-        </a>
-      </div>
+      {error && <p className="mt-2 text-xs font-medium text-s-red">{error}</p>}
     </li>
   )
 }
@@ -363,6 +402,39 @@ export function ReviewPage() {
     [canAssign, canListUsers],
   )
 
+  /*
+   * /queue/:id is an ASSIGNMENT id, but application ids are what officers have
+   * in hand everywhere else (notification deep links, a pasted URL, a row that
+   * has since been reassigned). Rather than dying on the raw binding error, ask
+   * the queue whether this number is one of our applications and bounce to its
+   * real assignment; only give up when nothing matches.
+   */
+  const [strayId, setStrayId] = useState<'checking' | 'unresolved' | null>(null)
+  const missing = Boolean(error) && toApiError(error).status === 404
+
+  useEffect(() => {
+    if (!missing) {
+      setStrayId(null)
+      return
+    }
+    let cancelled = false
+    setStrayId('checking')
+    assignments
+      .list()
+      .then((queue) => {
+        if (cancelled) return
+        const match = queue.find((a) => a.application.id === assignmentId)
+        if (match) navigate(`/queue/${match.id}`, { replace: true })
+        else setStrayId('unresolved')
+      })
+      .catch(() => {
+        if (!cancelled) setStrayId('unresolved')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [missing, assignmentId, navigate])
+
   const backLink = (
     <Link to="/queue" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline">
       <ArrowLeftIcon size={16} />
@@ -375,6 +447,32 @@ export function ReviewPage() {
       <div>
         {backLink}
         <ReviewSkeleton />
+      </div>
+    )
+  if (missing)
+    return (
+      <div>
+        {backLink}
+        <div className="rounded-lg bg-white px-5 py-6 shadow-card">
+          <h1 className="text-base font-bold text-ink">
+            {strayId === 'unresolved'
+              ? 'This application is not in your queue'
+              : 'Opening this application…'}
+          </h1>
+          <p className="mt-1.5 max-w-prose text-sm text-ink-secondary">
+            {strayId === 'unresolved'
+              ? 'The link points at a review that has been completed, reassigned, or removed. Open it again from Application Verification.'
+              : 'Checking your queue for the matching review.'}
+          </p>
+          {strayId === 'unresolved' && (
+            <Link
+              to="/queue"
+              className="mt-4 inline-flex rounded-md bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
+            >
+              Go to Application Verification
+            </Link>
+          )}
+        </div>
       </div>
     )
   if (error)
