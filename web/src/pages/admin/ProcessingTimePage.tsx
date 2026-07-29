@@ -17,6 +17,7 @@ import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { ProcessingTimeDepartment, ProcessingTimePoint } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
+import { ComputedAt } from './ComputedAt'
 
 /*
  * Permit Processing Time Monitoring (mockup 106) — Feature 7, formerly the
@@ -264,10 +265,18 @@ export function ProcessingTimePage() {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  const { data, loading, error, reload } = useAsync(
-    () => analytics.processingTime(Number(weeks)),
-    [weeks],
-  )
+  // Resolves to { data, meta }: the statistics plus when and by which engine they
+  // were computed. ComputedAt renders the meta — see AnalyticsProvenance for why
+  // it is not optional on an analytics screen.
+  const {
+    data: result,
+    loading,
+    error,
+    reload,
+  } = useAsync(() => analytics.processingTime(Number(weeks)), [weeks])
+
+  const data = result?.data
+  const meta = result?.meta
 
   const departments = data?.departments ?? []
   // The office filter falls back to the first charted office, so a window
@@ -329,6 +338,8 @@ export function ProcessingTimePage() {
       </PageTitle>
 
       <AnalyticsTabs />
+
+      {meta && <ComputedAt meta={meta} />}
 
       {downloadError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">

@@ -11,7 +11,9 @@ import type {
   AuditLog,
   Barangay,
   Business,
+  AnalyticsProvenance,
   BusinessGrowthReport,
+  Computed,
   BusinessStatus,
   BusinessPayload,
   Department,
@@ -48,6 +50,21 @@ import type {
 async function unwrap<T>(promise: Promise<{ data: { data: T } }>): Promise<T> {
   const res = await promise
   return res.data.data
+}
+
+/**
+ * Like unwrap, but keeps the provenance meta.
+ *
+ * The analytics endpoints are the one place `meta` is not optional detail: it
+ * says when the figures were computed and whether R or the PHP fallback computed
+ * them, and every analytics screen is required to show that. Keeping it in the
+ * return type is what stops a caller quietly dropping it — see AnalyticsProvenance.
+ */
+async function unwrapComputed<T>(
+  promise: Promise<{ data: { data: T; meta: AnalyticsProvenance } }>,
+): Promise<Computed<T>> {
+  const res = await promise
+  return { data: res.data.data, meta: res.data.meta }
 }
 
 /**
@@ -350,17 +367,25 @@ export const analytics = {
   /** Download the summary as a CSV report (Bearer blob; v2). */
   export: (filename = 'biztrack-analytics.csv') => downloadBlob('/analytics/export', filename),
 
-  /**
-   * Feature 7: per-office control charts over weekly review turnaround. The
-   * statistics run in PHP (App\Support\Spc); nothing calls the old R project.
+  /*
+   * The three R-backed screens. Each resolves to { data, meta }: the statistics
+   * plus when and by which engine they were computed. Read the meta onto the
+   * screen — these are batch figures, as fresh as the last `analytics:refresh`,
+   * and the PHP fallback stands in when R is unreachable.
    */
+
+  /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>
-    unwrap<ProcessingTimeReport>(api.get('/analytics/processing-time', { params: { weeks } })),
+    unwrapComputed<ProcessingTimeReport>(
+      api.get('/analytics/processing-time', { params: { weeks } }),
+    ),
   processingTimeReport: (weeks: number) =>
     downloadBlob(`/analytics/processing-time/report?weeks=${weeks}`, 'processing-time-monitoring.pdf'),
 
   businessGrowth: (months: number) =>
-    unwrap<BusinessGrowthReport>(api.get('/analytics/business-growth', { params: { months } })),
+    unwrapComputed<BusinessGrowthReport>(
+      api.get('/analytics/business-growth', { params: { months } }),
+    ),
   businessGrowthReport: (months: number) =>
     downloadBlob(`/analytics/business-growth/report?months=${months}`, 'business-growth-analysis.pdf'),
 
@@ -369,7 +394,9 @@ export const analytics = {
    * `score` is out of 100 and is not a probability — see RenewalRiskReport.
    */
   renewalRisk: (days: number, limit?: number) =>
-    unwrap<RenewalRiskReport>(api.get('/analytics/renewal-risk', { params: { days, limit } })),
+    unwrapComputed<RenewalRiskReport>(
+      api.get('/analytics/renewal-risk', { params: { days, limit } }),
+    ),
   renewalRiskReport: (days: number) =>
     downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
 }
