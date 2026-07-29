@@ -1,0 +1,66 @@
+[
+  {
+    "code": "zoning.filing_fee",
+    "title": "Locational clearance application/filing fee",
+    "section": "Sec. 3.D.01(a)(1)",
+    "source": "A10-2016",
+    "office": "CPDO",
+    "group": "zoning",
+    "permit_types": ["ZONING"],
+    "conditions": {},
+    "basis": "per_application",
+    "computation": { "type": "fixed", "amount": 45.0 },
+    "cap": null,
+    "notes": "Charged for every application for locational clearance irrespective of whether it is approved or not (Sec. 3.D.01(a)). Sec. 3.D.02(B) directs business applicants to pay the filing fee at the one-stop shop on submission, so it applies to a business locational clearance as well as to a building one.",
+    "defects": []
+  },
+  {
+    "code": "zoning.business_land_use_verification",
+    "title": "Land use verification fee (business locational clearance)",
+    "section": "Sec. 3.D.01(d)(1)",
+    "source": "A10-2016",
+    "office": "CPDO",
+    "group": "zoning",
+    "permit_types": ["ZONING"],
+    "conditions": {},
+    "basis": "per_application",
+    "computation": { "type": "fixed", "amount": 345.0 },
+    "cap": null,
+    "notes": "Business-specific flat rate. The building schedule charges land use verification by use category under Sec. 3.D.01(b) (residential 110, commercial/industrial 300); item (d) replaces that with one flat 345.00 for a business locational clearance.",
+    "defects": [
+      "Sec. 3.D.01(d) lists four lines all at 345.00: (1) land use verification fee, (2) processing fee, (3) sari-sari stores, (4) all other businesses. The ordinance does not say whether (3) and (4) are additional charges or simply restate that the same rate applies to every business category. The engine bills (1) and (2), mirroring the (b) verification + (c) processing structure used for buildings, and treats (3) and (4) as the category coverage statement rather than extra fees. Needs LGU confirmation: the alternative readings give 345.00 or 1,380.00 instead of 690.00."
+    ]
+  },
+  {
+    "code": "zoning.business_processing_fee",
+    "title": "Processing fee (business locational clearance)",
+    "section": "Sec. 3.D.01(d)(2)",
+    "source": "A10-2016",
+    "office": "CPDO",
+    "group": "zoning",
+    "permit_types": ["ZONING"],
+    "conditions": {},
+    "basis": "per_application",
+    "computation": { "type": "fixed", "amount": 345.0 },
+    "cap": null,
+    "notes": "Business-specific flat rate. Buildings pay a per-square-metre processing fee under Sec. 3.D.01(c) (9.00 to 18.00 per sqm by use); item (d) replaces that with one flat 345.00 for a business locational clearance, so floor area does not enter a business zoning assessment.",
+    "defects": [
+      "Same Sec. 3.D.01(d) ambiguity recorded on zoning.business_land_use_verification."
+    ]
+  },
+  {
+    "code": "zoning.ambulant_exempt",
+    "title": "Ambulant vendor or peddler — exempt from zoning clearance",
+    "section": "Sec. 3X.05",
+    "source": "A10-2016",
+    "office": "CPDO",
+    "group": "zoning",
+    "permit_types": ["ZONING"],
+    "conditions": { "flags": ["is_ambulant_vendor"] },
+    "basis": "exemption",
+    "computation": { "type": "fixed", "amount": 0.0 },
+    "cap": null,
+    "notes": "\"The application for business permit as ambulant and peddler shall be exempted from the zoning clearance\" (Sec. 3X.05). Emitted as an explicit zero line so the exemption is visible on the Tax Order of Payment rather than silently absent. The engine suppresses the other zoning lines when this flag is set.",
+    "defects": []
+  }
+]

@@ -7,7 +7,8 @@ import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitive
 import { formatDateTime } from '../lib/format'
 import { notifications } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
-import type { Notification } from '../lib/types'
+import type { Notification, User } from '../lib/types'
+import { useAuth } from '../stores/auth'
 
 /** Blue avatar circle with a white person glyph, per the prototype rows (PDF p19). */
 function AvatarCircle() {
@@ -24,9 +25,27 @@ function AvatarCircle() {
   )
 }
 
+/**
+ * The empty state has to speak to whoever is reading it. An officer is not
+ * waiting on "your applications, payments, and permits"; they are waiting on
+ * work arriving in their queue.
+ */
+function emptyStateFor(user: User | null): string {
+  const can = (permission: string) => user?.permissions.includes(permission) ?? false
+  if (can('user.manage')) {
+    return 'System alerts, officer assignments, and escalations will show up here.'
+  }
+  if (can('application.review')) {
+    return 'Applications routed to your office, applicant replies, and inspection updates will show up here.'
+  }
+  return 'Updates about your applications, payments, and permits will show up here.'
+}
+
 export function NotificationsPage() {
   const { data, loading, error, reload, setData } = useAsync(() => notifications.list(), [])
   const [markingAll, setMarkingAll] = useState(false)
+  const user = useAuth((s) => s.user)
+  const emptyDescription = emptyStateFor(user)
   const items: Notification[] = data?.data ?? []
   const unread = data?.unread ?? 0
 
@@ -85,11 +104,7 @@ export function NotificationsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={BellIcon}
-          title="No notifications"
-          description="Updates about your applications, payments, and permits will show up here."
-        />
+        <EmptyState icon={BellIcon} title="No notifications" description={emptyDescription} />
       ) : (
         <ul className="flex flex-col gap-4">
           {items.map((n) => {

@@ -23,19 +23,50 @@ use Illuminate\Validation\ValidationException;
  */
 class AuthController extends Controller
 {
+    /**
+     * The citizen-facing portal admits business owners only; the staff portal
+     * admits LGU officers and the super admin. Keeping the two doors separate
+     * means a leaked staff credential is useless at the public sign-in, and an
+     * applicant can never land on an officer dashboard by accident.
+     */
+    private const STAFF_ROLES = [
+        'bplo_staff', 'sanitary_officer', 'fire_inspector', 'zoning_officer',
+        'obo_staff', 'cenro_officer', 'market_admin', 'admin',
+    ];
+
     private function withRelations(User $user): User
     {
         return $user->load('department', 'roles.permissions');
     }
 
-    private function authPayload(User $user): JsonResponse
+    private function isStaff(User $user): bool
     {
-        $token = $user->createToken('web')->plainTextToken;
+        return $user->roles->pluck('name')->intersect(self::STAFF_ROLES)->isNotEmpty();
+    }
+
+    /**
+     * The signed-in user as the web app's `User` type, plus the join date the
+     * Profile screen shows as "member since". UserResource is shared with the
+     * admin user listings, so the extra field is added on this side.
+     *
+     * @return array<string, mixed>
+     */
+    private function userPayload(User $user): array
+    {
+        return (new UserResource($this->withRelations($user)))->resolve()
+            + ['created_at' => optional($user->created_at)->toISOString()];
+    }
+
+    private function authPayload(User $user, string $portal = 'public'): JsonResponse
+    {
+        // The token name records which door was used, so revoking one portal's
+        // sessions later doesn't take the other's down with it.
+        $token = $user->createToken("web:{$portal}")->plainTextToken;
 
         return response()->json([
             'data' => [
                 'token' => $token,
-                'user' => new UserResource($this->withRelations($user)),
+                'user' => $this->userPayload($user),
             ],
         ], 200);
     }
@@ -86,7 +117,9 @@ class AuthController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
+            'portal' => ['sometimes', 'in:public,staff'],
         ]);
+        $portal = $data['portal'] ?? 'public';
 
         $key = 'login:'.Str::lower($data['email']).'|'.$request->ip();
 
@@ -129,6 +162,20 @@ class AuthController extends Controller
             return response()->json(['message' => 'Your account is deactivated. Contact the City BPLO.'], 403);
         }
 
+        // Wrong door. Say which one is right, but only after the password has
+        // already checked out, so this can't be used to enumerate staff accounts.
+        $user->loadMissing('roles');
+        if ($this->isStaff($user) !== ($portal === 'staff')) {
+            RateLimiter::clear($key);
+
+            return response()->json([
+                'message' => $portal === 'staff'
+                    ? 'This is the LGU staff sign-in. Business owners sign in on the main BizTrack page.'
+                    : 'LGU staff accounts sign in through the staff portal.',
+                'portal' => $portal === 'staff' ? 'public' : 'staff',
+            ], 409);
+        }
+
         RateLimiter::clear($key);
         $user->forceFill([
             'failed_login_attempts' => 0,
@@ -137,7 +184,7 @@ class AuthController extends Controller
         ])->save();
         Audit::log('user.logged_in', $user);
 
-        return $this->authPayload($user);
+        return $this->authPayload($user, $portal);
     }
 
     public function logout(Request $request): JsonResponse
@@ -150,7 +197,73 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         return response()->json([
-            'data' => new UserResource($this->withRelations($request->user())),
+            'data' => $this->userPayload($request->user()),
+        ]);
+    }
+
+    /**
+     * Update the signed-in user's own profile fields. Email changes are
+     * intentionally not supported here: the address is the login identifier
+     * and the prototype has no live re-verification flow.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'first_name' => ['required', 'string', 'max:100'],
+            'middle_name' => ['nullable', 'string', 'max:100'],
+            'last_name' => ['required', 'string', 'max:100'],
+            'suffix' => ['nullable', 'string', 'max:20'],
+            'mobile_number' => ['required', 'string', 'max:20'],
+        ]);
+
+        $user = $request->user();
+        $user->fill([
+            'name' => trim("{$data['first_name']} {$data['last_name']}"),
+            'first_name' => $data['first_name'],
+            'middle_name' => $data['middle_name'] ?? $user->middle_name,
+            'last_name' => $data['last_name'],
+            'suffix' => $data['suffix'] ?? $user->suffix,
+            'mobile_number' => $data['mobile_number'],
+        ])->save();
+
+        Audit::log('user.profile_updated', $user);
+
+        return response()->json([
+            'data' => $this->userPayload($user),
+        ]);
+    }
+
+    /**
+     * Change the signed-in user's password. Requires the current password and
+     * revokes every other token so a hijacked session dies with the old
+     * credential; the token making this request stays valid.
+     */
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'confirmed', PasswordRule::min(8)],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is incorrect.'],
+            ]);
+        }
+
+        $user->forceFill(['password' => $data['password']])->save();
+
+        // Revoke all other sessions (keep the one performing the change).
+        $user->tokens()
+            ->where('id', '!=', $user->currentAccessToken()->id)
+            ->delete();
+
+        Audit::log('user.password_changed', $user);
+
+        return response()->json([
+            'message' => 'Password updated. Other signed-in devices have been logged out.',
         ]);
     }
 

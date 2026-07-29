@@ -6,6 +6,7 @@ import {
   HistoryIcon,
   HomeIcon,
   InboxIcon,
+  MailIcon,
   SearchIcon,
   ShieldCheckIcon,
   TrackIcon,
@@ -35,12 +36,13 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Home', icon: HomeIcon, to: '/dashboard', mobile: true },
   // Business owner
   { label: 'Track', icon: TrackIcon, to: '/applications', permission: 'application.view_own', mobile: true },
+  { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
   { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
   // Officer / staff
   { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
   { label: 'Inspections', icon: SearchIcon, to: '/inspections', permission: 'inspection.manage', mobile: true },
-  { label: 'Other Requirements', icon: FolderIcon, permission: 'request.create' },
+  { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
   // Admin
   { label: 'Analytics', icon: ChartIcon, to: '/analytics', permission: 'analytics.view' },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },

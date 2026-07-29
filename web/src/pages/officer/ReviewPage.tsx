@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
@@ -10,13 +10,14 @@ import {
 } from '../../components/icons'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
+import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { admin, applications, assignments, documents } from '../../lib/resources'
+import { admin, applications, assignments, documents, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { AdminUser, AppDocument, Application } from '../../lib/types'
+import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
 
 /*
  * Admin Review sheet (PDF p56, p67–p76): the officer reads the application as
@@ -50,6 +51,25 @@ const TYPE_TITLES: Record<string, string> = {
   new: 'New',
   renewal: 'Renewal of',
   amendment: 'Amendment of',
+}
+
+/*
+ * Issuance dates the applicant can never know: the office that issued the
+ * document records them here during review, and they save straight back into
+ * that permit type's office form.
+ */
+const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string }[]> = {
+  OCCUPANCY: [
+    { key: 'building_permit_date', label: 'Building Permit Date Issued' },
+    { key: 'fsec_date', label: 'FSEC Date Issued' },
+  ],
+}
+
+/** Today as a local-timezone YYYY-MM-DD string (input[type=date] max). */
+function todayISO(): string {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 const readOnlyInput = `${inputCls} read-only:cursor-default`
@@ -113,41 +133,80 @@ function Field({ label, value, className = '' }: { label: string; value: string;
   )
 }
 
+/*
+ * Uploaded requirement. Both actions fetch the file with the session's bearer
+ * token: linking straight at the API opened the 401 JSON envelope in a new tab
+ * instead of the document. View renders the PDF or image in a tab, Download
+ * saves it.
+ */
 function DocumentRow({ doc }: { doc: AppDocument }) {
-  const url = documents.downloadUrl(doc.id)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'view' | 'download' | null>(null)
+
+  async function view() {
+    // The tab has to be opened inside the click, before any await, or the
+    // popup blocker eats it.
+    const tab = window.open('', '_blank')
+    setBusy('view')
+    setError(null)
+    try {
+      await documents.view(doc.id, tab)
+    } catch (err) {
+      tab?.close()
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function save() {
+    setBusy('download')
+    setError(null)
+    try {
+      await documents.download(doc.id, doc.original_filename)
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-line bg-white px-4 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
-          <FileGlyph />
-        </span>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold text-ink">{doc.document_type.name}</p>
-          <p className="truncate text-xs text-ink-muted">
-            {doc.original_filename} · {formatBytes(doc.size_bytes)}
-          </p>
+    <li className="rounded-lg border border-line bg-white px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-royal-tint">
+            <FileGlyph />
+          </span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-ink">{doc.document_type.name}</p>
+            <p className="truncate text-xs text-ink-muted">
+              {doc.original_filename} · {formatBytes(doc.size_bytes)}
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={view}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
+          >
+            <EyeIcon size={14} />
+            {busy === 'view' ? 'Opening…' : 'View'}
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 rounded-md bg-royal px-3 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+          >
+            <DownloadIcon size={14} />
+            {busy === 'download' ? 'Saving…' : 'Download'}
+          </button>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
-        >
-          <EyeIcon size={14} />
-          View
-        </a>
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 rounded-md bg-royal px-3 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-        >
-          <DownloadIcon size={14} />
-          Download
-        </a>
-      </div>
+      {error && <p className="mt-2 text-xs font-medium text-s-red">{error}</p>}
     </li>
   )
 }
@@ -239,6 +298,63 @@ function ReviewSkeleton() {
   )
 }
 
+/** "floor_area_sqm" / "floorAreaSqm" → "Floor Area Sqm". */
+function humanizeKey(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+/** Render an opaque office-form answer as display text. */
+function formValueText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (Array.isArray(value)) return value.map((v) => formValueText(v)).join(', ')
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${humanizeKey(k)}: ${formValueText(v)}`)
+      .join(' · ')
+  }
+  return String(value)
+}
+
+const LOCATION_LABELS: Record<string, string> = {
+  within: 'Within the city',
+  outside: 'Outside the city',
+}
+
+/** Present fee-profile facts as labeled read-only values (absent fields skipped). */
+function feeProfileFacts(profile: FeeProfile): { label: string; value: string }[] {
+  const facts: { label: string; value: string }[] = []
+  const put = (label: string, value: string | null | undefined) => {
+    if (value) facts.push({ label, value })
+  }
+  const money = (n?: number) => (n == null ? null : formatMoney(n))
+  const count = (n?: number) => (n == null ? null : String(n))
+  put('Gross Sales (Preceding Year)', money(profile.gross_sales))
+  put('Capitalization', money(profile.capitalization))
+  put('Construction Cost', money(profile.construction_cost))
+  put('Floor Area', profile.floor_area_sqm == null ? null : `${profile.floor_area_sqm} sqm`)
+  put('Employees', count(profile.employees))
+  put('Storeys', count(profile.storeys))
+  put('Doors', count(profile.doors))
+  put('Rooms', count(profile.rooms))
+  put('Beds', count(profile.beds))
+  put('Market Stalls', count(profile.stall_count))
+  put('Delivery Vehicles (Motorized)', count(profile.delivery_vehicles_motorized))
+  put('Delivery Vehicles (Other)', count(profile.delivery_vehicles_other))
+  put('Business Structure', profile.business_structure ? humanizeKey(profile.business_structure) : null)
+  put('Goods Class', profile.goods_class ? humanizeKey(profile.goods_class) : null)
+  put('Office Location', profile.office_location ? LOCATION_LABELS[profile.office_location] : null)
+  put('Warehouse Location', profile.warehouse_location ? LOCATION_LABELS[profile.warehouse_location] : null)
+  put('Factory Location', profile.factory_location ? LOCATION_LABELS[profile.factory_location] : null)
+  put('Property Use', profile.property_use ? humanizeKey(profile.property_use) : null)
+  put('Occupancy Group', profile.occupancy_group ? profile.occupancy_group.toUpperCase() : null)
+  return facts
+}
+
 /** "24 Mabini Street" → { house: "24", street: "Mabini Street" }. */
 function splitLine1(line1: string | null | undefined): { house: string; street: string } {
   const raw = (line1 ?? '').trim()
@@ -267,6 +383,11 @@ export function ReviewPage() {
   const [officeUse, setOfficeUse] = useState({ receipt: '', receivedBy: '', ban: '', psic: '', fee: '', remarks: '' })
   const [officeTouched, setOfficeTouched] = useState<Record<string, boolean>>({})
 
+  // Office-recorded issuance dates, keyed "PERMIT_CODE.field_key".
+  const [issued, setIssued] = useState<Record<string, string>>({})
+  const [issuedSavingCode, setIssuedSavingCode] = useState<string | null>(null)
+  const [issuedNote, setIssuedNote] = useState<string | null>(null)
+
   // Fee adjustment (fee.adjust) + officer assignment (oic.assign) — v2.
   const [feeSaving, setFeeSaving] = useState(false)
   const [feeNote, setFeeNote] = useState<string | null>(null)
@@ -281,6 +402,39 @@ export function ReviewPage() {
     [canAssign, canListUsers],
   )
 
+  /*
+   * /queue/:id is an ASSIGNMENT id, but application ids are what officers have
+   * in hand everywhere else (notification deep links, a pasted URL, a row that
+   * has since been reassigned). Rather than dying on the raw binding error, ask
+   * the queue whether this number is one of our applications and bounce to its
+   * real assignment; only give up when nothing matches.
+   */
+  const [strayId, setStrayId] = useState<'checking' | 'unresolved' | null>(null)
+  const missing = Boolean(error) && toApiError(error).status === 404
+
+  useEffect(() => {
+    if (!missing) {
+      setStrayId(null)
+      return
+    }
+    let cancelled = false
+    setStrayId('checking')
+    assignments
+      .list()
+      .then((queue) => {
+        if (cancelled) return
+        const match = queue.find((a) => a.application.id === assignmentId)
+        if (match) navigate(`/queue/${match.id}`, { replace: true })
+        else setStrayId('unresolved')
+      })
+      .catch(() => {
+        if (!cancelled) setStrayId('unresolved')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [missing, assignmentId, navigate])
+
   const backLink = (
     <Link to="/queue" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline">
       <ArrowLeftIcon size={16} />
@@ -293,6 +447,32 @@ export function ReviewPage() {
       <div>
         {backLink}
         <ReviewSkeleton />
+      </div>
+    )
+  if (missing)
+    return (
+      <div>
+        {backLink}
+        <div className="rounded-lg bg-white px-5 py-6 shadow-card">
+          <h1 className="text-base font-bold text-ink">
+            {strayId === 'unresolved'
+              ? 'This application is not in your queue'
+              : 'Opening this application…'}
+          </h1>
+          <p className="mt-1.5 max-w-prose text-sm text-ink-secondary">
+            {strayId === 'unresolved'
+              ? 'The link points at a review that has been completed, reassigned, or removed. Open it again from Application Verification.'
+              : 'Checking your queue for the matching review.'}
+          </p>
+          {strayId === 'unresolved' && (
+            <Link
+              to="/queue"
+              className="mt-4 inline-flex rounded-md bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
+            >
+              Go to Application Verification
+            </Link>
+          )}
+        </div>
       </div>
     )
   if (error)
@@ -318,6 +498,18 @@ export function ReviewPage() {
   const { house, street } = splitLine1(address?.line1)
   const officerName = data.officer?.name ?? data.department.name
 
+  // Submitted per-office form answers: the reviewing office's form(s) first.
+  const officeForms = [...(app.office_forms ?? [])].sort(
+    (a, b) =>
+      Number(b.department_code === data.department.code) -
+      Number(a.department_code === data.department.code),
+  )
+  const feeProfile = app.fee_profile ?? null
+  const feeFacts = feeProfile ? feeProfileFacts(feeProfile) : []
+  const feeLines = feeProfile?.lines ?? []
+  const feeFlags = feeProfile?.flags ?? []
+  const hasFeeDeclaration = feeFacts.length > 0 || feeLines.length > 0 || feeFlags.length > 0
+
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
   const decided = rejected || approvedHere || Boolean(data.completed_at)
@@ -334,6 +526,43 @@ export function ReviewPage() {
   function setOffice(key: keyof typeof officeUse, value: string) {
     setOfficeTouched((t) => ({ ...t, [key]: true }))
     setOfficeUse((v) => ({ ...v, [key]: value }))
+  }
+
+  /*
+   * One group per permit type on this application that carries issuance dates.
+   * Prefilled from whatever the office already recorded; edits override.
+   */
+  const issuedGroups = app.permit_types
+    .filter((pt) => OFFICER_DATE_FIELDS[pt.code])
+    .map((pt) => {
+      const saved = officeForms.find((f) => f.permit_type_code === pt.code)?.form_data ?? {}
+      return {
+        code: pt.code,
+        name: pt.name,
+        fields: OFFICER_DATE_FIELDS[pt.code].map((field) => {
+          const stored = saved[field.key]
+          return {
+            ...field,
+            value: issued[`${pt.code}.${field.key}`] ?? (typeof stored === 'string' ? stored : ''),
+          }
+        }),
+      }
+    })
+
+  async function saveIssuedDates(group: (typeof issuedGroups)[number]) {
+    setIssuedSavingCode(group.code)
+    setIssuedNote(null)
+    setActionError(null)
+    try {
+      const payload = Object.fromEntries(group.fields.map((f) => [f.key, f.value || null]))
+      await officeFormsApi.save(app.id, group.code, payload)
+      setIssuedNote(`${group.name} issuance dates saved.`)
+      reload()
+    } catch (err) {
+      setActionError(toApiError(err).message)
+    } finally {
+      setIssuedSavingCode(null)
+    }
   }
 
   async function approve() {
@@ -548,6 +777,100 @@ export function ReviewPage() {
             )}
           </section>
 
+          {/* D — Submitted office-form answers (per permit type) */}
+          <section className="mt-9">
+            <SectionHeading letter="D">Office Form Answers</SectionHeading>
+            {officeForms.length === 0 ? (
+              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
+                The applicant did not fill any per-office forms for this application.
+              </p>
+            ) : (
+              officeForms.map((form, formIndex) => {
+                const entries = Object.entries(form.form_data ?? {})
+                const reviewingHere = form.department_code === data.department.code
+                return (
+                  <div key={form.permit_type_code ?? formIndex}>
+                    <div className={`mb-3 flex items-center gap-2 ${formIndex === 0 ? 'mt-1' : 'mt-6'}`}>
+                      <span className="h-4 w-1 rounded-full bg-royal" aria-hidden="true" />
+                      <h3 className="text-sm font-bold text-ink">
+                        {form.permit_type_name ?? form.permit_type_code}
+                      </h3>
+                      {reviewingHere && (
+                        <span className="rounded-md bg-royal-tint px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
+                          Your office
+                        </span>
+                      )}
+                    </div>
+                    {entries.length === 0 ? (
+                      <p className="text-sm text-ink-muted">No answers were recorded on this form.</p>
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {entries.map(([key, value]) => (
+                          <Field key={key} label={humanizeKey(key)} value={formValueText(value)} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            )}
+          </section>
+
+          {/* E — Applicant-declared fee inputs (revenue-code profile) */}
+          <section className="mt-9">
+            <SectionHeading letter="E">Fee Declaration</SectionHeading>
+            {!hasFeeDeclaration ? (
+              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
+                No fee declaration was submitted with this application.
+              </p>
+            ) : (
+              <>
+                {feeLines.length > 0 && (
+                  <div className="space-y-4">
+                    {feeLines.map((line, i) => (
+                      <div key={i} className="grid gap-4 sm:grid-cols-3">
+                        <Field
+                          label={`Business Category ${feeLines.length > 1 ? i + 1 : ''}`.trim()}
+                          value={humanizeKey(line.category)}
+                        />
+                        <Field
+                          label="Gross Sales (Preceding Year)"
+                          value={line.gross_sales == null ? '' : formatMoney(line.gross_sales)}
+                        />
+                        <Field
+                          label="Capitalization"
+                          value={line.capitalization == null ? '' : formatMoney(line.capitalization)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {feeFacts.length > 0 && (
+                  <div className={`grid gap-4 sm:grid-cols-3 ${feeLines.length > 0 ? 'mt-4' : ''}`}>
+                    {feeFacts.map((fact) => (
+                      <Field key={fact.label} label={fact.label} value={fact.value} />
+                    ))}
+                  </div>
+                )}
+                {feeFlags.length > 0 && (
+                  <div className="mt-4">
+                    <FieldLabel>Declared Flags</FieldLabel>
+                    <div className="flex flex-wrap gap-2">
+                      {feeFlags.map((flag) => (
+                        <span
+                          key={flag}
+                          className="rounded-md bg-canvas px-2.5 py-1 text-xs font-semibold text-ink-secondary"
+                        >
+                          {humanizeKey(flag)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
           {/* Consent note (p72) */}
           <div className="mt-6 rounded-md border border-s-green bg-s-green-tint px-4 py-3">
             <p className="flex items-center gap-2 text-sm font-bold text-s-green">
@@ -659,7 +982,63 @@ export function ReviewPage() {
                 />
               </label>
             </div>
+
+            {/* Issuance dates: recorded here, never asked of the applicant. */}
+            {issuedGroups.map((group) => (
+              <div key={group.code} className="mt-5 border-t border-officeuse-border pt-4">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                  {group.name} · Issuance Dates
+                </p>
+                <p className="mt-1 text-xs text-ink-secondary">
+                  Enter the dates the issuing office released these documents. Applicants are not
+                  asked for them.
+                </p>
+                <div className="mt-3 grid gap-4 sm:grid-cols-3 sm:items-end">
+                  {group.fields.map((field) => (
+                    <label key={field.key} className="block">
+                      <FieldLabel>{field.label}</FieldLabel>
+                      <input
+                        type="date"
+                        max={todayISO()}
+                        className={officeInput}
+                        value={field.value}
+                        onChange={(e) =>
+                          setIssued((v) => ({ ...v, [`${group.code}.${field.key}`]: e.target.value }))
+                        }
+                      />
+                    </label>
+                  ))}
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => saveIssuedDates(group)}
+                      disabled={issuedSavingCode !== null}
+                      className="rounded-md bg-royal px-3 py-2 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                    >
+                      {issuedSavingCode === group.code ? 'Saving…' : 'Save dates'}
+                    </button>
+                  </span>
+                </div>
+              </div>
+            ))}
+            {issuedNote && <p className="mt-2 text-xs font-medium text-s-green">{issuedNote}</p>}
           </div>
+
+          {/* Itemized Tax Order of Payment (revenue-code assessment) */}
+          {(app.fee_assessment?.line_items?.length ?? 0) > 0 && (
+            <div className="mt-6 rounded-lg border border-line bg-white px-5 py-5">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
+                Tax Order of Payment
+              </p>
+              <div className="mt-4">
+                <TaxOrderBreakdown fee={app.fee_assessment} showCitations />
+              </div>
+              <div className="mt-4 flex items-baseline justify-between border-t border-ink/40 pt-3 text-base font-bold text-ink">
+                <span>Total Amount</span>
+                <span className="tnum">{formatMoney(app.fee_assessment?.total_amount)}</span>
+              </div>
+            </div>
+          )}
 
           {/* Assign officer (oic.assign) — v2 */}
           {canAssign && !decided && (
