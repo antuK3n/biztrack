@@ -162,6 +162,15 @@ Artisan `biztrack:scan-permits`: (1) notify owners at 60/30/7 days before `valid
   Lines with `requires_officer: true` are ₱0 placeholders the officer
   completes via the existing fee-adjust endpoint (PIL, market stall rental,
   BMBE/cooperative claims, missing-in-print fees).
+- Zoning/locational clearance (Ch. III Art. D) bills the flat business
+  schedule: filing ₱45 (Sec. 3.D.01(a)(1)) + land use verification ₱345 +
+  processing ₱345 (Sec. 3.D.01(d)) = ₱735. Buildings use the per-sqm
+  schedule in (c); a business does not, so floor area is not part of a
+  business zoning assessment. The `zoning` group sits **outside** the FSIC
+  base on purpose: RA 9514 Sec. 12(b) pegs the FSIC to building and
+  business/mayor's permit fees, and a locational clearance is neither.
+  Ambulant vendors are exempt (Sec. 3X.05) via the `is_ambulant_vendor`
+  flag, emitted as an explicit ₱0 line.
 - Engine rules: business tax per line of business; franchise/printing route
   to 0.75% in lieu of the graduated table; environmental and sanitary bill
   the highest matched rate; garbage bills the highest schedule (+25% when

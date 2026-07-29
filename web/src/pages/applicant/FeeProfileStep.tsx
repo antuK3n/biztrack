@@ -107,6 +107,11 @@ const BUSINESS_FLAGS: { value: string; label: string; hint: string }[] = [
     hint: 'Wine, beer, or spirits on the menu or the shelf. Adds the liquor license fee.',
   },
   {
+    value: 'is_ambulant_vendor',
+    label: 'Ambulant vendor or peddler',
+    hint: 'You sell while moving around rather than from a fixed stall or store. Exempt from the zoning clearance fee.',
+  },
+  {
     value: 'sells_tobacco_retail',
     label: 'Sells tobacco at retail',
     hint: 'Cigarettes or tobacco sold per piece or pack to consumers.',

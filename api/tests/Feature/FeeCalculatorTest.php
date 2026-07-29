@@ -168,3 +168,66 @@ it('assessFees persists the itemized tax order with citations', function () {
         ->and(collect($fee->line_items)->firstWhere('code', 'biztax.retailer')['section'])->toBe('Sec. 2J.02(d)')
         ->and((float) $fee->total_amount)->toBe(round(collect($fee->line_items)->sum('amount'), 2));
 });
+
+/* ── Zoning / locational clearance (Ch. III Art. D) ─────────────────────── */
+
+it('bills the business locational clearance from the ordinance schedule', function () {
+    // Sec. 3.D.01: (a)(1) filing 45.00 + (d)(1) land use verification 345.00
+    // + (d)(2) processing 345.00 = 735.00. Buildings pay the per-sqm schedule
+    // in (c); a business pays the flat item (d) rates, so floor area is not
+    // part of a business zoning assessment.
+    $app = feeApp(['ZONING'], 'new', [
+        'lines' => [['category' => 'retailer', 'gross_sales' => 800000]],
+        'floor_area_sqm' => 400,
+    ]);
+
+    $assessed = app(FeeCalculator::class)->assess($app);
+
+    expect(amountOf($assessed, 'zoning.filing_fee'))->toBe(45.0)
+        ->and(amountOf($assessed, 'zoning.business_land_use_verification'))->toBe(345.0)
+        ->and(amountOf($assessed, 'zoning.business_processing_fee'))->toBe(345.0)
+        ->and($assessed['total'])->toBe(735.0);
+});
+
+it('does not let zoning fees inflate the FSIC base', function () {
+    /*
+     * RA 9514 Sec. 12(b) pegs the FSIC to building and business/mayor's permit
+     * fees. A locational clearance is neither, so the zoning group sits outside
+     * the FSIC base. Same application with and without zoning must yield the
+     * same FSIC.
+     */
+    $profile = ['lines' => [['category' => 'retailer', 'gross_sales' => 800000]]];
+
+    $withoutZoning = app(FeeCalculator::class)->assess(feeApp(['BUSINESS', 'FSIC'], 'new', $profile));
+    $withZoning = app(FeeCalculator::class)->assess(feeApp(['BUSINESS', 'FSIC', 'ZONING'], 'new', $profile));
+
+    expect(amountOf($withZoning, 'fire.fsic'))->toBe(amountOf($withoutZoning, 'fire.fsic'))
+        // ...while the zoning lines really were added to the bill.
+        ->and($withZoning['total'])->toBe($withoutZoning['total'] + 735.0);
+});
+
+it('exempts an ambulant vendor from the zoning clearance fee', function () {
+    // Sec. 3X.05. The exemption prints as an explicit zero line rather than
+    // the charges silently vanishing.
+    $app = feeApp(['ZONING'], 'new', [
+        'lines' => [['category' => 'retailer', 'gross_sales' => 50000]],
+        'flags' => ['is_ambulant_vendor'],
+    ]);
+
+    $assessed = app(FeeCalculator::class)->assess($app);
+
+    expect(amountOf($assessed, 'zoning.ambulant_exempt'))->toBe(0.0)
+        ->and(amountOf($assessed, 'zoning.filing_fee'))->toBeNull()
+        ->and(amountOf($assessed, 'zoning.business_land_use_verification'))->toBeNull()
+        ->and(amountOf($assessed, 'zoning.business_processing_fee'))->toBeNull();
+});
+
+it('records the Sec. 3.D.01(d) ambiguity as a defect on the rule', function () {
+    // The ordinance prints four lines at 345.00 without saying whether the
+    // last two are additional. The reading is defensible but not certain, so
+    // it must stay visible to whoever reconciles this with the LGU.
+    $rule = App\Models\FeeRule::where('code', 'zoning.business_land_use_verification')->firstOrFail();
+
+    expect($rule->defects)->not->toBeEmpty()
+        ->and($rule->defects[0])->toContain('345.00');
+});

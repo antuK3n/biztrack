@@ -303,7 +303,10 @@ class ReferenceSeeder extends Seeder
             'issuing_department_id' => $dept('CPDO'),
             'validity_days' => 365, 'description' => 'Confirms the business location conforms to the city zoning ordinance.',
             'requires_inspection' => false,
-            'base_fee' => 300, 'per_line_surcharge' => 0,
+            // Legacy flat-fee fallback only. The real charge comes from the
+            // revenue-code rules (Sec. 3.D.01: 45 filing + 345 verification +
+            // 345 processing = 735), which supersede this column.
+            'base_fee' => 735, 'per_line_surcharge' => 0,
         ]);
         $market = PermitType::updateOrCreate(['code' => 'MARKET'], [
             'name' => 'Market Clearance',

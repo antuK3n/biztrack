@@ -77,10 +77,22 @@ class FeeCalculator
         // Item 64 ("all other businesses not specifically mentioned") is a
         // fallback: it bills only when no category-specific mayor's-permit
         // line matched (Sec. 3A.03 IX(64)).
-        $plain = ['mayors_permit', 'admin', 'ctc', 'city_charge', 'exemption_claim'];
+        /*
+         * `zoning` sits here rather than in `regulatory` on purpose: RA 9514
+         * Sec. 12(b) pegs the FSIC to the fees charged for building permits and
+         * business/mayor's permits, and a locational clearance is neither. Filing
+         * it under regulatory would quietly inflate every FSIC by 10% of it.
+         */
+        $plain = ['mayors_permit', 'admin', 'ctc', 'city_charge', 'exemption_claim', 'zoning'];
+        // Ambulants and peddlers are exempt from zoning clearance (Sec. 3X.05):
+        // the exemption line still prints, the chargeable zoning lines do not.
+        $ambulant = in_array('is_ambulant_vendor', $profile['flags'] ?? [], true);
         $catchAll = null;
         $specificPermitMatched = false;
         foreach ($rules->whereIn('group', $plain) as $rule) {
+            if ($rule->group === 'zoning' && $ambulant && $rule->code !== 'zoning.ambulant_exempt') {
+                continue;
+            }
             if (! $this->matches($rule, $profile) || ($item = $this->compute($rule, $profile)) === null) {
                 continue;
             }
