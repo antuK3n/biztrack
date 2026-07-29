@@ -60,6 +60,12 @@ export interface DocumentType {
   help_text: string | null
   /** Present when nested under a permit type. */
   is_required?: boolean
+  /**
+   * When this requirement applies: 'all', or an application type / permit
+   * context that has to match. A renewal-only document must never be asked
+   * of a new business, which has no prior permit to produce.
+   */
+  context?: string
 }
 
 export interface PermitType {
@@ -90,6 +96,9 @@ export interface BusinessLine {
   id: number
   psic_code: PsicCode
   capitalization: string | null
+  /** Free text, set when the applicant picked "Other (not listed)". */
+  line_of_business: string | null
+  products_services: string | null
 }
 
 export interface Business {

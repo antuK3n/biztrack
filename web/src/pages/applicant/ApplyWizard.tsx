@@ -88,6 +88,23 @@ const OFFICE_LABELS: Record<OfficeFormCode, string> = {
 /** Document-type code for the repeatable "Other Requirements" uploads. */
 const OTHER_DOC_CODE = 'OTHER'
 
+/*
+ * The Mayor's / Business Permit is the OUTCOME of the application, not a
+ * clearance you tick, so it is never rendered as a card: the wizard attaches
+ * it to every application so BPLO always gets the assignment.
+ */
+const BUSINESS_PERMIT_CODE = 'BUSINESS'
+
+/** Catch-all PSIC row (ReferenceSeeder::OTHER_PSIC_CODE) for trades not listed. */
+const OTHER_PSIC_CODE = '00000'
+
+/*
+ * What the BPLO counter sees most, shown before the applicant types anything.
+ * The full list is long enough that "the first eight by code" would open on
+ * food manufacturing instead of the sari-sari store.
+ */
+const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120', '96200', '36000']
+
 /** A single running step: either a base phase or one office form sheet. */
 type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
 
@@ -97,10 +114,14 @@ const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
   amendment: { title: 'Application for Amendment of Business Permit', ref: 'MCG-BPLO-FO-003 · v2.0' },
 }
 
-/* One selected line of business (PSIC code + optional capitalization). */
+/*
+ * One selected line of business: a PSIC code, optional capitalization, and the
+ * free-text trade the applicant types when they pick "Other (not listed)".
+ */
 interface LineDraft {
   psic_code_id: number
   capitalization: string
+  line_of_business: string
 }
 
 interface FormState {
@@ -141,15 +162,19 @@ const REGISTRATION_TYPES = [
 ]
 
 /**
- * Philippine TIN: 9 digits (individual) or 12 digits (with branch code),
- * optionally hyphen-grouped in threes, e.g. 123-456-789 or 123-456-789-000.
- * Mirrored by the API's regex rule on POST/PUT /businesses.
+ * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where the taxpayer
+ * has one, written with any of the usual separators (123-456-789-000,
+ * 123 456 789, 123456789). The API normalises and re-checks the same shape.
  */
 function tinValid(raw: string): boolean {
-  return /^\d{3}-?\d{3}-?\d{3}(-?\d{3})?$/.test(raw.trim())
+  const trimmed = raw.trim()
+  if (!/^[\d\s.-]+$/.test(trimmed)) return false
+  const digits = trimmed.replace(/\D/g, '').length
+  return digits === 9 || (digits >= 12 && digits <= 14)
 }
 
-const TIN_ERROR = 'Enter a valid TIN: 9 or 12 digits, like 123-456-789 or 123-456-789-000.'
+const TIN_ERROR =
+  'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'
 
 /* ── Small prototype glyphs ───────────────────────────────────────────── */
 
@@ -200,9 +225,11 @@ function FormSheet({
 
 /* ── PSIC picker (Line of Business) ───────────────────────────────────── */
 /*
- * "Does Line of Business have choices?" Yes: this is a searchable picklist of
- * the seeded PSIC codes (reference/psic-codes), never free text. The separate
- * fee-profile category field stays a datalist by design.
+ * "Does Line of Business really have fixed choices?" It is a searchable
+ * picklist of the seeded PSIC codes (reference/psic-codes), and the last row
+ * is always "Other (not listed)": pick it and you type your own trade, which
+ * the API stores on business_lines.line_of_business. The separate fee-profile
+ * category field stays a datalist by design.
  */
 function LinesStep({
   codes,
@@ -214,10 +241,21 @@ function LinesStep({
   onChange: (lines: LineDraft[]) => void
 }) {
   const [query, setQuery] = useState('')
+  const otherCode = useMemo(() => codes.find((c) => c.code === OTHER_PSIC_CODE), [codes])
+  /*
+   * Search the real trades only; "Other (not listed)" is pinned underneath the
+   * results so it is reachable however the search went.
+   */
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return codes.slice(0, 8)
-    return codes
+    const listed = codes.filter((c) => c.code !== OTHER_PSIC_CODE)
+    if (!q) {
+      const common = COMMON_PSIC_CODES.map((code) => listed.find((c) => c.code === code)).filter(
+        (c): c is PsicCode => c !== undefined,
+      )
+      return common.length > 0 ? common : listed.slice(0, 8)
+    }
+    return listed
       .filter((c) => c.title.toLowerCase().includes(q) || c.code.includes(q))
       .slice(0, 12)
   }, [codes, query])
@@ -225,7 +263,7 @@ function LinesStep({
   function toggle(code: PsicCode) {
     const exists = lines.find((l) => l.psic_code_id === code.id)
     if (exists) onChange(lines.filter((l) => l.psic_code_id !== code.id))
-    else onChange([...lines, { psic_code_id: code.id, capitalization: '' }])
+    else onChange([...lines, { psic_code_id: code.id, capitalization: '', line_of_business: '' }])
   }
 
   return (
@@ -245,11 +283,16 @@ function LinesStep({
             className={`${inputCls} pl-10`}
           />
         </div>
+        <p className="mt-1.5 text-xs text-ink-secondary">
+          Can’t find your trade? Pick “Other (not listed)” at the bottom and type it yourself.
+        </p>
       </div>
 
       <ul className="divide-y divide-line overflow-hidden rounded-lg border border-input-border">
         {results.length === 0 ? (
-          <li className="px-4 py-4 text-sm text-ink-secondary">No matches. Try another word.</li>
+          <li className="px-4 py-4 text-sm text-ink-secondary">
+            No matches. Try another word, or pick “Other (not listed)” below.
+          </li>
         ) : (
           results.map((code) => {
             const selected = lines.some((l) => l.psic_code_id === code.id)
@@ -279,6 +322,34 @@ function LinesStep({
             )
           })
         )}
+        {otherCode && (
+          <li>
+            <button
+              type="button"
+              onClick={() => toggle(otherCode)}
+              aria-pressed={lines.some((l) => l.psic_code_id === otherCode.id)}
+              className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                lines.some((l) => l.psic_code_id === otherCode.id) ? 'bg-input' : 'hover:bg-royal-tint'
+              }`}
+            >
+              <span
+                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
+                  lines.some((l) => l.psic_code_id === otherCode.id)
+                    ? 'border-royal bg-royal text-white'
+                    : 'border-input-border bg-white'
+                }`}
+              >
+                {lines.some((l) => l.psic_code_id === otherCode.id) && <CheckIcon size={13} />}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">{otherCode.title}</span>
+                <span className="block text-xs text-ink-secondary">
+                  Type your own line of business
+                </span>
+              </span>
+            </button>
+          </li>
+        )}
       </ul>
 
       {lines.length > 0 && (
@@ -287,35 +358,67 @@ function LinesStep({
           <div className="space-y-3">
             {lines.map((line) => {
               const code = codes.find((c) => c.id === line.psic_code_id)
+              // "Other (not listed)" trades the fixed title for a required
+              // free-text box; everything else keeps the PSIC title.
+              const isOther = code?.code === OTHER_PSIC_CODE
+              const needsText = isOther && !line.line_of_business.trim()
               return (
-                <div key={line.psic_code_id} className="flex items-end gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm text-ink">{code?.title}</p>
+                <div key={line.psic_code_id}>
+                  <div className="flex items-end gap-3">
+                    <div className="min-w-0 flex-1">
+                      {isOther ? (
+                        <>
+                          <FieldLabel required>Your line of business</FieldLabel>
+                          <input
+                            value={line.line_of_business}
+                            onChange={(e) =>
+                              onChange(
+                                lines.map((l) =>
+                                  l.psic_code_id === line.psic_code_id
+                                    ? { ...l, line_of_business: e.target.value }
+                                    : l,
+                                ),
+                              )
+                            }
+                            placeholder="e.g. bamboo furniture weaving"
+                            className={inputCls}
+                            aria-invalid={needsText}
+                          />
+                        </>
+                      ) : (
+                        <p className="truncate text-sm text-ink">{code?.title}</p>
+                      )}
+                    </div>
+                    <div className="w-44">
+                      <FieldLabel>Capital (₱)</FieldLabel>
+                      <input
+                        inputMode="numeric"
+                        value={line.capitalization}
+                        onChange={(e) =>
+                          onChange(
+                            lines.map((l) =>
+                              l.psic_code_id === line.psic_code_id
+                                ? { ...l, capitalization: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        className={inputCls}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onChange(lines.filter((l) => l.psic_code_id !== line.psic_code_id))}
+                      className="mb-2 text-sm font-semibold text-s-red underline underline-offset-2"
+                    >
+                      Remove
+                    </button>
                   </div>
-                  <div className="w-44">
-                    <FieldLabel>Capital (₱)</FieldLabel>
-                    <input
-                      inputMode="numeric"
-                      value={line.capitalization}
-                      onChange={(e) =>
-                        onChange(
-                          lines.map((l) =>
-                            l.psic_code_id === line.psic_code_id
-                              ? { ...l, capitalization: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                      className={inputCls}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => onChange(lines.filter((l) => l.psic_code_id !== line.psic_code_id))}
-                    className="mb-2 text-sm font-semibold text-s-red underline underline-offset-2"
-                  >
-                    Remove
-                  </button>
+                  {needsText && (
+                    <p className="mt-1 text-xs font-medium text-s-red">
+                      Type the line of business you want registered.
+                    </p>
+                  )}
                 </div>
               )
             })}
@@ -338,9 +441,9 @@ export function ApplyWizard() {
 
   const isReuse = applicationType === 'renewal' || applicationType === 'amendment'
   /*
-   * Zoning outcome is presentational until real zoning data exists: the wizard
-   * shows CONGRATULATIONS by default, and the red SORRY modal (p031) only when
-   * a `?zoning=deny` debug query param is present.
+   * The wizard does not evaluate zoning; CPDO does, during processing. The
+   * default modal only confirms the pin was recorded. The red non-conforming
+   * modal (p031) is reachable with a `?zoning=deny` debug query param.
    */
   const zoningDenied = searchParams.get('zoning') === 'deny'
 
@@ -350,6 +453,8 @@ export function ApplyWizard() {
   const [form, setForm] = useState<FormState>(EMPTY)
   // Per-office form payloads keyed by permit-type code (prototype Parts 4-7).
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
+  /* Bumped after a permit re-sync to refetch server-derived office-form answers. */
+  const [officeFormsVersion, setOfficeFormsVersion] = useState(0)
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -436,6 +541,9 @@ export function ApplyWizard() {
         lines: b.lines.map((l) => ({
           psic_code_id: l.psic_code.id,
           capitalization: l.capitalization ?? '',
+          // Carry over the free text for an "Other (not listed)" trade, or a
+          // renewal would silently blank it and block Next.
+          line_of_business: l.line_of_business ?? '',
         })),
         // The permits picked in Part 1 win; suggestions only fill a blank choice.
         permit_type_ids:
@@ -466,18 +574,40 @@ export function ApplyWizard() {
   }
 
   const permitTypes = refs.data?.permitTypes ?? []
+  /*
+   * The Mayor's / Business Permit rides along on every application (it is what
+   * the application is for), so BPLO always ends up in the routing. The picker
+   * below only offers the supporting clearances.
+   */
+  const businessTypeId = permitTypes.find((pt) => pt.code === BUSINESS_PERMIT_CODE)?.id ?? null
+  const clearanceTypes = permitTypes.filter((pt) => pt.code !== BUSINESS_PERMIT_CODE)
   const barangays: Barangay[] = refs.data?.barangays ?? []
   const psic: PsicCode[] = refs.data?.psic ?? []
   const otherType: DocumentType | undefined = (refs.data?.documentTypes ?? []).find(
     (dt) => dt.code === OTHER_DOC_CODE,
   )
+  /*
+   * Documents the selected permits ask for, minus the ones whose `context`
+   * does not apply. A new business has no previous mayor's permit to upload,
+   * so demanding one is an unclearable block, not a requirement.
+   */
   const requiredDocs = useMemo(() => {
+    const selected = permitTypes.filter((pt) => form.permit_type_ids.includes(pt.id))
+    const selectedCodes = new Set(selected.map((pt) => pt.code))
+    const appliesNow = (context?: string) =>
+      !context ||
+      context === 'all' ||
+      context === applicationType ||
+      selectedCodes.has(context.toUpperCase())
+
     const map = new Map<number, DocumentType>()
-    permitTypes
-      .filter((pt) => form.permit_type_ids.includes(pt.id))
-      .forEach((pt) => pt.document_types.forEach((dt) => map.set(dt.id, dt)))
+    for (const pt of selected) {
+      for (const dt of pt.document_types) {
+        if (appliesNow(dt.context)) map.set(dt.id, dt)
+      }
+    }
     return [...map.values()]
-  }, [permitTypes, form.permit_type_ids])
+  }, [permitTypes, form.permit_type_ids, applicationType])
   const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
 
   /*
@@ -520,6 +650,16 @@ export function ApplyWizard() {
     setMaxVisited((m) => Math.min(m, sequence.length - 1))
   }, [sequence.length])
 
+  /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
+  useEffect(() => {
+    if (businessTypeId === null) return
+    setForm((f) =>
+      f.permit_type_ids.includes(businessTypeId)
+        ? f
+        : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+    )
+  }, [businessTypeId])
+
   const feeLines = useMemo(
     () =>
       form.lines.map((l) => ({
@@ -537,15 +677,33 @@ export function ApplyWizard() {
     if (node.kind === 'office') return officeFormMissing(node.code, officeData[node.code] ?? {})
     switch (node.phase) {
       case 'permits':
-        return form.permit_type_ids.length > 0 ? [] : ['Select at least one permit or certificate']
+        /*
+         * The clearance cards are additive, not a required pick: the Mayor's /
+         * Business Permit is attached implicitly, and applying for it alone is
+         * a real case (the seeded renewal storyline is exactly that). So the
+         * only thing that can block here is reference data that arrived
+         * without the BUSINESS permit type.
+         */
+        return form.permit_type_ids.length > 0
+          ? []
+          : ['Permit types could not be loaded. Reload the page and try again.']
       case 'business': {
         const missing: string[] = []
         if (!form.name.trim()) missing.push('Business Name')
-        if (form.tin.trim() && !tinValid(form.tin)) missing.push('A valid TIN (9 or 12 digits)')
+        if (!form.registration_number.trim()) missing.push('DTI / SEC / CDA Registration Number')
+        if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
+        else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
+        if (!form.registration_type) missing.push('Type of Registration')
         return missing
       }
-      case 'lines':
-        return form.lines.length > 0 ? [] : ['Select at least one line of business']
+      case 'lines': {
+        if (form.lines.length === 0) return ['Select at least one line of business']
+        const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
+        const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
+        return otherLine && !otherLine.line_of_business.trim()
+          ? ['Your line of business (typed in, for “Other”)']
+          : []
+      }
       case 'address': {
         const missing: string[] = []
         if (!form.line1.trim()) missing.push('House No. & Street Name')
@@ -564,11 +722,21 @@ export function ApplyWizard() {
       case 'review':
         return []
     }
-  }, [node, form, officeData, requiredDocs, uploaded, consent, feeDraft, applicationType, feeLines])
+  }, [node, form, officeData, requiredDocs, uploaded, consent, feeDraft, applicationType, feeLines, psic])
 
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
-    tin: form.tin.trim() && !tinValid(form.tin) ? TIN_ERROR : '',
+    registration_number:
+      touched.registration_number && !form.registration_number.trim()
+        ? 'Enter your DTI, SEC, or CDA registration number.'
+        : '',
+    tin: form.tin.trim()
+      ? tinValid(form.tin)
+        ? ''
+        : TIN_ERROR
+      : touched.tin
+        ? 'Enter your Tax Identification Number.'
+        : '',
     line1: touched.line1 && !form.line1.trim() ? 'Enter your street address.' : '',
     barangay_id: touched.barangay_id && !form.barangay_id ? 'Choose your barangay.' : '',
   }
@@ -587,10 +755,13 @@ export function ApplyWizard() {
         latitude: form.latitude ?? undefined,
         longitude: form.longitude ?? undefined,
       },
+      // The free-text line rides on the same payload; the API stores it on
+      // business_lines.line_of_business (contract addition, hence the cast).
       lines: form.lines.map((l) => ({
         psic_code_id: l.psic_code_id,
         capitalization: l.capitalization.trim() || undefined,
-      })),
+        line_of_business: l.line_of_business.trim() || undefined,
+      })) as BusinessPayload['lines'],
     }
   }
 
@@ -636,6 +807,9 @@ export function ApplyWizard() {
         // is presented once a certificate is clicked").
         if (applicationId) {
           await applications.update(applicationId, { permit_type_ids: form.permit_type_ids })
+          // The sheets for any newly-added certificate carry derived answers
+          // the server only knows now that it has the new permit list.
+          setOfficeFormsVersion((v) => v + 1)
         }
       } else if (phase === 'business' || phase === 'lines') {
         if (applicationId) {
@@ -768,7 +942,8 @@ export function ApplyWizard() {
     } else if (phase === 'address') {
       setForm((f) => ({ ...f, line1: '', line2: '', barangay_id: '', latitude: null, longitude: null }))
     } else if (phase === 'permits') {
-      setForm((f) => ({ ...f, permit_type_ids: [] }))
+      // Clearances only: the Mayor's / Business Permit is never cleared.
+      setForm((f) => ({ ...f, permit_type_ids: businessTypeId === null ? [] : [businessTypeId] }))
     } else if (phase === 'documents') {
       setConsent(false)
     } else if (phase === 'fees') {
@@ -848,6 +1023,9 @@ export function ApplyWizard() {
         const ids = pts
           .filter((pt) => app.permit_types.some((p) => p.code === pt.code))
           .map((pt) => pt.id)
+        // Older drafts may predate the implicit business permit; re-attach it.
+        const bizId = pts.find((pt) => pt.code === BUSINESS_PERMIT_CODE)?.id
+        if (bizId !== undefined && !ids.includes(bizId)) ids.unshift(bizId)
         const b = app.business
         const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
         setApplicationType(app.application_type)
@@ -868,6 +1046,9 @@ export function ApplyWizard() {
           lines: (b.lines ?? []).map((l) => ({
             psic_code_id: l.psic_code.id,
             capitalization: l.capitalization ?? '',
+            // Free text typed against "Other (not listed)". Restoring it is what
+            // stops a reopened draft from making the applicant type it again.
+            line_of_business: l.line_of_business ?? '',
           })),
           permit_type_ids: ids,
         })
@@ -903,7 +1084,13 @@ export function ApplyWizard() {
     }
   }, [draftIdParam, refs.data, navigate])
 
-  /* Load any previously-saved office-form payloads once the draft exists. */
+  /*
+   * Load any previously-saved office-form payloads once the draft exists, and
+   * again whenever the permit selection has been synced. Parts of these sheets
+   * are derived server-side from the permits chosen (the FSIC "Certificate
+   * Applied For", the sanitary and CEC application types), so adding a
+   * certificate mid-session leaves those fields blank until we refetch.
+   */
   useEffect(() => {
     if (!applicationId) return
     let active = true
@@ -928,7 +1115,7 @@ export function ApplyWizard() {
     return () => {
       active = false
     }
-  }, [applicationId])
+  }, [applicationId, officeFormsVersion])
 
   /*
    * Entering the Business & Tax Profile step: seed structure from the business
@@ -1081,8 +1268,23 @@ export function ApplyWizard() {
         <div>
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Section</h1>
           <div className="mb-6 h-px bg-ink/40" />
+          {/*
+            The Mayor's / Business Permit is stated, not offered: it is the
+            outcome of the whole application, so it is always attached and
+            BPLO always receives the file.
+          */}
+          <div className="mb-6 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4">
+            <p className="text-sm font-bold text-ink">
+              You are applying for the Mayor’s / Business Permit
+            </p>
+            <p className="mt-1 text-sm text-ink-secondary">
+              That permit is the result of this application, so it is always included and goes to
+              the Business Permits and Licensing Office. Below, add the clearances your business
+              needs to support it.
+            </p>
+          </div>
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {permitTypes.map((pt) => {
+            {clearanceTypes.map((pt) => {
               const selected = form.permit_type_ids.includes(pt.id)
               return (
                 <div key={pt.id} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
@@ -1158,21 +1360,28 @@ export function ApplyWizard() {
           )}
           <div className="mt-4 space-y-4">
             <div>
-              <FieldLabel>DTI / SEC / CDA Registration Number</FieldLabel>
+              <FieldLabel required>DTI / SEC / CDA Registration Number</FieldLabel>
               <input
                 value={form.registration_number}
                 onChange={(e) => update('registration_number', e.target.value)}
+                onBlur={() => touch('registration_number')}
                 placeholder="Enter registration number"
                 className={inputCls}
+                aria-invalid={Boolean(fieldErrors.registration_number)}
               />
+              {fieldErrors.registration_number && (
+                <p className="mt-1 text-xs font-medium text-s-red">
+                  {fieldErrors.registration_number}
+                </p>
+              )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <FieldLabel>Tax Identification Number (TIN)</FieldLabel>
+                <FieldLabel required>Tax Identification Number (TIN)</FieldLabel>
                 <input
                   inputMode="numeric"
-                  maxLength={15}
-                  pattern="\d{3}-?\d{3}-?\d{3}(-?\d{3})?"
+                  maxLength={20}
+                  pattern="[\d\s.-]{9,20}"
                   value={form.tin}
                   onChange={(e) => update('tin', e.target.value)}
                   onBlur={() => touch('tin')}
@@ -1207,7 +1416,7 @@ export function ApplyWizard() {
               />
             </div>
             <div>
-              <FieldLabel>Type of Registration</FieldLabel>
+              <FieldLabel required>Type of Registration</FieldLabel>
               <div className="flex flex-wrap gap-2.5">
                 {REGISTRATION_TYPES.map((rt) => {
                   const selected = form.registration_type === rt.value
@@ -1649,7 +1858,13 @@ export function ApplyWizard() {
           </ProtoModal>
         ) : (
           <ProtoModal
-            title="CONGRATULATIONS!"
+            /*
+             * Not "CONGRATULATIONS": nothing has been approved here. The system
+             * records the pin, CPDO rules on conformance later. Announcing a
+             * result we have not determined is how an applicant ends up
+             * believing their zoning passed.
+             */
+            title="Location recorded"
             tone="green"
             cancelLabel="Back"
             confirmLabel="Proceed to Application"
