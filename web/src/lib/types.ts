@@ -512,6 +512,84 @@ export interface BusinessGrowthReport {
   industry_growth: IndustryGrowthRow[]
 }
 
+/*
+ * Renewal Risk.
+ *
+ * A weighted rule score over the register, computed in
+ * App\Support\RenewalRiskScoring. Deliberately NOT a probability: there is no
+ * fitted model behind it, so nothing in the UI may render `score` as a
+ * percentage or call it a prediction, a likelihood, or a confidence. The revised
+ * mockup labelled this column "PROB. DELAY RISK" with percentages; that wording
+ * is not used. `score` is out of 100 and `drivers` says what produced it.
+ */
+
+export type RiskBand = 'high' | 'moderate' | 'low'
+export type RiskAction = 'immediate_follow_up' | 'send_reminder' | 'monitor'
+
+/** One rule's contribution to a permit's score, with its reason in plain words. */
+export interface RiskDriver {
+  rule: string
+  label: string
+  points: number
+  max: number
+  detail: string
+}
+
+/** The published rule book, rendered on screen so the weights cannot drift. */
+export interface RiskRule {
+  rule: string
+  label: string
+  max: number
+  description: string
+}
+
+export interface RenewalRiskRow {
+  permit_id: number
+  permit_number: string
+  business_id: number
+  business: string
+  barangay: string | null
+  permit_type: string
+  valid_until: string
+  /** Negative when the permit has already lapsed. */
+  days_to_expiry: number
+  /** Out of 100. Not a percentage of anything. */
+  score: number
+  band: RiskBand
+  band_label: string
+  action: RiskAction
+  action_label: string
+  renewal_stage: string
+  renewal_tracking_id: string | null
+  reminders_sent: number
+  /** Only the rules that cost points, heaviest first. */
+  drivers: RiskDriver[]
+}
+
+export interface RenewalRiskReport {
+  generated_at: string
+  horizon_days: number
+  lapsed_grace_days: number
+  window_start: string
+  window_end: string
+  scored_permits: number
+  counts: Record<RiskBand, number>
+  /** Real sends from the expiry-notice ledger, not an estimate. */
+  reminders_sent: number
+  at_risk: RenewalRiskRow[]
+  actions: { action: RiskAction; label: string; band: RiskBand; count: number }[]
+  rulebook: RiskRule[]
+  thresholds: { high: number; moderate: number }
+  /** The honesty statement. Rendered verbatim; never paraphrased on screen. */
+  methodology: string
+}
+
+/*
+ * No StaffingSimulationReport type. App\Support\Des is a complete port of
+ * r/R/des.R, but docs/r-integration-spec.md puts the discrete-event simulation
+ * out of scope for the delivered flow, so it has no endpoint and no screen.
+ */
+
 /* ── Admin ────────────────────────────────────────────────────────────── */
 
 export interface AdminUser extends User {}

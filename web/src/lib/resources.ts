@@ -33,6 +33,7 @@ import type {
   PrefillResult,
   ProcessingTimeReport,
   PsicCode,
+  RenewalRiskReport,
   RequestType,
   TimelineEntry,
 } from './types'
@@ -362,6 +363,15 @@ export const analytics = {
     unwrap<BusinessGrowthReport>(api.get('/analytics/business-growth', { params: { months } })),
   businessGrowthReport: (months: number) =>
     downloadBlob(`/analytics/business-growth/report?months=${months}`, 'business-growth-analysis.pdf'),
+
+  /**
+   * Renewal Risk: permits near expiry ranked by a weighted rule score.
+   * `score` is out of 100 and is not a probability — see RenewalRiskReport.
+   */
+  renewalRisk: (days: number, limit?: number) =>
+    unwrap<RenewalRiskReport>(api.get('/analytics/renewal-risk', { params: { days, limit } })),
+  renewalRiskReport: (days: number) =>
+    downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
 }
 
 /* ── Admin ────────────────────────────────────────────────────────────── */
