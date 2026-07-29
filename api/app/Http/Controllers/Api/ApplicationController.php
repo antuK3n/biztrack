@@ -10,6 +10,7 @@ use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
 use App\Services\WorkflowService;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -35,9 +36,10 @@ class ApplicationController extends Controller
     {
         $query = Application::with(['business:id,name', 'permitTypes:id,code,name']);
 
-        if (! $request->user()->hasPermission('application.view_all')) {
-            $query->where('applicant_user_id', $request->user()->id);
-        }
+        // Owners see their own; an office sees the filings routed to it; BPLO
+        // and the super admin see the register. A 403 on show would mean
+        // nothing if the list still leaked the row (checklist item 56).
+        ApplicationVisibility::scope($query, $request->user());
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
@@ -284,12 +286,14 @@ class ApplicationController extends Controller
         );
     }
 
+    /** Owner, an office routed this filing, or BPLO/admin. See ApplicationVisibility. */
     private function authorizeView(Request $request, Application $application): void
     {
-        if ($application->applicant_user_id === $request->user()->id) {
-            return;
-        }
-        abort_unless($request->user()->hasPermission('application.view_all'), 403, 'You may not view this application.');
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $application,
+            'You may not view this application.'
+        );
     }
 
     /** Trimmed title, or null so readers fall back to the business name. */

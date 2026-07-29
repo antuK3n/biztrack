@@ -10,6 +10,7 @@ use App\Models\Application;
 use App\Models\Payment;
 use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
+use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\PdfFile;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -89,9 +90,13 @@ class PaymentController extends Controller
         $payment->load(['application.business', 'application.feeAssessment']);
         $app = $payment->application;
 
-        $isOwner = $app && $app->applicant_user_id === $request->user()->id;
-        $isOfficer = $request->user()->hasPermission('application.view_all');
-        abort_unless($isOwner || $isOfficer, 403, 'This receipt is not yours.');
+        // The owner, or an officer whose office may open the filing this
+        // receipt belongs to (checklist item 56).
+        abort_unless(
+            $app && ApplicationVisibility::canView($request->user(), $app),
+            403,
+            'This receipt is not yours.'
+        );
 
         $fee = $app?->feeAssessment;
         $items = $fee?->line_items ?? [['label' => 'Permit fees', 'amount' => $payment->amount]];
