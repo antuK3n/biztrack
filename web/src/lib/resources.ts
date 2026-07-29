@@ -151,6 +151,9 @@ export const documents = {
     )
   },
   downloadUrl: (id: number) => `${api.defaults.baseURL}/documents/${id}/download`,
+  /** Authenticated save-to-disk (the plain downloadUrl has no bearer header). */
+  download: (id: number, filename: string) =>
+    downloadBlob(`/documents/${id}/download`, filename),
 }
 
 /* ── Messaging (per-application thread; v2) ───────────────────────────── */

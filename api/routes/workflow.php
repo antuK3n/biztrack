@@ -60,8 +60,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Per-office application forms (UI prototype Parts 4-7)
     Route::get('applications/{application}/office-forms', [OfficeFormController::class, 'index']);
-    Route::middleware('permission:application.create')
-        ->put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
+    // Write allowed for the owner (answers) OR a reviewing officer (issuance
+    // dates only) — which keys each may set is enforced in the controller.
+    Route::put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
 
     // Application create/edit + owner state changes (application.create)
     Route::middleware('permission:application.create')->group(function () {
