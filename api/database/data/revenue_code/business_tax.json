@@ -1,0 +1,2052 @@
+[
+  {
+    "code": "biztax.printing",
+    "title": "Tax on printing and publication (0.75% of gross receipts)",
+    "section": "Sec. 2E.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "printing_publication"
+      ],
+      "is_new_business": false
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.0075
+    },
+    "cap": null,
+    "notes": "75% of 1% (0.75%) of gross annual receipts of the preceding calendar year for printing and/or publication of books, cards, posters, leaflets, handbills, certificates, receipts, pamphlets and similar. Percentage-tax article: applies INSTEAD OF the Article J graduated table for these lines (engine ordering rule 1). Exempt receipts (Sec. 2E.02): printing/publishing of books or reading materials prescribed by DECS as school texts or references. Payable quarterly within the first 20 days following each quarter (Sec. 2E.03).",
+    "defects": []
+  },
+  {
+    "code": "biztax.printing_new",
+    "title": "Tax on printing and publication — newly started business (0.05% of capital investment)",
+    "section": "Sec. 2E.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "printing_publication"
+      ],
+      "is_new_business": true
+    },
+    "basis": "capitalization",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.0005
+    },
+    "cap": null,
+    "notes": "Newly started business: one-twentieth (1/20) of 1% = 0.05% of capital investment. From the succeeding calendar year, regardless of start date, the gross-receipts rule (biztax.printing) applies. Payable before the business starts to operate (Sec. 2E.03).",
+    "defects": []
+  },
+  {
+    "code": "biztax.franchise",
+    "title": "Franchise tax (0.75% of gross annual receipts)",
+    "section": "Sec. 2F.03",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "franchise_holder"
+      ],
+      "is_new_business": false
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.0075
+    },
+    "cap": null,
+    "notes": "75% of 1% (0.75%) of gross annual receipts (cash sales + sales on account) of the preceding calendar year for businesses enjoying a franchise (coverage per Sec. 2F.02). Percentage-tax article: applies INSTEAD OF the Article J graduated table (engine ordering rule 1). Sec. 2F.04: holders of certificates of public convenience for public-vehicle operation are NOT franchise holders. Payable quarterly within the first 20 days following each quarter (Sec. 2F.05).",
+    "defects": [
+      "Sec. 2F.03 prints receipts realized 'within this province, excluding the territorial limits of the city' — apparent drafting carry-over from LGC Sec. 137 (provincial franchise tax); read literally it would exclude city receipts, contradicting the article's purpose. Transcribed as printed; territorial scope pending legal review (Appendix A).",
+      "Sec. 2F.03 prints 'a tax on business enjoying a franchise tax' — trailing 'tax' [sic], apparent typo for 'a franchise'."
+    ]
+  },
+  {
+    "code": "biztax.franchise_new",
+    "title": "Franchise tax — newly started business (0.05% of capital investment)",
+    "section": "Sec. 2F.03",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "franchise_holder"
+      ],
+      "is_new_business": true
+    },
+    "basis": "capitalization",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.0005
+    },
+    "cap": null,
+    "notes": "Newly started business: one-twentieth (1/20) of 1% = 0.05% of capital investment; succeeding year switches to gross receipts (biztax.franchise). Capital investment determined per Sec. 2F.03(a)-(c): (a) principal office in the city — paid-up capital per articles of incorporation or similar document; (b) branch/sales office commencing the same year as the principal office — capital investment made for that branch; (c) branch commencing a later year — total funds invested in the branch. Payable before the business starts to operate (Sec. 2F.05).",
+    "defects": []
+  },
+  {
+    "code": "biztax.delivery_vehicle_motorized",
+    "title": "Annual fixed tax per delivery truck, van or motor vehicle (P750/unit)",
+    "section": "Sec. 2I.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer",
+        "wholesaler",
+        "retailer"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 750.0,
+      "unit_key": "delivery_vehicles_motorized"
+    },
+    "cap": null,
+    "notes": "P750.00 annual fixed tax for every truck, van or any motor vehicle used by manufacturers, producers, wholesalers, dealers or retailers in delivery/distribution of any product within the City. Accrues 1 January, payable within the first 20 days of January; newly started business or newly acquired vehicle pays before the vehicle operates on City roads (Sec. 2I.03). Sec. 2I.02 / Sec. 2L.01: payers are exempt from the peddler's tax. A separate mayor's-office sticker fee applies (Sec. 2I.04).",
+    "defects": [
+      "Sec. 2I.01 prints 'for servicing business customers with Malabon City' — 'with' as printed (verified 2x zoom); almost certainly intends 'within'."
+    ]
+  },
+  {
+    "code": "biztax.delivery_vehicle_other",
+    "title": "Annual fixed tax per other delivery vehicle (P100/unit)",
+    "section": "Sec. 2I.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer",
+        "wholesaler",
+        "retailer"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 100.0,
+      "unit_key": "delivery_vehicles_other"
+    },
+    "cap": null,
+    "notes": "P100.00 annually per 'motorized or any other delivery vehicle used for such purpose' (as printed). Applied here to delivery vehicles other than the trucks/vans/motor vehicles already taxed P750 (e.g. pedicabs, pushcarts). Same payment timing and sticker requirement as biztax.delivery_vehicle_motorized.",
+    "defects": [
+      "printed 'motorized'; likely non-motorized — pending confirmation"
+    ]
+  },
+  {
+    "code": "biztax.manufacturer",
+    "title": "Graduated tax on manufacturers, assemblers, importers, repackers, processors, brewers, distillers, rectifiers and compounders",
+    "section": "Sec. 2J.02(a)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 10000,
+          "amount": 247.5
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 330.0
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 453.0
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 660.0
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 990.0
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 1237.5
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 1980.0
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 2475.0
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 3300.0
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 4125.0
+        },
+        {
+          "min": 200000,
+          "max": 300000,
+          "amount": 5775.0
+        },
+        {
+          "min": 300000,
+          "max": 500000,
+          "amount": 8250.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 12000.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 15000.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 20625.0
+        },
+        {
+          "min": 2000000,
+          "max": 3000000,
+          "amount": 24750.0
+        },
+        {
+          "min": 3000000,
+          "max": 4000000,
+          "amount": 29700.0
+        },
+        {
+          "min": 4000000,
+          "max": 5000000,
+          "amount": 34650.0
+        },
+        {
+          "min": 5000000,
+          "max": 6500000,
+          "amount": 36562.5
+        }
+      ],
+      "excess": {
+        "tiers": [
+          {
+            "threshold": 6500000,
+            "max": 50000000,
+            "base": 36562.5,
+            "rate": 0.00375
+          },
+          {
+            "threshold": 50000000,
+            "max": 100000000,
+            "base": 199687.5,
+            "rate": 0.003
+          },
+          {
+            "threshold": 100000000,
+            "max": null,
+            "base": 349687.5,
+            "rate": 0.00225
+          }
+        ]
+      }
+    },
+    "cap": null,
+    "notes": "Graduated on gross sales/receipts of the preceding calendar year. Multi-tier excess: printed rows give 'the tax at 6.5M/50M/100M plus 37.5%/30%/22.5% of 1% of the excess'; tier bases beyond the first are derived by cascading (tax at 50M = 199,687.50; tax at 100M = 349,687.50). Rates apply only to DOMESTIC sales; goods under Sec. 2J.02(c) (essential commodities) are excluded — see biztax.essential_manufacturer. Businesses under this paragraph are not also subject to the wholesaler tax (Sec. 2J.02(b) closing text).",
+    "defects": [
+      "brackets 3M-6.5M pairing interpreted from ambiguous print; pending certified copy (Appendix A)",
+      "15,000-20,000 bracket prints 453.00 (verified 5x zoom), breaking the schedule's x1.5 pattern (453.75 expected); amount as printed.",
+      "Sec. 2J.02(a) heading prints 'compounders or [sic] liquors' — 'or' as printed, evidently for 'of'.",
+      "Top row prints 'The tax at 100M plus an additional tax of 22.5% of 1%.' without 'of the excess'; encoded as 0.225% of the excess over P100,000,000 by parallel with the preceding rows."
+    ]
+  },
+  {
+    "code": "biztax.wholesaler",
+    "title": "Graduated tax on wholesalers, distributors or dealers in any article of commerce",
+    "section": "Sec. 2J.02(b)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "wholesaler"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000,
+          "amount": 27.0
+        },
+        {
+          "min": 1000,
+          "max": 2000,
+          "amount": 49.5
+        },
+        {
+          "min": 2000,
+          "max": 3000,
+          "amount": 75.0
+        },
+        {
+          "min": 3000,
+          "max": 4000,
+          "amount": 108.0
+        },
+        {
+          "min": 4000,
+          "max": 5000,
+          "amount": 150.0
+        },
+        {
+          "min": 5000,
+          "max": 6000,
+          "amount": 181.0
+        },
+        {
+          "min": 6000,
+          "max": 7000,
+          "amount": 214.5
+        },
+        {
+          "min": 7000,
+          "max": 8000,
+          "amount": 247.5
+        },
+        {
+          "min": 8000,
+          "max": 10000,
+          "amount": 280.5
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 330.0
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 412.0
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 495.0
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 660.0
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 990.0
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 1425.0
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 1980.0
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 2805.0
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 3630.0
+        },
+        {
+          "min": 200000,
+          "max": 300000,
+          "amount": 4950.0
+        },
+        {
+          "min": 300000,
+          "max": 500000,
+          "amount": 6600.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 9900.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 13200.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 15000.0
+        }
+      ],
+      "excess": {
+        "tiers": [
+          {
+            "threshold": 2000000,
+            "max": 10000000,
+            "base": 15000.0,
+            "rate": 0.00375
+          },
+          {
+            "threshold": 10000000,
+            "max": null,
+            "base": 45000.0,
+            "rate": 0.003
+          }
+        ]
+      }
+    },
+    "cap": null,
+    "notes": "Graduated on gross sales/receipts of the preceding calendar year. Multi-tier excess: tier-2 base derived by cascading (tax at 10M = 45,000.00). Closing text: businesses enumerated in paragraph (a) (manufacturers etc.) shall no longer be subject to this wholesaler tax. Essential commodities route to biztax.essential_wholesaler at half rates.",
+    "defects": [
+      "5,000-6,000 bracket prints 181.00 (pattern would give 181.50); as printed (verified 6x zoom).",
+      "15,000-20,000 bracket prints 412.00 (pattern would give 412.50); as printed (verified 6x zoom).",
+      "50,000-75,000 bracket prints 1,425.00 (pattern would give 1,485.00); as printed (verified 6x zoom).",
+      "Top row prints 'The tax at 10M plus an additional tax of 30% of 1%.' without 'of the excess'; encoded as 0.30% of the excess over P10,000,000 by parallel with the preceding row."
+    ]
+  },
+  {
+    "code": "biztax.retailer",
+    "title": "Tax on retailers (3% of first P400,000 gross; 1.5% above)",
+    "section": "Sec. 2J.02(d)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "retailer"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 400000,
+          "rate": 0.03
+        }
+      ],
+      "excess": {
+        "threshold": 400000,
+        "base": 12000.0,
+        "rate": 0.015
+      }
+    },
+    "cap": null,
+    "notes": "Printed schedule is rate-based, not fixed amounts: 'First P400,000.00 — 3%; More than P400,000.00 — 1.5%'. The bracket row carries 'rate' instead of 'amount': below the threshold, tax = 3% x gross; above, tax = 12,000.00 (derived: 3% x 400,000) + 1.5% of the excess. Barangays have the exclusive power to levy taxes on stores whose preceding-year gross sales/receipts do not exceed P50,000.00, subject to existing laws and regulations. Essential commodities route to biztax.essential_retailer at half rates.",
+    "defects": []
+  },
+  {
+    "code": "biztax.essential_manufacturer",
+    "title": "Exporters and manufacturers/millers/producers of essential commodities — half of the Sec. 2J.02(a) schedule",
+    "section": "Sec. 2J.02(c)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "essential_manufacturer",
+        "exporter"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 10000,
+          "amount": 123.75
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 165.0
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 226.5
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 330.0
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 495.0
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 618.75
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 990.0
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 1237.5
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 1650.0
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 2062.5
+        },
+        {
+          "min": 200000,
+          "max": 300000,
+          "amount": 2887.5
+        },
+        {
+          "min": 300000,
+          "max": 500000,
+          "amount": 4125.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 6000.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 7500.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 10312.5
+        },
+        {
+          "min": 2000000,
+          "max": 3000000,
+          "amount": 12375.0
+        },
+        {
+          "min": 3000000,
+          "max": 4000000,
+          "amount": 14850.0
+        },
+        {
+          "min": 4000000,
+          "max": 5000000,
+          "amount": 17325.0
+        },
+        {
+          "min": 5000000,
+          "max": 6500000,
+          "amount": 18281.25
+        }
+      ],
+      "excess": {
+        "tiers": [
+          {
+            "threshold": 6500000,
+            "max": 50000000,
+            "base": 18281.25,
+            "rate": 0.001875
+          },
+          {
+            "threshold": 50000000,
+            "max": 100000000,
+            "base": 99843.75,
+            "rate": 0.0015
+          },
+          {
+            "threshold": 100000000,
+            "max": null,
+            "base": 174843.75,
+            "rate": 0.001125
+          }
+        ]
+      }
+    },
+    "cap": null,
+    "notes": "One-half of every Sec. 2J.02(a) amount and excess rate. Condition key 'base_category' is not a printed fact: it selects which base schedule ((a), (b) or (d)) the half-rate applies to, since Sec. 2J.02(c) sets the rate at one-half of subsections (a), (b) and (d). Ordinance says 'at a rate not exceeding one-half (1/2)'; encoded at exactly one-half. A line matching an essential/exporter rule must NOT also be charged the corresponding full-rate rule (engine dedup). Exporters: those principally engaged in exporting, and manufacturers/producers selling both domestically and abroad — export sales are excluded from total sales and taxed at these half rates. Essential commodities per Sec. 2J.02(c): (1) rice and corn; (2) wheat or cassava flour, meat, dairy products, locally manufactured/processed/preserved food, sugar, salt and agricultural marine and fresh water products, whether in their original state or not; (3) cooking oil and cooking gas; (4) laundry soap, detergents and medicine; (5) agricultural implements, equipment and post-harvest facilities, fertilizers, pesticides, insecticides, herbicides and other farm inputs; (6) poultry feeds and other animal feeds; (7) school supplies; (8) cement. [Line-of-business slugs select the base schedule directly (was base_category=manufacturer); exporters take the manufacturer half-rate base per Sec. 2J.02(c).]",
+    "defects": [
+      "Sec. 2J.02(c) heading prints 'wholesalers, distributors. [sic] dealers' — period as printed where a comma is evidently intended.",
+      "Amounts derived (x1/2) from Sec. 2J.02(a); inherits that schedule's defects, including: brackets 3M-6.5M pairing interpreted from ambiguous print; pending certified copy (Appendix A)."
+    ]
+  },
+  {
+    "code": "biztax.essential_wholesaler",
+    "title": "Wholesalers, distributors or dealers of essential commodities — half of the Sec. 2J.02(b) schedule",
+    "section": "Sec. 2J.02(c)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "essential_wholesaler"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000,
+          "amount": 13.5
+        },
+        {
+          "min": 1000,
+          "max": 2000,
+          "amount": 24.75
+        },
+        {
+          "min": 2000,
+          "max": 3000,
+          "amount": 37.5
+        },
+        {
+          "min": 3000,
+          "max": 4000,
+          "amount": 54.0
+        },
+        {
+          "min": 4000,
+          "max": 5000,
+          "amount": 75.0
+        },
+        {
+          "min": 5000,
+          "max": 6000,
+          "amount": 90.5
+        },
+        {
+          "min": 6000,
+          "max": 7000,
+          "amount": 107.25
+        },
+        {
+          "min": 7000,
+          "max": 8000,
+          "amount": 123.75
+        },
+        {
+          "min": 8000,
+          "max": 10000,
+          "amount": 140.25
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 165.0
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 206.0
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 247.5
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 330.0
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 495.0
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 712.5
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 990.0
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 1402.5
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 1815.0
+        },
+        {
+          "min": 200000,
+          "max": 300000,
+          "amount": 2475.0
+        },
+        {
+          "min": 300000,
+          "max": 500000,
+          "amount": 3300.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 4950.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 6600.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 7500.0
+        }
+      ],
+      "excess": {
+        "tiers": [
+          {
+            "threshold": 2000000,
+            "max": 10000000,
+            "base": 7500.0,
+            "rate": 0.001875
+          },
+          {
+            "threshold": 10000000,
+            "max": null,
+            "base": 22500.0,
+            "rate": 0.0015
+          }
+        ]
+      }
+    },
+    "cap": null,
+    "notes": "One-half of every Sec. 2J.02(b) amount and excess rate. Condition key 'base_category' is not a printed fact: it selects which base schedule ((a), (b) or (d)) the half-rate applies to, since Sec. 2J.02(c) sets the rate at one-half of subsections (a), (b) and (d). Ordinance says 'at a rate not exceeding one-half (1/2)'; encoded at exactly one-half. A line matching an essential/exporter rule must NOT also be charged the corresponding full-rate rule (engine dedup). Exporters: those principally engaged in exporting, and manufacturers/producers selling both domestically and abroad — export sales are excluded from total sales and taxed at these half rates. Essential commodities per Sec. 2J.02(c): (1) rice and corn; (2) wheat or cassava flour, meat, dairy products, locally manufactured/processed/preserved food, sugar, salt and agricultural marine and fresh water products, whether in their original state or not; (3) cooking oil and cooking gas; (4) laundry soap, detergents and medicine; (5) agricultural implements, equipment and post-harvest facilities, fertilizers, pesticides, insecticides, herbicides and other farm inputs; (6) poultry feeds and other animal feeds; (7) school supplies; (8) cement. [Line-of-business slugs select the base schedule directly (was base_category=wholesaler); exporters take the manufacturer half-rate base per Sec. 2J.02(c).]",
+    "defects": [
+      "Sec. 2J.02(c) heading prints 'wholesalers, distributors. [sic] dealers' — period as printed where a comma is evidently intended.",
+      "Amounts derived (x1/2) from Sec. 2J.02(b); inherits that schedule's as-printed anomalies (181.00, 412.00, 1,425.00 rows)."
+    ]
+  },
+  {
+    "code": "biztax.essential_retailer",
+    "title": "Retailers of essential commodities — half of the Sec. 2J.02(d) rates (1.5% / 0.75%)",
+    "section": "Sec. 2J.02(c)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "essential_retailer"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 400000,
+          "rate": 0.015
+        }
+      ],
+      "excess": {
+        "threshold": 400000,
+        "base": 6000.0,
+        "rate": 0.0075
+      }
+    },
+    "cap": null,
+    "notes": "One-half of the Sec. 2J.02(d) retailer rates: 1.5% on the first P400,000 of gross, 0.75% above (excess base 6,000.00 derived: 1.5% x 400,000). Bracket row carries 'rate' instead of 'amount', as in biztax.retailer. Condition key 'base_category' is not a printed fact: it selects which base schedule ((a), (b) or (d)) the half-rate applies to, since Sec. 2J.02(c) sets the rate at one-half of subsections (a), (b) and (d). Ordinance says 'at a rate not exceeding one-half (1/2)'; encoded at exactly one-half. A line matching an essential/exporter rule must NOT also be charged the corresponding full-rate rule (engine dedup). Exporters: those principally engaged in exporting, and manufacturers/producers selling both domestically and abroad — export sales are excluded from total sales and taxed at these half rates. Essential commodities per Sec. 2J.02(c): (1) rice and corn; (2) wheat or cassava flour, meat, dairy products, locally manufactured/processed/preserved food, sugar, salt and agricultural marine and fresh water products, whether in their original state or not; (3) cooking oil and cooking gas; (4) laundry soap, detergents and medicine; (5) agricultural implements, equipment and post-harvest facilities, fertilizers, pesticides, insecticides, herbicides and other farm inputs; (6) poultry feeds and other animal feeds; (7) school supplies; (8) cement. [Line-of-business slugs select the base schedule directly (was base_category=retailer); exporters take the manufacturer half-rate base per Sec. 2J.02(c).]",
+    "defects": [
+      "Sec. 2J.02(c) heading prints 'wholesalers, distributors. [sic] dealers' — period as printed where a comma is evidently intended."
+    ]
+  },
+  {
+    "code": "biztax.contractor",
+    "title": "Graduated tax on contractors and other independent contractors",
+    "section": "Sec. 2J.02(e)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 5000,
+          "amount": 41.25
+        },
+        {
+          "min": 5000,
+          "max": 10000,
+          "amount": 92.4
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 156.75
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 247.5
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 412.5
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 577.5
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 825.0
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 1320.0
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 1980.0
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 2970.0
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 3690.0
+        },
+        {
+          "min": 200000,
+          "max": 250000,
+          "amount": 5445.0
+        },
+        {
+          "min": 250000,
+          "max": 300000,
+          "amount": 6930.0
+        },
+        {
+          "min": 300000,
+          "max": 400000,
+          "amount": 9240.0
+        },
+        {
+          "min": 400000,
+          "max": 500000,
+          "amount": 12375.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 13875.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 15375.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 17250.0
+        }
+      ],
+      "excess": {
+        "threshold": 2000000,
+        "base": 17250.0,
+        "rate": 0.0075
+      }
+    },
+    "cap": null,
+    "notes": "Graduated on gross sales/receipts of the preceding calendar year; covers the 39 enumerated establishment types (barbershops through 'other similar employment services'). Excess row prints only 'At a rate not exceeding seventy five (75%) of (1%)' for the excess of 2,000,000.00 — encoded at exactly 0.75% of the excess, with base = the top bracket amount (17,250.00). General engineering, general building and specialty contractors: tax initially based on total contract price, payable in equal annual installments within the project term; recomputed on gross receipts upon completion, with deficiency collected or excess refunded.",
+    "defects": [
+      "150,000-200,000 bracket prints 3,690.00 (verified 5x zoom; an LGC x1.5 pattern would give 3,960.00); as printed.",
+      "Top fixed bracket prints '1,000,000.00 up to 2,000,000.00' ('up to', inclusive wording) while the excess row reads 'EXCESS OF 2,000,000.00'; encoded max-exclusive at 2,000,000 — at exactly 2,000,000 the excess row yields the same 17,250.00.",
+      "Enumerated item 13 prints 'establishments for planning or surfacing or resulting of lumber' [sic — likely 'planing ... recutting'].",
+      "Enumerated item 20 prints 'slandering' [sic — likely 'slendering'].",
+      "Enumerated item 27 prints 'logs belonging of [sic] others'.",
+      "Enumerated item 34 prints 'Water system instruments;' [sic — possibly 'installers'; wording truncated in the ordinance itself].",
+      "Enumerated item 35 prints 'Management;' as a single word [sic; wording truncated in the ordinance itself]."
+    ]
+  },
+  {
+    "code": "biztax.bank",
+    "title": "Tax on banks and other financial institutions (0.75% of gross receipts)",
+    "section": "Sec. 2J.02(f)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bank"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.0075
+    },
+    "cap": null,
+    "notes": "75% of 1% (0.75%) of preceding-calendar-year gross receipts derived from interest, commissions and discounts from lending activities, income from financial leasing, dividends, rentals on property, and profit from exchange or sale of property, insurance premium. All other income and receipts not enumerated are EXCLUDED from the computation — the declared gross for this line must contain only the enumerated items.",
+    "defects": []
+  },
+  {
+    "code": "biztax.peddler",
+    "title": "Tax on peddlers (P75.00 per peddler annually)",
+    "section": "Sec. 2J.02(g)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "peddler"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 75.0
+    },
+    "cap": null,
+    "notes": "P75.00 per peddler annually on peddlers engaged in the sale of any merchandise or article of commerce; the amount is per peddler, so a business fielding several peddlers pays per head (officer adjusts or repeats the line — no peddler-count fact is captured). Exemption (Sec. 2I.02 / Sec. 2L.01): manufacturers, producers, wholesalers, dealers or retailers paying the Article I delivery-vehicle tax (Sec. 141, RA 7160 enterprises) are exempt from this peddler's tax. Payable within the first 20 days of January; one starting to peddle after 20 January pays the full amount before engaging (Sec. 2L.01 third paragraph).",
+    "defects": []
+  },
+  {
+    "code": "biztax.restaurant",
+    "title": "Graduated tax on restaurants, cafes, cafeterias, carinderias, eateries, food caterers, refreshment parlors and similar",
+    "section": "Sec. 2J.02(h)(1)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "restaurant"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 2000,
+          "amount": 45.0
+        },
+        {
+          "min": 2000,
+          "max": 3750,
+          "amount": 75.0
+        },
+        {
+          "min": 3750,
+          "max": 4500,
+          "amount": 105.0
+        },
+        {
+          "min": 4500,
+          "max": 6125,
+          "amount": 135.0
+        },
+        {
+          "min": 6125,
+          "max": 7250,
+          "amount": 165.0
+        },
+        {
+          "min": 7250,
+          "max": 8750,
+          "amount": 195.0
+        },
+        {
+          "min": 8750,
+          "max": 10275,
+          "amount": 225.0
+        },
+        {
+          "min": 10275,
+          "max": 12125,
+          "amount": 270.0
+        },
+        {
+          "min": 12125,
+          "max": 15250,
+          "amount": 330.0
+        },
+        {
+          "min": 15250,
+          "max": 16750,
+          "amount": 375.0
+        },
+        {
+          "min": 16750,
+          "max": 18250,
+          "amount": 405.0
+        },
+        {
+          "min": 18250,
+          "max": 20625,
+          "amount": 435.0
+        },
+        {
+          "min": 20625,
+          "max": 23375,
+          "amount": 525.0
+        },
+        {
+          "min": 23375,
+          "max": 27000,
+          "amount": 600.0
+        },
+        {
+          "min": 27000,
+          "max": 30000,
+          "amount": 675.0
+        },
+        {
+          "min": 30000,
+          "max": 33000,
+          "amount": 750.0
+        },
+        {
+          "min": 33000,
+          "max": 35875,
+          "amount": 825.0
+        },
+        {
+          "min": 35875,
+          "max": 40625,
+          "amount": 915.0
+        },
+        {
+          "min": 40625,
+          "max": 45000,
+          "amount": 990.0
+        },
+        {
+          "min": 45000,
+          "max": 50000,
+          "amount": 1125.0
+        }
+      ],
+      "excess": {
+        "threshold": 50000,
+        "base": 1125.0,
+        "step": 1000,
+        "step_amount": 7.5
+      }
+    },
+    "cap": null,
+    "notes": "Excess row is step-based, not a plain rate: P7.50 'for every P1,000.00 or fraction thereof' in excess of P50,000.00 — i.e. base 1,125.00 (top bracket) + 7.50 x ceil(excess / 1,000). Equivalent to 0.75% with the excess rounded UP to the next full P1,000.",
+    "defects": [
+      "Sec. 2J.02(h) group heading prints 'On Business, numerated [sic] hereunder' — 'numerated' as printed (applies to all (h) subsections)."
+    ]
+  },
+  {
+    "code": "biztax.bar_nightclub",
+    "title": "Graduated tax on bars, beer gardens, cocktail lounges, day and night clubs, pub houses, sing-along or karaoke bars and similar",
+    "section": "Sec. 2J.02(h)(2)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bar_nightclub"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 2000,
+          "amount": 60.0
+        },
+        {
+          "min": 2000,
+          "max": 3750,
+          "amount": 112.5
+        },
+        {
+          "min": 3750,
+          "max": 4500,
+          "amount": 135.0
+        },
+        {
+          "min": 4500,
+          "max": 6125,
+          "amount": 183.0
+        },
+        {
+          "min": 6125,
+          "max": 7250,
+          "amount": 217.5
+        },
+        {
+          "min": 7250,
+          "max": 8750,
+          "amount": 262.5
+        },
+        {
+          "min": 8750,
+          "max": 10275,
+          "amount": 308.25
+        },
+        {
+          "min": 10275,
+          "max": 12125,
+          "amount": 363.75
+        },
+        {
+          "min": 12125,
+          "max": 15250,
+          "amount": 457.5
+        },
+        {
+          "min": 15250,
+          "max": 16750,
+          "amount": 502.5
+        },
+        {
+          "min": 16750,
+          "max": 18250,
+          "amount": 547.5
+        },
+        {
+          "min": 18250,
+          "max": 20625,
+          "amount": 618.75
+        },
+        {
+          "min": 20625,
+          "max": 23375,
+          "amount": 701.25
+        },
+        {
+          "min": 23375,
+          "max": 27000,
+          "amount": 810.0
+        },
+        {
+          "min": 27000,
+          "max": 30000,
+          "amount": 900.0
+        },
+        {
+          "min": 30000,
+          "max": 33000,
+          "amount": 990.0
+        },
+        {
+          "min": 33000,
+          "max": 35875,
+          "amount": 1076.25
+        },
+        {
+          "min": 35875,
+          "max": 40625,
+          "amount": 1218.75
+        },
+        {
+          "min": 40625,
+          "max": 45000,
+          "amount": 1365.0
+        },
+        {
+          "min": 45000,
+          "max": 50000,
+          "amount": 1500.0
+        }
+      ],
+      "excess": {
+        "threshold": 50000,
+        "base": 1500.0,
+        "step": 1000,
+        "step_amount": 15.0
+      }
+    },
+    "cap": null,
+    "notes": "Excess row is step-based: P15.00 for every P1,000.00 or fraction thereof in excess of P50,000.00 — base 1,500.00 (top bracket) + 15.00 x ceil(excess / 1,000).",
+    "defects": []
+  },
+  {
+    "code": "biztax.subdivision_operator",
+    "title": "Tax on real estate dealers/brokers — subdivision operators (P0.75 per square meter)",
+    "section": "Sec. 2J.02(h)(3)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "subdivision_operator"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 0.75,
+      "unit_key": "subdivision_remaining_lot_area_sqm"
+    },
+    "cap": null,
+    "notes": "P0.75 per square meter, based on the total area of the remaining lots titled in the name of the subdivision operator. unit_key 'subdivision_remaining_lot_area_sqm' is not among the standard captured fee-profile facts; the officer supplies the area (via profile extension or fee adjustment).",
+    "defects": []
+  },
+  {
+    "code": "biztax.lessor",
+    "title": "Graduated tax on lessors or sub-lessors of real estate (accessorias, boarding/pension houses, motels, apartments, apartels, condominiums, houses for lease, rooms and spaces for rent)",
+    "section": "Sec. 2J.02(h)(4)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor"
+      ],
+      "is_new_business": false
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000,
+          "amount": 0.0
+        },
+        {
+          "min": 1000,
+          "max": 4000,
+          "amount": 45.0
+        },
+        {
+          "min": 4000,
+          "max": 10000,
+          "amount": 112.5
+        },
+        {
+          "min": 10000,
+          "max": 20000,
+          "amount": 337.5
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 675.0
+        },
+        {
+          "min": 30000,
+          "max": 50000,
+          "amount": 1125.0
+        }
+      ],
+      "excess": {
+        "variants": [
+          {
+            "use": "non_residential",
+            "threshold": 50000,
+            "base": 1125.0,
+            "step": 1000,
+            "step_amount": 22.5
+          },
+          {
+            "use": "residential",
+            "threshold": 50000,
+            "base": 1125.0,
+            "step": 5000,
+            "step_amount": 15.0
+          }
+        ]
+      }
+    },
+    "cap": null,
+    "notes": "First bracket (under P1,000.00) is printed 'P Exempt' — encoded as amount 0. Two excess schedules above P50,000.00, both from base 1,125.00 (top bracket): P22.50 for every P1,000.00 of excess where the real property is used for purposes OTHER than residential; P15.00 for every P5,000.00 of excess where used for residential purposes. Property-use is not among the standard captured fee-profile facts — the engine must resolve the variant from a property-use input or via officer adjustment. New business: see biztax.lessor_new (fixed P75.00, printed as an in-table row).",
+    "defects": [
+      "Top fixed bracket prints '30,000.00 to 50,000.00' (not the schedule's usual 'or more but less than' wording); encoded max-exclusive at 50,000 — at exactly 50,000 the excess rows yield the same 1,125.00 base."
+    ]
+  },
+  {
+    "code": "biztax.lessor_new",
+    "title": "Lessors or sub-lessors of real estate — newly started business (initial tax P75.00)",
+    "section": "Sec. 2J.02(h)(4)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor"
+      ],
+      "is_new_business": true
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 75.0
+    },
+    "cap": null,
+    "notes": "Printed as the final row of the Sec. 2J.02(h)(4) table: 'For newly started business, the initial tax shall be at the rate of 75.00'.",
+    "defects": []
+  },
+  {
+    "code": "biztax.real_estate_dealer",
+    "title": "Graduated tax on dealers of real estate (excluding subdivision operators and lessors of real estate)",
+    "section": "Sec. 2J.02(h)(5)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "real_estate_dealer"
+      ],
+      "is_new_business": false
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 10000,
+          "amount": 375.0
+        },
+        {
+          "min": 10000,
+          "max": 50000,
+          "amount": 750.0
+        },
+        {
+          "min": 50000,
+          "max": 100000,
+          "amount": 1125.0
+        },
+        {
+          "min": 100000,
+          "max": 200000,
+          "amount": 2250.0
+        },
+        {
+          "min": 200000,
+          "max": 400000,
+          "amount": 3375.0
+        },
+        {
+          "min": 400000,
+          "max": 700000,
+          "amount": 6000.0
+        },
+        {
+          "min": 700000,
+          "max": 1000000,
+          "amount": 9000.0
+        },
+        {
+          "min": 1000000,
+          "max": 1500000,
+          "amount": 13125.0
+        },
+        {
+          "min": 1500000,
+          "max": 2000000,
+          "amount": 15750.0
+        },
+        {
+          "min": 2000000,
+          "max": 3000000,
+          "amount": 20625.0
+        },
+        {
+          "min": 3000000,
+          "max": 5000000,
+          "amount": 24000.0
+        },
+        {
+          "min": 5000000,
+          "max": 6500000,
+          "amount": 30000.0
+        },
+        {
+          "min": 6500000,
+          "max": 8000000,
+          "amount": 37500.0
+        },
+        {
+          "min": 8000000,
+          "max": 10000000,
+          "amount": 47250.0
+        }
+      ],
+      "excess": {
+        "threshold": 10000000,
+        "base": 47250.0,
+        "step": 500000,
+        "step_amount": 1500.0
+      }
+    },
+    "cap": null,
+    "notes": "Excess row is step-based: P1,500.00 for every P500,000.00 in excess of P10,000,000.00 — base 47,250.00 (top bracket) + 1,500.00 x ceil(excess / 500,000). New business: see biztax.real_estate_dealer_new (the printed 'minimum prescribed above').",
+    "defects": []
+  },
+  {
+    "code": "biztax.real_estate_dealer_new",
+    "title": "Dealers of real estate — newly started business (minimum prescribed, P375.00)",
+    "section": "Sec. 2J.02(h)(5)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "real_estate_dealer"
+      ],
+      "is_new_business": true
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 375.0
+    },
+    "cap": null,
+    "notes": "'For newly started business, the initial tax shall be the minimum prescribed above' — the minimum bracket amount, P375.00.",
+    "defects": []
+  },
+  {
+    "code": "biztax.private_market_operator",
+    "title": "Graduated tax on privately-owned markets and shopping centers",
+    "section": "Sec. 2J.02(h)(6)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_market_operator"
+      ],
+      "is_new_business": false
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 20000,
+          "amount": 1110.0
+        },
+        {
+          "min": 20000,
+          "max": 40000,
+          "amount": 2250.0
+        },
+        {
+          "min": 40000,
+          "max": 80000,
+          "amount": 4500.0
+        },
+        {
+          "min": 80000,
+          "max": 120000,
+          "amount": 6750.0
+        },
+        {
+          "min": 120000,
+          "max": 160000,
+          "amount": 9000.0
+        },
+        {
+          "min": 160000,
+          "max": 200000,
+          "amount": 11250.0
+        },
+        {
+          "min": 200000,
+          "max": 240000,
+          "amount": 13500.0
+        },
+        {
+          "min": 240000,
+          "max": 280000,
+          "amount": 15750.0
+        },
+        {
+          "min": 280000,
+          "max": 320000,
+          "amount": 18000.0
+        },
+        {
+          "min": 320000,
+          "max": 360000,
+          "amount": 20250.0
+        },
+        {
+          "min": 360000,
+          "max": 400000,
+          "amount": 22500.0
+        }
+      ],
+      "excess": {
+        "threshold": 400000,
+        "base": 22500.0,
+        "step": 1000,
+        "step_amount": 30.0
+      }
+    },
+    "cap": null,
+    "notes": "Excess row is step-based: P30.00 for every P1,000.00 in excess of P400,000.00 — base 22,500.00 (top bracket) + 30.00 x ceil(excess / 1,000). New business: see biztax.private_market_operator_new.",
+    "defects": [
+      "First bracket prints 1,110.00 (verified 5x zoom; pattern would suggest 1,125.00); amount as printed."
+    ]
+  },
+  {
+    "code": "biztax.private_market_operator_new",
+    "title": "Privately-owned markets and shopping centers — newly started (minimum prescribed, P1,110.00)",
+    "section": "Sec. 2J.02(h)(6)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_market_operator"
+      ],
+      "is_new_business": true
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1110.0
+    },
+    "cap": null,
+    "notes": "'For newly started privately-owned public market, the tax shall be the minimum prescribed aboved' — the minimum bracket amount, P1,110.00 as printed.",
+    "defects": [
+      "Prints 'the minimum prescribed aboved [sic]'.",
+      "Minimum bracket amount is the as-printed 1,110.00 anomaly carried from the main schedule."
+    ]
+  },
+  {
+    "code": "biztax.amusement_place",
+    "title": "Graduated tax on amusement places (bowling alleys, billiard halls, pool rooms, videogame parlors, bath houses, resorts with swimming pools)",
+    "section": "Sec. 2J.02(h)(7)",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "amusement_place"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000,
+          "amount": 30.0
+        },
+        {
+          "min": 1000,
+          "max": 2000,
+          "amount": 60.0
+        },
+        {
+          "min": 2000,
+          "max": 3000,
+          "amount": 90.0
+        },
+        {
+          "min": 3000,
+          "max": 4000,
+          "amount": 120.0
+        },
+        {
+          "min": 4000,
+          "max": 5000,
+          "amount": 150.0
+        },
+        {
+          "min": 5000,
+          "max": 6000,
+          "amount": 180.0
+        },
+        {
+          "min": 6000,
+          "max": 7000,
+          "amount": 210.0
+        },
+        {
+          "min": 7000,
+          "max": 8000,
+          "amount": 240.0
+        },
+        {
+          "min": 8000,
+          "max": 10000,
+          "amount": 300.0
+        },
+        {
+          "min": 10000,
+          "max": 15000,
+          "amount": 450.0
+        },
+        {
+          "min": 15000,
+          "max": 20000,
+          "amount": 600.0
+        },
+        {
+          "min": 20000,
+          "max": 30000,
+          "amount": 900.0
+        },
+        {
+          "min": 30000,
+          "max": 40000,
+          "amount": 1200.0
+        },
+        {
+          "min": 40000,
+          "max": 50000,
+          "amount": 1500.0
+        },
+        {
+          "min": 50000,
+          "max": 75000,
+          "amount": 2250.0
+        },
+        {
+          "min": 75000,
+          "max": 100000,
+          "amount": 3000.0
+        },
+        {
+          "min": 100000,
+          "max": 150000,
+          "amount": 4500.0
+        },
+        {
+          "min": 150000,
+          "max": 200000,
+          "amount": 6000.0
+        },
+        {
+          "min": 200000,
+          "max": 300000,
+          "amount": 9000.0
+        },
+        {
+          "min": 300000,
+          "max": 500000,
+          "amount": 15000.0
+        },
+        {
+          "min": 500000,
+          "max": 750000,
+          "amount": 22500.0
+        },
+        {
+          "min": 750000,
+          "max": 1000000,
+          "amount": 30000.0
+        },
+        {
+          "min": 1000000,
+          "max": 2000000,
+          "amount": 60000.0
+        }
+      ],
+      "excess": {
+        "threshold": 2000000,
+        "base": 60000.0,
+        "rate": 0.0075
+      }
+    },
+    "cap": null,
+    "notes": "Excess row: 'The tax at 2M plus an additional tax of 75% of 1% of the excess of 2,000,000.00' — base 60,000.00 (top bracket) + 0.75% of the excess over P2,000,000.00. Distinct from the Article H amusement tax on admission (10% of admission fees), which is out of this file's scope.",
+    "defects": []
+  },
+  {
+    "code": "biztax.mobile_trader",
+    "title": "Annual tax on mobile traders (1% of gross receipts)",
+    "section": "Sec. 2K.02",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "mobile_trader"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.01
+    },
+    "cap": null,
+    "notes": "1% of gross receipts of mobile traders (persons who travel from place to place selling goods using a vehicle; includes rolling stores, portable stores and similar arrangements — Sec. 2K.01). Paid upon issuance of the Mayor's Permit (Sec. 2K.03). The City Treasurer determines taxable gross receipts by applying the Presumptive Income Level Technique (Sec. 2K.04) — pairs with the pil.presumptive_income officer-set line when no gross is declared.",
+    "defects": []
+  },
+  {
+    "code": "biztax.puv_bus_truck_van",
+    "title": "PUV operators — buses, cargo trucks and container vans (P6,000.00/unit)",
+    "section": "Sec. 2K.05",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "puv_operator"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 6000.0,
+      "unit_key": "puv_bus_truck_van_units"
+    },
+    "cap": null,
+    "notes": "Annual per-unit tax on operators of public utility vehicles maintaining a booking office, terminal or waiting station for carrying passengers from this city under a certificate of public convenience and necessity or similar franchises. Exemption (Sec. 2K.05 proviso): operators of taxis, jeepneys and other vehicles for hire with fewer than three (3) units are exempt (exemption does NOT extend to buses, cargo trucks and container vans); motorized tricycles for hire and utility tricycles are not subject to this tax. Payable within the first 20 days of January (Sec. 2K.06). Unit-count keys are per-kind extensions of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.puv_taxi",
+    "title": "PUV operators — taxis (P3,000.00/unit)",
+    "section": "Sec. 2K.05",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "puv_operator"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 3000.0,
+      "unit_key": "puv_taxi_units"
+    },
+    "cap": null,
+    "notes": "Annual per-unit tax on operators of public utility vehicles maintaining a booking office, terminal or waiting station for carrying passengers from this city under a certificate of public convenience and necessity or similar franchises. Exemption (Sec. 2K.05 proviso): operators of taxis, jeepneys and other vehicles for hire with fewer than three (3) units are exempt (exemption does NOT extend to buses, cargo trucks and container vans); motorized tricycles for hire and utility tricycles are not subject to this tax. Payable within the first 20 days of January (Sec. 2K.06). Unit-count keys are per-kind extensions of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.puv_jeepney",
+    "title": "PUV operators — jeepneys (P1,500.00/unit)",
+    "section": "Sec. 2K.05",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "puv_operator"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1500.0,
+      "unit_key": "puv_jeepney_units"
+    },
+    "cap": null,
+    "notes": "Annual per-unit tax on operators of public utility vehicles maintaining a booking office, terminal or waiting station for carrying passengers from this city under a certificate of public convenience and necessity or similar franchises. Exemption (Sec. 2K.05 proviso): operators of taxis, jeepneys and other vehicles for hire with fewer than three (3) units are exempt (exemption does NOT extend to buses, cargo trucks and container vans); motorized tricycles for hire and utility tricycles are not subject to this tax. Payable within the first 20 days of January (Sec. 2K.06). Unit-count keys are per-kind extensions of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.puv_other",
+    "title": "PUV operators — other vehicles for hire (P1,500.00/unit)",
+    "section": "Sec. 2K.05",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "puv_operator"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1500.0,
+      "unit_key": "puv_other_units"
+    },
+    "cap": null,
+    "notes": "Annual per-unit tax on operators of public utility vehicles maintaining a booking office, terminal or waiting station for carrying passengers from this city under a certificate of public convenience and necessity or similar franchises. Exemption (Sec. 2K.05 proviso): operators of taxis, jeepneys and other vehicles for hire with fewer than three (3) units are exempt (exemption does NOT extend to buses, cargo trucks and container vans); motorized tricycles for hire and utility tricycles are not subject to this tax. Payable within the first 20 days of January (Sec. 2K.06). Unit-count keys are per-kind extensions of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.ambulant_circus",
+    "title": "Ambulant amusement — circus, carnivals and the like (P1,000.00/day)",
+    "section": "Sec. 2K.07",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ambulant_amusement"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1000.0,
+      "unit_key": "amusement_days"
+    },
+    "cap": null,
+    "notes": "Tax on ambulant and itinerant amusement operators during fiestas and fairs (Sec. 2K.07); payable before engaging in the activity (Sec. 2K.08). Unit key is a per-kind extension of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.ambulant_rides",
+    "title": "Ambulant amusement — merry-go-round, roller coaster, ferris wheel, swing, shooting gallery and other similar contrivances (P300.00/day)",
+    "section": "Sec. 2K.07",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ambulant_amusement"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 300.0,
+      "unit_key": "amusement_days"
+    },
+    "cap": null,
+    "notes": "Tax on ambulant and itinerant amusement operators during fiestas and fairs (Sec. 2K.07); payable before engaging in the activity (Sec. 2K.08). Unit key is a per-kind extension of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.ambulant_sideshow",
+    "title": "Ambulant amusement — side show (P300.00/booth)",
+    "section": "Sec. 2K.07",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ambulant_amusement"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 300.0,
+      "unit_key": "booths"
+    },
+    "cap": null,
+    "notes": "Tax on ambulant and itinerant amusement operators during fiestas and fairs (Sec. 2K.07); payable before engaging in the activity (Sec. 2K.08). Unit key is a per-kind extension of the fee profile.",
+    "defects": []
+  },
+  {
+    "code": "biztax.ambulant_tiangge",
+    "title": "Ambulant amusement — tiangge (P500.00 per sq. m. per week)",
+    "section": "Sec. 2K.07",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ambulant_amusement"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 500.0,
+      "unit_key": "sqm_weeks"
+    },
+    "cap": null,
+    "notes": "Tax on ambulant and itinerant amusement operators during fiestas and fairs (Sec. 2K.07); payable before engaging in the activity (Sec. 2K.08). Unit key is a per-kind extension of the fee profile. Unit is square-meter-weeks: area in sq. m. x number of weeks.",
+    "defects": []
+  },
+  {
+    "code": "biztax.ambulant_other",
+    "title": "Ambulant amusement — other similar contrivances (P500.00/day)",
+    "section": "Sec. 2K.07",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ambulant_amusement"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 500.0,
+      "unit_key": "amusement_days"
+    },
+    "cap": null,
+    "notes": "Tax on ambulant and itinerant amusement operators during fiestas and fairs (Sec. 2K.07); payable before engaging in the activity (Sec. 2K.08). Unit key is a per-kind extension of the fee profile.",
+    "defects": []
+  }
+]

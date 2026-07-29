@@ -11,6 +11,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             ReferenceSeeder::class,
             RbacSeeder::class,
+            FeeRuleSeeder::class,
             DemoSeeder::class,
         ]);
     }

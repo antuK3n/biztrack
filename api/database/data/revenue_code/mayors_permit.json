@@ -1,0 +1,4667 @@
+[
+  {
+    "code": "permit.filing_fee",
+    "title": "Application filing fee (business permit application)",
+    "section": "Sec. 3A.02",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 100.0
+    },
+    "cap": null,
+    "notes": "Payable to the City Mayor through the BPLO before processing of the business application.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_flammables_within",
+    "title": "Manufacturers/Producers in General — factory and office within Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 I(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ],
+      "goods_class": "flammables",
+      "office_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "Factory and office within Malabon.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_chemicals_within",
+    "title": "Manufacturers/Producers in General — factory and office within Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 I(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "Factory and office within Malabon.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_dry_goods_within",
+    "title": "Manufacturers/Producers in General — factory and office within Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 I(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "Factory and office within Malabon.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_perishables_within",
+    "title": "Manufacturers/Producers in General — factory and office within Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 I(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ],
+      "goods_class": "perishables",
+      "office_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "Factory and office within Malabon.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_multiple_products",
+    "title": "Manufacturers/Producers in General — multiple products manufactured/produced",
+    "section": "Sec. 3A.03 I(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6050.0
+    },
+    "cap": null,
+    "notes": "Single amount printed across the four-column matrix; treated as flat fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.manufacturer_small_scale",
+    "title": "Small Scale Industries such as RTW, assembled plastic products, confectionaries",
+    "section": "Sec. 3A.03 I",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "manufacturer_small_scale"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Line carries no letter designation in print; follows item (b) (Appendix A row 23)."
+    ]
+  },
+  {
+    "code": "permit.importer_flammables_within",
+    "title": "Importers — office and warehouse within Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 II(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "flammables",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_chemicals_within",
+    "title": "Importers — office and warehouse within Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 II(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_dry_goods_within",
+    "title": "Importers — office and warehouse within Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 II(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_perishables_within",
+    "title": "Importers — office and warehouse within Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 II(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "perishables",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_flammables_office_outside",
+    "title": "Importers — office outside Malabon, warehouse within Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 II(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "flammables",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_chemicals_office_outside",
+    "title": "Importers — office outside Malabon, warehouse within Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 II(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_dry_goods_office_outside",
+    "title": "Importers — office outside Malabon, warehouse within Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 II(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_perishables_office_outside",
+    "title": "Importers — office outside Malabon, warehouse within Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 II(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "perishables",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_flammables_warehouse_outside",
+    "title": "Importers — office within Malabon, warehouse outside Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 II(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "flammables",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_chemicals_warehouse_outside",
+    "title": "Importers — office within Malabon, warehouse outside Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 II(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_dry_goods_warehouse_outside",
+    "title": "Importers — office within Malabon, warehouse outside Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 II(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_perishables_warehouse_outside",
+    "title": "Importers — office within Malabon, warehouse outside Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 II(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ],
+      "goods_class": "perishables",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1650.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.importer_multiple_products",
+    "title": "Importers — multiple products/manufactured products",
+    "section": "Sec. 3A.03 II(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "importer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Single 5,500.00 printed in a middle column of the matrix; column intent unclear; treated as flat fee (Appendix A row 24)."
+    ]
+  },
+  {
+    "code": "permit.exporter_flammables_within",
+    "title": "Exporters — office and warehouse within Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 III(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "flammables",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_chemicals_within",
+    "title": "Exporters — office and warehouse within Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 III(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_dry_goods_within",
+    "title": "Exporters — office and warehouse within Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 III(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_perishables_within",
+    "title": "Exporters — office and warehouse within Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 III(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "perishables",
+      "office_location": "within",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_flammables_office_outside",
+    "title": "Exporters — office outside Malabon, warehouse within Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 III(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "flammables",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_chemicals_office_outside",
+    "title": "Exporters — office outside Malabon, warehouse within Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 III(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_dry_goods_office_outside",
+    "title": "Exporters — office outside Malabon, warehouse within Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 III(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_perishables_office_outside",
+    "title": "Exporters — office outside Malabon, warehouse within Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 III(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "perishables",
+      "office_location": "outside",
+      "warehouse_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_flammables_warehouse_outside",
+    "title": "Exporters — office within Malabon, warehouse outside Malabon, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 III(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "flammables",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_chemicals_warehouse_outside",
+    "title": "Exporters — office within Malabon, warehouse outside Malabon, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 III(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "chemicals",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_dry_goods_warehouse_outside",
+    "title": "Exporters — office within Malabon, warehouse outside Malabon, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 III(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "dry_goods",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_perishables_warehouse_outside",
+    "title": "Exporters — office within Malabon, warehouse outside Malabon, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 III(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "perishables",
+      "office_location": "within",
+      "warehouse_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1650.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.exporter_multiple_products_flammables",
+    "title": "Exporters — multiple products/manufactured products, flammable/combustible/explosive substances",
+    "section": "Sec. 3A.03 III(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "flammables"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Row (d) prints 5,500 / 3,300 / 2,200 / 2,200 — last two columns identical, as printed (Appendix A row 25)."
+    ]
+  },
+  {
+    "code": "permit.exporter_multiple_products_chemicals",
+    "title": "Exporters — multiple products/manufactured products, chemicals or non-flammable/non-combustible/non-explosive substances",
+    "section": "Sec. 3A.03 III(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "chemicals"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Row (d) prints 5,500 / 3,300 / 2,200 / 2,200 — last two columns identical, as printed (Appendix A row 25)."
+    ]
+  },
+  {
+    "code": "permit.exporter_multiple_products_dry_goods",
+    "title": "Exporters — multiple products/manufactured products, assorted non-perishable dry goods, merchandise or articles",
+    "section": "Sec. 3A.03 III(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "dry_goods"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Row (d) prints 5,500 / 3,300 / 2,200 / 2,200 — last two columns identical, as printed (Appendix A row 25)."
+    ]
+  },
+  {
+    "code": "permit.exporter_multiple_products_perishables",
+    "title": "Exporters — multiple products/manufactured products, consumable/perishable/refrigerated goods",
+    "section": "Sec. 3A.03 III(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "exporter"
+      ],
+      "goods_class": "perishables"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Row (d) prints 5,500 / 3,300 / 2,200 / 2,200 — last two columns identical, as printed (Appendix A row 25)."
+    ]
+  },
+  {
+    "code": "permit.wholesaler_general_merchandise",
+    "title": "Wholesaler/Dealer/Distributor/Trading — General Merchandise",
+    "section": "Sec. 3A.03 IV",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "wholesaler"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.gas_station_by_pumps",
+    "title": "Gasoline stations — annual fee by number of pumps",
+    "section": "Sec. 3A.03 V(a)-(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "gas_station"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 6,
+          "amount": 2200.0
+        },
+        {
+          "min": 6,
+          "max": 9,
+          "amount": 3300.0
+        },
+        {
+          "min": 9,
+          "max": null,
+          "amount": 5500.0
+        }
+      ],
+      "unit_key": "pumps"
+    },
+    "cap": null,
+    "notes": "Printed brackets: less than six pumps 2,200; six but not more than eight pumps 3,300; more than eight pumps 5,500.",
+    "defects": []
+  },
+  {
+    "code": "permit.gas_station_wash_bay_addon",
+    "title": "Gasoline stations — with service and wash bay (additional)",
+    "section": "Sec. 3A.03 V(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "gas_station"
+      ],
+      "flags": [
+        "has_wash_bay"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "Additional to the pump-count fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.gas_station_convenience_store_addon",
+    "title": "Gasoline stations — with convenient stores (additional)",
+    "section": "Sec. 3A.03 V(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "gas_station"
+      ],
+      "flags": [
+        "has_convenience_store"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "Additional to the pump-count fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.cigar_manufacturer",
+    "title": "Manufacturers/Producers of cigars",
+    "section": "Sec. 3A.03 VI(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cigar_manufacturer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.cigarette_manufacturer",
+    "title": "Manufacturers/Producers of cigarettes",
+    "section": "Sec. 3A.03 VI(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cigarette_manufacturer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.distiller_factory_within",
+    "title": "Distillers/Rectifiers/Repackers of wines, compounders of distilled spirit of wine, or brewers of fermented liquor — factory within Malabon",
+    "section": "Sec. 3A.03 VII(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "distiller"
+      ],
+      "factory_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.distiller_office_outside",
+    "title": "Distillers/Rectifiers/Repackers/Compounders/Brewers — office outside Malabon",
+    "section": "Sec. 3A.03 VII(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "distiller"
+      ],
+      "office_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.distiller_factory_outside_office_within",
+    "title": "Distillers/Rectifiers/Repackers/Compounders/Brewers — factory outside Malabon, office within Malabon",
+    "section": "Sec. 3A.03 VII(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "distiller"
+      ],
+      "factory_location": "outside",
+      "office_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.restaurant_multiple_menu",
+    "title": "Restaurants/caterers offering to the public or multiple meals or menu",
+    "section": "Sec. 3A.03 VIII(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "restaurant_multiple_menu"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.restaurant_franchised_fastfood",
+    "title": "Franchised restaurants and fast-foods serving ready-to-eat meals",
+    "section": "Sec. 3A.03 VIII(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "restaurant_franchised_fastfood"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.restaurant_nonfranchised_fastfood",
+    "title": "Non-franchised restaurants and fast-foods offering regular and special meals including food already cooked and ready to serve",
+    "section": "Sec. 3A.03 VIII(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "restaurant_nonfranchised_fastfood"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.ice_cream_parlor",
+    "title": "Ice cream parlors/soda fountains/bars and others",
+    "section": "Sec. 3A.03 VIII(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "ice_cream_parlor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 880.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.cafe_cafeteria",
+    "title": "Cafes and cafeterias",
+    "section": "Sec. 3A.03 VIII(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cafe_cafeteria"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 880.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.independent_caterer",
+    "title": "Independent caterers",
+    "section": "Sec. 3A.03 VIII(f)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "independent_caterer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.carinderia",
+    "title": "Carinderias/Lugawan",
+    "section": "Sec. 3A.03 VIII(g)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "carinderia"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.contractor_class_aa",
+    "title": "General building contractors (CAB) — Class AA",
+    "section": "Sec. 3A.03 IX(1)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor_class_aa"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.contractor_class_a",
+    "title": "General building contractors (CAB) — Class A",
+    "section": "Sec. 3A.03 IX(1)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor_class_a"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.contractor_class_b",
+    "title": "General building contractors (CAB) — Class B",
+    "section": "Sec. 3A.03 IX(1)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor_class_b"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.contractor_class_c",
+    "title": "General building contractors (CAB) — Class C",
+    "section": "Sec. 3A.03 IX(1)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor_class_c"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.contractor_class_d",
+    "title": "General building contractors (CAB) — Class D",
+    "section": "Sec. 3A.03 IX(1)(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "contractor_class_d"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.independent_contractor_other",
+    "title": "Other independent contractors (enumerated types, single braced fee)",
+    "section": "Sec. 3A.03 IX(2)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "independent_contractor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "Single fee printed opposite the closing item, covering: building maintenance contractor; demolition; filling-salvage contractor; electric light/gas system installer; engineering contractors; general-special contractors; garbage disposal contractors; proprietors/operators of heavy equipment; light by dozens/tractors; landscaping contractors; interior decorating services; installation of water system; sawmills under contract to saw; cutting logs belonging to others; towing services; all other contractors.",
+    "defects": []
+  },
+  {
+    "code": "permit.other_services_group",
+    "title": "Other services (braced group a-q, single fee)",
+    "section": "Sec. 3A.03 IX(3)(a-q)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "service_other"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "Single fee printed opposite item (q), covering: advertising agency; booking offices for film exchange; booking offices for transportation on commission basis; business management services; cinematographic film owners, lessors or distributors; commercial and immigration services; custom brokerage; feasibility studies; consultancy services; insurance agencies, adjusters, brokerage; management consultant not subject to occupation tax; mercantile agencies; managerial services; real estate appraisers; real estate brokerage; shipping agencies; travel agencies.",
+    "defects": []
+  },
+  {
+    "code": "permit.tour_guides",
+    "title": "Tour guides",
+    "section": "Sec. 3A.03 IX(3)(r)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "tour_guide"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.liaison_officer",
+    "title": "Liaison officer",
+    "section": "Sec. 3A.03 IX(3)(s)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "liaison_officer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.tourist_transport",
+    "title": "Tourist transport",
+    "section": "Sec. 3A.03 IX(3)(t)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "tourist_transport"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.sports_recreational_facilities",
+    "title": "Sports and recreational facilities",
+    "section": "Sec. 3A.03 IX(3)(u)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "sports_recreational_facility"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.car_wash_first_outlet",
+    "title": "Service stations for washing/greasing of motor vehicles — first service outlet",
+    "section": "Sec. 3A.03 IX(4)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "car_wash_station"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.car_wash_additional_outlets",
+    "title": "Service stations for washing/greasing of motor vehicles — for every service outlet",
+    "section": "Sec. 3A.03 IX(4)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "car_wash_station"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1100.0,
+      "unit_key": "outlets"
+    },
+    "cap": null,
+    "notes": "Unit count = service outlets beyond the first.",
+    "defects": []
+  },
+  {
+    "code": "permit.smelting_plant_within",
+    "title": "Smelting plants — principal office and plant within Malabon",
+    "section": "Sec. 3A.03 IX(5)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "smelting_plant"
+      ],
+      "office_location": "within",
+      "factory_location": "within"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.smelting_plant_office_outside",
+    "title": "Smelting plants — principal office outside Malabon",
+    "section": "Sec. 3A.03 IX(5)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "smelting_plant"
+      ],
+      "office_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.smelting_plant_office_within",
+    "title": "Smelting plants — principal office within Malabon (plant outside)",
+    "section": "Sec. 3A.03 IX(5)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "smelting_plant"
+      ],
+      "office_location": "within",
+      "factory_location": "outside"
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2750.0
+    },
+    "cap": null,
+    "notes": "Row (c) printed only 'Principal Office within Malabon'; read as plant outside Malabon to distinguish from row (a).",
+    "defects": []
+  },
+  {
+    "code": "permit.video_coverage_services",
+    "title": "Video coverage services",
+    "section": "Sec. 3A.03 IX(6)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "video_coverage_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.stevedoring_office",
+    "title": "Stevedoring services — office only",
+    "section": "Sec. 3A.03 IX(7)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "stevedoring_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.business_agent",
+    "title": "Business agent",
+    "section": "Sec. 3A.03 IX(8)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "business_agent"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.watch_repair_chronometers",
+    "title": "Watch repair center (exclusively manufactures chronometers)",
+    "section": "Sec. 3A.03 IX(9)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "watch_repair_chronometer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.watch_repair_watches",
+    "title": "Watch repair center of manufactures watches",
+    "section": "Sec. 3A.03 IX(10)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "watch_repair_watch"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "Title as printed.",
+    "defects": []
+  },
+  {
+    "code": "permit.watch_repair_ordinary",
+    "title": "Ordinary watch repair center of manufactures watches",
+    "section": "Sec. 3A.03 IX(11)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "watch_repair_ordinary"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "Title as printed.",
+    "defects": []
+  },
+  {
+    "code": "permit.plant_seller",
+    "title": "Plants/cutting and seedling seller",
+    "section": "Sec. 3A.03 IX(12)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "plant_seller"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.plant_rental_daily",
+    "title": "Rental plant services on daily basis",
+    "section": "Sec. 3A.03 IX(12)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "plant_rental"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.plant_rental_small",
+    "title": "Plant maintenance or rent-a-plant services offering to rent if not more than ten (10) plants",
+    "section": "Sec. 3A.03 IX(12)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "plant_rental_small"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.stable_horse_racing",
+    "title": "Stable for horse racing",
+    "section": "Sec. 3A.03 IX(13)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "stable_horse_racing"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Internally odd fee ordering as printed: 550.00 on heading line, first stable 110.00, every stable thereafter 1,100.00 (Appendix A row 26)."
+    ]
+  },
+  {
+    "code": "permit.stable_horse_racing_first_stable",
+    "title": "Stable for horse racing — for the first (1st) stable",
+    "section": "Sec. 3A.03 IX(13)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "stable_horse_racing"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Internally odd fee ordering as printed: 550.00 on heading line, first stable 110.00, every stable thereafter 1,100.00 (Appendix A row 26)."
+    ]
+  },
+  {
+    "code": "permit.stable_horse_racing_additional_stables",
+    "title": "Stable for horse racing — for every stable thereafter",
+    "section": "Sec. 3A.03 IX(13)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "stable_horse_racing"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 1100.0,
+      "unit_key": "stables"
+    },
+    "cap": null,
+    "notes": "Unit count = stables beyond the first.",
+    "defects": [
+      "Internally odd fee ordering as printed: 550.00 on heading line, first stable 110.00, every stable thereafter 1,100.00 (Appendix A row 26)."
+    ]
+  },
+  {
+    "code": "permit.rentals_video_sound",
+    "title": "Rentals of video coverage/VCD's/furniture/sound system",
+    "section": "Sec. 3A.03 IX(14)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "rental_video_sound"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.parking_area",
+    "title": "Parking area — annual fee by area",
+    "section": "Sec. 3A.03 IX(15)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "parking_area"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 300,
+          "amount": 550.0
+        },
+        {
+          "min": 300,
+          "max": 500,
+          "amount": 825.0
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 1100.0
+        },
+        {
+          "min": 1000,
+          "max": 2000,
+          "amount": 2200.0
+        },
+        {
+          "min": 2000,
+          "max": null,
+          "amount": 4400.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "First bracket printed 'Less the [sic] 300 sq. meters'."
+    ]
+  },
+  {
+    "code": "permit.escort_services",
+    "title": "Escort services",
+    "section": "Sec. 3A.03 IX(16)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "escort_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.warehouse_bodega",
+    "title": "Warehouse or bodega — annual fee by area",
+    "section": "Sec. 3A.03 IX(17)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "warehouse_bodega"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 50,
+          "amount": 550.0
+        },
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 1100.0
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 1650.0
+        },
+        {
+          "min": 200,
+          "max": 300,
+          "amount": 2200.0
+        },
+        {
+          "min": 300,
+          "max": 500,
+          "amount": 3300.0
+        },
+        {
+          "min": 500,
+          "max": null,
+          "amount": 5500.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'Boadega', typo for 'Bodega' (Appendix A row 27)."
+    ]
+  },
+  {
+    "code": "permit.fish_broker_market_by_stalls",
+    "title": "Fish broker market — annual fee by number of stalls",
+    "section": "Sec. 3A.03 IX(18)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "fish_broker_market"
+      ]
+    },
+    "basis": "stall_count",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 2,
+          "max": 10,
+          "amount": 4400.0
+        },
+        {
+          "min": 11,
+          "max": 20,
+          "amount": 6600.0
+        },
+        {
+          "min": 20,
+          "max": null,
+          "amount": 8800.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Printed brackets: more than 1 but not more than 9 stalls 4,400; more than 10 but not more than 19 stalls 6,600; 20 or more stalls 8,800. As printed, counts of exactly 1 and exactly 10 stalls are not covered.",
+    "defects": []
+  },
+  {
+    "code": "permit.goldsmith",
+    "title": "Gold smith",
+    "section": "Sec. 3A.03 IX(19)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "goldsmith"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lathe_machines",
+    "title": "Lathe machines",
+    "section": "Sec. 3A.03 IX(20)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lathe_machine_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.funeral_with_memorial_park",
+    "title": "Funeral establishment owning and maintaining memorial parks",
+    "section": "Sec. 3A.03 IX(21)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "funeral_memorial_park"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'memorial parts', likely 'parks' (Appendix A row 27)."
+    ]
+  },
+  {
+    "code": "permit.funeral_independent",
+    "title": "Independent funeral service",
+    "section": "Sec. 3A.03 IX(21)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "funeral_independent"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 5500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.medical_dental_lab",
+    "title": "Medical/dental/assaying laboratories",
+    "section": "Sec. 3A.03 IX(22)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "medical_dental_lab"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.veterinary_clinic",
+    "title": "Veterinary clinics",
+    "section": "Sec. 3A.03 IX(23)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "veterinary_clinic"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.slenderizing_massage_clinic",
+    "title": "Slenderizing and body building salons, massage and therapeutic clinic",
+    "section": "Sec. 3A.03 IX(24)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "slenderizing_massage_clinic"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.recruitment_services",
+    "title": "Recruitment and job placement services",
+    "section": "Sec. 3A.03 IX(25)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "recruitment_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.animal_hospital",
+    "title": "Animal hospitals",
+    "section": "Sec. 3A.03 IX(26)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "animal_hospital"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.motor_repair_and_similar_shops",
+    "title": "Motor repair and painting shops, ordinary laundry shops, sculpture shops, derma press, dyeing establishments, planing and carpentry establishments",
+    "section": "Sec. 3A.03 IX(27)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "motor_repair_similar_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'planning ... establishments', likely 'planing' (Appendix A row 27)."
+    ]
+  },
+  {
+    "code": "permit.photographic_studio_sophisticated",
+    "title": "Photographic studios with sophisticated photographic equipment",
+    "section": "Sec. 3A.03 IX(28)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "photographic_studio_sophisticated"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.photographic_studio_ordinary",
+    "title": "Ordinary photographic studios",
+    "section": "Sec. 3A.03 IX(29)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "photographic_studio_ordinary"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.silkscreen_tshirt",
+    "title": "Silkscreen T-shirts services",
+    "section": "Sec. 3A.03 IX(30)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "silkscreen_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.shoeshine_stand",
+    "title": "Shoeshine stand",
+    "section": "Sec. 3A.03 IX(31)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "shoeshine_stand"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.vaciador",
+    "title": "Vaciador",
+    "section": "Sec. 3A.03 IX(32)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "vaciador"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.bicycle_rental",
+    "title": "Bicycle rental",
+    "section": "Sec. 3A.03 IX(33)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bicycle_rental"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.other_independent_contractor_nonprofessional",
+    "title": "Other independent contractor (juridical/natural) not included among those subject to professional tax",
+    "section": "Sec. 3A.03 IX(34)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "other_independent_contractor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.cargo_inspection_services",
+    "title": "Inspection services for incoming and outgoing cargoes",
+    "section": "Sec. 3A.03 IX(35)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cargo_inspection_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.indentors",
+    "title": "Indentors",
+    "section": "Sec. 3A.03 IX(36)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "indentor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lighterage_services",
+    "title": "Lighterage services",
+    "section": "Sec. 3A.03 IX(37)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lighterage_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lithographers",
+    "title": "Lithographers",
+    "section": "Sec. 3A.03 IX(38)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lithographer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.mine_drillers",
+    "title": "Mine drillers",
+    "section": "Sec. 3A.03 IX(39)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "mine_driller"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.logistic_services",
+    "title": "Logistic services",
+    "section": "Sec. 3A.03 IX(40)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "logistic_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 3300.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.sauna_massage_parlor",
+    "title": "Sauna bath/massage parlors",
+    "section": "Sec. 3A.03 IX(41)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "sauna_massage_parlor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.bar_live_entertainment_vip",
+    "title": "Bars/super club/disco houses/videoke club — with live entertainment, auditorium and VIP rooms",
+    "section": "Sec. 3A.03 IX(42)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bar_live_entertainment_vip"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 16500.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.bar_no_live_vip",
+    "title": "Bars/super club/disco houses/videoke club — without live entertainment or floor shows, with VIP rooms",
+    "section": "Sec. 3A.03 IX(42)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bar_no_live_vip"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.bar_vip_gro",
+    "title": "Bars/super club/disco houses/videoke club — with VIP rooms and with GRO",
+    "section": "Sec. 3A.03 IX(42)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bar_vip_gro"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.bar_gro_no_vip",
+    "title": "Bars/super club/disco houses/videoke club — without VIP rooms but with GRO",
+    "section": "Sec. 3A.03 IX(42)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "bar_gro_no_vip"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.movie_house",
+    "title": "Movie houses/concert halls",
+    "section": "Sec. 3A.03 IX(43)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "movie_house"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.recopying_first_machine",
+    "title": "Recopying and duplicating services — for the first (1st) recopying or duplicating machine",
+    "section": "Sec. 3A.03 IX(44)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "recopying_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.recopying_additional_machines",
+    "title": "Recopying and duplicating services — for every duplication or recopying machine",
+    "section": "Sec. 3A.03 IX(44)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "recopying_service"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 220.0,
+      "unit_key": "machines"
+    },
+    "cap": null,
+    "notes": "Unit count = duplication/recopying machines beyond the first.",
+    "defects": []
+  },
+  {
+    "code": "permit.lamination_mimeo_machine",
+    "title": "Plastic lamination and mimeographing machine",
+    "section": "Sec. 3A.03 IX(44)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lamination_mimeo_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "Printed without per-unit language; treated as fixed line fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.photostatic_blueprint_machine",
+    "title": "Photo static and blue printing machine",
+    "section": "Sec. 3A.03 IX(44)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "blueprint_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "Printed without per-unit language; treated as fixed line fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.xerox_machine",
+    "title": "Xerox machine",
+    "section": "Sec. 3A.03 IX(44)(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "xerox_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "Printed without per-unit language; treated as fixed line fee.",
+    "defects": []
+  },
+  {
+    "code": "permit.typing_services_manual",
+    "title": "Typing services (manual)",
+    "section": "Sec. 3A.03 IX(44)(f)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "typing_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.typesetting_services",
+    "title": "Typesetting services",
+    "section": "Sec. 3A.03 IX(44)(g)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "typesetting_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.pig_fowl_roasting",
+    "title": "Roasting of pigs/fowls",
+    "section": "Sec. 3A.03 IX(45)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "pig_fowl_roasting"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 230.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lechon_house",
+    "title": "Lechon house",
+    "section": "Sec. 3A.03 IX(46)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lechon_house"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.shipyard_office",
+    "title": "Shipyard for repairing ship (office only)",
+    "section": "Sec. 3A.03 IX(47)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "shipyard_office"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.tailor_shop_first_equipment",
+    "title": "Tailor and dress shops — for the first (1st) equipment (printed 'beauty parlor equipment')",
+    "section": "Sec. 3A.03 IX(48)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "tailor_dress_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Sub-items printed 'beauty parlor equipment' under 'Tailor and dress shops' — apparent typesetting error in source (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.tailor_shop_additional_equipment",
+    "title": "Tailor and dress shops — for every additional equipment (printed 'parlor equipment')",
+    "section": "Sec. 3A.03 IX(48)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "tailor_dress_shop"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 220.0,
+      "unit_key": "tailoring_machines"
+    },
+    "cap": null,
+    "notes": "Unit count = equipment beyond the first.",
+    "defects": [
+      "Sub-items printed 'beauty parlor equipment' under 'Tailor and dress shops' — apparent typesetting error in source (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.wood_carving_shop",
+    "title": "Wood carving shops",
+    "section": "Sec. 3A.03 IX(49)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "wood_carving_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.hatters_millinery",
+    "title": "Hatters and millinery shops",
+    "section": "Sec. 3A.03 IX(50)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hatter_millinery_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'millery', likely 'millinery' (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.barber_shop_first_seat",
+    "title": "Barber shops — for the first (1st) tonsorial seat",
+    "section": "Sec. 3A.03 IX(51)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "barber_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.barber_shop_additional_seats",
+    "title": "Barber shops — for every additional tonsorial seat",
+    "section": "Sec. 3A.03 IX(51)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "barber_shop"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 220.0,
+      "unit_key": "seats"
+    },
+    "cap": null,
+    "notes": "Unit count = tonsorial seats beyond the first.",
+    "defects": []
+  },
+  {
+    "code": "permit.upholstery_shop",
+    "title": "Upholstery shops",
+    "section": "Sec. 3A.03 IX(52)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "upholstery_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 330.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.vulcanizing_shop",
+    "title": "Vulcanizing shops",
+    "section": "Sec. 3A.03 IX(53)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "vulcanizing_shop"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.tire_recapping_plant",
+    "title": "Tire recapping plants",
+    "section": "Sec. 3A.03 IX(54)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "tire_recapping_plant"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.real_estate_developer",
+    "title": "Real estate developers",
+    "section": "Sec. 3A.03 IX(55)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "real_estate_developer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.janitorial_manpower_services",
+    "title": "Janitorial/manpower services",
+    "section": "Sec. 3A.03 IX(56)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "janitorial_manpower_service"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.cellphone_dealer",
+    "title": "Infotech providers — dealer in cellphones, prepaid cards or auto loads and cellphone accessories",
+    "section": "Sec. 3A.03 IX(57)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "cellphone_dealer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Heading printed 'Infotech Provides', likely 'Providers' (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.autoload_dealer",
+    "title": "Infotech providers — auto load and cell card dealers",
+    "section": "Sec. 3A.03 IX(57)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "autoload_dealer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.internet_cafe_per_server",
+    "title": "Infotech providers — internet and wi-fi centers, additional P50.00 per server",
+    "section": "Sec. 3A.03 IX(57)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "internet_cafe"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 50.0,
+      "unit_key": "servers"
+    },
+    "cap": null,
+    "notes": "Covers only the printed '+P50.00 per server' component; the base annual fee is not printed in the source, so the officer must add the base amount via fee adjustment.",
+    "defects": [
+      "base fee absent in print — officer adjustment required (Appendix A row 29)"
+    ]
+  },
+  {
+    "code": "permit.video_game_parlor",
+    "title": "Infotech providers — video game parlors (base fee)",
+    "section": "Sec. 3A.03 IX(57)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "video_game_parlor"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "Plus an additional P100.00 for each unit of video game machine (separate per-unit rule).",
+    "defects": [
+      "Printed 'vide game machine' (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.video_game_parlor_per_machine",
+    "title": "Infotech providers — video game parlors, additional P100.00 per video game machine",
+    "section": "Sec. 3A.03 IX(57)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "video_game_parlor"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 100.0,
+      "unit_key": "video_game_machines"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'vide game machine' (Appendix A row 28)."
+    ]
+  },
+  {
+    "code": "permit.karaoke_unit_rental",
+    "title": "Infotech providers — karaoke unit leased by other entities as part of their business other than karaoke bars",
+    "section": "Sec. 3A.03 IX(57)(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "karaoke_unit_lessor"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "per_unit",
+      "unit_amount": 220.0,
+      "unit_key": "karaoke_units"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.hotel_deluxe",
+    "title": "Hotels duly licensed and accredited — De Luxe Hotel",
+    "section": "Sec. 3A.03 IX(58)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_deluxe"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 11000.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.hotel_first_class",
+    "title": "Hotels duly licensed and accredited — First Class Hotel",
+    "section": "Sec. 3A.03 IX(58)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_first_class"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 8800.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.hotel_standard",
+    "title": "Hotels duly licensed and accredited — Standard Hotel",
+    "section": "Sec. 3A.03 IX(58)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_standard"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.hotel_economy",
+    "title": "Hotels duly licensed and accredited — Economy/Budget Hotel",
+    "section": "Sec. 3A.03 IX(58)(d)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "hotel_economy"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'Economy/Budget Hotel110' — stray '110' mark; fee read as 2,200.00 (Appendix A row 30)."
+    ]
+  },
+  {
+    "code": "permit.apartelle",
+    "title": "Hotels duly licensed and accredited — Apartelle",
+    "section": "Sec. 3A.03 IX(58)(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "apartelle"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 2200.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": [
+      "Printed 'Apartellesle', typo for 'Apartelle' (Appendix A row 30)."
+    ]
+  },
+  {
+    "code": "permit.pension_house",
+    "title": "Hotels duly licensed and accredited — Pension House",
+    "section": "Sec. 3A.03 IX(58)(f)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "pension_house"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.subdivision_developer",
+    "title": "Real estate dealers — subdivision developer and dealer/seller",
+    "section": "Sec. 3A.03 IX(59)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "subdivision_developer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.real_estate_dealer_other",
+    "title": "Real estate dealers — other real estate dealers",
+    "section": "Sec. 3A.03 IX(59)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "real_estate_dealer"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.financial_institution",
+    "title": "Financial institution/lending (banks, pawnshops, insurance companies, savings and loan associations, lending, money shops, foreign exchange, Bayad Center)",
+    "section": "Sec. 3A.03 IX(60)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "financial_institution"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "Single braced fee covering all enumerated financial institution types.",
+    "defects": [
+      "Printed 'bayad Center' (lowercase) [sic]."
+    ]
+  },
+  {
+    "code": "permit.learning_institute",
+    "title": "Learning institute",
+    "section": "Sec. 3A.03 IX(61)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "learning_institute"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 6600.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lessor_commercial_building_by_storeys",
+    "title": "Real estate lessors — commercial building, by number of storeys",
+    "section": "Sec. 3A.03 IX(62)(a)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor_commercial_building"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 3300.0
+        },
+        {
+          "min": 3,
+          "max": 10,
+          "amount": 5500.0
+        },
+        {
+          "min": 10,
+          "max": null,
+          "amount": 7700.0
+        }
+      ],
+      "unit_key": "storeys"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lessor_residential_building_by_storeys",
+    "title": "Real estate lessors — residential building, by number of storeys",
+    "section": "Sec. 3A.03 IX(62)(b)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor_residential_building"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 1650.0
+        },
+        {
+          "min": 3,
+          "max": 10,
+          "amount": 2750.0
+        },
+        {
+          "min": 10,
+          "max": null,
+          "amount": 3850.0
+        }
+      ],
+      "unit_key": "storeys"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lessor_commercial_apartment_by_doors",
+    "title": "Real estate lessors — commercial apartment, by number of doors",
+    "section": "Sec. 3A.03 IX(62)(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor_commercial_apartment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 1100.0
+        },
+        {
+          "min": 3,
+          "max": 10,
+          "amount": 2200.0
+        },
+        {
+          "min": 10,
+          "max": null,
+          "amount": 3300.0
+        }
+      ],
+      "unit_key": "doors"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lessor_residential_apartment_by_doors",
+    "title": "Real estate lessors — residential apartment/home, by number of doors",
+    "section": "Sec. 3A.03 IX(62)(d)(1-3)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lessor_residential_apartment"
+      ]
+    },
+    "basis": "units",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 3,
+          "amount": 550.0
+        },
+        {
+          "min": 3,
+          "max": 10,
+          "amount": 1100.0
+        },
+        {
+          "min": 10,
+          "max": null,
+          "amount": 2200.0
+        }
+      ],
+      "unit_key": "doors"
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.house_rental_garage_pool",
+    "title": "Real estate lessors — house for rent with garage and swimming pool",
+    "section": "Sec. 3A.03 IX(62)(d)(4)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "house_rental_garage_pool"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 4400.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.house_rental_common_facilities",
+    "title": "Real estate lessors — house for rent with common kitchen and comfort facilities",
+    "section": "Sec. 3A.03 IX(62)(d)(5)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "house_rental_common_facilities"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.boarding_house",
+    "title": "Real estate lessors — boarding house",
+    "section": "Sec. 3A.03 IX(62)(d)(6)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "boarding_house"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 550.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lodging_inn",
+    "title": "Real estate lessors — lodging inns",
+    "section": "Sec. 3A.03 IX(62)(d)(7)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lodging_inn"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.boarding_lodging_house",
+    "title": "Real estate lessors — boarding and lodging houses",
+    "section": "Sec. 3A.03 IX(62)(d)(8)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "boarding_lodging_house"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 1100.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "permit.lot_lessor_by_area",
+    "title": "Real estate lessors — lot lessor, by area",
+    "section": "Sec. 3A.03 IX(62)(e)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "lot_lessor"
+      ]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 50,
+          "max": 100,
+          "amount": 1000.0
+        },
+        {
+          "min": 100,
+          "max": 300,
+          "amount": 2000.0
+        },
+        {
+          "min": 300,
+          "max": 500,
+          "amount": 3000.0
+        },
+        {
+          "min": 500,
+          "max": 1000,
+          "amount": 5000.0
+        },
+        {
+          "min": 1000,
+          "max": 5000,
+          "amount": 7000.0
+        },
+        {
+          "min": 5000,
+          "max": 10000,
+          "amount": 10000.0
+        },
+        {
+          "min": 10000,
+          "max": null,
+          "amount": 15000.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Lot area below 50 sq. m. is not covered by the printed schedule. Printed rows 5-6 read 'more than 1000 sq. m. less than 5000' and 'more than 5000 sq. m. less than 10,000'; rendered with the standard min-inclusive/max-exclusive convention.",
+    "defects": []
+  },
+  {
+    "code": "permit.market_by_stalls",
+    "title": "Privately-owned public market, shopping center and food center — by number of stalls",
+    "section": "Sec. 3A.03 IX(63)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "business_category": [
+        "private_market"
+      ]
+    },
+    "basis": "stall_count",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 11,
+          "amount": 2200.0
+        },
+        {
+          "min": 11,
+          "max": 16,
+          "amount": 3300.0
+        },
+        {
+          "min": 16,
+          "max": 21,
+          "amount": 4400.0
+        },
+        {
+          "min": 21,
+          "max": 30,
+          "amount": 7700.0
+        },
+        {
+          "min": 30,
+          "max": null,
+          "amount": 11000.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Every privately-owned market, shopping center or food center situated in this City shall be subject to separate permit regardless of whether it is owned and operated by the same person, partnership or corporation. Printed bracket boundaries overlap (10, 15, 20, 30 each appear in two rows); rendered with the min-inclusive/max-exclusive convention.",
+    "defects": [
+      "Row (d) printed 'Twenty (20) stalls but not more than thirty (3) stalls' — '(3)' likely '(30)' (Appendix A row 31)."
+    ]
+  },
+  {
+    "code": "permit.catchall_office_area",
+    "title": "All other businesses not specifically mentioned, maintaining an office only — by area",
+    "section": "Sec. 3A.03 IX(64)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 100,
+          "amount": 450.0
+        },
+        {
+          "min": 100,
+          "max": 200,
+          "amount": 675.0
+        },
+        {
+          "min": 200,
+          "max": 300,
+          "amount": 900.0
+        },
+        {
+          "min": 300,
+          "max": 400,
+          "amount": 1125.0
+        },
+        {
+          "min": 400,
+          "max": 500,
+          "amount": 1350.0
+        },
+        {
+          "min": 500,
+          "max": 600,
+          "amount": 1575.0
+        },
+        {
+          "min": 600,
+          "max": 700,
+          "amount": 1800.0
+        },
+        {
+          "min": 700,
+          "max": 800,
+          "amount": 2025.0
+        },
+        {
+          "min": 800,
+          "max": 900,
+          "amount": 2250.0
+        },
+        {
+          "min": 900,
+          "max": 1000,
+          "amount": 2475.0
+        },
+        {
+          "min": 1000,
+          "max": 5000,
+          "amount": 2700.0
+        },
+        {
+          "min": 5000,
+          "max": 9000,
+          "amount": 3000.0
+        },
+        {
+          "min": 9000,
+          "max": 109000,
+          "amount": 4500.0
+        },
+        {
+          "min": 10000,
+          "max": null,
+          "amount": 6000.0
+        }
+      ]
+    },
+    "cap": null,
+    "notes": "Catch-all for businesses not specifically mentioned in the schedule, maintaining an office only. Rows kept exactly as printed, including the overlapping 9,000-109,000 and 10,000-or-more rows.",
+    "defects": [
+      "printed 109,000; almost certainly 10,000 (Appendix A row 32)"
+    ]
+  },
+  {
+    "code": "permit.branch_fee_within",
+    "title": "Permit fee per branch/sales outlet — principal office within same locality, by capitalization",
+    "section": "Sec. 3A.03 (branch/sales office fees)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "office_location": "within"
+    },
+    "basis": "capitalization",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000000,
+          "amount": 100.0
+        },
+        {
+          "min": 1000000,
+          "max": 10000000,
+          "amount": 200.0
+        },
+        {
+          "min": 10000000,
+          "max": null,
+          "amount": 500.0
+        }
+      ],
+      "unit_key": "branches"
+    },
+    "cap": null,
+    "notes": "Applies to a business whose principal office maintains or operates a branch or sales office. Bracket amount is per branch/sales outlet: multiply by the number of branches (unit_key 'branches').",
+    "defects": [
+      "Both column headers print 'PRINCIPAL OFFICE WITHIN SAME LOCALITY'; the second is almost certainly 'OUTSIDE'. In the scan '100.00/branch' is printed in the middle cell of the second row; row alignment reconstructed per evident intent (Appendix A row 33)."
+    ]
+  },
+  {
+    "code": "permit.branch_fee_outside",
+    "title": "Permit fee per branch/sales outlet — principal office outside locality, by capitalization",
+    "section": "Sec. 3A.03 (branch/sales office fees)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "office_location": "outside"
+    },
+    "basis": "capitalization",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        {
+          "min": 0,
+          "max": 1000000,
+          "amount": 220.0
+        },
+        {
+          "min": 1000000,
+          "max": 10000000,
+          "amount": 550.0
+        },
+        {
+          "min": 10000000,
+          "max": null,
+          "amount": 1320.0
+        }
+      ],
+      "unit_key": "branches"
+    },
+    "cap": null,
+    "notes": "Applies to a business whose principal office maintains or operates a branch or sales office. Bracket amount is per branch/sales outlet: multiply by the number of branches (unit_key 'branches').",
+    "defects": [
+      "Both column headers print 'PRINCIPAL OFFICE WITHIN SAME LOCALITY'; the second is almost certainly 'OUTSIDE'. In the scan '100.00/branch' is printed in the middle cell of the second row; row alignment reconstructed per evident intent (Appendix A row 33)."
+    ]
+  },
+  {
+    "code": "permit.duplicate_permit",
+    "title": "Issuance of duplicate permit (original lost, stolen or destroyed)",
+    "section": "Sec. 3A.05(c)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "mayors_permit",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 150.0
+    },
+    "cap": null,
+    "notes": "Issued upon satisfactory proof that the original permit was lost, stolen or destroyed. [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [
+      "Printed 'One Hundred Pesos (P 150.00)' — words vs. figures conflict; figure 150.00 used (Appendix A row 36)."
+    ],
+    "seed": false
+  },
+  {
+    "code": "admin.mayors_certificate",
+    "title": "Mayor's Certificate",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.business_plate",
+    "title": "Business plates",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "admin.sticker_fee",
+    "title": "Sticker fee",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55.0
+    },
+    "cap": null,
+    "notes": "",
+    "defects": []
+  },
+  {
+    "code": "admin.business_plate_replacement",
+    "title": "Replacement of business plates",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 220.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.business_sticker_replacement",
+    "title": "Replacement of business sticker",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.certified_copy_permit",
+    "title": "Certified copy of Mayor's Permit",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.change_of_business_details",
+    "title": "Change of business name, business address, ownership, and status of business",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.certification_fee",
+    "title": "Certification fee",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 110.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.verification_fee",
+    "title": "Verification fee",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 55.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  },
+  {
+    "code": "admin.non_posting_of_permit",
+    "title": "Non-posting of permit",
+    "section": "Sec. 4A.01(E)",
+    "source": "A10-2016",
+    "office": "BPLO",
+    "group": "admin",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 100.0
+    },
+    "cap": null,
+    "notes": " [ON-DEMAND/VIOLATION FEE: not part of the routine assessment; charged when the service is requested or the violation is found. Documented, not seeded.]",
+    "defects": [],
+    "seed": false
+  }
+]

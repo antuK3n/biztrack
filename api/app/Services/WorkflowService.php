@@ -48,22 +48,34 @@ class WorkflowService
         $this->notify->applicationStatus($app, $to, $note);
     }
 
-    /** Fee = per requested permit type: base_fee + per_line_surcharge * #lines. */
+    /**
+     * Tax Order of Payment from the seeded revenue-code rules (A10-2016;
+     * see FeeCalculator). Applications without a fee profile — or profiles
+     * matching no rules — fall back to the legacy per-permit-type flat fee
+     * so pre-existing data keeps working.
+     */
     public function assessFees(Application $app): FeeAssessment
     {
         $app->loadMissing('permitTypes', 'business.lines');
-        $lineCount = max(1, $app->business->lines->count());
-        $items = [];
-        $total = 0;
-        foreach ($app->permitTypes as $pt) {
-            $amount = (float) $pt->base_fee + ((float) $pt->per_line_surcharge * $lineCount);
-            $items[] = ['label' => $pt->name.' fee', 'amount' => round($amount, 2)];
-            $total += $amount;
+
+        $assessed = app(FeeCalculator::class)->assess($app);
+        $items = $assessed['items'];
+        $total = $assessed['total'];
+
+        if ($items === []) {
+            $lineCount = max(1, $app->business->lines->count());
+            $total = 0;
+            foreach ($app->permitTypes as $pt) {
+                $amount = (float) $pt->base_fee + ((float) $pt->per_line_surcharge * $lineCount);
+                $items[] = ['label' => $pt->name.' fee (flat schedule)', 'amount' => round($amount, 2)];
+                $total += $amount;
+            }
+            $total = round($total, 2);
         }
 
         return FeeAssessment::updateOrCreate(
             ['application_id' => $app->id],
-            ['line_items' => $items, 'total_amount' => round($total, 2)]
+            ['line_items' => $items, 'total_amount' => $total]
         );
     }
 

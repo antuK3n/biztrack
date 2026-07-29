@@ -1,0 +1,227 @@
+[
+  {
+    "code": "fire.fsic",
+    "title": "Fire Safety Inspection Certificate fee (Fire Code fee)",
+    "section": "RA 9514 Sec. 12(b)",
+    "source": "RA 9514",
+    "office": "BFP",
+    "group": "fire_code",
+    "permit_types": [
+      "FSIC"
+    ],
+    "conditions": {},
+    "basis": "regulatory_subtotal",
+    "computation": {
+      "type": "percentage",
+      "rate": 0.1
+    },
+    "cap": null,
+    "notes": "National Fire Code fee, not a city imposition: 10% of all fees charged by the LGU in granting the business permit. Engine computes this LAST over the sum of mayors_permit + regulatory group lines on the same assessment. The city ordinance contains no BFP fee schedule.",
+    "defects": []
+  },
+  {
+    "code": "ctc.corporation",
+    "title": "Community tax — corporations (gross-receipts component + basic)",
+    "section": "Sec. 7.03",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "ctc",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "is_new_business": false,
+      "business_structure": [
+        "corporation",
+        "partnership"
+      ]
+    },
+    "basis": "gross_sales",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [],
+      "excess": {
+        "threshold": 0,
+        "base": 500.0,
+        "rate": 0.0004
+      }
+    },
+    "cap": {
+      "max_amount": 10000
+    },
+    "notes": "P500 basic + P2 per P5,000 of gross receipts (rate 0.0004), capped at P10,000 including the real-property component. The real-property component (P2 per P5,000 of assessed value) is NOT computed here — the application does not capture assessed property value; officers add it via fee adjustment when applicable. Dividends count as gross receipts per Sec. 7.03. Bills only juridical entities (corporation/partnership); sole proprietors owe the individual community tax (Sec. 7.02), a personal obligation outside this assessment.",
+    "defects": []
+  },
+  {
+    "code": "ctc.corporation_new",
+    "title": "Community tax — newly-registered corporations (basic only)",
+    "section": "Sec. 7.03",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "ctc",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "is_new_business": true,
+      "business_structure": [
+        "corporation",
+        "partnership"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 500.0
+    },
+    "cap": null,
+    "notes": "New business has no preceding-year gross receipts; only the P500 basic community tax applies in year one. Real-property component via officer adjustment when applicable. Bills only juridical entities (corporation/partnership); sole proprietors owe the individual community tax (Sec. 7.02), a personal obligation outside this assessment.",
+    "defects": []
+  },
+  {
+    "code": "penalty.late_payment",
+    "title": "Surcharge and interest on late payment",
+    "section": "Secs. 8A.04, 8A.05",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "penalty",
+    "permit_types": [],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "Constants consumed by FeeCalculator::latePenalty(), not emitted as an assessment line at filing time: one-time surcharge 25% of the amount due (Sec. 8A.04); interest up to 2% per month on the unpaid amount including surcharge, total interest capped at 36 months / 72% (Sec. 8A.05).",
+    "defects": [],
+    "constants": {
+      "surcharge_rate": 0.25,
+      "interest_rate_monthly": 0.02,
+      "interest_max_months": 36
+    }
+  },
+  {
+    "code": "pil.presumptive_income",
+    "title": "Presumptive Income Level assessment (officer-set)",
+    "section": "Sec. 2O.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "business_tax",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "no_gross_sales_declared"
+      ],
+      "is_new_business": false
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "requires_officer: the ordinance delegates the PIL minimum-gross-sales schedule to the City Treasury (approved by the Local Finance Committee); the schedule is not printed in the ordinance, so no amount can be computed here. A renewal declaring no gross sales gets this P0 line and the officer sets the assessed amount via fee adjustment. Declaring gross sales below PIL is also a permit-denial ground (Sec. 3A.05).",
+    "defects": [
+      "Sec. 2O.01 'SCHEDULE OF MINIMUM GROSS SALES' heading has no table printed; delegated to City Treasury (Appendix A)."
+    ],
+    "requires_officer": true
+  },
+  {
+    "code": "market.stall_rental",
+    "title": "Public market stall rental (officer-set, pending Market Code)",
+    "section": "none in A10-2016",
+    "source": "A10-2016",
+    "office": "CMO-MARKET",
+    "group": "city_charge",
+    "permit_types": [
+      "MARKET"
+    ],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "requires_officer: Ordinance A10-2016 contains no public-market stall fee schedule (Chapter V covers only city-owned commercial space leases at P200/sqm/month). Stall rates presumably live in a separate Market Code ordinance not on file. Officers set this line via fee adjustment. The computable MARKET lines are the mayor's-permit markets-by-stall-count bracket and garbage Schedule J.",
+    "defects": [],
+    "requires_officer": true
+  },
+  {
+    "code": "exempt.bmbe_claim",
+    "title": "BMBE exemption claim (officer-reviewed)",
+    "section": "RA 9178 Sec. 7-8",
+    "source": "RA 9178",
+    "office": "BPLO",
+    "group": "exemption_claim",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "is_bmbe"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "requires_officer: RA 9178 exempts registered BMBEs from income tax and ENCOURAGES (does not mandate) LGU reduction/exemption of local taxes and fees. A10-2016 grants no automatic BMBE exemption, so business tax is still computed; this P0 line records the claim (BMBE Certificate of Authority required) and the officer applies any reduction via fee adjustment.",
+    "defects": [],
+    "requires_officer": true
+  },
+  {
+    "code": "exempt.cooperative_claim",
+    "title": "Cooperative exemption claim (officer-reviewed)",
+    "section": "RA 9520 Art. 60-61",
+    "source": "RA 9520",
+    "office": "BPLO",
+    "group": "exemption_claim",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "is_cooperative"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "requires_officer: duly registered cooperatives transacting with members only are exempt from local taxes under RA 9520 Art. 61; those transacting with non-members are taxed per their CDA registration and exemption certificate. Business tax is still computed; this P0 line records the claim (CDA certificate required) and the officer zeroes or reduces lines via fee adjustment.",
+    "defects": [],
+    "requires_officer": true
+  },
+  {
+    "code": "exempt.petroleum",
+    "title": "Petroleum business exemption (automatic)",
+    "section": "Sec. 2L.01",
+    "source": "A10-2016",
+    "office": "CTO",
+    "group": "exemption_claim",
+    "permit_types": [
+      "BUSINESS"
+    ],
+    "conditions": {
+      "flags": [
+        "is_petroleum"
+      ]
+    },
+    "basis": "fixed",
+    "computation": {
+      "type": "fixed",
+      "amount": 0
+    },
+    "cap": null,
+    "notes": "Automatic by the ordinance itself: businesses engaged in production, manufacture, refining, distribution or sale of petroleum products are exempt from the Article J graduated tax (engine suppresses biztax.* lines when this flag is set and emits this P0 citation line). Regulatory and permit fees still apply.",
+    "defects": []
+  }
+]

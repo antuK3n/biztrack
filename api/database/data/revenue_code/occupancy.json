@@ -1,0 +1,436 @@
+[
+  {
+    "code": "occupancy._scope_note",
+    "title": "Scope note - Ch. III Art. V items 1-9 and 11.d-11.g not seeded",
+    "section": "Sec. 3V.01 items 1-9",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": [],
+    "seed": false,
+    "conditions": {},
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 0 },
+    "cap": null,
+    "notes": "Not a fee rule. Items 1-9 of the Ch. III Art. V schedule (building, electrical, mechanical, plumbing, electronics permit and related construction fees) are documented in docs/revenue-code-extract.md but intentionally not seeded: BizTrack issues certificates of occupancy, not construction permits. Item 11 sub-schedules 11.d-11.g (annual plumbing/electrical/mechanical/electronics inspections) cross-reference those trade permit schedules and are likewise not seeded; only the occupancy-linked tables 11.a-11.c are. The item 4.b transformer/UPS/generator fee table is missing from the scan entirely (Appendix A item 1) - out of this file's scope.",
+    "defects": []
+  },
+  {
+    "code": "occupancy.cert_a_residential",
+    "title": "Certificate of Use or Occupancy - Divisions A-1 and A-2 (residential), by cost of construction",
+    "section": "Sec. 3V.01 item 10.a",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["a1", "a2"]
+    },
+    "basis": "construction_cost",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        { "min": 0, "max": 150000, "amount": 100.00 },
+        { "min": 150000, "max": 400000, "amount": 200.00 },
+        { "min": 400000, "max": 850000, "amount": 400.00 },
+        { "min": 850000, "max": 1200000, "amount": 800.00 }
+      ],
+      "excess": { "threshold": 1200000, "base": 800.00, "rate": 0.0008 }
+    },
+    "cap": null,
+    "notes": "Excess line prints as 'every million or portion thereof in excess of P1,200,000.00 - 800.00'; linear rate 0.0008/peso encodes 800 per million - ordinance rounds the excess up to whole millions (portion thereof counts as a full million).",
+    "defects": [
+      "10.a.iii upper bound cut at line-wrap in print; reconstructed as P850,000.00 from the parallel 10.b/10.c schedules (Appendix A item 7).",
+      "Fixed costing references Table II.G.1, whose print is defective: first group-column header ends 'A, B, C, D, E, G, H,' with the final letter (presumably I) cut off (Appendix A item 2), and the Division A-2 'above 100 to 150 sq. m' bracket is absent from print - rows jump 50-100 to above 150 (Appendix A item 3)."
+    ]
+  },
+  {
+    "code": "occupancy.cert_b_e_f_g_h_i",
+    "title": "Certificate of Use or Occupancy - Divisions B-1/E-1,2,3/F-1/G-1,2,3,4,5/H-1,2,3,4/I-1, by cost of construction",
+    "section": "Sec. 3V.01 item 10.b",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["b", "e", "f", "g", "h", "i"]
+    },
+    "basis": "construction_cost",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        { "min": 0, "max": 150000, "amount": 200.00 },
+        { "min": 150000, "max": 400000, "amount": 400.00 },
+        { "min": 400000, "max": 850000, "amount": 800.00 },
+        { "min": 850000, "max": 1200000, "amount": 1000.00 }
+      ],
+      "excess": { "threshold": 1200000, "base": 1000.00, "rate": 0.001 }
+    },
+    "cap": null,
+    "notes": "Excess line prints as 'every million or portion thereof in excess of P1,200,000.00 - 1,000.00'; linear rate 0.001/peso encodes 1,000 per million - ordinance rounds the excess up to whole millions.",
+    "defects": [
+      "10.b.i bracket value cut at line-wrap ('costing up to' with no amount); reconstructed as P150,000.00 from the parallel 10.a/10.c schedules (Appendix A item 7).",
+      "10.b.iii upper bound cut at line-wrap; reconstructed as P850,000.00 from the parallel schedules (Appendix A item 7)."
+    ]
+  },
+  {
+    "code": "occupancy.cert_c_d",
+    "title": "Certificate of Use or Occupancy - Divisions C-1,2/D-1,2,3, by cost of construction",
+    "section": "Sec. 3V.01 item 10.c",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["c", "d"]
+    },
+    "basis": "construction_cost",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        { "min": 0, "max": 150000, "amount": 150.00 },
+        { "min": 150000, "max": 400000, "amount": 250.00 },
+        { "min": 400000, "max": 850000, "amount": 600.00 },
+        { "min": 850000, "max": 1200000, "amount": 900.00 }
+      ],
+      "excess": { "threshold": 1200000, "base": 900.00, "rate": 0.0009 }
+    },
+    "cap": null,
+    "notes": "Excess line prints as 'every million or portion thereof in excess of P1,200,000.00 - 900.00'; linear rate 0.0009/peso encodes 900 per million - ordinance rounds the excess up to whole millions.",
+    "defects": [
+      "10.c.iii upper bound cut at line-wrap; reconstructed as P850,000.00 from the parallel schedules (Appendix A item 7).",
+      "10.c.v threshold prints 'P1,[200,000.00]' - trailing figures cut at margin; completed from the parallel schedules (Appendix A item 7)."
+    ]
+  },
+  {
+    "code": "occupancy.cert_j1_floor_area",
+    "title": "Certificate of Use or Occupancy - Division J-1 buildings/structures, by floor area",
+    "section": "Sec. 3V.01 item 10.d",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["j1"]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        { "min": 0, "max": 20, "amount": 50.00 },
+        { "min": 20, "max": 500, "amount": 240.00 },
+        { "min": 500, "max": 1000, "amount": 360.00 },
+        { "min": 1000, "max": 5000, "amount": 480.00 },
+        { "min": 5000, "max": 10000, "amount": 200.00 },
+        { "min": 10000, "max": null, "amount": 2400.00 }
+      ]
+    },
+    "cap": null,
+    "notes": "Division heading prints 'J-I', read as J-1.",
+    "defects": [
+      "10.d.v (above 5,000 up to 10,000 sq. m) prints 200.00 where the DPWH DO 155 reference figure is 600.00 - possible misprint; encoded as printed (Appendix A item 4).",
+      "Rows ii and v have their leading 'With floor area above ...' phrases displaced by line-wrap in print; bracket boundaries reconstructed from the visible 'up to' lines, verified against the zoomed image (extract 10.d note).",
+      "Several fee figures print with the final digit cut by the margin (240.0/360.0/480.0); shown in the extract with [0] completion (Appendix A item 15)."
+    ]
+  },
+  {
+    "code": "occupancy.cert_j2_accessory",
+    "title": "Certificate of Use or Occupancy - Division J-2 accessory structures (garages, carports, balconies, terraces, lanais and the like)",
+    "section": "Sec. 3V.01 item 10.e.i",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["j2"],
+      "flags": ["j2_accessory"]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        { "min": 0, "max": 20, "amount": 25.00 },
+        { "min": 20, "max": 500, "amount": 120.00 },
+        { "min": 500, "max": 1000, "amount": 180.00 },
+        { "min": 1000, "max": 5000, "amount": 240.00 },
+        { "min": 5000, "max": 10000, "amount": 100.00 },
+        { "min": 10000, "max": null, "amount": 1200.00 }
+      ]
+    },
+    "cap": null,
+    "notes": "Ordinance text: '50% of the rate of the principal building of which they are accessories'. The principal building's own rate depends on its division and cost/area, which is not a fact of the J-2 application, so this rule encodes 50% of the J-1 (10.d) floor-area schedule as the computable proxy; an officer may adjust via adjustFee when the principal building's actual rate differs.",
+    "defects": [
+      "Derived: 50% of J-1 per 10.e as printed - the ordinance prints only the 50% rule, not amounts; bracket values are halved from 10.d.",
+      "Row 5,000-10,000 sq. m derives 100.00 from the printed (possibly misprinted) 200.00 in 10.d.v; DO 155 reference would give 300.00 (Appendix A item 4)."
+    ]
+  },
+  {
+    "code": "occupancy.cert_j2_aviary_zoo",
+    "title": "Certificate of Use or Occupancy - Division J-2 aviaries, aquariums, zoo structures and the like",
+    "section": "Sec. 3V.01 item 10.e.ii",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["j2"],
+      "flags": ["j2_aviary_zoo"]
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets",
+      "brackets": [
+        { "min": 0, "max": 20, "amount": 50.00 },
+        { "min": 20, "max": 500, "amount": 240.00 },
+        { "min": 500, "max": 1000, "amount": 360.00 },
+        { "min": 1000, "max": 5000, "amount": 480.00 },
+        { "min": 5000, "max": 10000, "amount": 200.00 },
+        { "min": 10000, "max": null, "amount": 2400.00 }
+      ]
+    },
+    "cap": null,
+    "notes": "Ordinance: 'same rates as for Section 10.d above'; brackets duplicated from occupancy.cert_j1_floor_area.",
+    "defects": [
+      "Inherits 10.d defects: 10.d.v prints 200.00 vs DO 155 reference 600.00 (Appendix A item 4); trailing-zero margin truncations per Appendix A item 15."
+    ]
+  },
+  {
+    "code": "occupancy.cert_j2_tower_base",
+    "title": "Certificate of Use or Occupancy - Division J-2 towers (radio/TV transmission, cell site, sign, water tank supports), first 10.00 meters of height",
+    "section": "Sec. 3V.01 item 10.e.iii(a)",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["j2"],
+      "flags": ["j2_tower"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 800.00 },
+    "cap": null,
+    "notes": "Covers the first 10.00 meters of height from the ground, any location; pairs with occupancy.cert_j2_tower_excess for height above 10 m.",
+    "defects": []
+  },
+  {
+    "code": "occupancy.cert_j2_tower_excess",
+    "title": "Certificate of Use or Occupancy - Division J-2 towers, every meter or fraction thereof in excess of 10.00 meters",
+    "section": "Sec. 3V.01 item 10.e.iii(b)",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["j2"],
+      "flags": ["j2_tower"]
+    },
+    "basis": "units",
+    "computation": { "type": "per_unit", "unit_amount": 50.00, "unit_key": "tower_height_excess_m" },
+    "cap": null,
+    "notes": "tower_height_excess_m = whole meters of height above 10.00 m, fractions rounded up ('every meter or fraction thereof'). Zero when the tower is 10 m or less.",
+    "defects": []
+  },
+  {
+    "code": "occupancy.change_of_use",
+    "title": "Change in Use/Occupancy, per sq. meter or fraction thereof of area affected",
+    "section": "Sec. 3V.01 item 10.f",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "flags": ["change_of_use"]
+    },
+    "basis": "floor_area_sqm",
+    "computation": { "type": "per_unit", "unit_amount": 5.00, "unit_key": "floor_area_sqm" },
+    "cap": null,
+    "notes": "floor_area_sqm here is the area affected by the change of use; fractions of a sq. meter round up ('or fraction thereof').",
+    "defects": []
+  },
+  {
+    "code": "occupancy.annual_inspection_a_residential",
+    "title": "Annual inspection - Divisions A-1 and A-2, owner-requested services",
+    "section": "Sec. 3V.01 item 11.a",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["a1", "a2"],
+      "is_new_business": false,
+      "flags": ["owner_requested_inspection"]
+    },
+    "basis": "units",
+    "computation": { "type": "per_unit", "unit_amount": 120.00, "unit_key": "requested_inspection_services" },
+    "cap": null,
+    "notes": "Single detached dwelling units and duplexes are NOT subject to annual inspections; billed only if the owner requests, at P120.00 for each requested service among: land use conformity, architectural presentability, structural stability, sanitary and health requirements, fire-resistive requirements. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": []
+  },
+  {
+    "code": "occupancy.annual_inspection_area",
+    "title": "Annual inspection - Divisions B-1/D-1,2,3/E-1,2,3/F-1/G-1,2,3,4,5/H-1,2,3,4/I-1 commercial, industrial, institutional buildings, by floor area",
+    "section": "Sec. 3V.01 item 11.b",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["b", "d", "e", "f", "g", "h", "i"],
+      "is_new_business": false
+    },
+    "basis": "floor_area_sqm",
+    "computation": {
+      "type": "brackets_excess",
+      "brackets": [
+        { "min": 0, "max": 100, "amount": 120.00 },
+        { "min": 100, "max": 200, "amount": 240.00 },
+        { "min": 200, "max": 350, "amount": 80.00 },
+        { "min": 350, "max": 500, "amount": 720.00 },
+        { "min": 500, "max": 750, "amount": 960.00 },
+        { "min": 750, "max": 1000, "amount": 1200.00 }
+      ],
+      "excess": { "threshold": 1000, "base": 1200.00, "rate": 1.2 }
+    },
+    "cap": null,
+    "notes": "Bills on renewal (annual), encoded as is_new_business false. Excess line prints as 'every 1,000.00 sq. meters or its portion in excess of 1,000.00 sq. meters - 1,200.00'; linear rate 1.2/sq. m encodes 1,200 per 1,000 sq. m - ordinance rounds the excess up to whole 1,000-sq.-m blocks. Appendages up to 3.00 cu. m are billed by occupancy.annual_inspection_appendage instead.",
+    "defects": [
+      "11.b.iv (above 200 up to 350 sq. m) prints 80.00, breaking the ascending progression (240 -> 80 -> 720); DPWH DO 155 reference figure is 480.00 - possible dropped leading digit; encoded as printed (Appendix A item 66 / consolidated item 5).",
+      "11.b.v prints 'Above three hundred 350.00 sq. meters' - redundant spelled-out words as printed; boundary taken as 350.00 sq. m."
+    ]
+  },
+  {
+    "code": "occupancy.annual_inspection_appendage",
+    "title": "Annual inspection - appendage of up to 3.00 cu. meters",
+    "section": "Sec. 3V.01 item 11.b.i",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["b", "d", "e", "f", "g", "h", "i"],
+      "is_new_business": false,
+      "flags": ["appendage"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 150.00 },
+    "cap": null,
+    "notes": "Volume-based row (cu. meters) of the 11.b table, split out because its basis differs from the floor-area brackets. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": [
+      "Printed unit 'cu. [meters]' truncated at margin; bracketed completion per the extract (Appendix A item 15 treatment)."
+    ]
+  },
+  {
+    "code": "occupancy.annual_inspection_cinema_first",
+    "title": "Annual inspection - first class cinematographs or theaters",
+    "section": "Sec. 3V.01 item 11.c.i",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["c"],
+      "is_new_business": false,
+      "flags": ["cinema_first_class"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 1200.00 },
+    "cap": null,
+    "notes": "Divisions C-1, 2 - amusement houses. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": [
+      "Trailing noun truncated at right margin ('cinematographs or [theaters]'); bracketed completion per DO 155 (Appendix A item 8)."
+    ]
+  },
+  {
+    "code": "occupancy.annual_inspection_cinema_second",
+    "title": "Annual inspection - second class cinematographs or theaters",
+    "section": "Sec. 3V.01 item 11.c.ii",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["c"],
+      "is_new_business": false,
+      "flags": ["cinema_second_class"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 720.00 },
+    "cap": null,
+    "notes": "Divisions C-1, 2 - amusement houses. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": [
+      "Trailing noun truncated at right margin ('cinematographs or [theaters]'); bracketed completion per DO 155 (Appendix A item 8)."
+    ]
+  },
+  {
+    "code": "occupancy.annual_inspection_cinema_third",
+    "title": "Annual inspection - third class cinematographs or theaters",
+    "section": "Sec. 3V.01 item 11.c.iii",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["c"],
+      "is_new_business": false,
+      "flags": ["cinema_third_class"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 520.00 },
+    "cap": null,
+    "notes": "Divisions C-1, 2 - amusement houses. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": [
+      "Trailing noun truncated at right margin ('cinematographs or [theaters]'); bracketed completion per DO 155 (Appendix A item 8)."
+    ]
+  },
+  {
+    "code": "occupancy.annual_inspection_grandstand_gym",
+    "title": "Annual inspection - grandstands/bleachers, gymnasia and the like",
+    "section": "Sec. 3V.01 item 11.c.iv",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "regulatory",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {
+      "occupancy_group": ["c"],
+      "is_new_business": false,
+      "flags": ["grandstand_gymnasium"]
+    },
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 720.00 },
+    "cap": null,
+    "notes": "Divisions C-1, 2 - amusement houses. Bills on renewal (annual), encoded as is_new_business false.",
+    "defects": [
+      "Line prints 'Grandstands/Bleachers, Gymnasia and the [like]' - trailing word truncated at margin; bracketed completion per the extract."
+    ]
+  },
+  {
+    "code": "occupancy.cert_true_copy",
+    "title": "Certified true copy of Certificate of Use/Occupancy",
+    "section": "Sec. 3V.01 item 12.b",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "admin",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 50.00 },
+    "cap": null,
+    "notes": "Item 12 certifications table row b.",
+    "defects": []
+  },
+  {
+    "code": "occupancy.certification_other",
+    "title": "Other OBO certifications (item 12, rows a and c-h)",
+    "section": "Sec. 3V.01 item 12",
+    "source": "A10-2016",
+    "office": "OBO",
+    "group": "admin",
+    "permit_types": ["OCCUPANCY"],
+    "conditions": {},
+    "basis": "fixed",
+    "computation": { "type": "fixed", "amount": 50.00 },
+    "cap": null,
+    "notes": "All eight item-12 rows carry the same P50.00 fee, so they are not seeded individually. Covered here: certified true copy of building permit (a); issuance and certified true copy of Certificate of Damage (c, d); certified true copy of Electrical Certificate (e); issuance of Certificate of Gas Meter Installation (f) - gas meter certificate must specify manufacturer, serial number, gas type, meter classification/model, maximum allowable operating pressure, hub size, capacity; certified true copy of Certificate of Operation (g); other certifications (h). The certified true copy of Certificate of Use/Occupancy (b) has its own rule, occupancy.cert_true_copy.",
+    "defects": []
+  }
+]
