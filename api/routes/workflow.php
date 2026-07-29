@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\OfficeFormController;
 use App\Http\Controllers\Api\OfficerRequestController;
 use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PermitController;
+use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
@@ -71,6 +72,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('applications/{application}/submit', [ApplicationController::class, 'submit']);
         Route::post('applications/{application}/resubmit', [ApplicationController::class, 'resubmit']);
         Route::post('applications/{application}/cancel', [ApplicationController::class, 'cancel']);
+        // Which permit a renewal/amendment is for (checklist item 50).
+        Route::get('applications/{application}/prior-permit', [PriorPermitController::class, 'show']);
+        Route::put('applications/{application}/prior-permit', [PriorPermitController::class, 'update']);
     });
 
     // Documents
