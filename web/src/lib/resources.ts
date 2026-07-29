@@ -11,6 +11,7 @@ import type {
   AuditLog,
   Barangay,
   Business,
+  BusinessGrowthReport,
   BusinessStatus,
   BusinessPayload,
   Department,
@@ -30,6 +31,7 @@ import type {
   Permit,
   PermitType,
   PrefillResult,
+  ProcessingTimeReport,
   PsicCode,
   RequestType,
   TimelineEntry,
@@ -346,6 +348,20 @@ export const analytics = {
   summary: () => unwrap<AnalyticsSummary>(api.get('/analytics/summary')),
   /** Download the summary as a CSV report (Bearer blob; v2). */
   export: (filename = 'biztrack-analytics.csv') => downloadBlob('/analytics/export', filename),
+
+  /**
+   * Feature 7: per-office control charts over weekly review turnaround. The
+   * statistics run in PHP (App\Support\Spc); nothing calls the old R project.
+   */
+  processingTime: (weeks: number) =>
+    unwrap<ProcessingTimeReport>(api.get('/analytics/processing-time', { params: { weeks } })),
+  processingTimeReport: (weeks: number) =>
+    downloadBlob(`/analytics/processing-time/report?weeks=${weeks}`, 'processing-time-monitoring.pdf'),
+
+  businessGrowth: (months: number) =>
+    unwrap<BusinessGrowthReport>(api.get('/analytics/business-growth', { params: { months } })),
+  businessGrowthReport: (months: number) =>
+    downloadBlob(`/analytics/business-growth/report?months=${months}`, 'business-growth-analysis.pdf'),
 }
 
 /* ── Admin ────────────────────────────────────────────────────────────── */

@@ -163,6 +163,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:analytics.view')->group(function () {
         Route::get('analytics/summary', [AnalyticsController::class, 'summary']);
         Route::get('analytics/export', [AnalyticsController::class, 'export']);
+        /*
+         * Features 6/7 moved out of the standalone r/ project and into the site.
+         * They stay on analytics.view (super admin only) because they aggregate
+         * every office's assignments — an office reviewer reading these would
+         * see round the scoping in ApplicationVisibility.
+         */
+        Route::get('analytics/processing-time', [AnalyticsController::class, 'processingTime']);
+        Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
+        Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
+        Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
     });
 
     // Admin — user management (user.manage) + activation toggle (owner.manage_status)
