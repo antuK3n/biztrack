@@ -20,6 +20,7 @@ import { applicationTypeLabel } from '../../lib/format'
 import { analytics, inspections, permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { AnalyticsSummary } from '../../lib/types'
+import { AnalyticsTabs } from './AnalyticsTabs'
 
 /*
  * Analytics Dashboard (PDF p84–86): 4 royal KPI cards, royal line chart,
@@ -270,6 +271,8 @@ export function AnalyticsPage() {
       >
         Analytics Dashboard
       </PageTitle>
+
+      <AnalyticsTabs />
 
       {exportError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
