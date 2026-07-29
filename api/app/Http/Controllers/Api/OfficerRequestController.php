@@ -42,6 +42,13 @@ class OfficerRequestController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'due_date' => ['nullable', 'date'],
+            /*
+             * Which office the applicant should see this coming from. Defaults
+             * to the requester's own, but the super admin has no department, so
+             * without this their requests reach the applicant attributed to
+             * nobody. Officers may also raise one on another office's behalf.
+             */
+            'department_id' => ['nullable', 'exists:departments,id'],
             // Meeting fields (officer-provided; no live calendar call — future work).
             'meeting_scheduled_at' => ['nullable', 'date', 'required_if:request_type,meeting'],
             'meeting_duration_minutes' => ['nullable', 'integer', 'min:5', 'max:480'],
@@ -52,7 +59,7 @@ class OfficerRequestController extends Controller
         $officerRequest = OfficerRequest::create([
             'application_id' => $application->id,
             'requested_by_user_id' => $request->user()->id,
-            'department_id' => $request->user()->department_id,
+            'department_id' => $data['department_id'] ?? $request->user()->department_id,
             'request_type' => $data['request_type'],
             'title' => $data['title'],
             'description' => $data['description'] ?? null,

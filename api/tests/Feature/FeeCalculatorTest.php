@@ -6,11 +6,6 @@ use App\Models\PermitType;
 use App\Models\User;
 use App\Services\FeeCalculator;
 
-/**
- * Revenue-code fee engine against hand-computed examples from Ordinance
- * A10-2016 (docs/revenue-code-extract.md). Every expected number below was
- * computed by hand from the cited section, not from the engine.
- */
 function feeApp(array $permitTypeCodes, string $type, array $profile): Application
 {
     $owner = User::where('email', 'owner@biztrack.local')->first();
