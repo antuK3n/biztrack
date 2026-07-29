@@ -44,6 +44,19 @@ class AuthController extends Controller
         return $user->roles->pluck('name')->intersect(self::STAFF_ROLES)->isNotEmpty();
     }
 
+    /**
+     * The signed-in user as the web app's `User` type, plus the join date the
+     * Profile screen shows as "member since". UserResource is shared with the
+     * admin user listings, so the extra field is added on this side.
+     *
+     * @return array<string, mixed>
+     */
+    private function userPayload(User $user): array
+    {
+        return (new UserResource($this->withRelations($user)))->resolve()
+            + ['created_at' => optional($user->created_at)->toISOString()];
+    }
+
     private function authPayload(User $user, string $portal = 'public'): JsonResponse
     {
         // The token name records which door was used, so revoking one portal's
@@ -53,7 +66,7 @@ class AuthController extends Controller
         return response()->json([
             'data' => [
                 'token' => $token,
-                'user' => new UserResource($this->withRelations($user)),
+                'user' => $this->userPayload($user),
             ],
         ], 200);
     }
@@ -184,7 +197,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         return response()->json([
-            'data' => new UserResource($this->withRelations($request->user())),
+            'data' => $this->userPayload($request->user()),
         ]);
     }
 
@@ -216,7 +229,7 @@ class AuthController extends Controller
         Audit::log('user.profile_updated', $user);
 
         return response()->json([
-            'data' => new UserResource($this->withRelations($user)),
+            'data' => $this->userPayload($user),
         ]);
     }
 
