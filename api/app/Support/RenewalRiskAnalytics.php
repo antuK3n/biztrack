@@ -80,37 +80,51 @@ final class RenewalRiskAnalytics
         .'permits by how many known risk signals they carry. The score is not a probability and does not '
         .'estimate how likely a renewal is to be late.';
 
+    /** The R endpoint that scores this dataset. */
+    public const R_ENDPOINT = '/renewal-risk';
+
     /**
+     * The facts each in-scope permit carries, gathered from the register.
+     *
+     * This is the whole SQL half of the feature and the payload
+     * `analytics:refresh` pushes to R. The split matters here more than anywhere
+     * else in the analytics code, because the two halves are different kinds of
+     * decision: *what counts as a risk signal* is a register question settled by
+     * the five bulk queries below, and *how signals become a score and a band* is
+     * the rule set — which lives in R, with RenewalRiskScoring as its fallback.
+     *
+     * Note what is NOT here: no scores, no bands, no ranking. R gets facts.
+     *
      * @return array<string, mixed>
      */
-    public static function build(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
+    public static function dataset(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
     {
         $now = CarbonImmutable::now();
         $today = $now->startOfDay();
         $windowStart = $today->subDays(self::LAPSED_GRACE_DAYS);
         $windowEnd = $today->addDays($horizonDays);
 
+        $frame = [
+            'params' => ['days' => $horizonDays, 'limit' => $limit],
+            'now' => $now->toISOString(),
+            'lapsed_grace_days' => self::LAPSED_GRACE_DAYS,
+            'window_start' => $windowStart->toDateString(),
+            'window_end' => $windowEnd->toDateString(),
+            'drivers_per_row' => self::DRIVERS_PER_ROW,
+            'methodology' => self::METHODOLOGY,
+            // The rule set travels with the facts. R reads the weights, bands and
+            // thresholds out of this payload instead of keeping its own copy, so
+            // there is exactly one place the numbers live (RenewalRiskScoring)
+            // and no way for the two engines to disagree about them. What R
+            // duplicates is the logic, which is what the parity test checks.
+            'parameters' => RenewalRiskScoring::parameters(),
+            'rulebook' => RenewalRiskScoring::rulebook(),
+        ];
+
         $permits = self::permitsInScope($windowStart, $windowEnd);
 
         if ($permits === []) {
-            return [
-                'generated_at' => $now->toISOString(),
-                'horizon_days' => $horizonDays,
-                'lapsed_grace_days' => self::LAPSED_GRACE_DAYS,
-                'window_start' => $windowStart->toDateString(),
-                'window_end' => $windowEnd->toDateString(),
-                'scored_permits' => 0,
-                'counts' => ['high' => 0, 'moderate' => 0, 'low' => 0],
-                'reminders_sent' => 0,
-                'at_risk' => [],
-                'actions' => self::actionTotals(['high' => 0, 'moderate' => 0, 'low' => 0]),
-                'rulebook' => RenewalRiskScoring::rulebook(),
-                'thresholds' => [
-                    'high' => RenewalRiskScoring::HIGH_THRESHOLD,
-                    'moderate' => RenewalRiskScoring::MODERATE_THRESHOLD,
-                ],
-                'methodology' => self::METHODOLOGY,
-            ];
+            return $frame + ['reminders_sent' => 0, 'permits' => []];
         }
 
         $permitIds = array_column($permits, 'id');
@@ -123,25 +137,9 @@ final class RenewalRiskAnalytics
         $noticeCounts = self::noticeCountsByPermit($permitIds);
 
         $rows = [];
-        $counts = ['high' => 0, 'moderate' => 0, 'low' => 0];
-
         foreach ($permits as $permit) {
             $renewal = $renewals[$permit['id']] ?? null;
             $validUntil = CarbonImmutable::parse($permit['valid_until'])->startOfDay();
-            // Whole days, signed: negative means the permit has already lapsed.
-            $daysToExpiry = (int) $today->diffInDays($validUntil, false);
-
-            $facts = [
-                'days_to_expiry' => $daysToExpiry,
-                'renewal_stage' => $renewal['stage'] ?? 'none',
-                'prior_renewals' => $punctuality[$permit['business_id']]['total'] ?? 0,
-                'late_renewals' => $punctuality[$permit['business_id']]['late'] ?? 0,
-                'open_findings' => $findings[$permit['business_id']] ?? 0,
-                'fee_state' => $renewal === null ? 'settled' : ($feeStates[$renewal['application_id']] ?? 'settled'),
-            ];
-
-            $scored = RenewalRiskScoring::score($facts);
-            $counts[$scored['band']]++;
 
             $rows[] = [
                 'permit_id' => $permit['id'],
@@ -151,21 +149,87 @@ final class RenewalRiskAnalytics
                 'barangay' => $permit['barangay'],
                 'permit_type' => $permit['permit_type'],
                 'valid_until' => $validUntil->toDateString(),
-                'days_to_expiry' => $daysToExpiry,
+                // Whole days, signed: negative means the permit has already
+                // lapsed. Computed here, not in R, because "today" is Laravel's
+                // clock and R must stay a pure function of its input.
+                'days_to_expiry' => (int) $today->diffInDays($validUntil, false),
+                'renewal_stage' => $renewal['stage'] ?? 'none',
+                'renewal_tracking_id' => $renewal['tracking_id'] ?? null,
+                'prior_renewals' => $punctuality[$permit['business_id']]['total'] ?? 0,
+                'late_renewals' => $punctuality[$permit['business_id']]['late'] ?? 0,
+                'open_findings' => $findings[$permit['business_id']] ?? 0,
+                'fee_state' => $renewal === null ? 'settled' : ($feeStates[$renewal['application_id']] ?? 'settled'),
+                'reminders_sent' => $noticeCounts[$permit['id']] ?? 0,
+            ];
+        }
+
+        return $frame + ['reminders_sent' => array_sum($noticeCounts), 'permits' => $rows];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function build(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
+    {
+        return self::compute(self::dataset($horizonDays, $limit));
+    }
+
+    /**
+     * The local (PHP) engine: facts in, scored watchlist out, no database.
+     *
+     * R's `POST /renewal-risk` returns this same schema from the same facts. The
+     * numbers must agree — AnalyticsParityTest is what enforces that, and without
+     * it the fallback would quietly become a second, divergent rule set.
+     *
+     * @param  array<string, mixed>  $dataset  as returned by dataset()
+     * @return array<string, mixed>
+     */
+    public static function compute(array $dataset): array
+    {
+        // Echoed, not re-parsed: see the note in ProcessingTimeAnalytics::compute().
+        $now = (string) $dataset['now'];
+        $limit = (int) $dataset['params']['limit'];
+        $driversPerRow = (int) ($dataset['drivers_per_row'] ?? self::DRIVERS_PER_ROW);
+
+        $rows = [];
+        $counts = ['high' => 0, 'moderate' => 0, 'low' => 0];
+
+        foreach ($dataset['permits'] as $permit) {
+            $facts = [
+                'days_to_expiry' => (int) $permit['days_to_expiry'],
+                'renewal_stage' => (string) $permit['renewal_stage'],
+                'prior_renewals' => (int) $permit['prior_renewals'],
+                'late_renewals' => (int) $permit['late_renewals'],
+                'open_findings' => (int) $permit['open_findings'],
+                'fee_state' => (string) $permit['fee_state'],
+            ];
+
+            $scored = RenewalRiskScoring::score($facts);
+            $counts[$scored['band']]++;
+
+            $rows[] = [
+                'permit_id' => $permit['permit_id'],
+                'permit_number' => $permit['permit_number'],
+                'business_id' => $permit['business_id'],
+                'business' => $permit['business'],
+                'barangay' => $permit['barangay'],
+                'permit_type' => $permit['permit_type'],
+                'valid_until' => $permit['valid_until'],
+                'days_to_expiry' => $facts['days_to_expiry'],
                 'score' => $scored['score'],
                 'band' => $scored['band'],
                 'band_label' => $scored['band_label'],
                 'action' => $scored['action'],
                 'action_label' => $scored['action_label'],
                 'renewal_stage' => $facts['renewal_stage'],
-                'renewal_tracking_id' => $renewal['tracking_id'] ?? null,
-                'reminders_sent' => $noticeCounts[$permit['id']] ?? 0,
+                'renewal_tracking_id' => $permit['renewal_tracking_id'] ?? null,
+                'reminders_sent' => (int) $permit['reminders_sent'],
                 // Only the drivers that actually cost points; a row listing
                 // "Fees settled: 0" is noise dressed as transparency.
                 'drivers' => array_slice(
                     array_values(array_filter($scored['drivers'], static fn (array $d): bool => $d['points'] > 0)),
                     0,
-                    self::DRIVERS_PER_ROW,
+                    $driversPerRow,
                 ),
             ];
         }
@@ -175,14 +239,14 @@ final class RenewalRiskAnalytics
         usort($rows, static fn (array $a, array $b) => [$b['score'], $a['days_to_expiry']] <=> [$a['score'], $b['days_to_expiry']]);
 
         return [
-            'generated_at' => $now->toISOString(),
-            'horizon_days' => $horizonDays,
-            'lapsed_grace_days' => self::LAPSED_GRACE_DAYS,
-            'window_start' => $windowStart->toDateString(),
-            'window_end' => $windowEnd->toDateString(),
+            'generated_at' => $now,
+            'horizon_days' => (int) $dataset['params']['days'],
+            'lapsed_grace_days' => (int) $dataset['lapsed_grace_days'],
+            'window_start' => (string) $dataset['window_start'],
+            'window_end' => (string) $dataset['window_end'],
             'scored_permits' => count($rows),
             'counts' => $counts,
-            'reminders_sent' => array_sum($noticeCounts),
+            'reminders_sent' => (int) $dataset['reminders_sent'],
             'at_risk' => array_slice($rows, 0, max(1, $limit)),
             'actions' => self::actionTotals($counts),
             'rulebook' => RenewalRiskScoring::rulebook(),
@@ -190,7 +254,7 @@ final class RenewalRiskAnalytics
                 'high' => RenewalRiskScoring::HIGH_THRESHOLD,
                 'moderate' => RenewalRiskScoring::MODERATE_THRESHOLD,
             ],
-            'methodology' => self::METHODOLOGY,
+            'methodology' => (string) ($dataset['methodology'] ?? self::METHODOLOGY),
         ];
     }
 

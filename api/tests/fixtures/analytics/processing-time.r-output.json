@@ -1,0 +1,647 @@
+{
+  "generated_at": "2025-08-11T09:00:00.000Z",
+  "window_weeks": 52,
+  "window_start": "2025-01-06",
+  "min_completions_per_week": 3,
+  "calibration_weeks_cap": 24,
+  "completed_reviews": 236,
+  "departments": [
+    {
+      "code": "BPLO",
+      "name": "Business Permits & Licensing Office",
+      "completed_reviews": 120,
+      "center": 2.497,
+      "lcl": 2.203,
+      "ucl": 2.791,
+      "sigma": 0.098,
+      "calibration_weeks": 24,
+      "status": "inside",
+      "latest_week": "2025-07-28",
+      "latest_mean_days": 2.635,
+      "points": [
+        {
+          "week_start": "2025-01-06",
+          "reviews": 4,
+          "mean_days": 2.5,
+          "deviation_days": 0.003,
+          "ewma": 2.498,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-13",
+          "reviews": 4,
+          "mean_days": 2.438,
+          "deviation_days": -0.059,
+          "ewma": 2.486,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-20",
+          "reviews": 4,
+          "mean_days": 2.552,
+          "deviation_days": 0.055,
+          "ewma": 2.499,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-27",
+          "reviews": 4,
+          "mean_days": 2.49,
+          "deviation_days": -0.007,
+          "ewma": 2.497,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-03",
+          "reviews": 4,
+          "mean_days": 2.604,
+          "deviation_days": 0.107,
+          "ewma": 2.518,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-10",
+          "reviews": 4,
+          "mean_days": 2.365,
+          "deviation_days": -0.132,
+          "ewma": 2.488,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-17",
+          "reviews": 4,
+          "mean_days": 2.479,
+          "deviation_days": -0.018,
+          "ewma": 2.486,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-24",
+          "reviews": 4,
+          "mean_days": 2.594,
+          "deviation_days": 0.097,
+          "ewma": 2.508,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-03",
+          "reviews": 4,
+          "mean_days": 2.531,
+          "deviation_days": 0.034,
+          "ewma": 2.512,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-10",
+          "reviews": 4,
+          "mean_days": 2.469,
+          "deviation_days": -0.028,
+          "ewma": 2.504,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-17",
+          "reviews": 4,
+          "mean_days": 2.406,
+          "deviation_days": -0.091,
+          "ewma": 2.484,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-24",
+          "reviews": 4,
+          "mean_days": 2.521,
+          "deviation_days": 0.024,
+          "ewma": 2.491,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-31",
+          "reviews": 4,
+          "mean_days": 2.635,
+          "deviation_days": 0.138,
+          "ewma": 2.52,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-07",
+          "reviews": 4,
+          "mean_days": 2.396,
+          "deviation_days": -0.101,
+          "ewma": 2.495,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-14",
+          "reviews": 4,
+          "mean_days": 2.51,
+          "deviation_days": 0.013,
+          "ewma": 2.498,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-21",
+          "reviews": 4,
+          "mean_days": 2.448,
+          "deviation_days": -0.049,
+          "ewma": 2.488,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-28",
+          "reviews": 4,
+          "mean_days": 2.562,
+          "deviation_days": 0.066,
+          "ewma": 2.503,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-05",
+          "reviews": 4,
+          "mean_days": 2.5,
+          "deviation_days": 0.003,
+          "ewma": 2.502,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-12",
+          "reviews": 4,
+          "mean_days": 2.438,
+          "deviation_days": -0.059,
+          "ewma": 2.489,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-19",
+          "reviews": 4,
+          "mean_days": 2.552,
+          "deviation_days": 0.055,
+          "ewma": 2.502,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-26",
+          "reviews": 4,
+          "mean_days": 2.49,
+          "deviation_days": -0.007,
+          "ewma": 2.5,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-02",
+          "reviews": 4,
+          "mean_days": 2.604,
+          "deviation_days": 0.107,
+          "ewma": 2.52,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-09",
+          "reviews": 4,
+          "mean_days": 2.365,
+          "deviation_days": -0.132,
+          "ewma": 2.489,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-16",
+          "reviews": 4,
+          "mean_days": 2.479,
+          "deviation_days": -0.018,
+          "ewma": 2.487,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-23",
+          "reviews": 4,
+          "mean_days": 2.594,
+          "deviation_days": 0.097,
+          "ewma": 2.509,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-30",
+          "reviews": 4,
+          "mean_days": 2.531,
+          "deviation_days": 0.034,
+          "ewma": 2.513,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-07-07",
+          "reviews": 4,
+          "mean_days": 2.469,
+          "deviation_days": -0.028,
+          "ewma": 2.504,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-07-14",
+          "reviews": 4,
+          "mean_days": 2.406,
+          "deviation_days": -0.091,
+          "ewma": 2.485,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-07-21",
+          "reviews": 4,
+          "mean_days": 2.521,
+          "deviation_days": 0.024,
+          "ewma": 2.492,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-07-28",
+          "reviews": 4,
+          "mean_days": 2.635,
+          "deviation_days": 0.138,
+          "ewma": 2.521,
+          "status": "in_control",
+          "rule_hit": null
+        }
+      ],
+      "flagged": [],
+      "trend": {
+        "direction": "steady",
+        "magnitude": 0.3162,
+        "ewma": 2.521,
+        "deviation_days": 0.02,
+        "drift_flagged": false
+      }
+    },
+    {
+      "code": "CHO",
+      "name": "City Health Office",
+      "completed_reviews": 90,
+      "center": 2.497,
+      "lcl": 2.097,
+      "ucl": 2.896,
+      "sigma": 0.1333,
+      "calibration_weeks": 24,
+      "status": "outside",
+      "latest_week": "2025-07-28",
+      "latest_mean_days": 7,
+      "points": [
+        {
+          "week_start": "2025-01-06",
+          "reviews": 3,
+          "mean_days": 2.528,
+          "deviation_days": 0.031,
+          "ewma": 2.503,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-13",
+          "reviews": 3,
+          "mean_days": 2.458,
+          "deviation_days": -0.038,
+          "ewma": 2.494,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-20",
+          "reviews": 3,
+          "mean_days": 2.569,
+          "deviation_days": 0.073,
+          "ewma": 2.509,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-01-27",
+          "reviews": 3,
+          "mean_days": 2.5,
+          "deviation_days": 0.003,
+          "ewma": 2.507,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-03",
+          "reviews": 3,
+          "mean_days": 2.431,
+          "deviation_days": -0.066,
+          "ewma": 2.492,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-10",
+          "reviews": 3,
+          "mean_days": 2.542,
+          "deviation_days": 0.045,
+          "ewma": 2.502,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-17",
+          "reviews": 3,
+          "mean_days": 2.472,
+          "deviation_days": -0.024,
+          "ewma": 2.496,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-02-24",
+          "reviews": 3,
+          "mean_days": 2.583,
+          "deviation_days": 0.087,
+          "ewma": 2.513,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-03",
+          "reviews": 3,
+          "mean_days": 2.333,
+          "deviation_days": -0.163,
+          "ewma": 2.477,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-10",
+          "reviews": 3,
+          "mean_days": 2.625,
+          "deviation_days": 0.128,
+          "ewma": 2.507,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-17",
+          "reviews": 3,
+          "mean_days": 2.375,
+          "deviation_days": -0.122,
+          "ewma": 2.481,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-24",
+          "reviews": 3,
+          "mean_days": 2.667,
+          "deviation_days": 0.17,
+          "ewma": 2.518,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-03-31",
+          "reviews": 3,
+          "mean_days": 2.417,
+          "deviation_days": -0.08,
+          "ewma": 2.498,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-07",
+          "reviews": 3,
+          "mean_days": 2.528,
+          "deviation_days": 0.031,
+          "ewma": 2.504,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-14",
+          "reviews": 3,
+          "mean_days": 2.458,
+          "deviation_days": -0.038,
+          "ewma": 2.495,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-21",
+          "reviews": 3,
+          "mean_days": 2.569,
+          "deviation_days": 0.073,
+          "ewma": 2.51,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-04-28",
+          "reviews": 3,
+          "mean_days": 2.5,
+          "deviation_days": 0.003,
+          "ewma": 2.508,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-05",
+          "reviews": 3,
+          "mean_days": 2.431,
+          "deviation_days": -0.066,
+          "ewma": 2.492,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-12",
+          "reviews": 3,
+          "mean_days": 2.542,
+          "deviation_days": 0.045,
+          "ewma": 2.502,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-19",
+          "reviews": 3,
+          "mean_days": 2.472,
+          "deviation_days": -0.024,
+          "ewma": 2.496,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-05-26",
+          "reviews": 3,
+          "mean_days": 2.583,
+          "deviation_days": 0.087,
+          "ewma": 2.514,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-02",
+          "reviews": 3,
+          "mean_days": 2.333,
+          "deviation_days": -0.163,
+          "ewma": 2.478,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-09",
+          "reviews": 3,
+          "mean_days": 2.625,
+          "deviation_days": 0.128,
+          "ewma": 2.507,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-16",
+          "reviews": 3,
+          "mean_days": 2.375,
+          "deviation_days": -0.122,
+          "ewma": 2.481,
+          "status": "in_control",
+          "rule_hit": null
+        },
+        {
+          "week_start": "2025-06-23",
+          "reviews": 3,
+          "mean_days": 3.417,
+          "deviation_days": 0.92,
+          "ewma": 2.668,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-06-30",
+          "reviews": 3,
+          "mean_days": 3.917,
+          "deviation_days": 1.42,
+          "ewma": 2.918,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-07",
+          "reviews": 3,
+          "mean_days": 4.778,
+          "deviation_days": 2.281,
+          "ewma": 3.29,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-14",
+          "reviews": 3,
+          "mean_days": 5.458,
+          "deviation_days": 2.962,
+          "ewma": 3.723,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-21",
+          "reviews": 3,
+          "mean_days": 6.319,
+          "deviation_days": 3.823,
+          "ewma": 4.243,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-28",
+          "reviews": 3,
+          "mean_days": 7,
+          "deviation_days": 4.503,
+          "ewma": 4.794,
+          "status": "out_of_control",
+          "rule_hit": "beyond_limits+ewma_drift"
+        }
+      ],
+      "flagged": [
+        {
+          "week_start": "2025-06-23",
+          "mean_days": 3.417,
+          "deviation_days": 0.92,
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-06-30",
+          "mean_days": 3.917,
+          "deviation_days": 1.42,
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-07",
+          "mean_days": 4.778,
+          "deviation_days": 2.28,
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-14",
+          "mean_days": 5.458,
+          "deviation_days": 2.96,
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-21",
+          "mean_days": 6.319,
+          "deviation_days": 3.82,
+          "rule_hit": "beyond_limits+ewma_drift"
+        },
+        {
+          "week_start": "2025-07-28",
+          "mean_days": 7,
+          "deviation_days": 4.5,
+          "rule_hit": "beyond_limits+ewma_drift"
+        }
+      ],
+      "trend": {
+        "direction": "rising",
+        "magnitude": 1,
+        "ewma": 4.794,
+        "deviation_days": 2.3,
+        "drift_flagged": true
+      }
+    }
+  ],
+  "thin": [
+    {
+      "code": "BFP",
+      "name": "Bureau of Fire Protection",
+      "completed_reviews": 2,
+      "reason": "No week in this window reached 3 completed reviews."
+    },
+    {
+      "code": "ZON",
+      "name": "Zoning Administration",
+      "completed_reviews": 24,
+      "reason": "Weekly turnaround did not vary across the calibration window, so no control limits can be fitted."
+    }
+  ]
+}

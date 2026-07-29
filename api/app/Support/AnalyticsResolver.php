@@ -6,6 +6,7 @@ use App\Models\AnalyticsSnapshot;
 use App\Services\RAnalytics;
 use Carbon\CarbonImmutable;
 
+
 /**
  * Serves an analytics dataset: the statistics R computed if we have them, the
  * PHP port if we do not — and always says which one it was.
@@ -84,6 +85,13 @@ final class AnalyticsResolver
      */
     private static function missReason(string $dataset, array $params): string
     {
+        // Nothing to refresh: R has no endpoint for this dataset yet, so it will
+        // never have a snapshot. Telling the reader to run the refresh here would
+        // send them after a fix that does not exist.
+        if (AnalyticsDatasets::get($dataset)['endpoint'] === null) {
+            return 'no_r_endpoint';
+        }
+
         if (! app(RAnalytics::class)->enabled()) {
             return 'r_disabled';
         }
@@ -113,9 +121,10 @@ final class AnalyticsResolver
     private static function noticeFor(string $reason): string
     {
         return match ($reason) {
-            'r_disabled' => 'Computed locally. The R statistics service is switched off for this environment.',
-            'window_not_precomputed' => 'Computed locally. This window is not one of the precomputed windows, so the R service has no result for it.',
-            default => 'Computed locally. The R statistics service has no result for this view yet — run the analytics refresh.',
+            'no_r_endpoint' => 'This view is not computed in R yet, so these figures come from the local implementation.',
+            'r_disabled' => 'The R statistics service is switched off for this environment.',
+            'window_not_precomputed' => 'This window is not one of the precomputed windows, so the R service has no result for it.',
+            default => 'The R statistics service has no result for this view yet — run the analytics refresh.',
         };
     }
 }

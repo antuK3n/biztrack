@@ -30,11 +30,13 @@
 
     <h1>BUSINESS GROWTH ANALYSIS</h1>
     <div class="meta">
-        Generated {{ $generated_at }} &middot;
+        @include('pdf.partials.computed-by') &middot;
         Period: {{ $report['period_start'] }} to {{ $report['period_end'] }}
         ({{ $report['period_months'] }} months) &middot;
         Compared against {{ $report['prior_period_start'] }} to {{ $report['period_start'] }}
     </div>
+
+    @include('pdf.partials.local-notice')
 
     <div class="note">
         Every figure is computed from the register. Lifecycle status is derived from permits: Active

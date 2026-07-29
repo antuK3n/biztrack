@@ -7,6 +7,7 @@ import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { BarangayGrowthRow, BusinessGrowthReport, IndustryGrowthRow } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
+import { ComputedAt } from './ComputedAt'
 
 /*
  * Business Growth Analysis (mockup 105).
@@ -210,10 +211,19 @@ export function BusinessGrowthPage() {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  const { data, loading, error, reload } = useAsync(
-    () => analytics.businessGrowth(Number(months)),
-    [months],
-  )
+  // Resolves to { data, meta } — see AnalyticsProvenance and ComputedAt. This
+  // screen has no R endpoint yet, so its meta reports "computed locally" every
+  // time; that is accurate rather than a bug, and it stops being the case when
+  // POST /growth/lifecycle lands.
+  const {
+    data: result,
+    loading,
+    error,
+    reload,
+  } = useAsync(() => analytics.businessGrowth(Number(months)), [months])
+
+  const data = result?.data
+  const meta = result?.meta
 
   async function generateReport() {
     setDownloading(true)
@@ -255,6 +265,8 @@ export function BusinessGrowthPage() {
       </PageTitle>
 
       <AnalyticsTabs />
+
+      {meta && <ComputedAt meta={meta} />}
 
       {downloadError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
