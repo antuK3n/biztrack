@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { SVGProps } from 'react'
-import { ChevronRightIcon, EyeIcon, EyeOffIcon } from '../components/icons'
+import { ChevronRightIcon } from '../components/icons'
+import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
 import { api, toApiError } from '../lib/api'
 import type { User } from '../lib/types'
@@ -40,42 +41,6 @@ function ProfileAvatar() {
         <path d="M12 13.5c-4.4 0-7 2.6-7 6.5h14c0-3.9-2.6-6.5-7-6.5Z" />
       </svg>
     </span>
-  )
-}
-
-/** Filled password input with the prototype's eye toggle (PDF p13). */
-function PasswordInput({ id, placeholder, value, onChange, autoComplete = 'new-password', invalid }: {
-  id: string
-  placeholder: string
-  value: string
-  onChange: (v: string) => void
-  autoComplete?: string
-  invalid?: boolean
-}) {
-  const [visible, setVisible] = useState(false)
-  return (
-    <div className="relative">
-      <input
-        id={id}
-        type={visible ? 'text' : 'password'}
-        autoComplete={autoComplete}
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={invalid || undefined}
-        aria-describedby={invalid ? `${id}-error` : undefined}
-        className={`${inputCls} pr-11`}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? 'Hide password' : 'Show password'}
-        aria-pressed={visible}
-        className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-ink-secondary hover:text-ink"
-      >
-        {visible ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
-      </button>
-    </div>
   )
 }
 
@@ -301,6 +266,8 @@ export function SettingsPage() {
                 onChange={setCurrentPassword}
                 autoComplete="current-password"
                 invalid={!!fieldErrors.current_password}
+                describedBy={fieldErrors.current_password ? 'settings-current-error' : undefined}
+                iconSize={18}
               />
               <FieldError id="settings-current-error" message={fieldErrors.current_password?.[0]} />
             </div>
@@ -312,12 +279,20 @@ export function SettingsPage() {
                 value={password}
                 onChange={setPassword}
                 invalid={!!fieldErrors.password}
+                describedBy={fieldErrors.password ? 'settings-password-error' : undefined}
+                iconSize={18}
               />
               <FieldError id="settings-password-error" message={fieldErrors.password?.[0]} />
             </div>
             <div>
               <FieldLabel>Confirm New Password</FieldLabel>
-              <PasswordInput id="settings-confirm" placeholder="Confirm Password" value={confirm} onChange={setConfirm} />
+              <PasswordInput
+                id="settings-confirm"
+                placeholder="Confirm Password"
+                value={confirm}
+                onChange={setConfirm}
+                iconSize={18}
+              />
             </div>
           </div>
           <p className="text-center text-xs text-ink-muted">

@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
 import { InfoCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
 import { SESSION_EXPIRED_KEY, api, loginPathFor, toApiError } from '../../lib/api'
 import type { Portal } from '../../lib/api'
@@ -36,6 +37,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const [sessionExpired, setSessionExpired] = useState(false)
   const [wrongPortal, setWrongPortal] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
+  const lastPath = useRef(location.pathname)
 
   useEffect(() => {
     if (sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
@@ -43,6 +45,22 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
       setSessionExpired(true)
     }
   }, [])
+
+  /*
+   * /login and /staff/login are the same component, so React keeps its state
+   * when the user hops between them — including the alert that sent them. Both
+   * the wrong-portal warning and the session-expired notice belong to the page
+   * being left, so clear them on arrival. The typed credentials stay: the whole
+   * point of "Go there now." is that they were right, just at the wrong door.
+   */
+  useEffect(() => {
+    if (lastPath.current === location.pathname) return
+    lastPath.current = location.pathname
+    setFormError(null)
+    setWrongPortal(false)
+    setSessionExpired(false)
+    setErrors({})
+  }, [location.pathname])
 
   function validate(): FormErrors {
     return {
@@ -180,19 +198,17 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
 
         <div>
           <FieldLabel>Password</FieldLabel>
-          <input
-            type="password"
+          <PasswordInput
             name="password"
             autoComplete="current-password"
             placeholder="Password"
             value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              if (errors.password && e.target.value) setErrors((prev) => ({ ...prev, password: undefined }))
+            onChange={(v) => {
+              setPassword(v)
+              if (errors.password && v) setErrors((prev) => ({ ...prev, password: undefined }))
             }}
-            aria-invalid={errors.password ? true : undefined}
-            aria-describedby={errors.password ? 'login-password-error' : undefined}
-            className={inputCls}
+            invalid={!!errors.password}
+            describedBy={errors.password ? 'login-password-error' : undefined}
           />
           {errors.password && (
             <p id="login-password-error" className="mt-1.5 text-sm font-medium text-s-red">

@@ -106,8 +106,8 @@ function Rail({ user }: { user: User }) {
               >
                 {[
                   { label: 'Settings', to: '/settings' },
-                  // Profile editing lives on the Settings page (Edit Profile bar).
-                  { label: 'Profile', to: '/settings' },
+                  // Profile reads the account record; Settings edits it.
+                  { label: 'Profile', to: '/profile' },
                 ].map((l) => (
                   <button
                     key={l.label}
