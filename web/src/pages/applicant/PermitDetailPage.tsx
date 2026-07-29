@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import { DownloadIcon, PrintIcon, XIcon } from '../../components/icons'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
@@ -18,15 +18,31 @@ import { Logo } from '../../components/Logo'
  * owner/business rows, QR from verify_url, validity + signature lines).
  */
 
-function CertField({ label, value, wide }: { label: string; value: string; wide?: boolean }) {
+function CertField({
+  label,
+  value,
+  wide,
+  to,
+}: {
+  label: string
+  value: string
+  wide?: boolean
+  /** Turns the value into a link. Used to walk back to the filing behind the permit. */
+  to?: string
+}) {
+  const box = 'min-w-0 flex-1 truncate border border-line bg-royal-tint px-2.5 py-1 text-sm text-ink'
   return (
     <div className={`flex items-baseline gap-3 ${wide ? 'col-span-2' : ''}`}>
       <span className="shrink-0 text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
         {label}
       </span>
-      <span className="min-w-0 flex-1 truncate border border-line bg-royal-tint px-2.5 py-1 text-sm text-ink">
-        {value}
-      </span>
+      {to ? (
+        <Link to={to} className={`${box} font-semibold text-royal underline underline-offset-2 hover:no-underline print:no-underline`}>
+          {value}
+        </Link>
+      ) : (
+        <span className={box}>{value}</span>
+      )}
     </div>
   )
 }
@@ -114,7 +130,13 @@ export function PermitDetailPage() {
               <CertField label="Permit Type" value={permit.permit_type.name} />
               <CertField label="Date of Issue" value={formatDate(permit.valid_from)} />
               <CertField label="Valid Until" value={formatDate(permit.valid_until)} />
-              <CertField wide label="Tracking ID" value={permit.application.tracking_id} />
+              {/* Approved filings leave the tracking list; this walks back to one. */}
+              <CertField
+                wide
+                label="Tracking ID"
+                value={permit.application.tracking_id}
+                to={`/applications/${permit.application.id}`}
+              />
             </div>
 
             <div className="mt-5 h-1 bg-royal/70" />

@@ -17,7 +17,10 @@
         table.details td.value { font-weight: bold; }
         .validity { margin-top: 24px; text-align: center; font-size: 13px; }
         .qr-box { text-align: center; margin-top: 28px; }
-        .qr-box img { width: 130px; height: 130px; }
+        /* Own line: the img is inline content, so without this the verify code
+           block flows up alongside the QR instead of sitting under it. */
+        .qr-box .qr { margin-bottom: 4px; }
+        .qr-box .qr img { width: 130px; height: 130px; }
         .verify-code { font-family: DejaVu Sans Mono, monospace; font-size: 12px; border: 1px solid #333; display: inline-block; padding: 6px 14px; margin-top: 8px; letter-spacing: 1px; }
         .verify-url { font-size: 10px; color: #555; margin-top: 6px; }
         .footer { margin-top: 36px; text-align: center; font-size: 9px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; }
@@ -47,7 +50,7 @@
 
     <div class="qr-box">
         @if($qr)
-            <img src="{{ $qr }}" alt="Verification QR">
+            <div class="qr"><img src="{{ $qr }}" alt="Verification QR"></div>
         @endif
         <div class="verify-code">{{ $permit_number }}</div>
         <div class="verify-url">Scan or verify at {{ $verify_url }}</div>

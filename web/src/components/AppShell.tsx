@@ -5,13 +5,17 @@ import { navItemsFor } from '../lib/nav'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { ChatBubble } from './ChatBubble'
-import { BellIcon, CheckIcon, LogOutIcon, MailIcon } from './icons'
+import { BellIcon, CheckIcon, MailIcon } from './icons'
 
 const ROLE_LABELS: Record<string, string> = {
   business_owner: 'Business owner',
   bplo_staff: 'BPLO staff',
   sanitary_officer: 'Sanitary officer',
   fire_inspector: 'Fire inspector',
+  zoning_officer: 'Zoning officer',
+  obo_staff: 'Building official staff',
+  cenro_officer: 'Environment officer',
+  market_admin: 'Market administrator',
   admin: 'Administrator',
 }
 
@@ -23,7 +27,6 @@ export function roleLabel(user: User): string {
 function Rail({ user }: { user: User }) {
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
-  const isOwner = user.permissions.includes('application.view_own')
   const [flyout, setFlyout] = useState(false)
   const [confirmOut, setConfirmOut] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -85,66 +88,58 @@ function Rail({ user }: { user: User }) {
         )}
       </nav>
 
-      {/* Bottom: avatar flyout (owner, p10) or logout (staff, p61) */}
+      {/*
+       * Bottom: the account flyout (p10). Staff used to get a bare logout icon,
+       * which left them no route to Settings and so no way to change their own
+       * password (tester item 74). Everyone gets the same menu now.
+       */}
       <div ref={rootRef} className="relative mt-2">
-        {isOwner ? (
-          <>
+        <button
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={flyout}
+          aria-label="Account menu"
+          onClick={() => setFlyout((v) => !v)}
+          className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-sm font-semibold text-royal shadow-card"
+        >
+          {initials}
+        </button>
+        {flyout && (
+          <div
+            role="menu"
+            aria-label="Account"
+            className="absolute bottom-0 left-16 z-40 w-44 rounded-r-xl bg-royal-deep py-3 shadow-overlay"
+          >
+            {[
+              { label: 'Settings', to: '/settings' },
+              // Profile reads the account record; Settings edits it.
+              { label: 'Profile', to: '/profile' },
+            ].map((l) => (
+              <button
+                key={l.label}
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFlyout(false)
+                  navigate(l.to)
+                }}
+                className="block w-full px-5 py-2.5 text-left text-sm font-medium text-white underline underline-offset-2 hover:bg-white/10"
+              >
+                {l.label}
+              </button>
+            ))}
             <button
               type="button"
-              aria-haspopup="menu"
-              aria-expanded={flyout}
-              onClick={() => setFlyout((v) => !v)}
-              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/90 text-sm font-semibold text-royal shadow-card"
+              role="menuitem"
+              onClick={() => {
+                setFlyout(false)
+                setConfirmOut(true)
+              }}
+              className="block w-full px-5 py-2.5 text-left text-sm font-medium text-white underline underline-offset-2 hover:bg-white/10"
             >
-              {initials}
+              Log Out
             </button>
-            {flyout && (
-              <div
-                role="menu"
-                aria-label="Account"
-                className="absolute bottom-0 left-16 z-40 w-44 rounded-r-xl bg-royal-deep py-3 shadow-overlay"
-              >
-                {[
-                  { label: 'Settings', to: '/settings' },
-                  // Profile reads the account record; Settings edits it.
-                  { label: 'Profile', to: '/profile' },
-                ].map((l) => (
-                  <button
-                    key={l.label}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setFlyout(false)
-                      navigate(l.to)
-                    }}
-                    className="block w-full px-5 py-2.5 text-left text-sm font-medium text-white underline underline-offset-2 hover:bg-white/10"
-                  >
-                    {l.label}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setFlyout(false)
-                    setConfirmOut(true)
-                  }}
-                  className="block w-full px-5 py-2.5 text-left text-sm font-medium text-white underline underline-offset-2 hover:bg-white/10"
-                >
-                  Log Out
-                </button>
-              </div>
-            )}
-          </>
-        ) : (
-          <button
-            type="button"
-            title="Log out"
-            onClick={() => setConfirmOut(true)}
-            className="flex h-11 w-11 items-center justify-center rounded-xl hover:bg-white/15"
-          >
-            <LogOutIcon size={24} className="text-white" />
-          </button>
+          </div>
         )}
       </div>
 
