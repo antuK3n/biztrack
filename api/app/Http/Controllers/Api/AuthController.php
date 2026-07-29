@@ -154,6 +154,72 @@ class AuthController extends Controller
         ]);
     }
 
+    /**
+     * Update the signed-in user's own profile fields. Email changes are
+     * intentionally not supported here: the address is the login identifier
+     * and the prototype has no live re-verification flow.
+     */
+    public function updateProfile(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'first_name' => ['required', 'string', 'max:100'],
+            'middle_name' => ['nullable', 'string', 'max:100'],
+            'last_name' => ['required', 'string', 'max:100'],
+            'suffix' => ['nullable', 'string', 'max:20'],
+            'mobile_number' => ['required', 'string', 'max:20'],
+        ]);
+
+        $user = $request->user();
+        $user->fill([
+            'name' => trim("{$data['first_name']} {$data['last_name']}"),
+            'first_name' => $data['first_name'],
+            'middle_name' => $data['middle_name'] ?? $user->middle_name,
+            'last_name' => $data['last_name'],
+            'suffix' => $data['suffix'] ?? $user->suffix,
+            'mobile_number' => $data['mobile_number'],
+        ])->save();
+
+        Audit::log('user.profile_updated', $user);
+
+        return response()->json([
+            'data' => new UserResource($this->withRelations($user)),
+        ]);
+    }
+
+    /**
+     * Change the signed-in user's password. Requires the current password and
+     * revokes every other token so a hijacked session dies with the old
+     * credential; the token making this request stays valid.
+     */
+    public function updatePassword(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password' => ['required', 'confirmed', PasswordRule::min(8)],
+        ]);
+
+        $user = $request->user();
+
+        if (! Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Your current password is incorrect.'],
+            ]);
+        }
+
+        $user->forceFill(['password' => $data['password']])->save();
+
+        // Revoke all other sessions (keep the one performing the change).
+        $user->tokens()
+            ->where('id', '!=', $user->currentAccessToken()->id)
+            ->delete();
+
+        Audit::log('user.password_changed', $user);
+
+        return response()->json([
+            'message' => 'Password updated. Other signed-in devices have been logged out.',
+        ]);
+    }
+
     public function forgotPassword(Request $request): JsonResponse
     {
         $request->validate(['email' => ['required', 'email']]);

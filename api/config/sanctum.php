@@ -50,7 +50,9 @@ return [
     |
     */
 
-    'expiration' => null,
+    // 12-hour bearer-token lifetime (session-hijack hardening). The web client
+    // treats the resulting 401 as an expired session and returns to login.
+    'expiration' => 720,
 
     /*
     |--------------------------------------------------------------------------
