@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
 use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\BusinessController;
+use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\InspectionController;
 use App\Http\Controllers\Api\MessageController;
@@ -59,8 +60,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Per-office application forms (UI prototype Parts 4-7)
     Route::get('applications/{application}/office-forms', [OfficeFormController::class, 'index']);
-    Route::middleware('permission:application.create')
-        ->put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
+    // Write allowed for the owner (answers) OR a reviewing officer (issuance
+    // dates only) — which keys each may set is enforced in the controller.
+    Route::put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
 
     // Application create/edit + owner state changes (application.create)
     Route::middleware('permission:application.create')->group(function () {
@@ -72,12 +74,17 @@ Route::middleware('auth:sanctum')->group(function () {
     });
 
     // Documents
-    Route::middleware('permission:document.upload_own')
-        ->post('applications/{application}/documents', [DocumentController::class, 'store']);
+    Route::middleware('permission:document.upload_own')->group(function () {
+        Route::post('applications/{application}/documents', [DocumentController::class, 'store']);
+        // Take an attachment back off a draft (owner only, checked in controller).
+        Route::delete('applications/{application}/documents/{document}', [ApplicationController::class, 'destroyDocument']);
+    });
     Route::get('documents/{document}/download', [DocumentController::class, 'download']);
 
     // Messaging (per-application thread; participant check in controller)
     Route::middleware('permission:message.participate')->group(function () {
+        // Inbox for the dedicated Messages page: one row per conversation.
+        Route::get('message-threads', [MessageController::class, 'threads']);
         Route::get('applications/{application}/messages', [MessageController::class, 'index']);
         Route::post('applications/{application}/messages', [MessageController::class, 'store']);
         Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
@@ -111,8 +118,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
-        Route::post('applications/{application}/reject', [ApplicationController::class, 'reject']);
     });
+    /*
+     * Rejecting the whole application is not a per-office power. Each office
+     * reviews its own clearance and returns its own assignment; ending the
+     * application belongs to the issuing office (BPLO) and the super admin.
+     * Otherwise a market administrator could terminate a business permit that
+     * every other office had already cleared.
+     */
+    Route::middleware('permission:application.reject')
+        ->post('applications/{application}/reject', [ApplicationController::class, 'reject']);
     // OIC: (re)assign an officer to an assignment (oic.assign)
     Route::middleware('permission:oic.assign')
         ->post('assignments/{assignment}/assign', [AssignmentController::class, 'assign']);
@@ -130,6 +145,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('permits/{permit}', [PermitController::class, 'show']);
     // Permit certificate PDF (owner-of or permit.view_all, enforced in controller)
     Route::get('permits/{permit}/pdf', [PermitController::class, 'pdf']);
+
+    // Chatbot (rule-based assistant; self-scoped, one conversation per user)
+    Route::get('chatbot/messages', [ChatbotController::class, 'index']);
+    Route::post('chatbot/messages', [ChatbotController::class, 'store']);
 
     // Notifications (self-scoped)
     Route::get('notifications', [NotificationController::class, 'index']);

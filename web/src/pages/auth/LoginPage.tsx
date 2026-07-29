@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
 import { InfoCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
-import { api, toApiError } from '../../lib/api'
+import { SESSION_EXPIRED_KEY, api, loginPathFor, toApiError } from '../../lib/api'
+import type { Portal } from '../../lib/api'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
 import { useAuth } from '../../stores/auth'
@@ -15,17 +17,50 @@ interface FormErrors {
   password?: string
 }
 
-export function LoginPage() {
+/**
+ * One form, two doors. Business owners sign in at /login; LGU officers and the
+ * super admin sign in at /staff/login. The API enforces the split (a staff
+ * credential is rejected at the public door and vice versa), so this is not
+ * merely cosmetic — see AuthController::login.
+ */
+export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const navigate = useNavigate()
   const location = useLocation()
   const setSession = useAuth((s) => s.setSession)
+  const staff = portal === 'staff'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [errors, setErrors] = useState<FormErrors>({})
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
+  const [wrongPortal, setWrongPortal] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
+  const lastPath = useRef(location.pathname)
+
+  useEffect(() => {
+    if (sessionStorage.getItem(SESSION_EXPIRED_KEY) === '1') {
+      sessionStorage.removeItem(SESSION_EXPIRED_KEY)
+      setSessionExpired(true)
+    }
+  }, [])
+
+  /*
+   * /login and /staff/login are the same component, so React keeps its state
+   * when the user hops between them — including the alert that sent them. Both
+   * the wrong-portal warning and the session-expired notice belong to the page
+   * being left, so clear them on arrival. The typed credentials stay: the whole
+   * point of "Go there now." is that they were right, just at the wrong door.
+   */
+  useEffect(() => {
+    if (lastPath.current === location.pathname) return
+    lastPath.current = location.pathname
+    setFormError(null)
+    setWrongPortal(false)
+    setSessionExpired(false)
+    setErrors({})
+  }, [location.pathname])
 
   function validate(): FormErrors {
     return {
@@ -47,17 +82,28 @@ export function LoginPage() {
 
     setLoading(true)
     setFormError(null)
+    setSessionExpired(false)
+    setWrongPortal(false)
     try {
       const { data } = await api.post<{ data: { token: string; user: User } }>('/auth/login', {
         email: email.trim(),
         password,
+        portal,
       })
-      setSession(data.data.token, data.data.user)
+      setSession(data.data.token, data.data.user, portal)
       const from = (location.state as { from?: string } | null)?.from
       navigate(from ?? '/dashboard', { replace: true })
     } catch (error) {
       const apiError = toApiError(error)
-      if (apiError.status === 429) {
+      if (apiError.status === 409) {
+        // Right credentials, wrong door. Send them to the other one.
+        setFormError({
+          variant: 'warning',
+          title: 'Use the other sign-in page',
+          body: apiError.message,
+        })
+        setWrongPortal(true)
+      } else if (apiError.status === 429) {
         setFormError({
           variant: 'warning',
           title: 'Too many attempts',
@@ -84,32 +130,55 @@ export function LoginPage() {
 
   return (
     <AuthLayout
-      title="Sign in to BizTrack"
-      titleHidden
+      title={staff ? 'LGU staff sign-in' : 'Sign in to BizTrack'}
+      lede={staff ? 'For City of Malabon permit officers and administrators.' : undefined}
+      titleHidden={!staff}
       footer={
-        <>
-          Don't have an account?{' '}
-          <Link to="/register" className="font-bold text-royal hover:underline">
-            Sign Up.
-          </Link>
-        </>
+        staff ? (
+          <>
+            Are you a business owner?{' '}
+            <Link to="/login" className="font-bold text-royal hover:underline">
+              Sign in here.
+            </Link>
+          </>
+        ) : (
+          <>
+            Don't have an account?{' '}
+            <Link to="/register" className="font-bold text-royal hover:underline">
+              Sign Up.
+            </Link>
+          </>
+        )
       }
     >
       <form ref={formRef} onSubmit={handleSubmit} noValidate className="flex flex-col gap-5">
+        {sessionExpired && !formError && (
+          <Alert variant="warning" title="Your session has expired">
+            For your security, sessions end after 12 hours. Sign in again to continue.
+          </Alert>
+        )}
         {formError && (
           <Alert variant={formError.variant} title={formError.title}>
             {formError.body}
+            {wrongPortal && (
+              <>
+                {' '}
+                <Link to={loginPathFor(staff ? 'public' : 'staff')} className="font-bold text-royal hover:underline">
+                  Go there now.
+                </Link>
+              </>
+            )}
           </Alert>
         )}
 
         <div>
-          <FieldLabel>Email or number</FieldLabel>
+          <FieldLabel>{staff ? 'Work email' : 'Email or number'}</FieldLabel>
           <input
             type="email"
             name="email"
             autoComplete="email"
             inputMode="email"
-            placeholder="Email or number"
+            placeholder={staff ? 'Work email' : 'Email or number'}
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)
@@ -129,19 +198,17 @@ export function LoginPage() {
 
         <div>
           <FieldLabel>Password</FieldLabel>
-          <input
-            type="password"
+          <PasswordInput
             name="password"
             autoComplete="current-password"
             placeholder="Password"
             value={password}
-            onChange={(e) => {
-              setPassword(e.target.value)
-              if (errors.password && e.target.value) setErrors((prev) => ({ ...prev, password: undefined }))
+            onChange={(v) => {
+              setPassword(v)
+              if (errors.password && v) setErrors((prev) => ({ ...prev, password: undefined }))
             }}
-            aria-invalid={errors.password ? true : undefined}
-            aria-describedby={errors.password ? 'login-password-error' : undefined}
-            className={inputCls}
+            invalid={!!errors.password}
+            describedBy={errors.password ? 'login-password-error' : undefined}
           />
           {errors.password && (
             <p id="login-password-error" className="mt-1.5 text-sm font-medium text-s-red">

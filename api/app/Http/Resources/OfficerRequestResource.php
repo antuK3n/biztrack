@@ -37,9 +37,25 @@ class OfficerRequestResource extends JsonResource
                     ? $this->application->business->name
                     : null,
             ] : null,
-            // Applicant response (paper: applicant_response; legacy: response_body).
+            // Latest applicant response (paper: applicant_response; legacy: response_body).
+            // Kept for mobile/contract clients; `responses` is the full thread.
             'applicant_response' => $this->applicant_response,
             'response_body' => $this->applicant_response,
+            // Every applicant reply, oldest first.
+            'responses' => $this->relationLoaded('responses')
+                ? $this->responses->map(fn ($r) => [
+                    'id' => $r->id,
+                    'body' => $r->body,
+                    'author' => [
+                        'name' => $r->relationLoaded('author') && $r->author ? $r->author->name : null,
+                    ],
+                    'document' => $r->application_document_id ? [
+                        'id' => $r->application_document_id,
+                        'filename' => $r->file_name,
+                    ] : null,
+                    'created_at' => optional($r->created_at)->toISOString(),
+                ])->all()
+                : [],
             // Meeting fields (officer-provided; calendar integration is future work).
             'meeting_scheduled_at' => optional($this->meeting_scheduled_at)->toISOString(),
             'meeting_duration_minutes' => $this->meeting_duration_minutes,

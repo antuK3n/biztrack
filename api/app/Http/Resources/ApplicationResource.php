@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Arr;
 
 /** Full application resource (single-record view). */
 class ApplicationResource extends JsonResource
@@ -14,6 +15,10 @@ class ApplicationResource extends JsonResource
             'id' => $this->id,
             'tracking_id' => $this->tracking_id,
             'application_type' => $this->application_type?->value,
+            // The applicant's own label for the filing; null means "use the
+            // business name", which every reader does.
+            'title' => $this->title,
+            'payment_mode' => $this->payment_mode,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'business' => $this->whenLoaded('business', fn () => new BusinessResource($this->business)),
@@ -31,8 +36,17 @@ class ApplicationResource extends JsonResource
             'documents' => $this->relationLoaded('documents')
                 ? DocumentResource::collection($this->documents)
                 : [],
+            'fee_profile' => $this->fee_profile,
+            'office_forms' => $this->relationLoaded('officeForms')
+                ? $this->officeForms->map(fn ($form) => [
+                    'permit_type_code' => $form->permitType?->code,
+                    'permit_type_name' => $form->permitType?->name,
+                    'department_code' => $form->permitType?->department?->code,
+                    'form_data' => $form->form_data,
+                ])->values()
+                : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
-                'line_items' => $this->feeAssessment->line_items,
+                'line_items' => $this->feeLineItems($request),
                 'total_amount' => $this->feeAssessment->total_amount,
             ] : null,
             'payments' => $this->relationLoaded('payments')
@@ -49,5 +63,27 @@ class ApplicationResource extends JsonResource
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];
+    }
+
+    /**
+     * Fee lines, with the revenue-code citations stripped for applicants.
+     *
+     * Officers need `Sec. 3A.02 · A10-2016` to defend an assessment; an
+     * applicant reading their bill does not, and the LGU asked that ordinance
+     * sections not be surfaced to the public. The UI already hides them, but
+     * leaving them in the payload just moves the leak to the network tab.
+     */
+    private function feeLineItems(Request $request): array
+    {
+        $items = $this->feeAssessment->line_items ?? [];
+
+        if ($request->user()?->hasPermission('application.review')) {
+            return $items;
+        }
+
+        return array_map(
+            fn ($item) => is_array($item) ? Arr::except($item, ['section', 'source']) : $item,
+            $items,
+        );
     }
 }

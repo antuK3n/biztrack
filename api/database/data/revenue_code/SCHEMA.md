@@ -40,12 +40,12 @@ the extract's Appendix A treatment.
 
 | Field | Values / meaning |
 |---|---|
-| `code` | Unique dotted id: `{group-prefix}.{slug}`. Prefixes: `biztax`, `permit` (mayor's permit), `sanitary`, `garbage`, `env`, `occupancy`, `fire`, `market`, `admin`, `ctc`. |
+| `code` | Unique dotted id: `{group-prefix}.{slug}`. Prefixes: `biztax`, `permit` (mayor's permit), `sanitary`, `garbage`, `env`, `occupancy`, `fire`, `market`, `admin`, `ctc`, `zoning`. |
 | `section` | Ordinance citation as printed (`Sec. 3W.02`), or the national citation when `source` is not the ordinance. |
 | `source` | `A10-2016` (the ordinance), `RA 9514` (Fire Code, FSIC 10% line), `DO 155` (DPWH reference figures), `RA 9178` (BMBE exemption), `RA 7160` (LGC). |
-| `office` | `BPLO`, `CHO`, `BFP`, `OBO`, `CENRO`, `CMO-MARKET`, `CTO` (Treasurer: business tax, CTC). |
-| `group` | `business_tax`, `mayors_permit`, `regulatory`, `service`, `admin`, `ctc`, `fire_code`, `city_charge`, `penalty`, `exemption_claim`. FSIC computes as 10% of `mayors_permit` + `regulatory` lines, so group assignment is load-bearing. |
-| `permit_types` | Which requested permit types make the rule a candidate (`BUSINESS`, `SANITARY`, `FSIC`, `OCCUPANCY`, `CEC`, `MARKET`). |
+| `office` | `BPLO`, `CHO`, `BFP`, `OBO`, `CENRO`, `CMO-MARKET`, `CTO` (Treasurer: business tax, CTC), `CPDO` (Planning: zoning/locational clearance). |
+| `group` | `business_tax`, `mayors_permit`, `regulatory`, `service`, `admin`, `ctc`, `fire_code`, `city_charge`, `penalty`, `exemption_claim`, `zoning`. FSIC computes as 10% of `mayors_permit` + `regulatory` lines, so group assignment is load-bearing: `zoning` is deliberately outside that base, since RA 9514 Sec. 12(b) pegs the FSIC to building and business/mayor's permit fees and a locational clearance is neither. |
+| `permit_types` | Which requested permit types make the rule a candidate (`BUSINESS`, `SANITARY`, `FSIC`, `OCCUPANCY`, `CEC`, `MARKET`, `ZONING`). |
 | `conditions` | All must hold. Keys map to fee-profile facts (below). Omitted/null keys don't constrain. `business_category` and `flags` are any-of lists. |
 | `basis` | What the computation consumes: `gross_sales`, `capitalization`, `floor_area_sqm`, `employees`, `units` (with `unit_key` naming the profile field), `construction_cost`, `stall_count`, `fixed`, `regulatory_subtotal` (FSIC only). |
 | `computation.type` | `fixed`, `percentage`, `per_unit`, `brackets`, `brackets_excess`. |

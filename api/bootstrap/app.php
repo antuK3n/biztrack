@@ -17,6 +17,15 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'permission' => \App\Http\Middleware\EnsurePermission::class,
         ]);
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+        /*
+         * API-only app: there is no named 'login' route to bounce a guest to.
+         * Returning null makes Authenticate throw AuthenticationException, which
+         * the JSON renderer below turns into a clean 401. Without this, any
+         * unauthenticated request that doesn't send Accept: application/json
+         * (a tester pasting a URL into the address bar) got a 500.
+         */
+        $middleware->redirectGuestsTo(fn () => null);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

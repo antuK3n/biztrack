@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthLayout } from '../../components/AuthLayout'
 import { Alert } from '../../components/ui/Alert'
+import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
 import { api, toApiError } from '../../lib/api'
 import type { User } from '../../lib/types'
@@ -163,7 +164,8 @@ export function RegisterPage() {
         password_confirmation: values.password_confirmation,
         data_privacy_consent: values.data_privacy_consent,
       })
-      setSession(data.data.token, data.data.user)
+      // Self-registration is always a business owner, so always the public portal.
+      setSession(data.data.token, data.data.user, 'public')
       navigate('/dashboard', { replace: true })
     } catch (error) {
       const apiError = toApiError(error)
@@ -298,29 +300,25 @@ export function RegisterPage() {
           </Field>
 
           <Field label="Password" required error={errors.password} errorId="reg-password-error">
-            <input
-              type="password"
-              autoComplete="new-password"
+            <PasswordInput
+              name="password"
               placeholder="Password"
               value={values.password}
-              onChange={(e) => setValue('password', e.target.value)}
+              onChange={(v) => setValue('password', v)}
               onBlur={() => blurValidate('password')}
-              aria-invalid={errors.password ? true : undefined}
-              aria-describedby={errors.password ? 'reg-password-error' : undefined}
-              className={inputCls}
+              invalid={!!errors.password}
+              describedBy={errors.password ? 'reg-password-error' : undefined}
             />
           </Field>
           <Field label="Confirm Password" required error={errors.password_confirmation} errorId="reg-confirm-error">
-            <input
-              type="password"
-              autoComplete="new-password"
+            <PasswordInput
+              name="password_confirmation"
               placeholder="Re-enter Password"
               value={values.password_confirmation}
-              onChange={(e) => setValue('password_confirmation', e.target.value)}
+              onChange={(v) => setValue('password_confirmation', v)}
               onBlur={() => blurValidate('password_confirmation')}
-              aria-invalid={errors.password_confirmation ? true : undefined}
-              aria-describedby={errors.password_confirmation ? 'reg-confirm-error' : undefined}
-              className={inputCls}
+              invalid={!!errors.password_confirmation}
+              describedBy={errors.password_confirmation ? 'reg-confirm-error' : undefined}
             />
           </Field>
         </div>

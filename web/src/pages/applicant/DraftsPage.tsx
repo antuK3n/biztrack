@@ -104,7 +104,9 @@ export function DraftsPage() {
             <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {visible.map((d) => {
                 const Icon = TYPE_ICON[d.application_type] ?? FilePlusIcon
-                const name = d.business.name || 'My Application'
+                // The applicant's own title wins; a draft they never renamed
+                // keeps showing the business it is for.
+                const name = d.title?.trim() || d.business.name || 'My Application'
                 return (
                   <li key={d.id}>
                     <Link

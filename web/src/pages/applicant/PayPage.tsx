@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeftIcon, CheckCircleFilledIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoCard, StatusCard } from '../../components/ui/Proto'
 import { formatDateTime, formatMoney, paymentMethodLabel } from '../../lib/format'
@@ -134,18 +135,9 @@ export function PayPage() {
           <span>Description</span>
           <span>Charge</span>
         </div>
-        <ul className="mt-3 min-h-24 space-y-2.5">
-          {assessment ? (
-            assessment.line_items.map((li, i) => (
-              <li key={i} className="flex items-baseline justify-between text-base text-ink">
-                <span>{li.label}</span>
-                <span className="tnum">{formatMoney(li.amount)}</span>
-              </li>
-            ))
-          ) : (
-            <li className="text-sm text-ink-muted">No fees assessed yet.</li>
-          )}
-        </ul>
+        <div className="mt-3">
+          <TaxOrderBreakdown fee={assessment} />
+        </div>
         <div className="display-serif mt-6 flex items-baseline justify-between border-t border-ink/40 pt-4 text-2xl text-ink">
           <span>Total Amount:</span>
           <span className="tnum">{formatMoney(assessment?.total_amount)}</span>
