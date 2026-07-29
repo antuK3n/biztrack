@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
 use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\BusinessController;
+use App\Http\Controllers\Api\ChatbotController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\InspectionController;
 use App\Http\Controllers\Api\MessageController;
@@ -130,6 +131,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('permits/{permit}', [PermitController::class, 'show']);
     // Permit certificate PDF (owner-of or permit.view_all, enforced in controller)
     Route::get('permits/{permit}/pdf', [PermitController::class, 'pdf']);
+
+    // Chatbot (rule-based assistant; self-scoped, one conversation per user)
+    Route::get('chatbot/messages', [ChatbotController::class, 'index']);
+    Route::post('chatbot/messages', [ChatbotController::class, 'store']);
 
     // Notifications (self-scoped)
     Route::get('notifications', [NotificationController::class, 'index']);
