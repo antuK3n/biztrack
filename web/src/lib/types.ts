@@ -493,6 +493,31 @@ export interface Computed<T> {
   meta: AnalyticsProvenance
 }
 
+/** One dataset variant's outcome from a manual refresh. */
+export interface AnalyticsRefreshRow {
+  key: string
+  dataset: string
+  ok: boolean
+  rows: number
+  duration_ms: number
+  error: string | null
+}
+
+/**
+ * What a manual refresh actually did.
+ *
+ * `failed` can be non-zero on a 200: R may recompute some datasets and fail
+ * others, leaving the screens showing a mix of fresh and stale figures. The
+ * caller has to report that rather than treat any 200 as a clean refresh.
+ */
+export interface AnalyticsRefreshResult {
+  message: string
+  refreshed: number
+  failed: number
+  engine_version: string | null
+  results: AnalyticsRefreshRow[]
+}
+
 /** An office with reviews on record but no week that cleared the minimum. */
 export interface ThinDepartment {
   code: string

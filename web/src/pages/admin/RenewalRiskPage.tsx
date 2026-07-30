@@ -287,7 +287,7 @@ export function RenewalRiskPage() {
 
       <AnalyticsTabs />
 
-      {meta && <ComputedAt meta={meta} />}
+      {meta && <ComputedAt meta={meta} onRefreshed={reload} />}
 
       {downloadError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
