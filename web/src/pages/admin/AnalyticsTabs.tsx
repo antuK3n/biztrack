@@ -12,6 +12,9 @@ import { NavLink } from 'react-router-dom'
 const TABS = [
   { to: '/analytics', label: 'Overview', end: true },
   { to: '/analytics/renewal-risk', label: 'Renewal Risk', end: false },
+  // The paper's §4 is "Business Growth Analysis". Mockup 122 retitles it
+  // "Business Lifecycle Monitoring", but the paper is what gets presented and
+  // questioned, so the paper wins on naming (docs/r-integration-spec.md §4).
   { to: '/analytics/business-growth', label: 'Business Growth', end: false },
   { to: '/analytics/processing-time', label: 'Processing Time', end: false },
 ]

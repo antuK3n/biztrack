@@ -17,6 +17,8 @@ namespace App\Support;
  */
 final class AnalyticsDatasets
 {
+    public const DASHBOARD = 'dashboard';
+
     public const PROCESSING_TIME = 'processing_time';
 
     public const RENEWAL_RISK = 'renewal_risk';
@@ -35,6 +37,18 @@ final class AnalyticsDatasets
     public static function all(): array
     {
         return [
+            self::DASHBOARD => [
+                'label' => 'Analytics Dashboard',
+                'endpoint' => DashboardAnalytics::R_ENDPOINT,
+                'dataset' => static fn (array $p): array => DashboardAnalytics::dataset(
+                    $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                ),
+                'local' => static fn (array $p): array => DashboardAnalytics::build(
+                    $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                ),
+                'defaults' => ['months' => DashboardAnalytics::DEFAULT_WINDOW_MONTHS],
+            ],
+
             self::PROCESSING_TIME => [
                 'label' => 'Permit Processing Time Monitoring',
                 'endpoint' => ProcessingTimeAnalytics::R_ENDPOINT,
@@ -66,12 +80,10 @@ final class AnalyticsDatasets
 
             self::BUSINESS_GROWTH => [
                 'label' => 'Business Lifecycle Monitoring',
-                // No R endpoint yet: the cohort-survival measure needs R's
-                // `survival` package and the rest of this screen is SQL
-                // aggregation R adds nothing to. Until it lands the screen is
-                // served locally and labelled as such.
-                'endpoint' => null,
-                'dataset' => static fn (array $p): array => [],
+                'endpoint' => BusinessGrowthAnalytics::R_ENDPOINT,
+                'dataset' => static fn (array $p): array => BusinessGrowthAnalytics::dataset(
+                    $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
+                ),
                 'local' => static fn (array $p): array => BusinessGrowthAnalytics::build(
                     $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
                 ),

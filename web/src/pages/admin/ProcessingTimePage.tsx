@@ -371,19 +371,6 @@ export function ProcessingTimePage() {
             </section>
           </div>
 
-          {data.thin.length > 0 && (
-            <p className="mt-5 text-sm text-ink-muted">
-              Not charted yet:{' '}
-              {data.thin
-                .map(
-                  (row) =>
-                    `${row.code} (${row.completed_reviews} review${row.completed_reviews === 1 ? '' : 's'})`,
-                )
-                .join(', ')}
-              . A week needs at least {data.min_completions_per_week} completed reviews before its average
-              is trustworthy.
-            </p>
-          )}
         </>
       ) : (
         <EmptyState

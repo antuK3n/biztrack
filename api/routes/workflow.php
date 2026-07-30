@@ -169,6 +169,14 @@ Route::middleware('auth:sanctum')->group(function () {
          * every office's assignments — an office reviewer reading these would
          * see round the scoping in ApplicationVisibility.
          */
+        /*
+         * The Analytics Dashboard (spec §1). Same permission and the same reason:
+         * these panels count every office's filings, decisions, inspections and
+         * permits, and the barangay and line-of-business rankings amount to a
+         * register-wide summary.
+         */
+        Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
+        Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
         Route::get('analytics/processing-time', [AnalyticsController::class, 'processingTime']);
         Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);

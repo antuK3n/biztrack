@@ -13,6 +13,7 @@ use App\Models\Permit;
 use App\Support\AnalyticsDatasets;
 use App\Support\AnalyticsResolver;
 use App\Support\BusinessGrowthAnalytics;
+use App\Support\DashboardAnalytics;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
 use App\Support\RenewalRiskAnalytics;
@@ -57,6 +58,33 @@ class AnalyticsController extends Controller
     public function summary(): JsonResponse
     {
         return response()->json(['data' => $this->buildSummary()]);
+    }
+
+    /**
+     * Screen 1: the Analytics Dashboard panels (spec §1).
+     *
+     * Every panel arrives on one payload deliberately. They share a clock — the
+     * KPI cards, the volume table and the outcome table all have to reconcile to
+     * the same month — and splitting them across endpoints would let a screen
+     * render two different refreshes side by side and quietly fail to add up.
+     */
+    public function dashboard(Request $request): JsonResponse
+    {
+        return $this->serve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+    }
+
+    /** Printable Analytics Dashboard report. */
+    public function dashboardReport(Request $request): Response
+    {
+        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+
+        $pdf = Pdf::loadView('pdf.analytics-dashboard-report', [
+            'report' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
+        ])->setPaper('a4');
+
+        return PdfFile::render($pdf)->download('analytics-dashboard.pdf');
     }
 
     /** Feature 7: per-department control charts over weekly review turnaround. */
@@ -194,6 +222,14 @@ class AnalyticsController extends Controller
         $weeks = (int) $request->query('weeks', (string) ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS);
 
         return max(Spc::MIN_COMPLETIONS_PER_WEEK, min(104, $weeks));
+    }
+
+    /** Dashboard trailing window in months, clamped so a stray query cannot scan. */
+    private function windowMonths(Request $request): int
+    {
+        $months = (int) $request->query('months', (string) DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
+
+        return max(1, min(36, $months));
     }
 
     /** Growth period in months, clamped to a sane range. */
