@@ -1,7 +1,21 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import type { ReactNode } from 'react'
-import { BellIcon, ChevronRightIcon } from '../components/icons'
+import type { ComponentType, ReactNode, SVGProps } from 'react'
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  BellIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  ClipboardIcon,
+  ClockIcon,
+  EyeIcon,
+  FileTextIcon,
+  MailIcon,
+  PaymentsIcon,
+  ShieldCheckIcon,
+  XCircleIcon,
+} from '../components/icons'
 import { PageTitle } from '../components/ui/Proto'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { formatDateTime } from '../lib/format'
@@ -10,17 +24,104 @@ import { useAsync } from '../lib/useAsync'
 import type { Notification, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 
-/** Blue avatar circle with a white person glyph, per the prototype rows (PDF p19). */
-function AvatarCircle() {
+/*
+ * Every row used to carry the same person-avatar glyph, which told the reader
+ * nothing: a permit about to lapse looked exactly like a new message. The
+ * mockup (`updated-gui/120.png`) gives each kind of news its own icon and
+ * colour, so a list can be triaged at a glance instead of read line by line.
+ *
+ * Colour never carries the meaning on its own (PRODUCT.md, WCAG 2.1 AA): each
+ * tone has a distinct glyph shape and the title says in words what happened.
+ */
+
+type Tone = 'warning' | 'pending' | 'success' | 'info'
+
+/** Tinted disc, ring, and glyph per tone — all from the tokens in index.css. */
+const TONES: Record<Tone, string> = {
+  warning: 'bg-red-50 ring-red-200 text-red-600',
+  pending: 'bg-amber-50 ring-amber-200 text-amber-800',
+  success: 'bg-green-50 ring-green-200 text-green-700',
+  info: 'bg-blue-50 ring-blue-100 text-royal',
+}
+
+type Glyph = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
+
+/**
+ * The status label a status-change notification is about.
+ *
+ * NotificationService writes the body as `{tracking} is now “{Label}”.`, so the
+ * stage is in there — it just is not a field. Reading it back is a coupling to
+ * that copy, and a deliberate one: the alternative is re-typing ten thousand
+ * existing rows on a database with live testers in it. If the copy ever drifts,
+ * the match fails and the row falls back to the neutral "update" styling, which
+ * is the same thing every row looked like before this change.
+ */
+function statusLabelIn(body: string): string | null {
+  return /is now [“"]([^”"]+)[”"]/.exec(body)?.[1] ?? null
+}
+
+/** Which icon and colour a notification gets, and why. */
+function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
+  // Renewal reminders and lapse notices (r-integration-spec.md §3).
+  if (n.type === 'expiry') {
+    return { tone: 'warning', Glyph: AlertTriangleIcon }
+  }
+
+  if (n.type === 'decision') {
+    return /reject/i.test(n.title)
+      ? { tone: 'warning', Glyph: XCircleIcon }
+      : { tone: 'success', Glyph: CheckCircleIcon }
+  }
+
+  if (n.type === 'issuance') {
+    return { tone: 'success', Glyph: ShieldCheckIcon }
+  }
+
+  if (n.type === 'status_change') {
+    switch (statusLabelIn(n.body)) {
+      case 'Approved':
+        return { tone: 'success', Glyph: CheckCircleIcon }
+      case 'Rejected':
+      case 'Cancelled':
+        return { tone: 'warning', Glyph: XCircleIcon }
+      case 'Returned for revision':
+        // Waiting on the applicant, not on the office — worth flagging.
+        return { tone: 'pending', Glyph: AlertCircleIcon }
+      case 'For inspection':
+        return { tone: 'pending', Glyph: ClockIcon }
+      case 'Awaiting payment':
+        return { tone: 'pending', Glyph: PaymentsIcon }
+      case 'Under review':
+        return { tone: 'pending', Glyph: EyeIcon }
+      default:
+        // Submitted, Draft, and anything the copy stops matching.
+        return { tone: 'info', Glyph: FileTextIcon }
+    }
+  }
+
+  // An officer is asking the applicant for something: their move.
+  if (n.type === 'request') {
+    return { tone: 'pending', Glyph: ClipboardIcon }
+  }
+  if (n.type === 'fee') {
+    return { tone: 'pending', Glyph: PaymentsIcon }
+  }
+  if (n.type === 'message') {
+    return { tone: 'info', Glyph: MailIcon }
+  }
+
+  return { tone: 'info', Glyph: BellIcon }
+}
+
+function NotificationIcon({ notification }: { notification: Notification }) {
+  const { tone, Glyph } = appearanceOf(notification)
+
   return (
     <span
       aria-hidden="true"
-      className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7796c5]"
+      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${TONES[tone]}`}
     >
-      <svg viewBox="0 0 24 24" className="mt-2 h-9 w-9 fill-white">
-        <circle cx="12" cy="8" r="4" />
-        <path d="M12 13.5c-4.4 0-7 2.6-7 6.5h14c0-3.9-2.6-6.5-7-6.5Z" />
-      </svg>
+      <Glyph size={22} />
     </span>
   )
 }
@@ -110,7 +211,7 @@ export function NotificationsPage() {
           {items.map((n) => {
             const row: ReactNode = (
               <div className="flex items-center gap-4 px-5 py-4">
-                <AvatarCircle />
+                <NotificationIcon notification={n} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-bold text-ink">
                     {n.title}

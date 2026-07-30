@@ -33,6 +33,16 @@ export function AlertCircleIcon(props: IconProps) {
   )
 }
 
+export function AlertTriangleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M10.6 4.4 2.9 17.6A1.6 1.6 0 0 0 4.3 20h15.4a1.6 1.6 0 0 0 1.4-2.4L13.4 4.4a1.6 1.6 0 0 0-2.8 0Z" />
+      <line x1="12" y1="9.5" x2="12" y2="13.5" />
+      <circle cx="12" cy="16.6" r="0.5" fill="currentColor" stroke="none" />
+    </Icon>
+  )
+}
+
 export function CheckCircleIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -354,6 +364,17 @@ export function BuildingIcon(props: IconProps) {
       <path d="M5 20.5V5A1.5 1.5 0 0 1 6.5 3.5h6A1.5 1.5 0 0 1 14 5v15.5" />
       <path d="M14 9.5h3.5A1.5 1.5 0 0 1 19 11v9.5" />
       <path d="M3.5 20.5h17M8 7h3M8 10.5h3M8 14h3" />
+    </Icon>
+  )
+}
+
+/** A filed document: the "application received" glyph in the notification list. */
+export function FileTextIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5l-5-5Z" />
+      <path d="M13.5 3.5v5h5" />
+      <path d="M8.5 12.5h7M8.5 16h4.5" />
     </Icon>
   )
 }

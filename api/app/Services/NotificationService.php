@@ -182,20 +182,38 @@ class NotificationService
     }
 
     // --- Permit expiry (scheduler) -------------------------------------------
-    public function permitExpiring(Permit $permit, int $days): void
+    /**
+     * Renewal reminder at one of the 30 / 15 / 7 / 1-day thresholds.
+     *
+     * The title is the mockup's (`updated-gui/120.png`) and the body is the
+     * client paper's wording verbatim, because this is the one string in the
+     * system the paper actually dictates.
+     *
+     * `$threshold` is the reminder bucket that fired; `$daysLeft` is the real
+     * number of days remaining, which can be smaller — a permit first seen with
+     * 22 days left fires the 30-day bucket. The copy quotes the bucket, matching
+     * both the paper and the ledger row, and the "expires on" date carries the
+     * exact fact so nothing has to be inferred from a rounded number.
+     */
+    public function permitExpiring(Permit $permit, int $threshold, ?int $daysLeft = null): void
     {
         $owner = $this->permitOwner($permit);
         if (! $owner) {
             return;
         }
+        $unit = $threshold === 1 ? 'day' : 'days';
+        $expiresOn = $permit->valid_until->format('j M Y');   // cast to a date on the model
+
         $this->push(
             $owner,
             'expiry',
-            'Permit expiring soon',
-            "Permit {$permit->permit_number} expires in {$days} day(s). Renew to stay compliant.",
+            "Business Permit expiring in {$threshold} {$unit}",
+            "Reminder: Your business permit will expire in {$threshold} {$unit}. Please renew your "
+                ."permit before the expiration date to avoid penalties. Permit {$permit->permit_number} "
+                ."expires on {$expiresOn}.",
             '/permits',
         );
-        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in {$days} day(s).");
+        $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).');
     }
 
     public function permitExpired(Permit $permit): void
