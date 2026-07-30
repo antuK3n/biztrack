@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ChevronDownIcon } from '../icons'
 
@@ -32,18 +32,95 @@ export function ProtoModal({
   const headerBg = tone === 'red' ? 'bg-s-red' : tone === 'green' ? 'bg-s-green' : 'bg-royal'
   const cancelBg = tone === 'red' ? 'bg-modal-cancel-red' : 'bg-modal-cancel'
   const confirmBg = tone === 'red' ? 'bg-modal-confirm-red' : 'bg-modal-confirm'
+  const titleId = useId()
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const cancelRef = useRef<HTMLButtonElement | null>(null)
+
+  /*
+   * Keyboard operability (WCAG 2.1 AA — 2.1.2 No Keyboard Trap, 2.4.3 Focus
+   * Order). Without this the dialog opens and focus stays on the button behind
+   * the overlay, so a keyboard or screen-reader user tabs around a page they can
+   * no longer see. Three things it fixes:
+   *
+   *  - focus moves into the dialog on open, and back to whatever opened it on
+   *    close, so the reading position is never lost;
+   *  - Escape dismisses, matching every other dialog the user has ever met;
+   *  - Tab cycles inside the dialog instead of walking out into the dead page.
+   */
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    // Captured now, not read in the cleanup: by teardown the ref has already
+    // been nulled, so `panelRef.current` there would always be null and focus
+    // would never come back.
+    const panel = panelRef.current
+    cancelRef.current?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onCancel()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = panel?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )
+      if (!focusable || focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+
+      if (event.shiftKey && (active === first || !panel?.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      // Only pull focus back if it is still inside the dialog being torn down;
+      // a confirm that navigates has already put focus somewhere deliberate.
+      if (panel?.contains(document.activeElement)) opener?.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  /*
+   * `z-[2000] transform-gpu` rather than `z-50`, for two separate reasons that
+   * both showed up as the Leaflet map on the zoning step painting straight
+   * through this dialog:
+   *
+   *  - Leaflet's own stylesheet puts its panes and controls at z-index 200–1000,
+   *    and `.leaflet-container` sets no z-index of its own, so those panes
+   *    compete in the root stacking context and beat a z-50 overlay.
+   *  - Its tile pane is 3D-transformed, which promotes it to a compositor layer.
+   *    A layer is ordered by the compositor, not by paint order, so it drew over
+   *    an overlay that had no layer of its own — hit-testing said the dialog was
+   *    on top while the pixels said otherwise. `transform-gpu` gives the overlay
+   *    its own layer so both agree.
+   */
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} overflow-hidden rounded-md bg-white shadow-overlay`}>
-        <div className={`${headerBg} px-5 py-3 text-base font-bold tracking-wide text-white`}>{title}</div>
+    <div className="fixed inset-0 z-[2000] flex transform-gpu items-center justify-center bg-black/40 p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`w-full ${wide ? 'max-w-2xl' : 'max-w-lg'} overflow-hidden rounded-md bg-white shadow-overlay`}
+      >
+        <h2 id={titleId} className={`${headerBg} px-5 py-3 text-base font-bold tracking-wide text-white`}>
+          {title}
+        </h2>
         <div className="max-h-[70vh] overflow-y-auto px-7 py-7 text-ink">{children}</div>
         <div className="grid grid-cols-2">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
             className={`${cancelBg} py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95`}
