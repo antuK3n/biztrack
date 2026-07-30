@@ -29,6 +29,11 @@ import {
   type OfficeFormData,
 } from './OfficeFormStep'
 import {
+  LocationInsightsPanel,
+  useLocationInsights,
+  type LocationInsightsQuery,
+} from './LocationInsightsPanel'
+import {
   EMPTY_FEE_PROFILE,
   FeeProfileStep,
   buildFeeProfile,
@@ -759,6 +764,38 @@ export function ApplyWizard() {
   const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
 
   /*
+   * The line of business the applicant declared, when they have one. The zoning
+   * step is Part 1 and the Line of Business step comes later, so on a new filing
+   * this is usually undefined until they come back to the map — renewals and
+   * amendments have it from the start because the prior filing is prefilled.
+   */
+  const declaredLine = psic.find((c) => c.id === form.lines[0]?.psic_code_id)
+
+  /*
+   * What the zoning modal says the verdict is ABOUT. The mockup underlines the
+   * line of business ("The new business for Cafe"), which is what a zoning
+   * decision actually turns on — a use, not a trade name. The business name is
+   * the fallback, and on a fresh filing neither exists yet at Part 1, so the
+   * sentence still has to read as English with no subject at all.
+   *
+   * PSIC titles carry the colloquial name in brackets, and that is the half a
+   * shop owner recognises: "sari-sari store", not "Retail sale in
+   * non-specialized stores (sari-sari store)". Prefer the bracketed name so the
+   * sentence reads like the mockup's "Cafe" instead of a statistical class.
+   */
+  const zoningSubject: string | null =
+    declaredLine?.title.match(/\(([^)]+)\)\s*$/)?.[1] ?? declaredLine?.title ?? (form.name || null)
+
+  /*
+   * Frozen when the modal opens rather than tracked live off the pin: the point
+   * being reported has to be the point the applicant was told about, and moving
+   * the pin behind an open modal would silently change the figures underneath
+   * the numbers they are reading. Nulled on close so reopening refetches.
+   */
+  const [insightsQuery, setInsightsQuery] = useState<LocationInsightsQuery | null>(null)
+  const insights = useLocationInsights(insightsQuery)
+
+  /*
    * Codes of the selected inspection-office permits that have a prototype form,
    * in the canonical office order (SANITARY, CEC, FSIC, OCCUPANCY). Each gets
    * its own step, and all of them show in the map the moment they are picked.
@@ -1149,12 +1186,27 @@ export function ApplyWizard() {
 
   async function next() {
     if (stepMissing.length > 0) return
-    // Zoning result (p30) — presentational congratulations before leaving the map step.
+    // Zoning result (p30) — the conformity message plus Location Insights (§5).
     if (phase === 'address') {
+      // stepMissing already guarantees a pin, so the coordinates are present.
+      if (form.latitude !== null && form.longitude !== null) {
+        setInsightsQuery({
+          latitude: form.latitude,
+          longitude: form.longitude,
+          psicCodeId: form.lines[0]?.psic_code_id ?? null,
+          businessId,
+        })
+      }
       setShowZoning(true)
       return
     }
     await advance()
+  }
+
+  /** Both modal exits go through here so the frozen query never outlives the modal. */
+  function closeZoning() {
+    setShowZoning(false)
+    setInsightsQuery(null)
   }
 
   function back() {
@@ -2740,11 +2792,13 @@ export function ApplyWizard() {
             title="SORRY."
             tone="red"
             cancelLabel="Back"
-            onCancel={() => setShowZoning(false)}
+            onCancel={closeZoning}
           >
             <p className="text-base leading-relaxed">
               The declared use for{' '}
-              <span className="font-bold underline underline-offset-2">{form.name || 'your business'}</span>{' '}
+              <span className="font-bold underline underline-offset-2">
+                {zoningSubject ?? 'your new business'}
+              </span>{' '}
               appears non-conforming for{' '}
               <span className="font-bold uppercase underline underline-offset-2">
                 {barangayName ?? 'Area Location'}
@@ -2755,31 +2809,59 @@ export function ApplyWizard() {
         ) : (
           <ProtoModal
             /*
-             * Not "CONGRATULATIONS": nothing has been approved here. The system
-             * records the pin, CPDO rules on conformance later. Announcing a
-             * result we have not determined is how an applicant ends up
-             * believing their zoning passed.
+             * The mockup's wording (spec §5, screens 124/125). An earlier build
+             * said "Location recorded" instead, on the grounds that the system
+             * holds no zone polygons and therefore determines nothing — the
+             * client's paper overruled that, so the headline is restored.
+             *
+             * The one line kept from the cautious version is CPDO's final say.
+             * The applicant is told the use is conforming AND told who actually
+             * decides, which is the part that stops "CONGRATULATIONS!" reading
+             * as an issued clearance.
              */
-            title="Location recorded"
+            title="CONGRATULATIONS!"
             tone="green"
             cancelLabel="Back"
             confirmLabel="Proceed to Application"
-            onCancel={() => setShowZoning(false)}
+            wide
+            onCancel={closeZoning}
             onConfirm={() => {
-              setShowZoning(false)
+              closeZoning()
               void advance()
             }}
           >
             <p className="text-base leading-relaxed">
-              The location for{' '}
-              <span className="font-bold underline underline-offset-2">{form.name || 'your business'}</span>{' '}
-              in{' '}
+              {/*
+               * "The new business for X" is the mockup's sentence and it is right
+               * for a new filing. A renewal is not a new business, so the word
+               * drops out rather than telling someone renewing a ten-year-old
+               * carinderia that it is new.
+               */}
+              {zoningSubject ? (
+                <>
+                  {isReuse ? 'The business for' : 'The new business for'}{' '}
+                  <span className="font-bold underline underline-offset-2">{zoningSubject}</span>{' '}
+                  is
+                </>
+              ) : (
+                `Your ${isReuse ? 'business' : 'new business'} is`
+              )}{' '}
+              conforming / within the allowed use for{' '}
               <span className="font-bold uppercase underline underline-offset-2">
                 {barangayName ?? 'Area Location'}
-              </span>{' '}
-              has been recorded for your zoning clearance. The Zoning Office (CPDO) evaluates
-              conformance during processing. You may now proceed with your application.
+              </span>
+              . You may now proceed with the processing of your Business Permit Application.
             </p>
+            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
+              The Zoning Office (CPDO) makes the final determination on your zoning clearance
+              during processing.
+            </p>
+
+            <LocationInsightsPanel
+              insights={insights.data}
+              loading={insights.loading}
+              error={insights.error}
+            />
           </ProtoModal>
         ))}
 
