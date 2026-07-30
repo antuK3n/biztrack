@@ -75,10 +75,10 @@ final class RenewalRiskAnalytics
      * Kept server-side on purpose: if the honesty statement lived only in the
      * React copy, an export would quietly ship the numbers without it.
      */
-    public const METHODOLOGY = 'Risk scores are a weighted rule set over the register, not a statistical '
-        .'prediction. Each of five signals contributes a fixed maximum number of points; the total ranks '
-        .'permits by how many known risk signals they carry. The score is not a probability and does not '
-        .'estimate how likely a renewal is to be late.';
+    public const METHODOLOGY = 'Each permit is checked against five things: how soon it expires, whether a '
+        .'renewal has been filed, whether this business has renewed late before, open compliance findings, '
+        .'and unpaid fees. Each adds points, up to 100. A higher score means more warning signs — it is not '
+        .'a prediction, and it does not say how likely a renewal is to be late.';
 
     /** The R endpoint that scores this dataset. */
     public const R_ENDPOINT = '/renewal-risk';
