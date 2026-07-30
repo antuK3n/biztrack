@@ -189,6 +189,20 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
         Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
+
+        /*
+         * Manual refresh, for when waiting for the nightly run will not do — a
+         * demo, or an officer who has just filed something and wants the figures
+         * to include it.
+         *
+         * Throttled because one call pushes the whole register to R: a year of
+         * review history plus the full renewal watchlist, several MB of JSON over
+         * eight dataset variants. Holding it to a few calls a minute stops a
+         * held-down button turning into a self-inflicted load test on a service
+         * that a page load depends on.
+         */
+        Route::post('analytics/refresh', [AnalyticsController::class, 'refresh'])
+            ->middleware('throttle:4,1');
         /*
          * No staffing-simulation route. App\Support\Des is a complete, tested
          * port of r/R/des.R, but docs/r-integration-spec.md puts the discrete-

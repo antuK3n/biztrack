@@ -12,6 +12,7 @@ import type {
   Barangay,
   Business,
   AnalyticsProvenance,
+  AnalyticsRefreshResult,
   BusinessGrowthReport,
   Computed,
   BusinessStatus,
@@ -412,6 +413,18 @@ export const analytics = {
     ),
   renewalRiskReport: (days: number) =>
     downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
+
+  /**
+   * Recompute every figure set from R now, rather than waiting for 03:00.
+   *
+   * Slow by nature — it pushes the register to R and waits for eight dataset
+   * variants, a few seconds in total — so the caller has to show a pending state
+   * rather than assume this returns promptly. Resolves to what happened per
+   * dataset, because a refresh can partly succeed and the screens would then
+   * mix fresh and stale figures.
+   */
+  refresh: () =>
+    unwrap<AnalyticsRefreshResult>(api.post('/analytics/refresh')),
 }
 
 /* ── Admin ────────────────────────────────────────────────────────────── */

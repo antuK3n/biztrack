@@ -351,7 +351,7 @@ export function BusinessGrowthPage() {
 
       <AnalyticsTabs />
 
-      {meta && <ComputedAt meta={meta} />}
+      {meta && <ComputedAt meta={meta} onRefreshed={reload} />}
 
       {loading ? (
         <LoadingState />
