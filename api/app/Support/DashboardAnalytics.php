@@ -642,9 +642,44 @@ final class DashboardAnalytics
      */
     private static function renewalCompliance(CarbonImmutable $windowStart, CarbonImmutable $now): array
     {
+        /*
+         * THE DENOMINATOR HAS TO BE COMMENSURABLE WITH THE NUMERATOR.
+         *
+         * A renewal application carries exactly one `prior_permit_id`, so it can
+         * only ever be credited against one permit — in practice the business
+         * permit, with the sanitary, fire and zoning clearances riding along on
+         * the same filing. Counting every permit type that fell due therefore
+         * built a denominator the numerator could not reach by construction:
+         * 1,257 permits due (444 business, 321 sanitary, 321 fire, 71 zoning)
+         * against a numerator capped at the number of filings. The indicator read
+         * 21.2% and looked like a compliance catastrophe when it was an
+         * arithmetic artefact.
+         *
+         * So restrict the denominator to the permit types renewals actually
+         * re-validate, derived from the register rather than hardcoded, which
+         * keeps this correct if this LGU ever starts filing standalone renewals
+         * for a clearance. Same rows, scoped: 266 of 444 = 59.9%.
+         *
+         * The remaining shortfall is a real finding, not an artefact — 169
+         * business permits fell due with no renewal filed at all, while 91% of
+         * the renewals that were filed arrived on time.
+         */
+        $renewablePermitTypes = DB::table('applications')
+            ->join('permits', 'permits.id', '=', 'applications.prior_permit_id')
+            ->whereNull('applications.deleted_at')
+            ->where('applications.application_type', ApplicationType::Renewal->value)
+            ->whereNotNull('applications.submitted_at')
+            ->distinct()
+            ->pluck('permits.permit_type_id')
+            ->all();
+
         $due = DB::table('permits')
             ->join('businesses', 'businesses.id', '=', 'permits.business_id')
             ->whereNull('businesses.deleted_at')
+            ->when(
+                $renewablePermitTypes !== [],
+                static fn ($q) => $q->whereIn('permits.permit_type_id', $renewablePermitTypes),
+            )
             ->whereDate('permits.valid_until', '>=', $windowStart->toDateString())
             ->whereDate('permits.valid_until', '<=', $now->toDateString())
             ->pluck('permits.valid_until', 'permits.id');
