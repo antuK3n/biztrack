@@ -1,0 +1,428 @@
+{
+    "params": {
+        "months": 12
+    },
+    "now": "2026-07-30T00:00:00.000000Z",
+    "today": "2026-07-30",
+    "window_start": "2025-07-30",
+    "ytd_start": "2026-01-01",
+    "month_start": "2026-07-01",
+    "top_n": 5,
+    "expiry_windows": [
+        30,
+        60,
+        90
+    ],
+    "tiers": [
+        {
+            "tier": "simple",
+            "label": "Simple",
+            "statutory_working_days": 3
+        },
+        {
+            "tier": "complex",
+            "label": "Complex",
+            "statutory_working_days": 7
+        },
+        {
+            "tier": "highly_technical",
+            "label": "Highly technical",
+            "statutory_working_days": 20
+        }
+    ],
+    "map_point_limit": 1000,
+    "kpis": {
+        "active_businesses": 20,
+        "applications_ytd": 120,
+        "applications_this_month": 16
+    },
+    "volume": [
+        {
+            "type": "new",
+            "label": "New",
+            "count": 9
+        },
+        {
+            "type": "renewal",
+            "label": "Renewals",
+            "count": 6
+        },
+        {
+            "type": "amendment",
+            "label": "Amendments",
+            "count": 1
+        }
+    ],
+    "decisions": [
+        {
+            "outcome": "approved",
+            "label": "Approved",
+            "count": 8,
+            "decisioned": true
+        },
+        {
+            "outcome": "returned",
+            "label": "Returned for revision",
+            "count": 2,
+            "decisioned": true
+        },
+        {
+            "outcome": "rejected",
+            "label": "Rejected",
+            "count": 2,
+            "decisioned": true
+        },
+        {
+            "outcome": "pending",
+            "label": "Pending",
+            "count": 4,
+            "decisioned": false
+        },
+        {
+            "outcome": "cancelled",
+            "label": "Cancelled",
+            "count": 0,
+            "decisioned": false
+        }
+    ],
+    "tier_observations": [
+        {
+            "tier": "simple",
+            "working_days": 3,
+            "calendar_days": 4.5,
+            "within_statutory": true,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "simple",
+            "working_days": 4,
+            "calendar_days": 5.5,
+            "within_statutory": false,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "simple",
+            "working_days": 5,
+            "calendar_days": 6.5,
+            "within_statutory": false,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "simple",
+            "working_days": 5,
+            "calendar_days": 6.5,
+            "within_statutory": false,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "complex",
+            "working_days": 6,
+            "calendar_days": 8,
+            "within_statutory": true,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "complex",
+            "working_days": 6,
+            "calendar_days": 8,
+            "within_statutory": true,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "complex",
+            "working_days": 7,
+            "calendar_days": 9,
+            "within_statutory": true,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        },
+        {
+            "tier": "complex",
+            "working_days": 7,
+            "calendar_days": 9,
+            "within_statutory": true,
+            "within_recorded_deadline": true,
+            "recorded_deadline_working_days": 10
+        }
+    ],
+    "stage_observations": [
+        {
+            "code": "BPLO",
+            "name": "Business Permits and Licensing Office",
+            "days": 1
+        },
+        {
+            "code": "BPLO",
+            "name": "Business Permits and Licensing Office",
+            "days": 2
+        },
+        {
+            "code": "BPLO",
+            "name": "Business Permits and Licensing Office",
+            "days": 3
+        },
+        {
+            "code": "CHO",
+            "name": "City Health Office",
+            "days": 4
+        },
+        {
+            "code": "CHO",
+            "name": "City Health Office",
+            "days": 5
+        },
+        {
+            "code": "OBO",
+            "name": "Office of the Building Official",
+            "days": 0
+        },
+        {
+            "code": "CENRO",
+            "name": "City Environment Office",
+            "days": 0
+        },
+        {
+            "code": "BFP",
+            "name": "Bureau of Fire Protection",
+            "days": 0
+        }
+    ],
+    "compliance": [
+        {
+            "indicator": "ra11032_processing",
+            "label": "RA 11032 processing",
+            "numerator": 71,
+            "denominator": 100,
+            "numerator_label": "decided within the legal deadline",
+            "denominator_label": "decided filings"
+        },
+        {
+            "indicator": "permit_validity",
+            "label": "Business permit compliance",
+            "numerator": 0,
+            "denominator": 0,
+            "numerator_label": "hold a valid permit for every type they have been issued",
+            "denominator_label": "businesses ever issued a permit"
+        },
+        {
+            "indicator": "renewal",
+            "label": "Renewal compliance",
+            "numerator": 0,
+            "denominator": 40,
+            "numerator_label": "renewed before expiry",
+            "denominator_label": "permits due for renewal",
+            "unavailable_reason": "No renewal filing in this window records which permit it replaces, so on-time renewals cannot be counted. This is a gap in the register, not a compliance finding."
+        }
+    ],
+    "permit_type_columns": [
+        {
+            "code": "BUSINESS",
+            "label": "Mayor's / Business Permit"
+        },
+        {
+            "code": "SANITARY",
+            "label": "Sanitary Permit / Health Certificate"
+        },
+        {
+            "code": "FSIC",
+            "label": "Fire Safety Inspection Certificate"
+        },
+        {
+            "code": "ZONING",
+            "label": "Zoning / Locational Clearance"
+        }
+    ],
+    "expiring_permits": [
+        {
+            "code": "BUSINESS",
+            "days_to_expiry": 10
+        },
+        {
+            "code": "BUSINESS",
+            "days_to_expiry": 45
+        },
+        {
+            "code": "BUSINESS",
+            "days_to_expiry": 80
+        },
+        {
+            "code": "BUSINESS",
+            "days_to_expiry": -5
+        },
+        {
+            "code": "SANITARY",
+            "days_to_expiry": 10
+        },
+        {
+            "code": "SANITARY",
+            "days_to_expiry": 80
+        },
+        {
+            "code": "FSIC",
+            "days_to_expiry": 45
+        },
+        {
+            "code": "FSIC",
+            "days_to_expiry": -5
+        },
+        {
+            "code": "ZONING",
+            "days_to_expiry": -5
+        },
+        {
+            "code": "ZONING",
+            "days_to_expiry": -40
+        }
+    ],
+    "barangays": [
+        {
+            "barangay": "Longos",
+            "count": 7
+        },
+        {
+            "barangay": "Bulacan",
+            "count": 4
+        },
+        {
+            "barangay": "Acacia",
+            "count": 4
+        },
+        {
+            "barangay": "Tinajeros",
+            "count": 1
+        }
+    ],
+    "lines_of_business": [
+        {
+            "industry": "Retail sale of hardware",
+            "psic_code": "47521",
+            "count": 5
+        },
+        {
+            "industry": "Laundry services",
+            "psic_code": "96200",
+            "count": 3
+        },
+        {
+            "industry": "Bakery products",
+            "psic_code": "10711",
+            "count": 3
+        }
+    ],
+    "organization_forms": {
+        "forms": [
+            {
+                "form": "sole_proprietorship",
+                "label": "Sole Proprietorship",
+                "count": 12
+            },
+            {
+                "form": "corporation",
+                "label": "Corporation",
+                "count": 5
+            },
+            {
+                "form": "partnership",
+                "label": "Partnership",
+                "count": 2
+            },
+            {
+                "form": "cooperative",
+                "label": "Cooperative",
+                "count": 1
+            }
+        ],
+        "unrecorded": 5,
+        "total": 25
+    },
+    "inspections": [
+        {
+            "type": "CHO",
+            "label": "Sanitary",
+            "scheduled": 10,
+            "completed": 8,
+            "passed": 7,
+            "failed": 0,
+            "conditional": 1
+        },
+        {
+            "type": "BFP",
+            "label": "Fire Safety",
+            "scheduled": 9,
+            "completed": 8,
+            "passed": 5,
+            "failed": 2,
+            "conditional": 1
+        },
+        {
+            "type": "CPDO",
+            "label": "Zoning",
+            "scheduled": 4,
+            "completed": 0,
+            "passed": 0,
+            "failed": 0,
+            "conditional": 0
+        }
+    ],
+    "officer_activity": {
+        "response_hours": [
+            1,
+            2,
+            3.5,
+            42
+        ],
+        "threads_awaiting_reply": 2,
+        "requests": {
+            "total": 8,
+            "fulfilled": 5
+        },
+        "meetings": {
+            "scheduled": 4,
+            "attended": 3
+        }
+    },
+    "map": {
+        "mapped": 4,
+        "total_businesses": 25,
+        "points": [
+            {
+                "business_id": 1,
+                "business": "Aling Nena Sari-Sari",
+                "barangay": "Longos",
+                "latitude": 14.662398,
+                "longitude": 120.961482,
+                "permit_state": "active"
+            },
+            {
+                "business_id": 2,
+                "business": "Malabon Hardware",
+                "barangay": "Longos",
+                "latitude": 14.661319,
+                "longitude": 120.972104,
+                "permit_state": "lapsed"
+            },
+            {
+                "business_id": 3,
+                "business": "Tinajeros Bakeshop",
+                "barangay": "Tinajeros",
+                "latitude": 14.647883,
+                "longitude": 120.978329,
+                "permit_state": "active"
+            },
+            {
+                "business_id": 4,
+                "business": "Unmapped Barangay Co",
+                "barangay": null,
+                "latitude": 14.658513,
+                "longitude": 120.952827,
+                "permit_state": "active"
+            }
+        ]
+    }
+}

@@ -58,8 +58,29 @@ function() {
     status    = "ok",
     r_version = as.character(getRversion()),
     qcc       = as.character(utils::packageVersion("qcc")),
-    endpoints = c("/spc/processing-time", "/renewal-risk")
+    endpoints = c("/dashboard", "/growth/lifecycle", "/spc/processing-time", "/renewal-risk")
   )
+}
+
+#* Analytics Dashboard — the section 1 panel figures.
+#*
+#* Accepts counts, per-observation rows (one per decided filing, one per completed
+#* review, one per permit near expiry) and the rules those are judged against:
+#* RA 11032's statutory day limits, the expiry horizons, how many rows a ranking
+#* shows. Returns every panel on the screen.
+#*
+#* Two things it will not do: report a rate with an empty denominator as 0%, and
+#* average a tier the register holds no decided filing for. Both come back null,
+#* with the count that explains why.
+#* `digits = NA` keeps full numeric precision. jsonlite otherwise serialises at
+#* four decimal places, which silently truncated the map's latitudes and
+#* longitudes from six — about 11 metres of drift, and a mismatch against the PHP
+#* fallback that the parity fixture caught. Every other figure here is already
+#* rounded before it is emitted, so this changes nothing else.
+#* @post /dashboard
+#* @serializer json list(auto_unbox = FALSE, null = "null", na = "null", digits = NA)
+function(req, res) {
+  .compute(req, res, service_dashboard)
 }
 
 #* Permit Processing Time Monitoring — per-department control charts.
@@ -72,6 +93,22 @@ function() {
 #* @serializer json list(auto_unbox = FALSE, null = "null", na = "null")
 function(req, res) {
   .compute(req, res, service_processing_time)
+}
+
+#* Business Lifecycle Monitoring — growth, status, cohort survival, trends.
+#*
+#* Accepts registration and closure counts, per-barangay and per-industry counts
+#* for two periods, and one survival observation per business: how many renewal
+#* cycles it cleared and whether it then lapsed or is still being watched.
+#*
+#* Cohort survival is computed with `survival::survfit`, as the client's paper
+#* specifies. It is a Kaplan-Meier estimate over observed renewal cycles, not a
+#* single-period ratio and not a forecast — businesses still inside their current
+#* permit are censored rather than counted as failures.
+#* @post /growth/lifecycle
+#* @serializer json list(auto_unbox = FALSE, null = "null", na = "null")
+function(req, res) {
+  .compute(req, res, service_growth_lifecycle)
 }
 
 #* Renewal Risk — permits near expiry ranked by a weighted rule score.
