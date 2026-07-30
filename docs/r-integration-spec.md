@@ -272,6 +272,52 @@ Mockup values: 4 cafés · Medium · Foods & Beverages · 320 m.
 
 Zoning conformity check stays as-is; these insights are additive decision support.
 
+### Built — and the two decisions that differ from the rest of the suite
+
+**Spatial data exists, so the 500 m radius is real.** All 748 `business_addresses` rows carry
+`latitude`/`longitude` (746 distinct pairs) inside Malabon's bounding box, and 691 registered
+businesses have both coordinates and a PSIC-coded line. Distances are therefore measured, not
+proxied, and the labels say "within 500 m" because that is what was computed. No PostGIS is
+involved: the column pair is plain `decimal(10,7)` (the migration defers geometry to S7), the
+prefilter is a bounding box that behaves the same on SQLite and PostgreSQL, and the metric is a
+haversine in PHP.
+
+The admin dashboard's "No mapped business locations yet" is unrelated to missing coordinates —
+`AnalyticsPage.useBusinessMarkers` derives pins from the *inspections* feed rather than from
+addresses, so it goes empty whenever that feed is empty. The data was there all along.
+
+**Per-request, not batch.** This is the one analytics screen the snapshot architecture cannot
+serve. A snapshot is keyed by a fixed variant list (`config/analytics.php`) because a window
+cannot be sliced out of a wider one; here the key is a latitude/longitude the applicant chose
+seconds ago — continuous and unbounded, so there is nothing to precompute. This is exactly the
+case that config already calls the honest outcome: computed locally, and says so
+(`meta.engine = "PHP"`).
+
+**Computed in PHP, not R** — the client should know this is a deviation from the paper, which
+attributes the spatial analysis to `sf`/`dplyr`. The statistics are a count, a banding, a mode
+and an arithmetic mean over a haversine: no spatial predicate and no model fitting, so there is
+little for `sf` to do, and `Rscript` per applicant click is ruled out. If the client wants R to
+own it, the shape that fits is a plumber endpoint called from Laravel on the pin drop — which
+would put a synchronous R call on an applicant's critical path, the thing the batch decision
+was made to avoid.
+
+Implementation notes:
+- "Similar" is the **PSIC group** (first 3 digits) — the standard's own notion of a related
+  trade, so 56301 coffee shop matches 56302 bar but not 56101 restaurant. `PsicTaxonomy`.
+- The catch-all `00000` code relates to nothing; it would otherwise make every unlisted trade
+  a neighbour of every other unlisted trade.
+- "Registered" means a business with an application past `draft`, so a tester's abandoned draft
+  never inflates the next applicant's neighbourhood.
+- The zoning step is Part 1 and Line of Business comes later, so on a new filing the applicant
+  usually has **no declared line** when the modal opens. The two category-dependent figures
+  report as unavailable and name what would unlock them; the two that need no category still
+  answer. Renewals and amendments have the line prefilled and show all four.
+- Nothing identifying is returned — a count, a band, a category name, a mean distance. An
+  exclusion id is honoured only if the caller owns that business, otherwise the count becomes
+  an oracle for whether a given business sits on a block.
+- The modal keeps one sentence of the cautious earlier copy: CPDO still makes the final
+  determination. The headline and body are the mockup's.
+
 ---
 
 ## 6. Permit Processing Time Monitoring — BUILT (PR #31)
