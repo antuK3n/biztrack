@@ -1,0 +1,200 @@
+{
+    "params": {
+        "months": 12
+    },
+    "now": "2026-07-30T00:00:00.000000Z",
+    "period_start": "2025-07-30",
+    "period_end": "2026-07-30",
+    "prior_period_start": "2024-07-30",
+    "top_n": 6,
+    "survival_methodology": "Cohort survival is a Kaplan-Meier estimate over observed renewal cycles: of the businesses that reached a given renewal, the share that had renewed every previous one without a lapse in cover. Businesses still within their current permit are censored rather than counted as failures. It describes what this cohort did, and is not a forecast of what any business will do next.",
+    "grace_days": 30,
+    "registrations": 40,
+    "registrations_prior": 32,
+    "closures": 7,
+    "status_counts": {
+        "active": 300,
+        "expired": 65,
+        "inactive": 30,
+        "closed": 5
+    },
+    "barangays": [
+        {
+            "barangay": "Longos",
+            "registrations": 20,
+            "prior": 18
+        },
+        {
+            "barangay": "Bulacan",
+            "registrations": 10,
+            "prior": 4
+        },
+        {
+            "barangay": "Acacia",
+            "registrations": 10,
+            "prior": 4
+        },
+        {
+            "barangay": "Flores",
+            "registrations": 4,
+            "prior": 0
+        },
+        {
+            "barangay": "Tonsuya",
+            "registrations": 2,
+            "prior": 9
+        }
+    ],
+    "closure_months": [
+        {
+            "month": "2025-08",
+            "closures": 0
+        },
+        {
+            "month": "2025-09",
+            "closures": 2
+        },
+        {
+            "month": "2025-10",
+            "closures": 1
+        },
+        {
+            "month": "2025-11",
+            "closures": 4
+        }
+    ],
+    "industries": [
+        {
+            "industry": "Retail sale of hardware",
+            "psic_code": "47521",
+            "count": 30,
+            "registrations": 10,
+            "prior": 4
+        },
+        {
+            "industry": "Food and beverage service",
+            "psic_code": "56101",
+            "count": 20,
+            "registrations": 3,
+            "prior": 9
+        },
+        {
+            "industry": "Laundry services",
+            "psic_code": "96200",
+            "count": 12,
+            "registrations": 5,
+            "prior": 5
+        },
+        {
+            "industry": "Bakery products",
+            "psic_code": "10711",
+            "count": 12,
+            "registrations": 6,
+            "prior": 1
+        }
+    ],
+    "cohorts": [
+        {
+            "cohort": "2023",
+            "business_id": 1,
+            "time": 1,
+            "event": 1
+        },
+        {
+            "cohort": "2023",
+            "business_id": 2,
+            "time": 1,
+            "event": 1
+        },
+        {
+            "cohort": "2023",
+            "business_id": 3,
+            "time": 1,
+            "event": 0
+        },
+        {
+            "cohort": "2023",
+            "business_id": 4,
+            "time": 1,
+            "event": 0
+        },
+        {
+            "cohort": "2023",
+            "business_id": 5,
+            "time": 2,
+            "event": 1
+        },
+        {
+            "cohort": "2023",
+            "business_id": 6,
+            "time": 2,
+            "event": 1
+        },
+        {
+            "cohort": "2023",
+            "business_id": 7,
+            "time": 2,
+            "event": 0
+        },
+        {
+            "cohort": "2023",
+            "business_id": 8,
+            "time": 3,
+            "event": 0
+        },
+        {
+            "cohort": "2023",
+            "business_id": 9,
+            "time": 3,
+            "event": 0
+        },
+        {
+            "cohort": "2023",
+            "business_id": 10,
+            "time": 2,
+            "event": 0
+        },
+        {
+            "cohort": "2024",
+            "business_id": 11,
+            "time": 1,
+            "event": 1
+        },
+        {
+            "cohort": "2024",
+            "business_id": 12,
+            "time": 1,
+            "event": 0
+        },
+        {
+            "cohort": "2024",
+            "business_id": 13,
+            "time": 1,
+            "event": 0
+        },
+        {
+            "cohort": "2024",
+            "business_id": 14,
+            "time": 1,
+            "event": 0
+        },
+        {
+            "cohort": "2026",
+            "business_id": 15,
+            "time": 0,
+            "event": 0
+        },
+        {
+            "cohort": "2026",
+            "business_id": 16,
+            "time": 0,
+            "event": 0
+        },
+        {
+            "cohort": "2026",
+            "business_id": 17,
+            "time": 0,
+            "event": 0
+        }
+    ]
+}

@@ -26,6 +26,7 @@ suppressWarnings(suppressMessages({
   library(dplyr)
   library(tibble)
   library(qcc)
+  library(survival)
 }))
 
 # --- helpers -----------------------------------------------------------------
@@ -529,3 +530,715 @@ service_renewal_risk <- function(payload) {
 }
 
 .plural <- function(count, word) if (count == 1) word else paste0(word, "s")
+
+# --- 3. Analytics dashboard --------------------------------------------------
+
+#' The Analytics Dashboard panels (spec section 1).
+#'
+#' Laravel sends counts, per-observation rows, and the rules (RA 11032's
+#' statutory limits, the expiry horizons, how many rows a ranking shows). This
+#' turns them into the screen's statistics. Nothing here queries anything and
+#' nothing here holds a threshold of its own — every number that both engines need
+#' arrives in the payload, which is what stops the two drifting while both look
+#' right.
+#'
+#' The two computations worth calling out, because they are the ones a careless
+#' rewrite would get subtly wrong:
+#'
+#'  - **A rate with an empty denominator is NULL, not 0.** So is a rate whose
+#'    numerator the register cannot establish; that case carries a reason so the
+#'    screen can distinguish "nothing to divide" from "cannot be counted", which
+#'    are different facts and would otherwise both print as 0%.
+#'  - **Expiry windows are cumulative.** A permit 20 days from expiry counts in
+#'    the 30, 60 and 90 day rows. Expired is disjoint from all three.
+#'
+#' @param payload Parsed request body, as built by DashboardAnalytics::dataset().
+#' @return The Analytics Dashboard payload.
+service_dashboard <- function(payload) {
+  top_n <- as.integer(.scalar(payload$top_n, 5L))
+
+  compliance <- .dash_compliance(payload$compliance)
+  validity   <- NULL
+  for (ind in compliance) {
+    if (ind$indicator == "permit_validity") validity <- ind$rate
+  }
+
+  list(
+    generated_at  = .s(.scalar(payload$now, NA_character_)),
+    window_months = .i(.scalar(payload$params$months, NA_integer_)),
+    window_start  = .s(.scalar(payload$window_start, NA_character_)),
+    ytd_start     = .s(.scalar(payload$ytd_start, NA_character_)),
+    month_start   = .s(.scalar(payload$month_start, NA_character_)),
+    today         = .s(.scalar(payload$today, NA_character_)),
+
+    kpis = list(
+      active_businesses       = .i(.scalar(payload$kpis$active_businesses, 0L)),
+      applications_ytd        = .i(.scalar(payload$kpis$applications_ytd, 0L)),
+      applications_this_month = .i(.scalar(payload$kpis$applications_this_month, 0L)),
+      # The Compliance Rate card IS the permit-validity indicator, read back off
+      # the computed panel rather than divided a second time here. One division,
+      # so the card and the panel cannot disagree.
+      compliance_rate         = validity
+    ),
+
+    volume                = .dash_volume(payload$volume),
+    decisions             = .dash_decisions(payload$decisions),
+    processing_tiers      = .dash_tiers(payload$tiers, payload$tier_observations),
+    stages                = .dash_stages(payload$stage_observations),
+    compliance            = compliance,
+    expiry                = .dash_expiry(payload$permit_type_columns,
+                                         payload$expiring_permits,
+                                         payload$expiry_windows),
+    top_barangays         = .dash_shares(payload$barangays, "barangay", top_n),
+    top_lines_of_business = .dash_shares(payload$lines_of_business, "industry", top_n),
+    organization_forms    = .dash_org_forms(payload$organization_forms),
+    inspections           = .dash_inspections(payload$inspections),
+    officer_activity      = .dash_officer(payload$officer_activity),
+    map                   = .dash_map(payload$map)
+  )
+}
+
+#' Rate as a percentage rounded to one place, or NULL when there is none.
+#' @keywords internal
+.rate <- function(numerator, denominator) {
+  if (is.na(denominator) || denominator <= 0) return(NULL)
+  .n(round((as.numeric(numerator) / as.numeric(denominator)) * 100, 1))
+}
+
+#' @keywords internal
+.dash_volume <- function(volume) {
+  rows <- .rows(volume)
+  if (nrow(rows) == 0) return(list(rows = list(), total = .i(0)))
+
+  counts <- as.integer(rows$count)
+  list(
+    rows = lapply(seq_len(nrow(rows)), function(i) list(
+      type  = .s(rows$type[[i]]),
+      label = .s(rows$label[[i]]),
+      count = .i(counts[[i]])
+    )),
+    total = .i(sum(counts))
+  )
+}
+
+#' Decision outcomes and the approval rate.
+#'
+#' The denominator is the sum of the buckets Laravel flagged `decisioned`, so
+#' Pending cannot leak into it. The flag travels with the fact precisely so this
+#' function does not need to know which statuses count.
+#' @keywords internal
+.dash_decisions <- function(decisions) {
+  rows <- .rows(decisions)
+  if (nrow(rows) == 0) {
+    return(list(rows = list(), total = .i(0), decisioned = .i(0),
+                approved = .i(0), approval_rate = NULL))
+  }
+
+  counts     <- as.integer(rows$count)
+  decisioned <- as.logical(rows$decisioned)
+  approved   <- sum(counts[rows$outcome == "approved"])
+  n_dec      <- sum(counts[decisioned])
+
+  list(
+    rows = lapply(seq_len(nrow(rows)), function(i) list(
+      outcome    = .s(rows$outcome[[i]]),
+      label      = .s(rows$label[[i]]),
+      count      = .i(counts[[i]]),
+      decisioned = .b(decisioned[[i]])
+    )),
+    total         = .i(sum(counts)),
+    decisioned    = .i(n_dec),
+    approved      = .i(approved),
+    approval_rate = .rate(approved, n_dec)
+  )
+}
+
+#' Mean processing time per RA 11032 tier against the statutory limit.
+#'
+#' A tier with no decided filing gets nulls and `observations = 0`. That is not a
+#' compliant tier and must not be rendered as one — the register simply has
+#' nothing to average, and saying so is the only honest option.
+#'
+#' `breaching` has no tolerance band. A mean of 3.1 working days against a 3-day
+#' legal limit is a breach; softening it here would soften it on screen.
+#' @keywords internal
+.dash_tiers <- function(tiers, observations) {
+  rules <- .rows(tiers)
+  obs   <- .rows(observations)
+  if (nrow(rules) == 0) return(list())
+
+  lapply(seq_len(nrow(rules)), function(i) {
+    key    <- as.character(rules$tier[[i]])
+    target <- as.integer(rules$statutory_working_days[[i]])
+
+    mine <- if (nrow(obs) == 0) obs[0, , drop = FALSE] else obs[obs$tier == key, , drop = FALSE]
+    n    <- nrow(mine)
+
+    if (n == 0) {
+      return(list(
+        tier = .s(key), label = .s(rules$label[[i]]),
+        statutory_working_days = .i(target),
+        observations = .i(0),
+        mean_working_days = NULL, mean_calendar_days = NULL,
+        within_statutory = .i(0), within_statutory_rate = NULL,
+        within_recorded_deadline = .i(0),
+        recorded_deadline_working_days = NULL,
+        overage_days = NULL,
+        breaching = .b(FALSE)
+      ))
+    }
+
+    mean_working  <- round(mean(as.numeric(mine$working_days)), 1)
+    mean_calendar <- round(mean(as.numeric(mine$calendar_days)), 1)
+    within_stat   <- sum(as.logical(mine$within_statutory))
+
+    # The recorded deadline is uniform across the register today, but that is data
+    # and not a guarantee, so it is reported only when every filing in the tier
+    # agrees. A mixed tier gets NULL rather than a figure that is half the story.
+    recorded <- unique(mine$recorded_deadline_working_days)
+    recorded <- recorded[!is.na(recorded)]
+
+    list(
+      tier = .s(key), label = .s(rules$label[[i]]),
+      statutory_working_days = .i(target),
+      observations       = .i(n),
+      mean_working_days  = .n(mean_working),
+      mean_calendar_days = .n(mean_calendar),
+      # Against the STATUTE — the same yardstick as `breaching`.
+      within_statutory      = .i(within_stat),
+      within_statutory_rate = .n(round((within_stat / n) * 100, 1)),
+      # Against applications.deadline_at, a different and more lenient yardstick.
+      # Never present this one as statutory compliance.
+      within_recorded_deadline = .i(sum(as.logical(mine$within_recorded_deadline))),
+      recorded_deadline_working_days = if (length(recorded) == 1) .i(recorded[[1]]) else NULL,
+      overage_days       = .n(round(mean_working - target, 1)),
+      breaching          = .b(mean_working > target)
+    )
+  })
+}
+
+#' Mean time-in-stage per department, slowest first, plus the bottleneck.
+#'
+#' The bottleneck is emitted as computed values, never a sentence: a fixed
+#' "Fire Protection is the bottleneck" would keep reading as true after Fire
+#' Protection got faster. The screen assembles the wording from these numbers.
+#' @keywords internal
+.dash_stages <- function(observations) {
+  obs <- .rows(observations)
+  if (nrow(obs) == 0) {
+    return(list(rows = list(), reviews = .i(0), mean_days = NULL, bottleneck = NULL))
+  }
+
+  days <- as.numeric(obs$days)
+
+  summary <- tibble(code = as.character(obs$code),
+                    name = as.character(obs$name),
+                    days = days) |>
+    group_by(code, name) |>
+    summarise(reviews = n(), mean_days = round(mean(days), 1), .groups = "drop") |>
+    # Slowest first, then review count, then code. The code tie-break is load
+    # bearing: three offices carry one review each at a mean of 0.0 days, so both
+    # earlier keys tie and the order would otherwise follow the payload, which is
+    # not the order PHP's sort produces. The parity fixture caught that.
+    arrange(desc(mean_days), desc(reviews), code)
+
+  overall <- round(mean(days), 1)
+
+  list(
+    rows = lapply(seq_len(nrow(summary)), function(i) list(
+      code      = .s(summary$code[[i]]),
+      name      = .s(summary$name[[i]]),
+      reviews   = .i(summary$reviews[[i]]),
+      mean_days = .n(summary$mean_days[[i]])
+    )),
+    reviews    = .i(length(days)),
+    mean_days  = .n(overall),
+    bottleneck = list(
+      code                = .s(summary$code[[1]]),
+      name                = .s(summary$name[[1]]),
+      mean_days           = .n(summary$mean_days[[1]]),
+      reviews             = .i(summary$reviews[[1]]),
+      above_average_days  = .n(round(summary$mean_days[[1]] - overall, 1)),
+      share_of_reviews    = .n(round((summary$reviews[[1]] / max(1, length(days))) * 100, 1))
+    )
+  )
+}
+
+#' The three compliance indicators.
+#'
+#' Two distinct ways an indicator has no rate, kept distinct: an empty
+#' denominator, and a numerator the register cannot establish. Both give NULL,
+#' only the second carries a reason, and a screen that collapsed them would print
+#' 0% for a missing link in the data — which reads as a compliance failure.
+#' @keywords internal
+.dash_compliance <- function(compliance) {
+  rows <- .rows(compliance)
+  if (nrow(rows) == 0) return(list())
+
+  has_reason <- "unavailable_reason" %in% names(rows)
+
+  lapply(seq_len(nrow(rows)), function(i) {
+    numerator   <- as.integer(rows$numerator[[i]])
+    denominator <- as.integer(rows$denominator[[i]])
+    reason      <- if (has_reason) rows$unavailable_reason[[i]] else NA
+
+    list(
+      indicator         = .s(rows$indicator[[i]]),
+      label             = .s(rows$label[[i]]),
+      numerator         = .i(numerator),
+      denominator       = .i(denominator),
+      numerator_label   = .s(rows$numerator_label[[i]]),
+      denominator_label = .s(rows$denominator_label[[i]]),
+      rate              = if (is.null(reason) || all(is.na(reason))) .rate(numerator, denominator) else NULL,
+      unavailable_reason = .s_or_null(reason)
+    )
+  })
+}
+
+#' Permits approaching expiry, in CUMULATIVE windows.
+#'
+#' 30d is a subset of 60d is a subset of 90d, which is what the mockup's own
+#' figures do; Expired is disjoint from the three. Laravel sends one row per
+#' permit with a signed days-to-expiry rather than pre-bucketed counts, which is
+#' what makes the nesting a computation here instead of an assumption there.
+#' @keywords internal
+.dash_expiry <- function(columns, permits, windows) {
+  cols <- .rows(columns)
+  if (nrow(cols) == 0) return(list(columns = list(), rows = list()))
+
+  codes   <- as.character(cols$code)
+  horizons <- as.integer(unlist(windows))
+  perms   <- .rows(permits)
+
+  p_code <- if (nrow(perms) == 0) character(0) else as.character(perms$code)
+  p_days <- if (nrow(perms) == 0) integer(0)   else as.integer(perms$days_to_expiry)
+
+  # One row per window, then the disjoint Expired row.
+  specs <- c(
+    lapply(horizons, function(h) list(
+      window = sprintf("next_%dd", h), label = sprintf("Next %dd", h),
+      days = .i(h), expired = FALSE, keep = function(d) d >= 0 & d <= h
+    )),
+    list(list(window = "expired", label = "Expired", days = NULL,
+              expired = TRUE, keep = function(d) d < 0))
+  )
+
+  rows <- lapply(specs, function(spec) {
+    hit    <- if (length(p_days)) spec$keep(p_days) else logical(0)
+    counts <- vapply(codes, function(code) sum(hit & p_code == code), integer(1))
+
+    list(
+      window  = .s(spec$window),
+      label   = .s(spec$label),
+      days    = spec$days,
+      expired = .b(spec$expired),
+      counts  = stats::setNames(lapply(counts, .i), codes),
+      total   = .i(sum(counts))
+    )
+  })
+
+  list(
+    columns = lapply(seq_len(nrow(cols)), function(i) list(
+      code = .s(cols$code[[i]]), label = .s(cols$label[[i]])
+    )),
+    rows = rows
+  )
+}
+
+#' Rank a count list and give each row its share of the total.
+#'
+#' Count descending, then name ascending so equal counts hold a stable order
+#' across refreshes instead of following whatever order the query returned.
+#' @keywords internal
+.dash_shares <- function(facts, name_key, top_n) {
+  rows <- .rows(facts)
+  if (nrow(rows) == 0) return(list(rows = list(), total = .i(0), groups = .i(0)))
+
+  counts <- as.integer(rows$count)
+  total  <- sum(counts)
+  names_ <- as.character(rows[[name_key]])
+
+  order_ <- order(-counts, names_)
+  keep   <- utils::head(order_, top_n)
+  extra  <- setdiff(names(rows), c("count", name_key))
+
+  list(
+    rows = lapply(seq_along(keep), function(r) {
+      i <- keep[[r]]
+      out <- list(
+        rank  = .i(r),
+        count = .i(counts[[i]]),
+        share = if (total > 0) .n(round((counts[[i]] / total) * 100, 1)) else NULL
+      )
+      out[[name_key]] <- .s(names_[[i]])
+      # Any other column Laravel sent (psic_code, for instance) rides along, so
+      # the two engines emit the same keys without this listing them.
+      for (col in extra) out[[col]] <- .s(rows[[col]][[i]])
+      out
+    }),
+    total  = .i(total),
+    groups = .i(nrow(rows))
+  )
+}
+
+#' Businesses by form of organization.
+#'
+#' Shares are of businesses whose form IS recorded, so the rows sum to 100%
+#' when any are populated rather than to a fraction set by how blank the column
+#' is. When none is recorded every share is NULL and the screen says the field is
+#' not captured — four zero bars would read as a finding about Malabon.
+#' @keywords internal
+.dash_org_forms <- function(facts) {
+  rows  <- .rows(facts$forms)
+  total <- as.integer(.scalar(facts$total, 0L))
+  unrec <- as.integer(.scalar(facts$unrecorded, 0L))
+  recorded <- total - unrec
+
+  list(
+    rows = if (nrow(rows) == 0) list() else lapply(seq_len(nrow(rows)), function(i) {
+      count <- as.integer(rows$count[[i]])
+      list(
+        form  = .s(rows$form[[i]]),
+        label = .s(rows$label[[i]]),
+        count = .i(count),
+        share = if (recorded > 0) .n(round((count / recorded) * 100, 1)) else NULL
+      )
+    }),
+    recorded   = .i(recorded),
+    unrecorded = .i(unrec),
+    total      = .i(total)
+  )
+}
+
+#' Inspections per type, with the pass rate over COMPLETED inspections.
+#'
+#' Passed over completed, never over scheduled: dividing by scheduled would report
+#' a queue's progress as a quality figure.
+#' @keywords internal
+.dash_inspections <- function(facts) {
+  rows <- .rows(facts)
+  fields <- c("scheduled", "completed", "passed", "failed", "conditional")
+
+  if (nrow(rows) == 0) {
+    zero <- stats::setNames(lapply(fields, function(f) .i(0)), fields)
+    return(list(rows = list(), combined = c(
+      list(type = .s("combined"), label = .s("Combined")), zero, list(pass_rate = NULL)
+    )))
+  }
+
+  totals <- stats::setNames(
+    vapply(fields, function(f) sum(as.integer(rows[[f]])), integer(1)),
+    fields
+  )
+
+  shape <- function(type, label, values) {
+    c(
+      list(type = .s(type), label = .s(label)),
+      stats::setNames(lapply(fields, function(f) .i(values[[f]])), fields),
+      list(pass_rate = .rate(values[["passed"]], values[["completed"]]))
+    )
+  }
+
+  list(
+    rows = lapply(seq_len(nrow(rows)), function(i) {
+      values <- stats::setNames(
+        vapply(fields, function(f) as.integer(rows[[f]][[i]]), integer(1)),
+        fields
+      )
+      shape(rows$type[[i]], rows$label[[i]], values)
+    }),
+    combined = shape("combined", "Combined", totals)
+  )
+}
+
+#' Officer response latency, request fulfilment and meeting participation.
+#'
+#' The median goes out alongside the mean because with a handful of replies one
+#' forgotten thread drags the mean somewhere no officer would recognise.
+#'
+#' A zero meeting count yields a NULL rate, not 0%: nothing was scheduled, so
+#' nobody failed to attend.
+#' @keywords internal
+.dash_officer <- function(facts) {
+  hours <- as.numeric(unlist(facts$response_hours))
+  hours <- hours[!is.na(hours)]
+
+  req_total     <- as.integer(.scalar(facts$requests$total, 0L))
+  req_fulfilled <- as.integer(.scalar(facts$requests$fulfilled, 0L))
+  met_sched     <- as.integer(.scalar(facts$meetings$scheduled, 0L))
+  met_attended  <- as.integer(.scalar(facts$meetings$attended, 0L))
+
+  list(
+    responses            = .i(length(hours)),
+    mean_response_hours  = if (length(hours)) .n(round(mean(hours), 1)) else NULL,
+    # type = 7 is R's default quantile; for the even case it is the midpoint of
+    # the two central values, which is what the PHP port computes.
+    median_response_hours = if (length(hours)) .n(round(stats::median(hours), 1)) else NULL,
+    threads_awaiting_reply = .i(.scalar(facts$threads_awaiting_reply, 0L)),
+    requests_total        = .i(req_total),
+    requests_fulfilled    = .i(req_fulfilled),
+    requests_fulfilled_rate = .rate(req_fulfilled, req_total),
+    meetings_scheduled    = .i(met_sched),
+    meetings_attended     = .i(met_attended),
+    meetings_attended_rate = .rate(met_attended, met_sched)
+  )
+}
+
+#' The map point layer, plus the per-barangay aggregation the choropleth reads.
+#' @keywords internal
+.dash_map <- function(facts) {
+  pts <- .rows(facts$points)
+
+  frame <- list(
+    mapped           = .i(.scalar(facts$mapped, 0L)),
+    plotted          = .i(nrow(pts)),
+    total_businesses = .i(.scalar(facts$total_businesses, 0L))
+  )
+
+  if (nrow(pts) == 0) {
+    return(c(frame, list(points = list(), by_barangay = list())))
+  }
+
+  barangay <- as.character(pts$barangay)
+  state    <- as.character(pts$permit_state)
+  plotted  <- nrow(pts)
+
+  points <- lapply(seq_len(plotted), function(i) list(
+    business_id  = .i(pts$business_id[[i]]),
+    business     = .s(pts$business[[i]]),
+    barangay     = .s_or_null(barangay[[i]]),
+    latitude     = .n(pts$latitude[[i]]),
+    longitude    = .n(pts$longitude[[i]]),
+    permit_state = .s(state[[i]])
+  ))
+
+  named <- !is.na(barangay)
+  summary <- if (!any(named)) NULL else tibble(
+      barangay = barangay[named],
+      active   = state[named] == "active"
+    ) |>
+    group_by(barangay) |>
+    summarise(businesses = n(), active = sum(active), .groups = "drop") |>
+    arrange(desc(businesses), barangay)
+
+  c(frame, list(
+    points = points,
+    by_barangay = if (is.null(summary)) list() else lapply(seq_len(nrow(summary)), function(i) list(
+      barangay   = .s(summary$barangay[[i]]),
+      businesses = .i(summary$businesses[[i]]),
+      active     = .i(summary$active[[i]]),
+      share      = if (plotted > 0) .n(round((summary$businesses[[i]] / plotted) * 100, 1)) else NULL
+    ))
+  ))
+}
+
+# --- 4. Business lifecycle monitoring ----------------------------------------
+
+#' Business Lifecycle Monitoring (spec section 4).
+#'
+#' Growth, lifecycle status, cohort survival over renewal cycles, the barangays
+#' growing fastest, closures by month, and per-industry direction.
+#'
+#' The one real statistic here is the survival curve; everything else is a share,
+#' a delta or a rank. See .growth_survival() for why survival is the right measure
+#' and a single division is not.
+#'
+#' @param payload Parsed request body, as built by BusinessGrowthAnalytics::dataset().
+#' @return The Business Lifecycle Monitoring payload.
+service_growth_lifecycle <- function(payload) {
+  top_n      <- as.integer(.scalar(payload$top_n, 6L))
+  registered <- as.integer(.scalar(payload$registrations, 0L))
+  prior      <- as.integer(.scalar(payload$registrations_prior, 0L))
+
+  list(
+    generated_at       = .s(.scalar(payload$now, NA_character_)),
+    period_months      = .i(.scalar(payload$params$months, NA_integer_)),
+    period_start       = .s(.scalar(payload$period_start, NA_character_)),
+    period_end         = .s(.scalar(payload$period_end, NA_character_)),
+    prior_period_start = .s(.scalar(payload$prior_period_start, NA_character_)),
+    registrations      = .i(registered),
+    registrations_prior = .i(prior),
+    # NULL when the prior period was empty. A change from zero is not a rate, and
+    # the screen renders this as "No prior period" rather than a fabricated 0%.
+    growth_rate = if (prior > 0) .n(round(((registered - prior) / prior) * 100, 1)) else NULL,
+    closures    = .i(.scalar(payload$closures, 0L)),
+
+    cohort_survival = .growth_survival(payload$cohorts,
+                                       .scalar(payload$survival_methodology, ""),
+                                       .scalar(payload$grace_days, 30L)),
+    status_summary  = .growth_status(payload$status_counts),
+    top_barangays   = .growth_barangays(payload$barangays, top_n),
+    closure_trend   = .growth_closures(payload$closure_months),
+    industry_growth = .growth_industries(payload$industries, top_n)
+  )
+}
+
+#' Kaplan-Meier survival over renewal cycles, overall and per cohort.
+#'
+#' WHY SURVIVAL AND NOT A RATIO. The paper's formula reads "businesses that
+#' continued renewing on time over total businesses in the group". Taken literally
+#' as one division that flatters the LGU: a business registered last month has had
+#' no renewal to miss, so putting it in the denominator drags the figure toward
+#' whatever share of the register is merely too new to have failed. Survival
+#' analysis is the fix — a business still inside its current permit is CENSORED,
+#' counting while it was observed and dropping out once there is nothing left to
+#' see. That is why the paper names this package, and `survival::survfit` is what
+#' computes it here rather than a hand-rolled product.
+#'
+#' The PHP fallback reproduces the same product-limit estimator, and the parity
+#' fixture is what keeps the two from drifting.
+#' @keywords internal
+.growth_survival <- function(cohorts, methodology, grace_days) {
+  obs <- .rows(cohorts)
+
+  frame <- list(
+    methodology = .s(methodology),
+    grace_days  = .i(grace_days)
+  )
+
+  if (nrow(obs) == 0) {
+    return(c(frame, list(
+      businesses = .i(0), renewals_observed = .i(0), lapses = .i(0),
+      max_cycle = .i(0), survival = NULL, points = list(), cohorts = list()
+    )))
+  }
+
+  overall <- .km_curve(as.integer(obs$time), as.integer(obs$event))
+
+  groups <- sort(unique(as.character(obs$cohort)))
+  per_cohort <- lapply(groups, function(g) {
+    mine  <- obs[as.character(obs$cohort) == g, , drop = FALSE]
+    curve <- .km_curve(as.integer(mine$time), as.integer(mine$event))
+    c(list(cohort = .s(g)), curve)
+  })
+
+  c(frame, overall, list(cohorts = per_cohort))
+}
+
+#' One Kaplan-Meier curve, evaluated at every integer renewal cycle.
+#'
+#' `survfit` does the estimation. It reports rows only at times where something
+#' happened, so the curve is then read off at each integer cycle with
+#' `summary(..., times = )`, which is the shape the screen draws and the shape the
+#' PHP port emits. At-risk and lapse counts travel with each point so a reader can
+#' see how thin a late cycle is rather than trusting a percentage computed over
+#' three businesses.
+#' @keywords internal
+.km_curve <- function(time, event) {
+  max_cycle <- if (length(time)) max(time) else 0L
+
+  base <- list(
+    businesses = .i(length(time)),
+    # How many renewal cycles this group actually lived through: the sample size
+    # behind the curve.
+    renewals_observed = .i(sum(time)),
+    lapses    = .i(sum(event)),
+    max_cycle = .i(max_cycle)
+  )
+
+  if (max_cycle < 1) {
+    return(c(base, list(survival = NULL, points = list())))
+  }
+
+  fit <- survival::survfit(survival::Surv(time, event) ~ 1)
+
+  points <- list()
+  surv   <- NULL
+  for (t in seq_len(max_cycle)) {
+    at_risk <- sum(time >= t)
+    if (at_risk == 0) break
+
+    s <- summary(fit, times = t, extend = TRUE)
+    surv <- as.numeric(s$surv)[[1]]
+
+    points[[length(points) + 1]] <- list(
+      cycle    = .i(t),
+      at_risk  = .i(at_risk),
+      lapses   = .i(sum(time == t & event == 1)),
+      survival = .n(round(surv * 100, 1))
+    )
+  }
+
+  c(base, list(
+    survival = if (is.null(surv)) NULL else .n(round(surv * 100, 1)),
+    points   = points
+  ))
+}
+
+#' @keywords internal
+.growth_status <- function(counts) {
+  labels <- c(active = "Active", expired = "Expired",
+              inactive = "Inactive", closed = "Closed")
+
+  values <- vapply(names(labels), function(k) as.integer(.scalar(counts[[k]], 0L)), integer(1))
+  total  <- sum(values)
+
+  lapply(seq_along(labels), function(i) list(
+    status = .s(names(labels)[[i]]),
+    label  = .s(labels[[i]]),
+    count  = .i(values[[i]]),
+    share  = if (total > 0) .n(round((values[[i]] / total) * 100, 1)) else NULL
+  ))
+}
+
+#' Barangays ranked by the INCREASE between periods, as the spec asks — not by how
+#' many they hold. A barangay with 300 registrations and no change is not growing.
+#' @keywords internal
+.growth_barangays <- function(barangays, top_n) {
+  rows <- .rows(barangays)
+  if (nrow(rows) == 0) return(list())
+
+  current <- as.integer(rows$registrations)
+  prior   <- as.integer(rows$prior)
+  names_  <- as.character(rows$barangay)
+  delta   <- current - prior
+
+  # Delta descending, then volume, then name so ties hold a stable order.
+  keep <- utils::head(order(-delta, -current, names_), top_n)
+
+  lapply(keep, function(i) list(
+    barangay      = .s(names_[[i]]),
+    registrations = .i(current[[i]]),
+    prior         = .i(prior[[i]]),
+    delta         = .i(delta[[i]]),
+    growth_rate   = if (prior[[i]] > 0)
+                      .n(round(((current[[i]] - prior[[i]]) / prior[[i]]) * 100, 1))
+                    else NULL
+  ))
+}
+
+#' @keywords internal
+.growth_closures <- function(months) {
+  rows <- .rows(months)
+  if (nrow(rows) == 0) return(list())
+
+  lapply(seq_len(nrow(rows)), function(i) list(
+    month    = .s(rows$month[[i]]),
+    closures = .i(rows$closures[[i]])
+  ))
+}
+
+#' @keywords internal
+.growth_industries <- function(industries, top_n) {
+  rows <- .rows(industries)
+  if (nrow(rows) == 0) return(list())
+
+  count   <- as.integer(rows$count)
+  current <- as.integer(rows$registrations)
+  prior   <- as.integer(rows$prior)
+  codes   <- as.character(rows$psic_code)
+  delta   <- current - prior
+
+  keep <- utils::head(order(-count, -delta, codes), top_n)
+
+  lapply(keep, function(i) list(
+    industry      = .s(rows$industry[[i]]),
+    psic_code     = .s(codes[[i]]),
+    count         = .i(count[[i]]),
+    registrations = .i(current[[i]]),
+    prior         = .i(prior[[i]]),
+    delta         = .i(delta[[i]]),
+    direction     = .s(if (delta[[i]] > 0) "growing"
+                       else if (delta[[i]] < 0) "declining" else "steady")
+  ))
+}

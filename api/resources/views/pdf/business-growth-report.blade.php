@@ -28,7 +28,7 @@
         <div class="office">Business Permits and Licensing Office</div>
     </div>
 
-    <h1>BUSINESS GROWTH ANALYSIS</h1>
+    <h1>BUSINESS LIFECYCLE MONITORING</h1>
     <div class="meta">
         @include('pdf.partials.computed-by') &middot;
         Period: {{ $report['period_start'] }} to {{ $report['period_end'] }}
@@ -63,14 +63,16 @@
             <td>{{ $report['registrations'] }} this period, {{ $report['registrations_prior'] }} in the prior period</td>
         </tr>
         <tr>
-            <td class="label">Renewal performance</td>
+            <td class="label">Cohort survival rate</td>
             <td>
-                @if ($report['renewal_performance']['rate'] === null)
-                    Not available: no renewal filing was decided in this period
+                @if ($report['cohort_survival']['survival'] === null)
+                    Not available: no business has reached a first renewal yet
                 @else
-                    {{ number_format($report['renewal_performance']['rate'], 1) }}%
-                    ({{ $report['renewal_performance']['approved'] }} approved of
-                    {{ $report['renewal_performance']['decided'] }} decided)
+                    {{ number_format($report['cohort_survival']['survival'], 1) }}%
+                    still renewing through {{ $report['cohort_survival']['max_cycle'] }}
+                    renewal {{ \Illuminate\Support\Str::plural('cycle', $report['cohort_survival']['max_cycle']) }}
+                    ({{ $report['cohort_survival']['lapses'] }} lapsed of
+                    {{ $report['cohort_survival']['businesses'] }} businesses followed)
                 @endif
             </td>
         </tr>
@@ -91,7 +93,74 @@
         </tr>
     </table>
 
-    <h2>Business status summary</h2>
+    <h2>Business renewal performance — cohort survival</h2>
+    @if (empty($report['cohort_survival']['points']))
+        <div class="empty">
+            No business on record has reached a first renewal, so there is no cohort to have survived
+            anything. This is not a 0% survival rate — there is nothing yet to measure.
+        </div>
+    @else
+        <table>
+            <thead>
+                <tr>
+                    <th>Renewal cycle</th>
+                    <th class="num">Reached it</th>
+                    <th class="num">Lapsed</th>
+                    <th class="num">Still renewing</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($report['cohort_survival']['points'] as $point)
+                    <tr>
+                        <td>Cycle {{ $point['cycle'] }}</td>
+                        <td class="num">{{ number_format($point['at_risk']) }}</td>
+                        <td class="num">{{ number_format($point['lapses']) }}</td>
+                        <td class="num">{{ $point['survival'] === null ? '—' : number_format($point['survival'], 1).'%' }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+
+        @if (! empty($report['cohort_survival']['cohorts']))
+            <table>
+                <thead>
+                    <tr>
+                        <th>First held a permit</th>
+                        <th class="num">Businesses</th>
+                        <th class="num">Lapsed</th>
+                        <th class="num">Cycles observed</th>
+                        <th class="num">Still renewing</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($report['cohort_survival']['cohorts'] as $cohort)
+                        <tr>
+                            <td>{{ $cohort['cohort'] }}</td>
+                            <td class="num">{{ number_format($cohort['businesses']) }}</td>
+                            <td class="num">{{ number_format($cohort['lapses']) }}</td>
+                            <td class="num">{{ $cohort['max_cycle'] }}</td>
+                            <td class="num">
+                                @if ($cohort['survival'] === null)
+                                    no renewal reached yet
+                                @else
+                                    {{ number_format($cohort['survival'], 1) }}%
+                                @endif
+                            </td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endif
+
+        <div class="empty">
+            {{ $report['cohort_survival']['methodology'] }}
+            A business counts as lapsed when its permit ran out more than
+            {{ $report['cohort_survival']['grace_days'] }} days ago with no successor, or when a
+            renewal left a gap in cover.
+        </div>
+    @endif
+
+    <h2>Business lifecycle status</h2>
     <table>
         <thead><tr><th>Status</th><th class="num">Count</th><th class="num">Share</th></tr></thead>
         <tbody>
@@ -99,7 +168,7 @@
                 <tr>
                     <td>{{ $row['label'] }}</td>
                     <td class="num">{{ number_format($row['count']) }}</td>
-                    <td class="num">{{ number_format($row['share'], 1) }}%</td>
+                    <td class="num">{{ $row['share'] === null ? '—' : number_format($row['share'], 1).'%' }}</td>
                 </tr>
             @endforeach
         </tbody>

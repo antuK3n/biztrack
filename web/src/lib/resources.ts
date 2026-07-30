@@ -16,6 +16,7 @@ import type {
   Computed,
   BusinessStatus,
   BusinessPayload,
+  DashboardReport,
   Department,
   DocumentType,
   FeeAssessment,
@@ -373,6 +374,18 @@ export const analytics = {
    * screen — these are batch figures, as fresh as the last `analytics:refresh`,
    * and the PHP fallback stands in when R is unreachable.
    */
+
+  /**
+   * Screen 1: every Analytics Dashboard panel on one payload.
+   *
+   * One request, not one per panel: the KPI cards, application volume and
+   * decision outcomes all describe the same month and have to reconcile, which
+   * they cannot be relied on to do if each arrives from a different refresh.
+   */
+  dashboard: (months: number) =>
+    unwrapComputed<DashboardReport>(api.get('/analytics/dashboard', { params: { months } })),
+  dashboardReport: (months: number) =>
+    downloadBlob(`/analytics/dashboard/report?months=${months}`, 'analytics-dashboard.pdf'),
 
   /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>

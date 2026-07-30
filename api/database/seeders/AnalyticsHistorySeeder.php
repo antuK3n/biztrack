@@ -5,6 +5,8 @@ namespace Database\Seeders;
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
 use App\Enums\InspectionResult;
+use App\Enums\InspectionStatus;
+use App\Enums\OfficerRequestStatus;
 use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
@@ -18,6 +20,10 @@ use App\Models\BusinessOwner;
 use App\Models\Department;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
+use App\Models\Message;
+use App\Models\MessageThread;
+use App\Models\OfficerRequest;
+use App\Models\OfficerRequestResponse;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
@@ -62,6 +68,32 @@ use Illuminate\Support\Facades\Hash;
  * and the whole `application_status_history` chain are produced by the same
  * code path a live filing takes, so they cannot drift out of agreement with
  * each other or with what the app would ever produce.
+ *
+ * WHAT IT FILLS IN THAT THE WORKFLOW WOULD NOT
+ * --------------------------------------------
+ * Five columns the paper reports on are real columns nothing had ever written
+ * to, so the screens reading them showed honest empty states. They are filled
+ * here from the register's own facts, never from a figure copied off the paper:
+ *
+ *   businesses.form_of_organization  allocated to the paper's shares, with
+ *                                    registration_type set to the agency that
+ *                                    registers that form (DTI / SEC / CDA)
+ *   applications.prior_permit_id     every renewal and amendment points at the
+ *                                    business permit it replaces, which is what
+ *                                    makes Renewal Compliance computable. A
+ *                                    renewal is late because its submitted_at
+ *                                    really does fall after that permit expired
+ *   applications.complexity          the highly-technical tier is a rule over
+ *                                    line of business and declared capital, so
+ *                                    RA 11032's 20-working-day limit has filings
+ *                                    to be measured against
+ *   inspections.inspection_type      written from the inspecting office, along
+ *                                    with the CPDO zoning visits, the failed
+ *                                    visits, and the re-inspections that follow
+ *   officer_requests / messages      requests with responses, meetings with
+ *                                    attendance, and replies placed by walking
+ *                                    forward through office hours so the
+ *                                    latencies are working-hour gaps
  *
  * THE INJECTED SLOWDOWN
  * ---------------------
@@ -177,6 +209,186 @@ class AnalyticsHistorySeeder extends Seeder
     /** Reviewer headcount per office (r/config.R DEPARTMENTS$reviewers). */
     private const REVIEWERS = ['BPLO' => 3, 'CHO' => 2, 'BFP' => 2, 'CPDO' => 1];
 
+    /* ── register attributes the paper reports on ─────────────────────────── */
+
+    /**
+     * Form of organization mix.
+     *
+     * The paper's figure counts 2,318 sole proprietorships, 422 corporations and
+     * 142 partnerships — 80.5% / 14.7% / 4.9% of the three it names. Those shares
+     * are what is reproduced here, scaled to whatever number of businesses this
+     * window produces, with a small cooperative tail because the register has a
+     * column for it and Malabon does have cooperatives.
+     *
+     * @var array<string, float>
+     */
+    private const ORGANIZATION_MIX = [
+        'sole_proprietorship' => 0.805,
+        'corporation' => 0.146,
+        'partnership' => 0.044,
+        'cooperative' => 0.005,
+    ];
+
+    /**
+     * Who registers each form, so `registration_type` and
+     * `form_of_organization` cannot contradict each other.
+     *
+     * DTI registers sole proprietorships, the SEC registers corporations and
+     * partnerships, and the CDA registers cooperatives. Before this the seeder
+     * drew DTI/SEC on a 72/28 coin flip with nothing to tie it to, which would
+     * now read as 28% of sole proprietorships having been registered with the
+     * SEC.
+     *
+     * @var array<string, string>
+     */
+    private const REGISTRAR_BY_FORM = [
+        'sole_proprietorship' => 'DTI',
+        'corporation' => 'SEC',
+        'partnership' => 'SEC',
+        'cooperative' => 'CDA',
+    ];
+
+    /**
+     * Share of renewal filings submitted on or before the prior permit expired.
+     *
+     * Lateness here is a real relationship between two dates, not a flag: a late
+     * renewal is one whose `submitted_at` genuinely falls after the
+     * `valid_until` of the permit its `prior_permit_id` points at. The rate is
+     * reached by choosing WHICH business files on a given date (see
+     * pickRenewalCandidate) — some businesses are current, some have let the
+     * permit lapse — so no date is ever bent to produce it.
+     *
+     * 0.85 lands the paper's ~68% Renewal Compliance reading once the filings
+     * that never arrive at all are counted in the denominator.
+     */
+    private const RENEWAL_ON_TIME_RATE = 0.85;
+
+    /**
+     * RA 11032 highly-technical tier.
+     *
+     * The law lets the LGU classify transactions that need technical evaluation
+     * as highly technical and gives them twenty working days. The register's
+     * checkable proxy for "needs technical evaluation" is the line of business
+     * and the declared capital, so the rule is exactly that and nothing else:
+     * a NEW filing for a manufacturing, construction or amusement line with at
+     * least this much declared capital is highly technical. It is deterministic
+     * — a panelist can be shown the two columns that decide it.
+     */
+    private const HIGH_TECH_CATEGORIES = [
+        'manufacturer', 'essential_manufacturer', 'contractor', 'amusement_place',
+    ];
+
+    private const HIGH_TECH_CAPITAL_FLOOR = 1_000_000;
+
+    /**
+     * Days a highly-technical filing spends between the scheduled site visit and
+     * the visit itself.
+     *
+     * This is where the tier's extra time sits, and it is a deliberate choice.
+     * The alternative — slowing the office desk reviews — would inject outliers
+     * into exactly the assignment durations the SPC control chart is fitted on,
+     * and the gradual-slowdown signal that chart exists to show is the one thing
+     * in this seeder that must not be contaminated. Technical evaluation and
+     * site assessment is also where the time actually goes on a filing like
+     * this, so the honest place to record it is the inspection stage.
+     *
+     * The result is a mean statutory turnaround in the mid-twenties of working
+     * days against a twenty-day limit: the tier BREACHES, which is what the
+     * paper reports and a more useful finding than a manufactured pass.
+     */
+    private const HIGH_TECH_EVALUATION_DAYS = [17.0, 30.0];
+
+    /* ── inspections ──────────────────────────────────────────────────────── */
+
+    /**
+     * Outcome mix for a first site visit.
+     *
+     * Passed + conditional + failed = 1. A failed first visit is followed by a
+     * re-inspection, so the pass rate the screen reports (passed ÷ completed,
+     * counting the re-inspection as its own completed inspection) settles a
+     * little under the first-visit pass rate — the 84-89% band the paper shows.
+     */
+    private const INSPECTION_FAIL_RATE = 0.05;
+
+    private const INSPECTION_CONDITIONAL_RATE = 0.08;
+
+    /** Share of failed first visits whose re-inspection also fails. */
+    private const REINSPECTION_FAIL_RATE = 0.22;
+
+    /** Days between a failed visit and the re-inspection. */
+    private const REINSPECTION_GAP_DAYS = [10.0, 28.0];
+
+    /**
+     * Which inspection type each office records.
+     *
+     * `inspections.inspection_type` is a real column that nothing had ever
+     * written to, so the dashboard was inferring the type from the inspecting
+     * department. Writing it means the column and the department agree rather
+     * than one standing in for the other.
+     *
+     * @var array<string, string>
+     */
+    private const INSPECTION_TYPE_BY_OFFICE = [
+        'CHO' => 'sanitary',
+        'BFP' => 'fire_safety',
+        'CPDO' => 'zoning',
+        'OBO' => 'building',
+        'CENRO' => 'environmental',
+    ];
+
+    /* ── officer activity ─────────────────────────────────────────────────── */
+
+    /**
+     * Officer requests raised inside the trailing twelve months the Officer
+     * Activity panel reports on.
+     *
+     * The paper shows 49 requests with 39 fulfilled (80%) and 18 meetings all
+     * attended. Those are the targets: MEETINGS_WINDOW meeting requests, all
+     * fulfilled and all with an applicant response against them, plus
+     * REQUESTS_WINDOW document/message requests of which REQUESTS_FULFILLED are
+     * fulfilled. 18 + 21 = 39 fulfilled out of 18 + 31 = 49.
+     *
+     * Earlier months get the same density, scaled by how many filings they hold,
+     * so the register does not look as though officers only started answering
+     * anyone twelve months ago.
+     */
+    private const OFFICER_REQUESTS_WINDOW = 31;
+
+    private const OFFICER_REQUESTS_FULFILLED_WINDOW = 21;
+
+    private const OFFICER_MEETINGS_WINDOW = 18;
+
+    /**
+     * Mean officer reply latency, in WORKING hours.
+     *
+     * The panel measures wall-clock hours from an applicant's message to the
+     * next reply in that thread, so an afternoon question answered first thing
+     * the next morning is a ~17-hour gap however promptly it was handled. Replies
+     * are therefore placed by advancing through office hours (08:00-17:00,
+     * weekdays) rather than by adding raw hours: the latencies that come out are
+     * real office behaviour, and the handful that cross a night are what pulls
+     * the reported average up towards the paper's 4.2 hours.
+     */
+    private const OFFICER_REPLY_WORKING_HOURS = 1.9;
+
+    /** Share of applicant messages sent too late in the day to be answered that day. */
+    private const OFFICER_LATE_DAY_SHARE = 0.07;
+
+    private const OFFICE_DAY_START = 8;
+
+    private const OFFICE_DAY_END = 17;
+
+    /**
+     * The window the Officer Activity panel reports on.
+     *
+     * Mirrors App\Support\DashboardAnalytics::DEFAULT_WINDOW_MONTHS. Kept as its
+     * own number rather than imported because a seeder reaching into the
+     * analytics layer for a constant would make the two impossible to change
+     * independently; if that one moves, the counts here spread over a different
+     * window and the report says so.
+     */
+    private const OFFICER_WINDOW_MONTHS = 12;
+
     /* ── runtime state ────────────────────────────────────────────────────── */
 
     private WorkflowService $workflow;
@@ -219,11 +431,30 @@ class AnalyticsHistorySeeder extends Seeder
     /** @var array<int, array{business: Business, registered_at: Carbon, renewed_years: array<int, true>}> */
     private array $register = [];
 
+    /**
+     * Moments where an office and an applicant had something to talk about.
+     *
+     * A returned assignment is the one point in the workflow where a real
+     * applicant reliably picks up the phone, so that is where the seeded message
+     * threads, requests for another requirement, and meetings hang off. One
+     * entry per application, because `message_threads.application_id` is unique.
+     *
+     * @var array<int, array{application_id: int, applicant_id: int, department_id: int, officer_id: int, at: Carbon}>
+     */
+    private array $engagements = [];
+
     private array $counts = [
         'businesses' => 0, 'applications' => 0, 'assignments' => 0,
         'completed_reviews' => 0, 'permits' => 0, 'closures' => 0,
         'approved' => 0, 'rejected' => 0, 'in_flight' => 0, 'returned_loops' => 0,
+        'highly_technical' => 0, 'renewals_linked' => 0, 'renewals_late' => 0,
+        'inspections' => 0, 'reinspections' => 0, 'inspection_failures' => 0,
+        'zoning_inspections' => 0, 'inspection_rejections' => 0,
+        'threads' => 0, 'messages' => 0, 'officer_requests' => 0, 'meetings' => 0,
     ];
+
+    /** @var array<string, int> businesses per form_of_organization */
+    private array $organizationMix = [];
 
     public function run(): void
     {
@@ -266,6 +497,7 @@ class AnalyticsHistorySeeder extends Seeder
                 }
             }
 
+            $this->seedOfficerActivity();
             $this->closeBusinesses();
             $this->lapsePermits();
         } finally {
@@ -541,15 +773,26 @@ class AnalyticsHistorySeeder extends Seeder
      * this calendar year. Weighted Zipf-ishly towards the earliest registrants
      * so a handful of businesses accumulate three years of filings, as
      * generate.R's `biz_weights` intends.
+     *
+     * `$preferOnTime` steers the Renewal Compliance indicator without touching a
+     * single date. Eligible businesses fall into three groups by the state of the
+     * business permit this filing would replace — still valid on `$at`, already
+     * expired on `$at`, or none ever issued — and the caller says which group it
+     * would rather draw from. A late renewal is then late because the business it
+     * belongs to really did let its permit lapse before filing, which is what the
+     * indicator is measuring. Preference, not restriction: if the preferred group
+     * is empty on this date the whole eligible set is used, because forcing the
+     * shape would mean skipping filings the calendar planned.
      */
-    private function pickRenewalCandidate(Carbon $at): ?int
+    private function pickRenewalCandidate(Carbon $at, ?bool $preferOnTime = null): ?int
     {
         if ($this->register === []) {
             return null;
         }
 
-        $eligible = [];
-        $weights = [];
+        $today = $at->toDateString();
+        $eligible = ['on_time' => [], 'late' => [], 'unpermitted' => []];
+        $weights = ['on_time' => [], 'late' => [], 'unpermitted' => []];
         $rank = 0;
         foreach ($this->register as $id => $entry) {
             $rank++;
@@ -559,15 +802,31 @@ class AnalyticsHistorySeeder extends Seeder
             if (isset($entry['renewed_years'][(int) $at->year])) {
                 continue;
             }
-            $eligible[] = $id;
-            $weights[] = 1 / ($rank ** 0.6);
+
+            $permit = $entry['business_permit'] ?? null;
+            $group = match (true) {
+                $permit === null => 'unpermitted',
+                $permit['valid_until'] >= $today => 'on_time',
+                default => 'late',
+            };
+
+            $eligible[$group][] = $id;
+            $weights[$group][] = 1 / ($rank ** 0.6);
         }
 
-        if ($eligible === []) {
-            return null;
+        $order = match ($preferOnTime) {
+            true => ['on_time', 'late', 'unpermitted'],
+            false => ['late', 'on_time', 'unpermitted'],
+            default => ['on_time', 'late', 'unpermitted'],
+        };
+
+        foreach ($order as $group) {
+            if ($eligible[$group] !== []) {
+                return $eligible[$group][$this->pickWeighted($weights[$group])];
+            }
         }
 
-        return $eligible[$this->pickWeighted($weights)];
+        return null;
     }
 
     /* ── writing ──────────────────────────────────────────────────────────── */
@@ -578,7 +837,10 @@ class AnalyticsHistorySeeder extends Seeder
         // already on the register coming back to renew or amend. January and
         // February are renewal season, so new registrations are rarer then.
         $renewalSeason = in_array((int) $submittedAt->month, [1, 2], true);
-        $candidate = $this->pickRenewalCandidate($submittedAt);
+        // Decided before the business is chosen, because it is the choice of
+        // business that makes a renewal on time or late.
+        $wantOnTime = $this->chance(self::RENEWAL_ON_TIME_RATE);
+        $candidate = $this->pickRenewalCandidate($submittedAt, $wantOnTime);
 
         if ($candidate === null || $this->chance($renewalSeason ? 0.18 : 0.45)) {
             $type = ApplicationType::New;
@@ -592,11 +854,16 @@ class AnalyticsHistorySeeder extends Seeder
         $this->register[$business->id]['last_filing_at'] = $submittedAt->copy();
         $owner = $business->owner;
 
+        // RA 11032 classification, decided before the permit route because the
+        // highly-technical tier is the one that goes the full four-office route.
+        $tier = $this->complexityFor($business, $type);
+
         // Which permits are being asked for. New filings go the full route;
         // renewals mostly re-validate health and fire too (both certificates
         // are annual), a minority are a BPLO re-validation only, and amendments
         // touch the business permit alone.
         $codes = match (true) {
+            $tier === 'highly_technical' => ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING'],
             $type === ApplicationType::New => $this->chance(0.35)
                 ? ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING']
                 : ['BUSINESS', 'SANITARY', 'FSIC'],
@@ -606,6 +873,15 @@ class AnalyticsHistorySeeder extends Seeder
             default => ['BUSINESS'],
         };
         $requested = array_map(fn (string $c) => $this->permitTypes[$c], $codes);
+
+        // The permit this filing replaces. Real column, real link: it is what
+        // the Renewal Compliance indicator counts, and what an applicant picks
+        // by hand on a live renewal (see PriorPermitController). Null when the
+        // business has never been issued one — the honest answer for a business
+        // whose earlier permits predate the system.
+        $priorPermit = $type === ApplicationType::New
+            ? null
+            : ($this->register[$business->id]['business_permit'] ?? null);
 
         // ── draft ──────────────────────────────────────────────────────────
         $draftedAt = $submittedAt->copy()->subHours(mt_rand(1, 30));
@@ -617,13 +893,22 @@ class AnalyticsHistorySeeder extends Seeder
             'applicant_user_id' => $owner->id,
             'application_type' => $type,
             'status' => ApplicationStatus::Draft,
+            'prior_permit_id' => $priorPermit['id'] ?? null,
             'fee_profile' => $this->feeProfile($business, $type),
             'payment_mode' => $this->chance(0.7) ? 'annual' : 'quarterly',
         ]);
         $app->permitTypes()->sync(collect($requested)->pluck('id'));
-        // RA 11032 classification. New filings are complex (multi-office),
-        // renewals and amendments are simple.
-        $app->forceFill(['complexity' => $type === ApplicationType::New ? 'complex' : 'simple'])->save();
+        $app->forceFill(['complexity' => $tier])->save();
+
+        if ($tier === 'highly_technical') {
+            $this->counts['highly_technical']++;
+        }
+        if ($type === ApplicationType::Renewal && $priorPermit !== null) {
+            $this->counts['renewals_linked']++;
+            if ($priorPermit['valid_until'] < $submittedAt->toDateString()) {
+                $this->counts['renewals_late']++;
+            }
+        }
 
         // ── submit → fee assessment → pending payment ──────────────────────
         $this->travelTo($submittedAt);
@@ -701,6 +986,12 @@ class AnalyticsHistorySeeder extends Seeder
 
         // ── inspections (scheduled by the workflow when reviews all clear) ──
         $app->refresh();
+        // Written before any visit is recorded: recordInspection issues the
+        // permits as soon as every inspection on the file has passed, so an
+        // inspection added afterwards would arrive after its own approval.
+        $this->addZoningInspection($app, $lastCompletedAt ?? $paidAt);
+
+        $highlyTechnical = $tier === 'highly_technical';
         $visits = [];
         foreach ($app->inspections()->with('department')->get() as $inspection) {
             $inspector = $this->reviewerFor($inspection->department->code);
@@ -710,11 +1001,18 @@ class AnalyticsHistorySeeder extends Seeder
                 // seeded reviewer for the same office; nothing else changes.
                 $inspection->forceFill(['inspector_user_id' => $inspector->id])->save();
             }
+            $this->tagInspectionType($inspection);
+
+            // A highly-technical filing waits on technical evaluation before the
+            // site assessment happens; everything else is visited within days.
+            $gap = $highlyTechnical
+                ? $this->uniform(...self::HIGH_TECH_EVALUATION_DAYS)
+                : $this->uniform(0.5, 2.5);
+
             $visits[] = [
                 'inspection' => $inspection,
                 'inspector' => $inspector,
-                'conducted_at' => $inspection->scheduled_at->copy()
-                    ->addSeconds((int) $this->uniform(0.5 * 86400, 2.5 * 86400)),
+                'conducted_at' => $inspection->scheduled_at->copy()->addSeconds((int) round($gap * 86400)),
             ];
         }
         // Conduct them in date order: the last visit is what triggers issuance,
@@ -722,6 +1020,8 @@ class AnalyticsHistorySeeder extends Seeder
         usort($visits, fn (array $a, array $b) => $a['conducted_at'] <=> $b['conducted_at']);
 
         $pendingInspection = false;
+        $failed = [];
+        $lastVisitAt = null;
         foreach ($visits as $visit) {
             if ($visit['conducted_at']->greaterThan($this->anchor)) {
                 $pendingInspection = true;
@@ -729,15 +1029,13 @@ class AnalyticsHistorySeeder extends Seeder
                 continue;
             }
 
-            $this->travelTo($visit['conducted_at']);
-            Auth::setUser($visit['inspector'] ?? $this->reviewers['BPLO'][0]);
-            $this->workflow->recordInspection(
-                $visit['inspection'],
-                $this->chance(0.86) ? InspectionResult::Passed : InspectionResult::Conditional,
-                $this->chance(0.86)
-                    ? 'Premises inspected. Compliant with the applicable requirements.'
-                    : 'Compliant subject to correction of minor findings within 30 days.',
-            );
+            $result = $this->inspectionOutcome();
+            $this->recordVisit($visit['inspection'], $visit['inspector'], $visit['conducted_at'], $result);
+            $lastVisitAt = $visit['conducted_at'];
+
+            if ($result === InspectionResult::Failed) {
+                $failed[] = $visit;
+            }
         }
 
         if ($pendingInspection) {
@@ -746,15 +1044,236 @@ class AnalyticsHistorySeeder extends Seeder
             return;
         }
 
+        // ── re-inspections ─────────────────────────────────────────────────
+        // A failed visit does not end the filing: the department schedules
+        // another one. That second visit is its own inspection row, which is why
+        // the reported pass rate (passed / completed) sits a little below the
+        // first-visit pass rate.
+        $unresolved = false;
+        foreach ($failed as $visit) {
+            $reinspectedAt = $visit['conducted_at']->copy()
+                ->addSeconds((int) round($this->uniform(...self::REINSPECTION_GAP_DAYS) * 86400));
+            if ($reinspectedAt->greaterThan($this->anchor)) {
+                $pendingInspection = true;
+
+                break;
+            }
+
+            $result = $this->chance(self::REINSPECTION_FAIL_RATE)
+                ? InspectionResult::Failed
+                : ($this->chance(0.85) ? InspectionResult::Passed : InspectionResult::Conditional);
+
+            $reinspection = Inspection::create([
+                'application_id' => $app->id,
+                'department_id' => $visit['inspection']->department_id,
+                'inspector_user_id' => $visit['inspector']?->id,
+                'status' => InspectionStatus::Scheduled,
+                'scheduled_at' => $reinspectedAt->copy()->subDays(2),
+            ]);
+            $this->tagInspectionType($reinspection->setRelation('department', $visit['inspection']->department));
+            $this->recordVisit($reinspection, $visit['inspector'], $reinspectedAt, $result, true);
+            $this->counts['reinspections']++;
+
+            $lastVisitAt = $reinspectedAt;
+            if ($result === InspectionResult::Failed) {
+                $unresolved = true;
+            }
+        }
+
+        if ($pendingInspection) {
+            $this->counts['in_flight']++;
+
+            return;
+        }
+
+        // A deficiency that survived the re-inspection ends the filing. This is
+        // the one rejection in the seeder with physical evidence behind it, and
+        // the reason the rejection reasons include re-inspection failure.
+        if ($unresolved) {
+            $decidedAt = ($lastVisitAt ?? $paidAt)->copy()->addSeconds((int) $this->uniform(4 * 3600, 60 * 3600));
+            if ($decidedAt->greaterThan($this->anchor)) {
+                $decidedAt = $this->anchor->copy();
+            }
+            $this->travelTo($decidedAt);
+            Auth::setUser($this->reviewers['BPLO'][0]);
+            $this->workflow->rejectApplication(
+                $app->fresh(),
+                'Sanitary deficiencies were not corrected on re-inspection.'.self::LABEL,
+            );
+            $this->counts['rejected']++;
+            $this->counts['inspection_rejections']++;
+
+            return;
+        }
+
+        // A failed visit stays on the file forever, so recordInspection's
+        // "every inspection passed" test can never come true again and the
+        // workflow will not issue on its own. The re-inspection that cleared it
+        // is the decision, so issuance is asked for explicitly, at that instant,
+        // through the same public method the workflow uses itself.
+        $app->refresh();
+        if ($failed !== [] && $app->status === ApplicationStatus::ForInspection) {
+            $this->travelTo($lastVisitAt ?? $paidAt);
+            Auth::setUser($this->reviewers['BPLO'][0]);
+            $this->workflow->approveAndIssue($app->fresh());
+            $app->refresh();
+        }
+
         // No inspection-bearing permit type: the workflow already approved and
         // issued on the last review. Either way the application is decided.
-        $app->refresh();
         if ($app->status === ApplicationStatus::Approved) {
             $this->counts['approved']++;
             $this->counts['permits'] += $app->permits()->count();
+            $this->rememberBusinessPermit($app);
         } else {
             $this->counts['in_flight']++;
         }
+    }
+
+    /**
+     * The CPDO site verification behind a locational clearance.
+     *
+     * `permit_types.ZONING.requires_inspection` is false, so the workflow never
+     * schedules one and the register held zero Zoning inspections — the panel's
+     * third type was structurally empty. Flipping the reference flag was the
+     * other option and was rejected: it would change what happens to a live
+     * tester's next filing. So the row is written here instead, for seeded
+     * filings only, following the workflow's own scheduling rule (two working
+     * days out) so the dates line up with the sanitary and fire visits.
+     */
+    private function addZoningInspection(Application $app, Carbon $reviewsClearedAt): void
+    {
+        $app->loadMissing('permitTypes');
+        if (! $app->permitTypes->contains(fn ($pt) => $pt->code === 'ZONING')) {
+            return;
+        }
+
+        $cpdo = $this->departments['CPDO'];
+        if ($app->status === ApplicationStatus::Approved
+            || $app->inspections()->where('department_id', $cpdo->id)->exists()) {
+            return;
+        }
+
+        $this->travelTo($reviewsClearedAt);
+        $inspection = Inspection::create([
+            'application_id' => $app->id,
+            'department_id' => $cpdo->id,
+            'inspector_user_id' => $this->reviewerFor('CPDO')?->id,
+            'status' => InspectionStatus::Scheduled,
+            'scheduled_at' => $reviewsClearedAt->copy()->addWeekdays(2),
+        ]);
+        $this->tagInspectionType($inspection->setRelation('department', $cpdo));
+        $this->counts['zoning_inspections']++;
+    }
+
+    /**
+     * Write `inspections.inspection_type` from the inspecting office.
+     *
+     * Not a derived label standing in for a missing column: the column is filled
+     * in, so the dashboard can read it directly and the two agree.
+     */
+    private function tagInspectionType(Inspection $inspection): void
+    {
+        $code = $inspection->department->code ?? null;
+        $type = self::INSPECTION_TYPE_BY_OFFICE[$code] ?? null;
+        if ($type === null) {
+            return;
+        }
+
+        $inspection->forceFill(['inspection_type' => $type])->save();
+    }
+
+    /** passed / conditional / failed, in the mix the paper's pass rates imply. */
+    private function inspectionOutcome(): InspectionResult
+    {
+        $roll = mt_rand() / mt_getrandmax();
+
+        return match (true) {
+            $roll < self::INSPECTION_FAIL_RATE => InspectionResult::Failed,
+            $roll < self::INSPECTION_FAIL_RATE + self::INSPECTION_CONDITIONAL_RATE => InspectionResult::Conditional,
+            default => InspectionResult::Passed,
+        };
+    }
+
+    private function recordVisit(
+        Inspection $inspection,
+        ?User $inspector,
+        Carbon $at,
+        InspectionResult $result,
+        bool $isReinspection = false,
+    ): void {
+        $this->travelTo($at);
+        Auth::setUser($inspector ?? $this->reviewers['BPLO'][0]);
+        $this->workflow->recordInspection($inspection, $result, $this->inspectionFindings($result, $isReinspection));
+        $this->counts['inspections']++;
+        if ($result === InspectionResult::Failed) {
+            $this->counts['inspection_failures']++;
+        }
+    }
+
+    private function inspectionFindings(InspectionResult $result, bool $isReinspection): string
+    {
+        $text = match ($result) {
+            InspectionResult::Passed => $isReinspection
+                ? 'Re-inspection conducted. Earlier findings have been corrected.'
+                : 'Premises inspected. Compliant with the applicable requirements.',
+            InspectionResult::Conditional => 'Compliant subject to correction of minor findings within 30 days.',
+            InspectionResult::Failed => $isReinspection
+                ? 'Re-inspection conducted. The findings raised on the first visit remain uncorrected.'
+                : [
+                    'Fire exit obstructed and no serviceable extinguisher on the premises.',
+                    'Food handlers without current health certificates; storage area not vermin-proofed.',
+                    'Occupied floor area exceeds what the locational clearance covers.',
+                    'No potable water supply and no grease trap on the wash line.',
+                ][mt_rand(0, 3)],
+        };
+
+        return $text.self::LABEL;
+    }
+
+    /**
+     * Remember the business permit this business now holds, so the renewal that
+     * replaces it can point at it.
+     */
+    private function rememberBusinessPermit(Application $app): void
+    {
+        $permit = $app->permits()
+            ->where('permit_type_id', $this->permitTypes['BUSINESS']->id)
+            ->latest('id')->first(['id', 'valid_until']);
+
+        if ($permit === null || ! isset($this->register[$app->business_id])) {
+            return;
+        }
+
+        $this->register[$app->business_id]['business_permit'] = [
+            'id' => (int) $permit->id,
+            'valid_until' => Carbon::parse($permit->valid_until)->toDateString(),
+        ];
+    }
+
+    /**
+     * RA 11032 tier for a filing.
+     *
+     * Renewals and amendments are simple transactions. A new registration is
+     * complex — several offices have to clear it — unless its line of business
+     * and declared capital put it in the tier the law reserves for filings that
+     * need technical evaluation, which is a rule read off two real columns rather
+     * than a coin flip.
+     */
+    private function complexityFor(Business $business, ApplicationType $type): string
+    {
+        if ($type !== ApplicationType::New) {
+            return 'simple';
+        }
+
+        $business->loadMissing('lines.psicCode');
+        $category = $this->lineMetaFor($business)['category'];
+        $capital = (float) ($business->lines->first()?->capitalization ?? 0);
+
+        return in_array($category, self::HIGH_TECH_CATEGORIES, true)
+            && $capital >= self::HIGH_TECH_CAPITAL_FLOOR
+                ? 'highly_technical'
+                : 'complex';
     }
 
     /**
@@ -855,6 +1374,18 @@ class AnalyticsHistorySeeder extends Seeder
             $this->workflow->resubmit($app->fresh());
             $this->counts['returned_loops']++;
 
+            // A returned filing is the moment an applicant has a question, so it
+            // is where the seeded conversation and any request for a further
+            // requirement hangs off. One per application: message_threads is
+            // unique on application_id, and a second entry would be dropped.
+            $this->engagements[$app->id] ??= [
+                'application_id' => $app->id,
+                'applicant_id' => $app->applicant_user_id,
+                'department_id' => $assignment->department_id,
+                'officer_id' => ($officer ?? $this->reviewers['BPLO'][0])->id,
+                'at' => $returnedAt->copy(),
+            ];
+
             $assignment->refresh();
         }
 
@@ -881,11 +1412,13 @@ class AnalyticsHistorySeeder extends Seeder
         Auth::setUser($owner);
 
         $sequence = $this->counts['businesses'] + 1;
+        $form = $this->nextOrganizationForm();
+
         $business = Business::create([
             'owner_user_id' => $owner->id,
             'name' => $this->businessName($line, $owner, $sequence),
             'trade_name' => null,
-            'registration_type' => $this->chance(0.72) ? 'DTI' : 'SEC',
+            'registration_type' => self::REGISTRAR_BY_FORM[$form],
             // Tag #2: independent of the account, so seeded businesses stay
             // identifiable even if an account is renamed or reassigned.
             'registration_number' => sprintf('%s%06d', self::REGISTRATION_PREFIX, $sequence),
@@ -893,6 +1426,10 @@ class AnalyticsHistorySeeder extends Seeder
             'ban' => Numbering::ban(),
             'status' => 'active',
         ]);
+        // Not in Business::$fillable — it is a BPLO form field the API writes
+        // through its own request object, so the seeder writes it directly.
+        $business->forceFill(['form_of_organization' => $form])->save();
+        $this->organizationMix[$form] = ($this->organizationMix[$form] ?? 0) + 1;
 
         BusinessAddress::create([
             'business_id' => $business->id,
@@ -927,6 +1464,32 @@ class AnalyticsHistorySeeder extends Seeder
         ];
 
         return $business;
+    }
+
+    /**
+     * The next form of organization to register, kept on the paper's shares.
+     *
+     * Allocated rather than drawn. A weighted draw over seven hundred businesses
+     * still misses its target shares by two or three points, and this figure is
+     * one a panelist reads straight off the screen and compares with the paper —
+     * so each new business takes whichever form is furthest behind its share.
+     * The mix is then exact at any register size, and deterministic.
+     */
+    private function nextOrganizationForm(): string
+    {
+        $placed = array_sum($this->organizationMix) + 1;
+
+        $pick = array_key_first(self::ORGANIZATION_MIX);
+        $worst = -INF;
+        foreach (self::ORGANIZATION_MIX as $form => $share) {
+            $deficit = $share * $placed - ($this->organizationMix[$form] ?? 0);
+            if ($deficit > $worst) {
+                $worst = $deficit;
+                $pick = $form;
+            }
+        }
+
+        return $pick;
     }
 
     /**
@@ -992,6 +1555,380 @@ class AnalyticsHistorySeeder extends Seeder
                 ->update(['status' => PermitStatus::Expired->value]);
         }
         $this->counts['expired_permits'] = $lapsed;
+    }
+
+    /* ── officer activity ─────────────────────────────────────────────────── */
+
+    /**
+     * The conversations, requests and meetings the Officer Activity panel counts.
+     *
+     * All of it hangs off applications this seeder wrote, which is what keeps the
+     * purge complete: message_threads, officer_requests and their responses are
+     * all reached through `application_id`, so nothing new had to be added to
+     * AnalyticsHistorySeeder::purge().
+     *
+     * Requests are placed to hit an exact count inside the panel's twelve-month
+     * window, and the same density is applied to the months before it — an
+     * officer-response record that starts abruptly twelve months ago would be an
+     * artefact of the reporting window rather than a register.
+     */
+    private function seedOfficerActivity(): void
+    {
+        if ($this->engagements === []) {
+            return;
+        }
+
+        $engagements = array_values($this->engagements);
+        usort($engagements, fn (array $a, array $b) => $a['at'] <=> $b['at']);
+
+        foreach ($engagements as $engagement) {
+            $this->writeThread($engagement);
+        }
+
+        $windowStart = $this->anchor->copy()->startOfDay()->subMonths(self::OFFICER_WINDOW_MONTHS);
+        $inWindow = array_values(array_filter(
+            $engagements,
+            fn (array $e) => $e['at']->greaterThanOrEqualTo($windowStart),
+        ));
+        $earlier = array_values(array_filter(
+            $engagements,
+            fn (array $e) => $e['at']->lessThan($windowStart),
+        ));
+
+        $this->writeOfficerRequests(
+            $inWindow,
+            self::OFFICER_REQUESTS_WINDOW,
+            self::OFFICER_MEETINGS_WINDOW,
+            self::OFFICER_REQUESTS_FULFILLED_WINDOW,
+        );
+
+        $scale = $inWindow === [] ? 0.0 : count($earlier) / count($inWindow);
+        $this->writeOfficerRequests(
+            $earlier,
+            (int) round(self::OFFICER_REQUESTS_WINDOW * $scale),
+            (int) round(self::OFFICER_MEETINGS_WINDOW * $scale),
+            (int) round(self::OFFICER_REQUESTS_FULFILLED_WINDOW * $scale),
+        );
+    }
+
+    /**
+     * One applicant/officer conversation on a returned filing.
+     *
+     * Each exchange is an applicant question and the office's answer. The answer
+     * is placed by walking forward through office hours, so the wall-clock gap
+     * the panel measures is whatever that walk produces — a couple of hours for
+     * a morning question, most of a day for one sent at half past four.
+     */
+    private function writeThread(array $engagement): void
+    {
+        $openedAt = $this->askMoment($engagement['at']);
+        if ($openedAt->greaterThan($this->anchor)) {
+            return;
+        }
+
+        $this->travelTo($openedAt);
+        $thread = MessageThread::create(['application_id' => $engagement['application_id']]);
+        $this->counts['threads']++;
+
+        $askedAt = $openedAt;
+        $exchanges = mt_rand(1, 3);
+        for ($i = 0; $i < $exchanges; $i++) {
+            if ($askedAt->greaterThan($this->anchor)) {
+                return;
+            }
+
+            $this->travelTo($askedAt);
+            Message::create([
+                'thread_id' => $thread->id,
+                'sender_user_id' => $engagement['applicant_id'],
+                'body' => $this->applicantQuestion($i).self::LABEL,
+            ]);
+            $this->counts['messages']++;
+
+            $repliedAt = $this->advanceWorkingHours(
+                $askedAt,
+                $this->lognormalWithMean(self::OFFICER_REPLY_WORKING_HOURS, 0.7),
+            );
+            if ($repliedAt->greaterThan($this->anchor)) {
+                return;
+            }
+
+            $this->travelTo($repliedAt);
+            Message::create([
+                'thread_id' => $thread->id,
+                'sender_user_id' => $engagement['officer_id'],
+                'body' => $this->officerReply($i).self::LABEL,
+            ]);
+            $this->counts['messages']++;
+
+            $askedAt = $this->askMoment($repliedAt->copy()->addSeconds((int) $this->uniform(20 * 3600, 5 * 86400)));
+        }
+    }
+
+    /**
+     * Place `$documents` document/message requests and `$meetings` meeting
+     * requests across `$pool`, of which `$fulfilled` of the non-meeting ones are
+     * fulfilled.
+     *
+     * Which engagements get one is chosen by an even stride through the pool so
+     * the requests spread across the whole period rather than bunching wherever
+     * the random draw happened to land.
+     *
+     * @param  list<array{application_id: int, applicant_id: int, department_id: int, officer_id: int, at: Carbon}>  $pool
+     */
+    private function writeOfficerRequests(array $pool, int $documents, int $meetings, int $fulfilled): void
+    {
+        $total = $documents + $meetings;
+        if ($pool === [] || $total <= 0) {
+            return;
+        }
+
+        $picked = [];
+        $stride = count($pool) / min($total, count($pool));
+        for ($i = 0; $i < min($total, count($pool)); $i++) {
+            $picked[] = $pool[(int) floor($i * $stride)];
+        }
+
+        // Meetings all end fulfilled — a meeting that happened and was answered
+        // is the only kind this register can evidence. The rest split into
+        // fulfilled, answered-but-not-yet-reviewed, and still outstanding.
+        $outstanding = max(0, $documents - $fulfilled);
+        $submitted = (int) ceil($outstanding * 0.6);
+        $plan = array_merge(
+            array_fill(0, $meetings, ['meeting', OfficerRequestStatus::Fulfilled]),
+            array_fill(0, min($fulfilled, $documents), ['document', OfficerRequestStatus::Fulfilled]),
+            array_fill(0, $submitted, ['document', OfficerRequestStatus::Submitted]),
+            array_fill(0, max(0, $outstanding - $submitted), ['document', OfficerRequestStatus::Pending]),
+        );
+        shuffle($plan);
+
+        foreach ($picked as $i => $engagement) {
+            if (! isset($plan[$i])) {
+                break;
+            }
+            [$kind, $status] = $plan[$i];
+            $this->writeOfficerRequest($engagement, $kind, $status);
+        }
+    }
+
+    private function writeOfficerRequest(array $engagement, string $kind, OfficerRequestStatus $status): void
+    {
+        $raisedAt = $this->nextOfficeMoment(
+            $engagement['at']->copy()->addSeconds((int) $this->uniform(2 * 3600, 2 * 86400))
+        );
+        if ($raisedAt->greaterThan($this->anchor)) {
+            return;
+        }
+
+        $meetingAt = null;
+        if ($kind === 'meeting') {
+            $meetingAt = $this->nextOfficeMoment($raisedAt->copy()->addWeekdays(mt_rand(2, 5)))
+                ->startOfHour()->addHours(mt_rand(1, 6));
+            if ($meetingAt->greaterThan($this->anchor)) {
+                // The meeting has not happened yet, so there is nothing to count
+                // as attended. Raise it as a document request instead of writing
+                // a meeting the register cannot evidence.
+                $kind = 'document';
+                $meetingAt = null;
+            }
+        }
+
+        $this->travelTo($raisedAt);
+        [$title, $description] = $this->officerRequestText($kind, $meetingAt);
+        $request = OfficerRequest::create([
+            'application_id' => $engagement['application_id'],
+            'requested_by_user_id' => $engagement['officer_id'],
+            'department_id' => $engagement['department_id'],
+            'title' => $title.self::LABEL,
+            'description' => $description,
+            'request_type' => $kind,
+            'status' => OfficerRequestStatus::Pending,
+            'due_date' => $raisedAt->copy()->addWeekdays(5),
+            'meeting_scheduled_at' => $meetingAt,
+            'meeting_duration_minutes' => $kind === 'meeting' ? [30, 45, 60][mt_rand(0, 2)] : 30,
+            'meeting_link' => $kind === 'meeting'
+                ? 'https://meet.google.com/'.substr(md5((string) $engagement['application_id']), 0, 3)
+                    .'-'.substr(md5((string) $engagement['officer_id']), 0, 4)
+                    .'-'.substr(md5((string) $engagement['applicant_id']), 0, 3)
+                : null,
+        ]);
+        $this->counts['officer_requests']++;
+        if ($meetingAt !== null) {
+            $this->counts['meetings']++;
+        }
+
+        if ($status === OfficerRequestStatus::Pending) {
+            return;
+        }
+
+        // The applicant answers — after the meeting, if there was one.
+        $answeredAt = $meetingAt !== null
+            ? $this->advanceWorkingHours($meetingAt->copy()->addMinutes(45), $this->uniform(0.5, 6.0))
+            : $this->advanceWorkingHours($raisedAt, $this->uniform(4, 3 * 9));
+        if ($answeredAt->greaterThan($this->anchor)) {
+            return;
+        }
+
+        $body = $meetingAt === null
+            ? 'Attaching the document requested. Please let us know if anything else is needed.'
+            : 'Attended the scheduled meeting. Noting the agreed corrections for our records.';
+
+        $this->travelTo($answeredAt);
+        OfficerRequestResponse::create([
+            'officer_request_id' => $request->id,
+            'user_id' => $engagement['applicant_id'],
+            'body' => $body.self::LABEL,
+        ]);
+        $request->update([
+            'status' => OfficerRequestStatus::Submitted,
+            'applicant_response' => $body.self::LABEL,
+            'submitted_at' => $answeredAt,
+        ]);
+
+        if ($status !== OfficerRequestStatus::Fulfilled) {
+            return;
+        }
+
+        $reviewedAt = $this->advanceWorkingHours($answeredAt, $this->uniform(1, 2 * 9));
+        if ($reviewedAt->greaterThan($this->anchor)) {
+            return;
+        }
+
+        $this->travelTo($reviewedAt);
+        $request->update([
+            'status' => OfficerRequestStatus::Fulfilled,
+            'reviewed_by_user_id' => $engagement['officer_id'],
+            'reviewed_at' => $reviewedAt,
+            'remarks' => 'Accepted. Requirement complete.'.self::LABEL,
+        ]);
+    }
+
+    /** @return array{string, string} */
+    private function officerRequestText(string $kind, ?Carbon $meetingAt): array
+    {
+        if ($kind === 'meeting') {
+            return [
+                'Meeting: walkthrough of the outstanding findings',
+                'Scheduled for '.($meetingAt?->format('j M Y, g:i a') ?? 'a date to be confirmed')
+                    .'. Please bring the original documents so they can be sighted.',
+            ];
+        }
+
+        $requests = [
+            ['Certified true copy of the lease contract', 'The uploaded copy is unsigned on the lessor page.'],
+            ['Latest community tax certificate', 'Not attached to the filing.'],
+            ['Sketch plan with the declared floor area', 'The declared area does not match the plan on file.'],
+            ['Barangay clearance, clearer scan', 'The uploaded scan is not legible.'],
+            ['Occupancy permit for the unit', 'Required for the line of business declared.'],
+            ['Fire safety maintenance certificate', 'Needed before the FSIC can be endorsed.'],
+        ];
+        $pick = $requests[mt_rand(0, count($requests) - 1)];
+
+        return ['Additional requirement: '.$pick[0], $pick[1]];
+    }
+
+    private function applicantQuestion(int $index): string
+    {
+        $questions = [
+            'Good day. We received a notice that our filing was returned — may we know exactly which document needs correcting?',
+            'We have re-uploaded the corrected file. Is anything else outstanding on our side?',
+            'May we follow up on the status? We would like to know if we should expect an inspection this week.',
+            'Would it be possible to submit the missing page in person instead of online?',
+        ];
+
+        return $questions[$index % count($questions)];
+    }
+
+    private function officerReply(int $index): string
+    {
+        $replies = [
+            'Good day. The barangay clearance on file is not legible — please re-upload a clearer copy and the review will resume.',
+            'Received, thank you. Nothing further is outstanding; the file is back with the reviewing office.',
+            'The review has been completed and the inspection is scheduled. The inspector will call ahead.',
+            'Yes, you may submit it over the counter. Bring the original and we will sight it and attach the scan for you.',
+        ];
+
+        return $replies[$index % count($replies)];
+    }
+
+    /**
+     * A plausible moment for an applicant to write, at or after `$at`.
+     *
+     * Weighted towards the morning, because that is when a question still gets
+     * answered the same day. The minority sent late in the afternoon are the
+     * ones whose answer lands the next working day, and they are what makes the
+     * reported average response time longer than the office's actual handling
+     * time — a distinction the panel's figure cannot make, so the register at
+     * least has to make it truthfully.
+     */
+    private function askMoment(Carbon $at): Carbon
+    {
+        $hour = $this->chance(self::OFFICER_LATE_DAY_SHARE)
+            ? $this->uniform(15.5, 16.9)
+            : $this->uniform(self::OFFICE_DAY_START, 13.5);
+
+        $day = $at->copy();
+        for ($guard = 0; $guard < 10; $guard++) {
+            if (! $day->isWeekend()) {
+                $moment = $day->copy()->startOfDay()->addSeconds((int) round($hour * 3600));
+                if ($moment->greaterThanOrEqualTo($at)) {
+                    return $moment;
+                }
+            }
+            $day->addDay();
+        }
+
+        return $day;
+    }
+
+    /** Snap a moment forward into the next stretch of office hours. */
+    private function nextOfficeMoment(Carbon $at): Carbon
+    {
+        return $this->advanceWorkingHours($at, 0.0);
+    }
+
+    /**
+     * `$hours` of office time after `$from`, in wall-clock terms.
+     *
+     * Office hours are OFFICE_DAY_START..OFFICE_DAY_END on weekdays. Two hours
+     * of work starting at 16:00 finishes at 09:00 the next morning, which is a
+     * seventeen-hour wall-clock gap and a two-hour wait — the seeded latencies
+     * are wall-clock because that is what the panel measures.
+     */
+    private function advanceWorkingHours(Carbon $from, float $hours): Carbon
+    {
+        $cursor = $from->copy();
+        $remaining = max(0.0, $hours) * 3600;
+
+        for ($guard = 0; $guard < 400; $guard++) {
+            if ($cursor->isWeekend()) {
+                $cursor = $cursor->copy()->addDay()->startOfDay()->addHours(self::OFFICE_DAY_START);
+
+                continue;
+            }
+
+            $dayStart = $cursor->copy()->startOfDay()->addHours(self::OFFICE_DAY_START);
+            $dayEnd = $cursor->copy()->startOfDay()->addHours(self::OFFICE_DAY_END);
+
+            if ($cursor->lessThan($dayStart)) {
+                $cursor = $dayStart;
+            }
+            if ($cursor->greaterThanOrEqualTo($dayEnd)) {
+                $cursor = $cursor->copy()->addDay()->startOfDay()->addHours(self::OFFICE_DAY_START);
+
+                continue;
+            }
+
+            $available = $dayEnd->getTimestamp() - $cursor->getTimestamp();
+            if ($remaining <= $available) {
+                return $cursor->copy()->addSeconds((int) round($remaining));
+            }
+
+            $remaining -= $available;
+            $cursor = $cursor->copy()->addDay()->startOfDay()->addHours(self::OFFICE_DAY_START);
+        }
+
+        return $cursor;
     }
 
     /* ── content ──────────────────────────────────────────────────────────── */
@@ -1205,6 +2142,23 @@ class AnalyticsHistorySeeder extends Seeder
                 $this->counts['assignments'], $this->counts['completed_reviews'], $this->counts['returned_loops']),
             sprintf('permits issued        %d (%d lapsed to expired)',
                 $this->counts['permits'], $this->counts['expired_permits'] ?? 0),
+            sprintf('RA 11032 tiers        %d highly technical, the rest complex (new) or simple (renewal/amendment)',
+                $this->counts['highly_technical']),
+            sprintf('form of organization  %s',
+                implode(', ', array_map(
+                    fn (string $form, int $n): string => sprintf('%s %d', $form, $n),
+                    array_keys($this->organizationMix),
+                    array_values($this->organizationMix),
+                ))),
+            sprintf('renewals linked       %d to the permit they replace (%d filed after it expired)',
+                $this->counts['renewals_linked'], $this->counts['renewals_late']),
+            sprintf('inspections recorded  %d (%d zoning added, %d re-inspections, %d failures, %d ended in rejection)',
+                $this->counts['inspections'], $this->counts['zoning_inspections'],
+                $this->counts['reinspections'], $this->counts['inspection_failures'],
+                $this->counts['inspection_rejections']),
+            sprintf('officer activity      %d threads / %d messages, %d requests, %d meetings',
+                $this->counts['threads'], $this->counts['messages'],
+                $this->counts['officer_requests'], $this->counts['meetings']),
             sprintf('injected slowdown     %s, weeks of %s .. %s (x%.2f ramping to x%.2f)',
                 self::ANOMALY_DEPARTMENT,
                 $this->anomalyStart->toDateString(),

@@ -55,6 +55,13 @@ return [
     */
 
     'variants' => [
+        'dashboard' => [
+            // Trailing window in months for the rate and mean panels. The KPI,
+            // volume and decision-outcome panels are YTD / this-month whatever
+            // this is set to — see DashboardAnalytics' note on windows.
+            ['months' => 12],
+        ],
+
         'processing_time' => [
             // weeks
             ['weeks' => 26],
