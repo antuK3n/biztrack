@@ -512,13 +512,235 @@ export interface ProcessingTimeReport {
   thin: ThinDepartment[]
 }
 
-/* Business Growth Analysis. */
+/*
+ * Analytics Dashboard (docs/r-integration-spec.md §1).
+ *
+ * Mirrors App\Support\DashboardAnalytics exactly, which is also what R's
+ * POST /dashboard returns. Three conventions run through the whole shape:
+ *
+ *  - **A null rate means "no rate exists"**, never zero. An empty denominator is
+ *    not 0%, and a screen that printed one would be asserting a finding nobody
+ *    computed.
+ *  - **Windows differ per panel** and each panel states which it used. Volume and
+ *    decision outcomes are this month; tier times, stage times, compliance,
+ *    inspections and officer activity run on a trailing window; the rest are as
+ *    of today.
+ *  - **Counts and their denominators both travel**, so a screen can show the
+ *    fraction behind a percentage instead of asking the reader to trust it.
+ */
+
+export interface DashboardKpis {
+  active_businesses: number
+  applications_ytd: number
+  applications_this_month: number
+  /** The permit-validity indicator, read off the compliance panel — not a fifth figure. */
+  compliance_rate: number | null
+}
+
+export interface ApplicationVolumeRow {
+  type: string
+  label: string
+  count: number
+}
+
+export interface DecisionOutcomeRow {
+  outcome: 'approved' | 'returned' | 'rejected' | 'pending' | 'cancelled'
+  label: string
+  count: number
+  /** Whether this bucket belongs in the Approval Rate denominator. */
+  decisioned: boolean
+}
+
+/**
+ * A statutory RA 11032 tier against its legal limit.
+ *
+ * `statutory_working_days` is a legal threshold (3 / 7 / 20) from the Ease of
+ * Doing Business Act, not an internal service target, and `mean_working_days` is
+ * measured in working days because that is how the statute sets the limit.
+ * `observations: 0` with null means is a tier the register holds no decided filing
+ * for — that is not a compliant tier and must not render as one.
+ */
+export interface ProcessingTierRow {
+  tier: 'simple' | 'complex' | 'highly_technical'
+  label: string
+  statutory_working_days: number
+  observations: number
+  mean_working_days: number | null
+  mean_calendar_days: number | null
+  /**
+   * Filings that met RA 11032's limit for their own tier — the same yardstick as
+   * `breaching`, so the two can never contradict each other.
+   */
+  within_statutory: number
+  within_statutory_rate: number | null
+  /**
+   * Filings that met `applications.deadline_at`, which the workflow sets to a flat
+   * ten working days for every tier. A DIFFERENT and more lenient yardstick than
+   * the statute — for a simple transaction it is over three times what the law
+   * allows. It must never be labelled as statutory compliance.
+   */
+  within_recorded_deadline: number
+  /** The recorded deadline in working days, when uniform across the tier. */
+  recorded_deadline_working_days: number | null
+  /** Signed: how far the mean sits above (or below) the statutory limit. */
+  overage_days: number | null
+  breaching: boolean
+}
+
+export interface StageRow {
+  code: string
+  name: string
+  reviews: number
+  mean_days: number
+}
+
+export interface StageBottleneck {
+  code: string
+  name: string
+  mean_days: number
+  reviews: number
+  above_average_days: number | null
+  share_of_reviews: number
+}
+
+export interface ComplianceIndicator {
+  indicator: 'ra11032_processing' | 'permit_validity' | 'renewal'
+  label: string
+  numerator: number
+  denominator: number
+  numerator_label: string
+  denominator_label: string
+  rate: number | null
+  /**
+   * Set when the register cannot establish the numerator at all — distinct from
+   * an empty denominator. Both give a null rate; only this needs explaining, and
+   * the screen shows this sentence rather than printing 0%, which would read as a
+   * compliance failure instead of a missing link in the data.
+   */
+  unavailable_reason: string | null
+}
+
+export interface ExpiryColumn {
+  code: string
+  label: string
+}
+
+/** Windows are cumulative: 30d ⊂ 60d ⊂ 90d. `expired` is disjoint from all three. */
+export interface ExpiryRow {
+  window: string
+  label: string
+  days: number | null
+  expired: boolean
+  counts: Record<string, number>
+  total: number
+}
+
+export interface RankedShareRow {
+  rank: number
+  count: number
+  /** Null only when the total is zero. */
+  share: number | null
+}
+
+export type BarangayShareRow = RankedShareRow & { barangay: string }
+export type LineOfBusinessRow = RankedShareRow & { industry: string; psic_code: string }
+
+export interface OrganizationFormRow {
+  form: string
+  label: string
+  count: number
+  /** Share of businesses whose form IS recorded, so recorded rows sum to 100%. */
+  share: number | null
+}
+
+export interface InspectionRow {
+  type: string
+  label: string
+  scheduled: number
+  completed: number
+  passed: number
+  failed: number
+  conditional: number
+  /** Passed ÷ COMPLETED × 100 — never ÷ scheduled. Null when nothing is completed. */
+  pass_rate: number | null
+}
+
+export interface OfficerActivity {
+  responses: number
+  mean_response_hours: number | null
+  median_response_hours: number | null
+  threads_awaiting_reply: number
+  requests_total: number
+  requests_fulfilled: number
+  requests_fulfilled_rate: number | null
+  meetings_scheduled: number
+  meetings_attended: number
+  meetings_attended_rate: number | null
+}
+
+export interface MapPoint {
+  business_id: number
+  business: string
+  barangay: string | null
+  latitude: number
+  longitude: number
+  permit_state: 'active' | 'lapsed'
+}
+
+export interface DashboardReport {
+  generated_at: string
+  window_months: number
+  window_start: string
+  ytd_start: string
+  month_start: string
+  today: string
+  kpis: DashboardKpis
+  volume: { rows: ApplicationVolumeRow[]; total: number }
+  decisions: {
+    rows: DecisionOutcomeRow[]
+    total: number
+    decisioned: number
+    approved: number
+    /** Approved ÷ decisioned × 100. The denominator EXCLUDES pending. */
+    approval_rate: number | null
+  }
+  processing_tiers: ProcessingTierRow[]
+  stages: {
+    rows: StageRow[]
+    reviews: number
+    mean_days: number | null
+    bottleneck: StageBottleneck | null
+  }
+  compliance: ComplianceIndicator[]
+  expiry: { columns: ExpiryColumn[]; rows: ExpiryRow[] }
+  top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
+  top_lines_of_business: { rows: LineOfBusinessRow[]; total: number; groups: number }
+  organization_forms: {
+    rows: OrganizationFormRow[]
+    recorded: number
+    unrecorded: number
+    total: number
+  }
+  inspections: { rows: InspectionRow[]; combined: InspectionRow }
+  officer_activity: OfficerActivity
+  map: {
+    mapped: number
+    plotted: number
+    total_businesses: number
+    points: MapPoint[]
+    by_barangay: { barangay: string; businesses: number; active: number; share: number | null }[]
+  }
+}
+
+/* Business Lifecycle Monitoring (spec §4; mockup 122 renames it from the
+ * paper's "Business Growth Analysis" and the mockup wins on naming). */
 
 export interface BusinessStatusRow {
   status: 'active' | 'expired' | 'inactive' | 'closed'
   label: string
   count: number
-  share: number
+  /** Null only when the register holds no businesses at all. */
+  share: number | null
 }
 
 export interface BarangayGrowthRow {
@@ -540,6 +762,46 @@ export interface IndustryGrowthRow {
   direction: 'growing' | 'declining' | 'steady'
 }
 
+/** One point on a Kaplan-Meier curve, at one renewal cycle. */
+export interface SurvivalPoint {
+  cycle: number
+  /** Businesses that reached this cycle. Small values mean a thin estimate. */
+  at_risk: number
+  lapses: number
+  /** Survival through this cycle, as a percentage. */
+  survival: number | null
+}
+
+export interface SurvivalCurve {
+  businesses: number
+  /** Total renewal cycles the group lived through: the sample behind the curve. */
+  renewals_observed: number
+  lapses: number
+  max_cycle: number
+  /**
+   * Survival through `max_cycle`. Null when no business in the group has reached
+   * a first renewal — a cohort too new to have survived anything has no rate, and
+   * rendering 0% or 100% there would both be inventions.
+   */
+  survival: number | null
+  points: SurvivalPoint[]
+}
+
+/**
+ * Cohort survival over renewal cycles.
+ *
+ * A Kaplan-Meier estimate, computed in R by `survival::survfit` and mirrored by
+ * the PHP fallback. It is descriptive, not predictive: it reports what an observed
+ * cohort did, and businesses still inside their current permit are censored rather
+ * than counted as failures. It is not a probability that any given business will
+ * renew, and `methodology` is the sentence that has to travel with it.
+ */
+export type CohortSurvival = SurvivalCurve & {
+  methodology: string
+  grace_days: number
+  cohorts: (SurvivalCurve & { cohort: string })[]
+}
+
 export interface BusinessGrowthReport {
   generated_at: string
   period_months: number
@@ -549,8 +811,8 @@ export interface BusinessGrowthReport {
   registrations: number
   registrations_prior: number
   growth_rate: number | null
-  renewal_performance: { rate: number | null; approved: number; decided: number }
   closures: number
+  cohort_survival: CohortSurvival
   status_summary: BusinessStatusRow[]
   top_barangays: BarangayGrowthRow[]
   closure_trend: { month: string; closures: number }[]

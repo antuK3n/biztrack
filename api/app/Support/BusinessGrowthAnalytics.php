@@ -2,24 +2,25 @@
 
 namespace App\Support;
 
-use App\Enums\ApplicationStatus;
-use App\Enums\ApplicationType;
 use App\Enums\PermitStatus;
-use App\Models\Application;
-use App\Models\ApplicationStatusHistory;
 use App\Models\Business;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Business Growth Analysis, computed from the register itself.
+ * Business Lifecycle Monitoring, computed from the register.
  *
- * Every figure here is derived from `businesses`, `business_addresses`,
- * `business_lines` -> `psic_codes`, `permits`, `applications` and
- * `application_status_history`. Where the data cannot answer a question the
- * value is null and the screen says so, rather than showing a plausible number.
+ * Naming: the client's paper calls this "Business Growth Analysis" and mockup 122
+ * calls it "Business Lifecycle Monitoring". The mockup is newer, so it wins on
+ * naming; the paper wins on formulas. That split is deliberate and is recorded in
+ * docs/r-integration-spec.md §4.
  *
- * Two definitions worth stating plainly, because they are choices:
+ * Same shape as the other analytics features: `dataset()` gathers facts and is
+ * what `analytics:refresh` pushes to R, `compute()` turns facts into statistics
+ * and doubles as the fallback, and R's `POST /growth/lifecycle` returns the same
+ * schema from the same facts.
+ *
+ * DEFINITIONS THAT ARE CHOICES
  *
  *  - **Lifecycle status** (Active / Expired / Inactive / Closed) is derived from
  *    permits, not from `businesses.status`. That column is the moderation state
@@ -31,50 +32,140 @@ use Illuminate\Support\Facades\DB;
  *  - **A closure is dated by `deleted_at`.** There is no closed_at column, and
  *    `updated_at` moves for every edit, so the soft-delete timestamp is the only
  *    honest closure date in the schema.
+ *  - Growth compares the requested period against the equally long period that
+ *    ended where it began.
  *
- * Growth compares the requested period against the equally long period that
- * ended where it began.
+ * See cohortObservations() for how the survival measure is defined; it is the one
+ * figure here that is a statistic rather than a count, and the reasoning behind
+ * it is longer than a line.
  */
 final class BusinessGrowthAnalytics
 {
+    /** The R endpoint that computes this dataset. */
+    public const R_ENDPOINT = '/growth/lifecycle';
+
     public const DEFAULT_PERIOD_MONTHS = 12;
 
     /** How many barangays and industries the screen lists. */
     private const TOP_N = 6;
 
     /**
+     * Days after a permit expires before a missing renewal counts as a lapse.
+     *
+     * Without a grace period every business whose permit expired yesterday would
+     * be recorded as having failed to renew, when in practice it is simply still
+     * within the window where a renewal normally lands. Thirty days matches the
+     * first renewal reminder, so a business counts as lapsed only once it has had
+     * a reminder and a month.
+     */
+    private const RENEWAL_GRACE_DAYS = 30;
+
+    /**
+     * Days of coverage gap tolerated between consecutive permits.
+     *
+     * A permit valid to 31 December replaced by one effective 1 January is
+     * contiguous cover and an on-time renewal, even though the dates are not
+     * equal. One day is what makes that read correctly rather than as a lapse.
+     */
+    private const COVERAGE_GAP_TOLERANCE_DAYS = 1;
+
+    /**
+     * The permit type whose sequence defines a renewal cycle.
+     *
+     * The mayor's permit is the one every business must hold, so it is the only
+     * one whose chain is comparable across the register. Following the sanitary
+     * or fire chains as well would count a single year's renewal up to three
+     * times for some businesses and once for others.
+     */
+    private const CYCLE_PERMIT_TYPE = 'BUSINESS';
+
+    /**
+     * The sentence that has to travel with the survival figure, wherever it is
+     * shown. Kept server-side so an export cannot ship the number without it.
+     */
+    public const SURVIVAL_METHODOLOGY = 'Cohort survival is a Kaplan-Meier estimate over observed '
+        .'renewal cycles: of the businesses that reached a given renewal, the share that had renewed '
+        .'every previous one without a lapse in cover. Businesses still within their current permit '
+        .'are censored rather than counted as failures. It describes what this cohort did, and is not '
+        .'a forecast of what any business will do next.';
+
+    /**
      * @return array<string, mixed>
      */
     public static function build(int $periodMonths = self::DEFAULT_PERIOD_MONTHS): array
+    {
+        return self::compute(self::dataset($periodMonths));
+    }
+
+    /**
+     * The facts every panel needs. No rates, no ranks, no survival curve — R's
+     * job (and compute()'s).
+     *
+     * @return array<string, mixed>
+     */
+    public static function dataset(int $periodMonths = self::DEFAULT_PERIOD_MONTHS): array
     {
         $now = CarbonImmutable::now();
         $periodStart = $now->subMonths($periodMonths)->startOfDay();
         $priorStart = $periodStart->subMonths($periodMonths)->startOfDay();
 
-        $registered = self::countRegistrations($periodStart, $now, includeEnd: true);
-        $registeredPrior = self::countRegistrations($priorStart, $periodStart);
-
         return [
-            'generated_at' => $now->toISOString(),
-            'period_months' => $periodMonths,
+            'params' => ['months' => $periodMonths],
+            'now' => $now->toISOString(),
             'period_start' => $periodStart->toDateString(),
             'period_end' => $now->toDateString(),
             'prior_period_start' => $priorStart->toDateString(),
-            'registrations' => $registered,
-            'registrations_prior' => $registeredPrior,
-            // Null when there is nothing to compare against: a percentage change
-            // from zero is not a number, and inventing one would be a lie.
-            'growth_rate' => $registeredPrior > 0
-                ? round((($registered - $registeredPrior) / $registeredPrior) * 100, 1)
-                : null,
-            'renewal_performance' => self::renewalPerformance($periodStart, $now),
+            'top_n' => self::TOP_N,
+            'survival_methodology' => self::SURVIVAL_METHODOLOGY,
+
+            'registrations' => self::countRegistrations($periodStart, $now, includeEnd: true),
+            'registrations_prior' => self::countRegistrations($priorStart, $periodStart),
             'closures' => self::closures($periodStart, $now),
-            'status_summary' => self::statusSummary(),
-            'top_barangays' => self::topBarangays($periodStart, $priorStart, $now),
-            'closure_trend' => self::closureTrend($periodStart, $now, $periodMonths),
-            'industry_growth' => self::industryGrowth($periodStart, $priorStart, $now),
+            'status_counts' => self::statusCounts(),
+            'barangays' => self::barangayCounts($periodStart, $priorStart, $now),
+            'closure_months' => self::closureMonths($periodStart, $now, $periodMonths),
+            'industries' => self::industryCounts($periodStart, $priorStart, $now),
+            'cohorts' => self::cohortObservations($now),
         ];
     }
+
+    /**
+     * The local (PHP) engine: facts in, lifecycle statistics out, no database.
+     *
+     * @param  array<string, mixed>  $dataset  as returned by dataset()
+     * @return array<string, mixed>
+     */
+    public static function compute(array $dataset): array
+    {
+        $periodMonths = (int) $dataset['params']['months'];
+        $registered = (int) $dataset['registrations'];
+        $prior = (int) $dataset['registrations_prior'];
+        $topN = (int) ($dataset['top_n'] ?? self::TOP_N);
+
+        return [
+            'generated_at' => (string) $dataset['now'],
+            'period_months' => $periodMonths,
+            'period_start' => (string) $dataset['period_start'],
+            'period_end' => (string) $dataset['period_end'],
+            'prior_period_start' => (string) $dataset['prior_period_start'],
+            'registrations' => $registered,
+            'registrations_prior' => $prior,
+            // Null when there is nothing to compare against: a percentage change
+            // from zero is not a number, and inventing one would be a lie. The
+            // screen renders this as "No prior period".
+            'growth_rate' => $prior > 0
+                ? Rounding::statistic((($registered - $prior) / $prior) * 100, 1)
+                : null,
+            'closures' => (int) $dataset['closures'],
+            'cohort_survival' => self::computeSurvival($dataset['cohorts'], (string) $dataset['survival_methodology']),
+            'status_summary' => self::computeStatusSummary($dataset['status_counts']),
+            'top_barangays' => self::computeBarangays($dataset['barangays'], $topN),
+            'closure_trend' => self::computeClosureTrend($dataset['closure_months']),
+            'industry_growth' => self::computeIndustries($dataset['industries'], $topN),
+        ];
+    }
+
+    /* ── facts ─────────────────────────────────────────────────────────── */
 
     /**
      * The period end is inclusive because it is "now": timestamps are stored to
@@ -99,52 +190,11 @@ final class BusinessGrowthAnalytics
     }
 
     /**
-     * Share of renewal filings decided in the period that were approved.
-     *
-     * Decisions are dated from the status history, not from the application row,
-     * so a renewal approved last year does not count towards this quarter.
-     *
-     * @return array{rate: float|null, approved: int, decided: int}
-     */
-    private static function renewalPerformance(CarbonImmutable $from, CarbonImmutable $to): array
-    {
-        $renewalIds = Application::where('application_type', ApplicationType::Renewal->value)->pluck('id');
-
-        if ($renewalIds->isEmpty()) {
-            return ['rate' => null, 'approved' => 0, 'decided' => 0];
-        }
-
-        $decisions = ApplicationStatusHistory::whereIn('application_id', $renewalIds)
-            ->whereIn('to_status', [ApplicationStatus::Approved->value, ApplicationStatus::Rejected->value])
-            ->where('created_at', '>=', $from)
-            ->where('created_at', '<=', $to)
-            ->get(['application_id', 'to_status', 'created_at']);
-
-        // One decision per application: the first terminal transition wins.
-        $firstDecision = [];
-        foreach ($decisions->sortBy('created_at') as $row) {
-            $firstDecision[$row->application_id] ??= $row->to_status;
-        }
-
-        $decided = count($firstDecision);
-        $approved = count(array_filter(
-            $firstDecision,
-            static fn ($status) => (string) $status === ApplicationStatus::Approved->value,
-        ));
-
-        return [
-            'rate' => $decided > 0 ? round(($approved / $decided) * 100, 1) : null,
-            'approved' => $approved,
-            'decided' => $decided,
-        ];
-    }
-
-    /**
      * Active / Expired / Inactive / Closed, derived from permits + soft deletes.
      *
-     * @return list<array{status: string, label: string, count: int, share: float}>
+     * @return array<string, int>
      */
-    private static function statusSummary(): array
+    private static function statusCounts(): array
     {
         $today = CarbonImmutable::now()->toDateString();
 
@@ -176,33 +226,15 @@ final class BusinessGrowthAnalytics
             }
         }
 
-        $total = array_sum($counts);
-        $labels = [
-            'active' => 'Active',
-            'expired' => 'Expired',
-            'inactive' => 'Inactive',
-            'closed' => 'Closed',
-        ];
-
-        $summary = [];
-        foreach ($counts as $status => $count) {
-            $summary[] = [
-                'status' => $status,
-                'label' => $labels[$status],
-                'count' => $count,
-                'share' => $total > 0 ? round(($count / $total) * 100, 1) : 0.0,
-            ];
-        }
-
-        return $summary;
+        return $counts;
     }
 
     /**
-     * New registrations per barangay this period against the one before it.
+     * New registrations per barangay, this period and the one before it.
      *
-     * @return list<array{barangay: string, registrations: int, prior: int, delta: int, growth_rate: float|null}>
+     * @return list<array{barangay: string, registrations: int, prior: int}>
      */
-    private static function topBarangays(CarbonImmutable $periodStart, CarbonImmutable $priorStart, CarbonImmutable $now): array
+    private static function barangayCounts(CarbonImmutable $periodStart, CarbonImmutable $priorStart, CarbonImmutable $now): array
     {
         $rows = DB::table('businesses')
             ->join('business_addresses', 'business_addresses.business_id', '=', 'businesses.id')
@@ -223,22 +255,18 @@ final class BusinessGrowthAnalytics
         }
 
         $names = array_unique([...array_keys($current), ...array_keys($prior)]);
+        sort($names);
+
         $out = [];
         foreach ($names as $name) {
-            $now_ = $current[$name] ?? 0;
-            $then = $prior[$name] ?? 0;
             $out[] = [
-                'barangay' => $name,
-                'registrations' => $now_,
-                'prior' => $then,
-                'delta' => $now_ - $then,
-                'growth_rate' => $then > 0 ? round((($now_ - $then) / $then) * 100, 1) : null,
+                'barangay' => (string) $name,
+                'registrations' => $current[$name] ?? 0,
+                'prior' => $prior[$name] ?? 0,
             ];
         }
 
-        usort($out, static fn (array $a, array $b) => [$b['delta'], $b['registrations']] <=> [$a['delta'], $a['registrations']]);
-
-        return array_slice($out, 0, self::TOP_N);
+        return $out;
     }
 
     /**
@@ -246,7 +274,7 @@ final class BusinessGrowthAnalytics
      *
      * @return list<array{month: string, closures: int}>
      */
-    private static function closureTrend(CarbonImmutable $periodStart, CarbonImmutable $now, int $periodMonths): array
+    private static function closureMonths(CarbonImmutable $periodStart, CarbonImmutable $now, int $periodMonths): array
     {
         $closures = Business::onlyTrashed()
             ->where('deleted_at', '>=', $periodStart)
@@ -279,25 +307,26 @@ final class BusinessGrowthAnalytics
     /**
      * Registrations by line of business (PSIC), this period against the last.
      *
-     * `count` is how many live businesses carry that line today; `delta` is the
-     * change in new registrations, which is what "growing" and "declining" read.
+     * `count` is how many live businesses carry that line today; the two period
+     * counts are what "growing" and "declining" read.
      *
-     * @return list<array{industry: string, psic_code: string, count: int, registrations: int, prior: int, delta: int, direction: string}>
+     * @return list<array{industry: string, psic_code: string, count: int, registrations: int, prior: int}>
      */
-    private static function industryGrowth(CarbonImmutable $periodStart, CarbonImmutable $priorStart, CarbonImmutable $now): array
+    private static function industryCounts(CarbonImmutable $periodStart, CarbonImmutable $priorStart, CarbonImmutable $now): array
     {
         $lines = DB::table('business_lines')
             ->join('businesses', 'businesses.id', '=', 'business_lines.business_id')
             ->join('psic_codes', 'psic_codes.id', '=', 'business_lines.psic_code_id')
             ->whereNull('businesses.deleted_at')
+            ->orderBy('psic_codes.code')
             ->get(['psic_codes.code as psic_code', 'psic_codes.title as industry', 'businesses.created_at']);
 
         $totals = [];
         foreach ($lines as $line) {
             $key = $line->psic_code;
             $totals[$key] ??= [
-                'industry' => $line->industry,
-                'psic_code' => $line->psic_code,
+                'industry' => (string) $line->industry,
+                'psic_code' => (string) $line->psic_code,
                 'count' => 0,
                 'registrations' => 0,
                 'prior' => 0,
@@ -312,18 +341,337 @@ final class BusinessGrowthAnalytics
             }
         }
 
-        $out = [];
-        foreach ($totals as $row) {
-            $delta = $row['registrations'] - $row['prior'];
-            $out[] = [...$row, 'delta' => $delta, 'direction' => match (true) {
-                $delta > 0 => 'growing',
-                $delta < 0 => 'declining',
-                default => 'steady',
-            }];
+        return array_values($totals);
+    }
+
+    /**
+     * One survival observation per business: how many renewal cycles it cleared,
+     * and whether it then lapsed or is still being watched.
+     *
+     * WHY THIS IS A SURVIVAL MEASURE AND NOT A RATIO
+     *
+     * The paper's formula reads "businesses that continued renewing on time ÷
+     * total businesses in the group", and taken literally as a single division
+     * that figure is wrong in a way that flatters the LGU: a business registered
+     * last month has not had a renewal to miss, so counting it in the denominator
+     * drags the rate toward whatever share of the register is simply too new to
+     * have failed. Cohort survival is the measure that handles this — businesses
+     * still inside their current permit are *censored*, meaning they count while
+     * they were observed and stop counting once there is nothing left to observe.
+     * That is why the paper names the `survival` package.
+     *
+     * WHAT A CYCLE IS. Each business's mayor's-permit chain is ordered by
+     * `valid_from`. Cycle k is the k-th renewal of that chain. A renewal is on
+     * time when the new permit takes effect before the old one's cover ends
+     * (within COVERAGE_GAP_TOLERANCE_DAYS). The observation for a business is:
+     *
+     *   time  = the cycle it failed at, or the last cycle it is known to have
+     *           cleared if it has not failed
+     *   event = 1 if it lapsed at `time`, 0 if it is still under observation
+     *
+     * A business with one permit still in force has time 0 and event 0: it has
+     * not yet reached its first renewal, so it informs no cycle and correctly
+     * drops out of the risk set. A business whose only permit expired more than
+     * RENEWAL_GRACE_DAYS ago with no successor failed at cycle 1.
+     *
+     * The cohort is the year the chain started, which is what lets the screen show
+     * whether recent cohorts renew better or worse than older ones.
+     *
+     * @return list<array{cohort: string, business_id: int, time: int, event: int}>
+     */
+    private static function cohortObservations(CarbonImmutable $now): array
+    {
+        $today = $now->startOfDay();
+
+        $rows = DB::table('permits')
+            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
+            ->join('businesses', 'businesses.id', '=', 'permits.business_id')
+            ->whereNull('businesses.deleted_at')
+            ->where('permit_types.code', self::CYCLE_PERMIT_TYPE)
+            ->whereIn('permits.status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+            ->orderBy('permits.business_id')
+            ->orderBy('permits.valid_from')
+            ->orderBy('permits.id')
+            ->get(['permits.business_id', 'permits.valid_from', 'permits.valid_until']);
+
+        $chains = [];
+        foreach ($rows as $row) {
+            $chains[(int) $row->business_id][] = [
+                'from' => CarbonImmutable::parse($row->valid_from)->startOfDay(),
+                'until' => CarbonImmutable::parse($row->valid_until)->startOfDay(),
+            ];
         }
 
-        usort($out, static fn (array $a, array $b) => [$b['count'], $b['delta']] <=> [$a['count'], $a['delta']]);
+        $observations = [];
+        foreach ($chains as $businessId => $chain) {
+            $cohort = $chain[0]['from']->format('Y');
+            $cleared = 0;
+            $event = 0;
 
-        return array_slice($out, 0, self::TOP_N);
+            for ($i = 0; $i < count($chain); $i++) {
+                $current = $chain[$i];
+                $next = $chain[$i + 1] ?? null;
+
+                if ($next !== null) {
+                    $deadline = $current['until']->addDays(self::COVERAGE_GAP_TOLERANCE_DAYS);
+                    if ($next['from']->lessThanOrEqualTo($deadline)) {
+                        $cleared++;
+
+                        continue;
+                    }
+
+                    // A gap in cover: this is the cycle the business lapsed at.
+                    $event = 1;
+                    $cleared++;
+                    break;
+                }
+
+                // End of the chain. Still inside the permit (or its grace) means
+                // there is nothing yet to judge; past it with no successor is a
+                // lapse at the next cycle.
+                if ($today->greaterThan($current['until']->addDays(self::RENEWAL_GRACE_DAYS))) {
+                    $event = 1;
+                    $cleared++;
+                }
+            }
+
+            $observations[] = [
+                'cohort' => $cohort,
+                'business_id' => (int) $businessId,
+                'time' => $cleared,
+                'event' => $event,
+            ];
+        }
+
+        return $observations;
+    }
+
+    /* ── statistics ────────────────────────────────────────────────────── */
+
+    /**
+     * Kaplan-Meier survival over renewal cycles, overall and per cohort.
+     *
+     * The product-limit estimator: at each cycle t, S(t) = S(t-1) × (1 − d/n)
+     * where n is how many businesses reached cycle t and d how many lapsed there.
+     * Censored businesses leave the risk set without ever counting as failures,
+     * which is the whole reason for using this rather than a single division.
+     *
+     * R computes the same thing through `survival::survfit`; this reproduces it so
+     * the fallback cannot quietly become a second, different measure.
+     *
+     * @param  list<array{cohort: string, business_id: int, time: int, event: int}>  $observations
+     * @return array<string, mixed>
+     */
+    private static function computeSurvival(array $observations, string $methodology): array
+    {
+        $overall = self::survivalCurve($observations);
+
+        $byCohort = [];
+        $grouped = [];
+        foreach ($observations as $observation) {
+            $grouped[(string) $observation['cohort']][] = $observation;
+        }
+        ksort($grouped);
+
+        foreach ($grouped as $cohort => $rows) {
+            $curve = self::survivalCurve($rows);
+            $byCohort[] = [
+                'cohort' => (string) $cohort,
+                'businesses' => $curve['businesses'],
+                'renewals_observed' => $curve['renewals_observed'],
+                'lapses' => $curve['lapses'],
+                'max_cycle' => $curve['max_cycle'],
+                'survival' => $curve['survival'],
+                'points' => $curve['points'],
+            ];
+        }
+
+        return [
+            'methodology' => $methodology,
+            'grace_days' => self::RENEWAL_GRACE_DAYS,
+            'businesses' => $overall['businesses'],
+            'renewals_observed' => $overall['renewals_observed'],
+            'lapses' => $overall['lapses'],
+            'max_cycle' => $overall['max_cycle'],
+            // The headline: survival through the last cycle any business reached.
+            // Null when no business has reached a first renewal yet — there is no
+            // cohort to have survived anything.
+            'survival' => $overall['survival'],
+            'points' => $overall['points'],
+            'cohorts' => $byCohort,
+        ];
+    }
+
+    /**
+     * @param  list<array{time: int, event: int}>  $rows
+     * @return array<string, mixed>
+     */
+    private static function survivalCurve(array $rows): array
+    {
+        $maxCycle = 0;
+        $lapses = 0;
+        foreach ($rows as $row) {
+            $maxCycle = max($maxCycle, (int) $row['time']);
+            $lapses += (int) $row['event'];
+        }
+
+        $points = [];
+        $survival = 1.0;
+        $estimable = false;
+
+        for ($t = 1; $t <= $maxCycle; $t++) {
+            $atRisk = 0;
+            $events = 0;
+            foreach ($rows as $row) {
+                if ((int) $row['time'] >= $t) {
+                    $atRisk++;
+                }
+                if ((int) $row['time'] === $t && (int) $row['event'] === 1) {
+                    $events++;
+                }
+            }
+
+            if ($atRisk === 0) {
+                break;
+            }
+
+            $estimable = true;
+            $survival *= 1 - ($events / $atRisk);
+
+            $points[] = [
+                'cycle' => $t,
+                'at_risk' => $atRisk,
+                'lapses' => $events,
+                'survival' => Rounding::statistic($survival * 100, 1),
+            ];
+        }
+
+        return [
+            'businesses' => count($rows),
+            // How many renewal cycles the cohort actually lived through, which is
+            // the sample size behind the curve.
+            'renewals_observed' => array_sum(array_map(static fn (array $r): int => (int) $r['time'], $rows)),
+            'lapses' => $lapses,
+            'max_cycle' => $maxCycle,
+            'survival' => $estimable ? Rounding::statistic($survival * 100, 1) : null,
+            'points' => $points,
+        ];
+    }
+
+    /**
+     * @param  array<string, int>  $counts
+     * @return list<array{status: string, label: string, count: int, share: float|null}>
+     */
+    private static function computeStatusSummary(array $counts): array
+    {
+        $labels = [
+            'active' => 'Active',
+            'expired' => 'Expired',
+            'inactive' => 'Inactive',
+            'closed' => 'Closed',
+        ];
+
+        $total = 0;
+        foreach ($labels as $status => $_label) {
+            $total += (int) ($counts[$status] ?? 0);
+        }
+
+        $summary = [];
+        foreach ($labels as $status => $label) {
+            $count = (int) ($counts[$status] ?? 0);
+            $summary[] = [
+                'status' => $status,
+                'label' => $label,
+                'count' => $count,
+                'share' => $total > 0 ? Rounding::statistic(($count / $total) * 100, 1) : null,
+            ];
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Barangays ranked by the INCREASE between periods, as the spec asks — not by
+     * how many they have. A barangay with 300 registrations and no change is not
+     * growing.
+     *
+     * @param  list<array{barangay: string, registrations: int, prior: int}>  $facts
+     * @return list<array<string, mixed>>
+     */
+    private static function computeBarangays(array $facts, int $topN): array
+    {
+        $out = [];
+        foreach ($facts as $row) {
+            $current = (int) $row['registrations'];
+            $prior = (int) $row['prior'];
+            $out[] = [
+                'barangay' => (string) $row['barangay'],
+                'registrations' => $current,
+                'prior' => $prior,
+                'delta' => $current - $prior,
+                'growth_rate' => $prior > 0
+                    ? Rounding::statistic((($current - $prior) / $prior) * 100, 1)
+                    : null,
+            ];
+        }
+
+        // Delta descending, then volume, then name so ties hold a stable order.
+        usort(
+            $out,
+            static fn (array $a, array $b) => [$b['delta'], $b['registrations'], $a['barangay']]
+                <=> [$a['delta'], $a['registrations'], $b['barangay']],
+        );
+
+        return array_slice($out, 0, $topN);
+    }
+
+    /**
+     * @param  list<array{month: string, closures: int}>  $facts
+     * @return list<array{month: string, closures: int}>
+     */
+    private static function computeClosureTrend(array $facts): array
+    {
+        $trend = [];
+        foreach ($facts as $row) {
+            $trend[] = ['month' => (string) $row['month'], 'closures' => (int) $row['closures']];
+        }
+
+        return $trend;
+    }
+
+    /**
+     * @param  list<array{industry: string, psic_code: string, count: int, registrations: int, prior: int}>  $facts
+     * @return list<array<string, mixed>>
+     */
+    private static function computeIndustries(array $facts, int $topN): array
+    {
+        $out = [];
+        foreach ($facts as $row) {
+            $current = (int) $row['registrations'];
+            $prior = (int) $row['prior'];
+            $delta = $current - $prior;
+
+            $out[] = [
+                'industry' => (string) $row['industry'],
+                'psic_code' => (string) $row['psic_code'],
+                'count' => (int) $row['count'],
+                'registrations' => $current,
+                'prior' => $prior,
+                'delta' => $delta,
+                'direction' => match (true) {
+                    $delta > 0 => 'growing',
+                    $delta < 0 => 'declining',
+                    default => 'steady',
+                },
+            ];
+        }
+
+        usort(
+            $out,
+            static fn (array $a, array $b) => [$b['count'], $b['delta'], $a['psic_code']]
+                <=> [$a['count'], $a['delta'], $b['psic_code']],
+        );
+
+        return array_slice($out, 0, $topN);
     }
 }

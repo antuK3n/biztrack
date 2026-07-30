@@ -1,22 +1,47 @@
 import { useState } from 'react'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import type { ReactNode } from 'react'
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
-import { toApiError } from '../../lib/api'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { BarangayGrowthRow, BusinessGrowthReport, IndustryGrowthRow } from '../../lib/types'
+import type {
+  BarangayGrowthRow,
+  BusinessGrowthReport,
+  IndustryGrowthRow,
+} from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
+import { GenerateReportButton } from './GenerateReportButton'
 
 /*
- * Business Growth Analysis (mockup 105).
+ * Business Growth Analysis — docs/r-integration-spec.md §4.
  *
- * Everything is computed server-side from the register (BusinessGrowthAnalytics)
- * and rendered here as-is. Where a figure genuinely cannot be derived — a growth
- * rate against an empty prior period, a renewal rate with nothing decided — the
- * server sends null and this page says so instead of printing a number nobody
- * can defend.
+ * Naming and formulas both follow the client's paper. Mockup 122 retitles this
+ * "Business Lifecycle Monitoring" and renames the second KPI, but the paper is
+ * the document that gets presented and questioned, so it wins where the two
+ * disagree. The paper's names are "Business Growth Analysis" for the screen and
+ * "Business Renewal Performance" for the cohort KPI.
+ *
+ * Everything is computed server-side (App\Support\BusinessGrowthAnalytics, or R's
+ * POST /growth/lifecycle) and rendered as given. Where a figure genuinely cannot
+ * be derived — a growth rate against an empty prior period, survival for a cohort
+ * that has not reached its first renewal — the server sends null and this page
+ * says so rather than printing a number nobody can defend.
+ *
+ * THE PANEL THAT NEEDS READING CAREFULLY is cohort survival. It is a Kaplan-Meier
+ * estimate over renewal cycles, not a single-period ratio, and it is descriptive
+ * rather than predictive. The curve carries its at-risk count at every cycle
+ * because a late cycle can rest on very few businesses, and a percentage over a
+ * hundred businesses should not look like one over six hundred.
  */
 
 const ROYAL = '#3242ca'
@@ -29,19 +54,34 @@ const PERIOD_OPTIONS = [
   { value: '6', label: 'Last 6 months' },
   { value: '12', label: 'Last 12 months' },
   { value: '24', label: 'Last 24 months' },
+  { value: '36', label: 'Last 36 months' },
 ]
 
 function signed(value: number): string {
   return `${value >= 0 ? '+' : ''}${value}`
 }
 
-/** "2026-03" reads as "Mar 2026" on the closure-trend axis. */
+function pct(value: number | null): string {
+  return value === null ? '—' : `${value.toFixed(1)}%`
+}
+
+/** "2026-03" reads as "Mar 26" on the closure-trend axis. */
 function monthLabel(month: string): string {
   const [year, m] = month.split('-').map(Number)
   return new Date(year, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' })
 }
 
-function Headline({ value, label, muted }: { value: string; label: string; muted?: boolean }) {
+function Headline({
+  value,
+  label,
+  hint,
+  muted,
+}: {
+  value: string
+  label: string
+  hint?: string
+  muted?: boolean
+}) {
   return (
     <ProtoCard className="px-4 py-7 text-center">
       <p
@@ -52,9 +92,21 @@ function Headline({ value, label, muted }: { value: string; label: string; muted
         {value}
       </p>
       <p className="mt-2.5 text-[13px] text-ink-muted">{label}</p>
+      {hint && <p className="mt-1 text-[11px] leading-snug text-ink-muted">{hint}</p>}
     </ProtoCard>
   )
 }
+
+function SectionHeading({ children, note }: { children: ReactNode; note?: string }) {
+  return (
+    <div className="mb-2.5">
+      <h2 className="text-xl text-ink">{children}</h2>
+      {note && <p className="mt-0.5 text-[11px] text-ink-muted">{note}</p>}
+    </div>
+  )
+}
+
+/* ── Business Lifecycle Status ─────────────────────────────────────────── */
 
 function StatusSummary({ report }: { report: BusinessGrowthReport }) {
   return (
@@ -83,22 +135,39 @@ function StatusSummary({ report }: { report: BusinessGrowthReport }) {
                 {row.count.toLocaleString()}
               </td>
               <td className="tnum px-5 py-2.5 text-right text-[15px] text-ink-secondary">
-                {row.share.toFixed(1)}%
+                {pct(row.share)}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
       <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
-        Active holds a permit valid today, Expired has let every permit lapse, Inactive is registered but
-        never permitted, Closed had its registration removed.
+        Active holds a permit valid today, Expired has let every permit lapse, Inactive is registered
+        but never permitted, Closed had its registration removed. Derived from permits, not from the
+        moderation status an admin sets.
       </p>
     </ProtoCard>
   )
 }
 
+/* ── Cohort Survival ───────────────────────────────────────────────────── */
+
+/**
+ * The Kaplan-Meier curve, plus per-cohort figures.
+ *
+ * `at_risk` is shown at every cycle on purpose. Survival through a third renewal
+ * can rest on a hundred businesses when the first rests on four hundred, and a
+ * reader who cannot see that has no way to judge how much weight the last point
+ * carries.
+ */
+
+/* ── Top Growing Barangays ─────────────────────────────────────────────── */
+
 function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
-  const peak = Math.max(1, ...rows.map((row) => row.registrations))
+  // Scaled by the biggest INCREASE, because that is what the panel ranks. Scaling
+  // by volume would put the longest bar on a barangay that did not grow.
+  const peak = Math.max(1, ...rows.map((row) => Math.abs(row.delta)))
+
   return (
     <ProtoCard className="space-y-3.5 px-5 py-5">
       {rows.map((row, i) => (
@@ -107,7 +176,7 @@ function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
             <p className="truncate text-[13px] font-bold text-ink">{row.barangay}</p>
             <p className="text-[11px] text-ink-muted">
               {row.growth_rate === null
-                ? `${row.registrations} new`
+                ? `${row.registrations} new, none before`
                 : `${signed(row.growth_rate)}% vs prior`}
             </p>
           </div>
@@ -115,8 +184,8 @@ function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
             <div
               className="h-full rounded-full"
               style={{
-                width: `${Math.max(4, (row.registrations / peak) * 100)}%`,
-                backgroundColor: i === 0 ? ROYAL : MUTED_BAR,
+                width: `${Math.max(3, (Math.abs(row.delta) / peak) * 100)}%`,
+                backgroundColor: i === 0 && row.delta > 0 ? ROYAL : MUTED_BAR,
               }}
             />
           </div>
@@ -125,9 +194,15 @@ function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
           </p>
         </div>
       ))}
+      <p className="border-t border-line pt-3 text-xs text-ink-muted">
+        Ranked by the increase in new registrations against the previous period of the same length,
+        not by total size. The figure on the right is that change.
+      </p>
     </ProtoCard>
   )
 }
+
+/* ── Business Closure Trend ────────────────────────────────────────────── */
 
 function ClosureTrend({ report }: { report: BusinessGrowthReport }) {
   const data = report.closure_trend.map((row) => ({ ...row, label: monthLabel(row.month) }))
@@ -135,11 +210,23 @@ function ClosureTrend({ report }: { report: BusinessGrowthReport }) {
 
   return (
     <ProtoCard className="p-5">
-      <ResponsiveContainer width="100%" height={190}>
+      <ResponsiveContainer width="100%" height={200}>
         <LineChart data={data} margin={{ top: 8, right: 12, left: -14, bottom: 4 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="label" tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: GRID }} minTickGap={14} />
-          <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} allowDecimals={false} width={34} />
+          <XAxis
+            dataKey="label"
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={{ stroke: GRID }}
+            minTickGap={14}
+          />
+          <YAxis
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+            width={34}
+          />
           <Tooltip
             formatter={(value) => [`${Number(value)} closed`, 'Businesses']}
             labelFormatter={(label) => String(label)}
@@ -159,39 +246,57 @@ function ClosureTrend({ report }: { report: BusinessGrowthReport }) {
       <p className="mt-2 text-[13px] text-ink-muted">
         {total === 0
           ? `No business closed its registration in the last ${report.period_months} months.`
-          : `${total} closure${total === 1 ? '' : 's'} over ${report.period_months} months, dated by when the registration was removed.`}
+          : `${total} closure${total === 1 ? '' : 's'} over ${report.period_months} months, dated by when the registration was removed — the only closure date the schema records.`}
       </p>
     </ProtoCard>
   )
 }
 
+/* ── Business Industry Growth Trend ────────────────────────────────────── */
+
 function IndustryBars({ rows }: { rows: IndustryGrowthRow[] }) {
   const peak = Math.max(1, ...rows.map((row) => row.count))
+
   return (
     <ProtoCard className="space-y-3.5 px-5 py-5">
       {rows.map((row) => (
         <div key={row.psic_code} className="flex items-center gap-4">
-          <div className="w-32 shrink-0">
+          <div className="w-36 shrink-0">
             <p className="truncate text-[13px] font-bold text-ink" title={row.industry}>
               {row.industry}
             </p>
-            <p className="text-[11px] text-ink-muted">{row.direction}</p>
+            {/*
+              The direction is a word, never only a bar tone: DESIGN.md's Never
+              Color Alone rule, and "declining" is the kind of finding a reader
+              should not have to infer from a shade of blue.
+            */}
+            <p className="text-[11px] text-ink-muted">
+              {row.direction} · {signed(row.delta)} vs prior
+            </p>
           </div>
           <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
             <div
               className="h-full rounded-full"
               style={{
-                width: `${Math.max(4, (row.count / peak) * 100)}%`,
+                width: `${Math.max(3, (row.count / peak) * 100)}%`,
                 backgroundColor: row.direction === 'declining' ? MUTED_BAR : ROYAL,
               }}
             />
           </div>
-          <p className="tnum w-12 shrink-0 text-right text-[13px] font-semibold text-ink">{row.count}</p>
+          <p className="tnum w-12 shrink-0 text-right text-[13px] font-semibold text-ink">
+            {row.count}
+          </p>
         </div>
       ))}
+      <p className="border-t border-line pt-3 text-xs text-ink-muted">
+        The bar is how many businesses carry that line today; growing or declining is the change in
+        new registrations against the previous period. Grouped by PSIC code.
+      </p>
     </ProtoCard>
   )
 }
+
+/* ── page ──────────────────────────────────────────────────────────────── */
 
 function LoadingState() {
   return (
@@ -208,13 +313,7 @@ function LoadingState() {
 
 export function BusinessGrowthPage() {
   const [months, setMonths] = useState('12')
-  const [downloading, setDownloading] = useState(false)
-  const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  // Resolves to { data, meta } — see AnalyticsProvenance and ComputedAt. This
-  // screen has no R endpoint yet, so its meta reports "computed locally" every
-  // time; that is accurate rather than a bug, and it stops being the case when
-  // POST /growth/lifecycle lands.
   const {
     data: result,
     loading,
@@ -225,19 +324,10 @@ export function BusinessGrowthPage() {
   const data = result?.data
   const meta = result?.meta
 
-  async function generateReport() {
-    setDownloading(true)
-    setDownloadError(null)
-    try {
-      await analytics.businessGrowthReport(Number(months))
-    } catch (err) {
-      setDownloadError(toApiError(err).message)
-    } finally {
-      setDownloading(false)
-    }
-  }
-
   const top = data?.top_barangays[0]
+  const survival = data?.cohort_survival
+  const period = data ? `${data.period_start} to ${data.period_end}` : ''
+  const lastPoint = survival?.points[survival.points.length - 1]
 
   return (
     <div>
@@ -245,19 +335,14 @@ export function BusinessGrowthPage() {
         right={
           <span className="flex items-center gap-3 pb-1">
             <FilterMenu
-              label="Filter business growth"
+              label="Filter business growth analysis"
               fields={[
                 { label: 'Period', value: months, options: PERIOD_OPTIONS, onChange: setMonths },
               ]}
             />
-            <button
-              type="button"
-              onClick={generateReport}
-              disabled={downloading}
-              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
-            >
-              {downloading ? 'Generating…' : 'Generate Report'}
-            </button>
+            <GenerateReportButton
+              onGenerate={() => analytics.businessGrowthReport(Number(months))}
+            />
           </span>
         }
       >
@@ -268,67 +353,81 @@ export function BusinessGrowthPage() {
 
       {meta && <ComputedAt meta={meta} />}
 
-      {downloadError && (
-        <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
-          {downloadError}
-        </p>
-      )}
-
       {loading ? (
         <LoadingState />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
-      ) : data ? (
+      ) : data && survival ? (
         <>
           <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
             <Headline
               value={data.growth_rate === null ? 'No prior period' : `${signed(data.growth_rate)}%`}
               label="Business Growth Rate"
+              hint={
+                data.growth_rate === null
+                  ? 'nothing registered in the period before this one to compare against'
+                  : `${data.registrations} new vs ${data.registrations_prior} before`
+              }
               muted={data.growth_rate === null}
             />
             <Headline
               value={
-                data.renewal_performance.rate === null
-                  ? 'Nothing decided yet'
-                  : `${Math.round(data.renewal_performance.rate)}%`
+                survival.survival === null
+                  ? 'No renewal reached'
+                  : `${survival.survival.toFixed(0)}%`
               }
               label="Business Renewal Performance"
-              muted={data.renewal_performance.rate === null}
+              hint={
+                survival.survival === null
+                  ? 'no business has reached a first renewal yet'
+                  : `still renewing through ${survival.max_cycle} ${survival.max_cycle === 1 ? 'cycle' : 'cycles'}${lastPoint ? ` · ${lastPoint.at_risk} reached it` : ''}`
+              }
+              muted={survival.survival === null}
             />
-            <Headline value={data.closures.toLocaleString()} label="Closures (Period)" />
+            <Headline
+              value={data.closures.toLocaleString()}
+              label="Closures (Period)"
+              hint={period}
+            />
             <Headline
               value={top ? top.barangay : 'No data'}
               label="Top Growing Barangay"
+              hint={top ? `${signed(top.delta)} new registrations vs prior` : undefined}
               muted={!top}
             />
           </div>
 
           <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Business Status Summary</h2>
+              <SectionHeading note="As of today">Business Status Summary</SectionHeading>
               <StatusSummary report={data} />
             </section>
 
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Top Growing Barangays</h2>
+              <SectionHeading note={`${period}, against the ${data.period_months} months before`}>
+                Top Growing Barangays
+              </SectionHeading>
               {data.top_barangays.length > 0 ? (
                 <BarangayBars rows={data.top_barangays} />
               ) : (
                 <ProtoCard className="px-5 py-6">
                   <p className="text-sm text-ink-secondary">
-                    No business registered a barangay address in this period.
+                    No business registered a barangay address in this period, so there is nothing to
+                    rank.
                   </p>
                 </ProtoCard>
               )}
             </section>
 
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Business Closure Trend</h2>
+              <SectionHeading note={period}>Business Closure Trend</SectionHeading>
               <ClosureTrend report={data} />
             </section>
 
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Business Industry Growth Trend</h2>
+              <SectionHeading note={`${period}, against the ${data.period_months} months before`}>
+                Business Industry Growth Trend
+              </SectionHeading>
               {data.industry_growth.length > 0 ? (
                 <IndustryBars rows={data.industry_growth} />
               ) : (
@@ -343,10 +442,11 @@ export function BusinessGrowthPage() {
 
           <p className="mt-6 text-xs text-ink-muted">
             {data.registrations.toLocaleString()} new registrations between {data.period_start} and{' '}
-            {data.period_end}, against {data.registrations_prior.toLocaleString()} in the {data.period_months}{' '}
-            months before that.
-            {data.renewal_performance.decided > 0 &&
-              ` Renewal performance is ${data.renewal_performance.approved} approved of ${data.renewal_performance.decided} decided.`}
+            {data.period_end}, against {data.registrations_prior.toLocaleString()} in the{' '}
+            {data.period_months} months before that. Cohort survival follows{' '}
+            {survival.businesses.toLocaleString()} businesses across{' '}
+            {survival.renewals_observed.toLocaleString()} observed renewal cycles, of which{' '}
+            {survival.lapses.toLocaleString()} lapsed.
           </p>
         </>
       ) : null}

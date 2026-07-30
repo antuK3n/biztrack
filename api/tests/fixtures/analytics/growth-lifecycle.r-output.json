@@ -1,0 +1,214 @@
+{
+  "generated_at": "2026-07-30T00:00:00.000000Z",
+  "period_months": 12,
+  "period_start": "2025-07-30",
+  "period_end": "2026-07-30",
+  "prior_period_start": "2024-07-30",
+  "registrations": 40,
+  "registrations_prior": 32,
+  "growth_rate": 25,
+  "closures": 7,
+  "cohort_survival": {
+    "methodology": "Cohort survival is a Kaplan-Meier estimate over observed renewal cycles: of the businesses that reached a given renewal, the share that had renewed every previous one without a lapse in cover. Businesses still within their current permit are censored rather than counted as failures. It describes what this cohort did, and is not a forecast of what any business will do next.",
+    "grace_days": 30,
+    "businesses": 17,
+    "renewals_observed": 22,
+    "lapses": 5,
+    "max_cycle": 3,
+    "survival": 52.4,
+    "points": [
+      {
+        "cycle": 1,
+        "at_risk": 14,
+        "lapses": 3,
+        "survival": 78.6
+      },
+      {
+        "cycle": 2,
+        "at_risk": 6,
+        "lapses": 2,
+        "survival": 52.4
+      },
+      {
+        "cycle": 3,
+        "at_risk": 2,
+        "lapses": 0,
+        "survival": 52.4
+      }
+    ],
+    "cohorts": [
+      {
+        "cohort": "2023",
+        "businesses": 10,
+        "renewals_observed": 18,
+        "lapses": 4,
+        "max_cycle": 3,
+        "survival": 53.3,
+        "points": [
+          {
+            "cycle": 1,
+            "at_risk": 10,
+            "lapses": 2,
+            "survival": 80
+          },
+          {
+            "cycle": 2,
+            "at_risk": 6,
+            "lapses": 2,
+            "survival": 53.3
+          },
+          {
+            "cycle": 3,
+            "at_risk": 2,
+            "lapses": 0,
+            "survival": 53.3
+          }
+        ]
+      },
+      {
+        "cohort": "2024",
+        "businesses": 4,
+        "renewals_observed": 4,
+        "lapses": 1,
+        "max_cycle": 1,
+        "survival": 75,
+        "points": [
+          {
+            "cycle": 1,
+            "at_risk": 4,
+            "lapses": 1,
+            "survival": 75
+          }
+        ]
+      },
+      {
+        "cohort": "2026",
+        "businesses": 3,
+        "renewals_observed": 0,
+        "lapses": 0,
+        "max_cycle": 0,
+        "survival": null,
+        "points": []
+      }
+    ]
+  },
+  "status_summary": [
+    {
+      "status": "active",
+      "label": "Active",
+      "count": 300,
+      "share": 75
+    },
+    {
+      "status": "expired",
+      "label": "Expired",
+      "count": 65,
+      "share": 16.2
+    },
+    {
+      "status": "inactive",
+      "label": "Inactive",
+      "count": 30,
+      "share": 7.5
+    },
+    {
+      "status": "closed",
+      "label": "Closed",
+      "count": 5,
+      "share": 1.2
+    }
+  ],
+  "top_barangays": [
+    {
+      "barangay": "Acacia",
+      "registrations": 10,
+      "prior": 4,
+      "delta": 6,
+      "growth_rate": 150
+    },
+    {
+      "barangay": "Bulacan",
+      "registrations": 10,
+      "prior": 4,
+      "delta": 6,
+      "growth_rate": 150
+    },
+    {
+      "barangay": "Flores",
+      "registrations": 4,
+      "prior": 0,
+      "delta": 4,
+      "growth_rate": null
+    },
+    {
+      "barangay": "Longos",
+      "registrations": 20,
+      "prior": 18,
+      "delta": 2,
+      "growth_rate": 11.1
+    },
+    {
+      "barangay": "Tonsuya",
+      "registrations": 2,
+      "prior": 9,
+      "delta": -7,
+      "growth_rate": -77.8
+    }
+  ],
+  "closure_trend": [
+    {
+      "month": "2025-08",
+      "closures": 0
+    },
+    {
+      "month": "2025-09",
+      "closures": 2
+    },
+    {
+      "month": "2025-10",
+      "closures": 1
+    },
+    {
+      "month": "2025-11",
+      "closures": 4
+    }
+  ],
+  "industry_growth": [
+    {
+      "industry": "Retail sale of hardware",
+      "psic_code": "47521",
+      "count": 30,
+      "registrations": 10,
+      "prior": 4,
+      "delta": 6,
+      "direction": "growing"
+    },
+    {
+      "industry": "Food and beverage service",
+      "psic_code": "56101",
+      "count": 20,
+      "registrations": 3,
+      "prior": 9,
+      "delta": -6,
+      "direction": "declining"
+    },
+    {
+      "industry": "Bakery products",
+      "psic_code": "10711",
+      "count": 12,
+      "registrations": 6,
+      "prior": 1,
+      "delta": 5,
+      "direction": "growing"
+    },
+    {
+      "industry": "Laundry services",
+      "psic_code": "96200",
+      "count": 12,
+      "registrations": 5,
+      "prior": 5,
+      "delta": 0,
+      "direction": "steady"
+    }
+  ]
+}

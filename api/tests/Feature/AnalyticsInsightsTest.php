@@ -273,18 +273,62 @@ it('leaves the growth rate null when there is no prior period to compare against
     expect($body['growth_rate'])->toBeNull();
 });
 
-it('reports renewal performance with its own numerator and denominator', function () {
+it('reports renewal performance as a cohort survival curve, not a single ratio', function () {
     $body = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
-        ->json('data.renewal_performance');
+        ->json('data.cohort_survival');
 
-    expect($body)->toHaveKeys(['rate', 'approved', 'decided']);
-    if ($body['decided'] === 0) {
-        expect($body['rate'])->toBeNull();
-    } else {
-        expect((float) $body['rate'])->toBe(round(($body['approved'] / $body['decided']) * 100, 1));
-        expect($body['approved'])->toBeLessThanOrEqual($body['decided']);
+    expect($body)->toHaveKeys([
+        'methodology', 'grace_days', 'businesses', 'renewals_observed',
+        'lapses', 'max_cycle', 'survival', 'points', 'cohorts',
+    ]);
+
+    // The measure must never be sold as a forecast: it describes a cohort that
+    // has already been observed.
+    expect($body['methodology'])->toContain('not a forecast');
+
+    if ($body['points'] === []) {
+        // Nothing has reached a first renewal, so there is no rate — and null is
+        // the only honest answer. A 0% here would read as total failure to renew.
+        expect($body['survival'])->toBeNull();
+        expect($body['max_cycle'])->toBe(0);
+
+        return;
+    }
+
+    // A survival curve is monotonically non-increasing by construction: it is a
+    // running product of terms that are each at most 1. A rise would mean
+    // businesses came back from a lapse, which the estimator cannot express.
+    $previous = 100.0;
+    foreach ($body['points'] as $point) {
+        expect($point['survival'])->toBeLessThanOrEqual($previous);
+        expect($point['at_risk'])->toBeGreaterThan(0);
+        expect($point['lapses'])->toBeLessThanOrEqual($point['at_risk']);
+        $previous = (float) $point['survival'];
+    }
+
+    // The headline is the last point, so the card and the curve cannot disagree.
+    expect((float) $body['survival'])->toBe((float) end($body['points'])['survival']);
+});
+
+it('leaves a cohort that has not reached a renewal without a survival rate', function () {
+    // The divide-by-zero guard the spec asks for, at cohort level: a business
+    // registered this year has had no renewal to miss, so its cohort has no rate
+    // rather than a fabricated 0% or a flattering 100%.
+    $cohorts = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/business-growth')
+        ->assertOk()
+        ->json('data.cohort_survival.cohorts');
+
+    foreach ($cohorts as $cohort) {
+        if ($cohort['max_cycle'] === 0) {
+            expect($cohort['survival'])->toBeNull(
+                "Cohort {$cohort['cohort']} reached no renewal cycle but still reported a rate.",
+            );
+        } else {
+            expect($cohort['survival'])->not->toBeNull();
+        }
     }
 });
 
@@ -322,6 +366,253 @@ it('generates a processing time PDF that carries the flagged weeks', function ()
 it('generates a business growth PDF', function () {
     $response = test()->withHeaders(authAs('admin@biztrack.local'))
         ->get('/api/v1/analytics/business-growth/report')
+        ->assertOk();
+
+    expect($response->headers->get('content-type'))->toBe('application/pdf');
+    expect($response->getContent())->toStartWith('%PDF-');
+    expect(strlen($response->getContent()))->toBeGreaterThan(2000);
+});
+
+/* ── Analytics Dashboard (spec §1) ─────────────────────────────────────── */
+
+it('serves the analytics dashboard to the super admin only', function () {
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk();
+
+    // These panels count every office's filings, decisions, inspections and
+    // permits, and the barangay ranking is a register-wide summary. An office
+    // reviewer holds application.view_all but not analytics.view; letting them
+    // read this would hand them an aggregate of filings ApplicationVisibility
+    // deliberately keeps out of their queue.
+    foreach (['sanitary@biztrack.local', 'bplo@biztrack.local', 'owner@biztrack.local'] as $email) {
+        test()->withHeaders(authAs($email))
+            ->getJson('/api/v1/analytics/dashboard')
+            ->assertForbidden();
+
+        test()->withHeaders(authAs($email))
+            ->get('/api/v1/analytics/dashboard/report')
+            ->assertForbidden();
+    }
+});
+
+it('refuses the dashboard and its report to a caller with no session', function () {
+    // No authAs() anywhere in this test: Sanctum::actingAs would outlive it.
+    test()->getJson('/api/v1/analytics/dashboard')->assertUnauthorized();
+    test()->get('/api/v1/analytics/dashboard/report')->assertUnauthorized();
+});
+
+it('returns every panel the dashboard spec asks for', function () {
+    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json();
+
+    expect($body['data'])->toHaveKeys([
+        'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
+        'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
+        'inspections', 'officer_activity', 'map',
+    ]);
+
+    // Provenance is mandatory on every analytics response: these are batch figures
+    // and the screen has to be able to say when and by what they were computed.
+    expect($body['meta'])->toHaveKeys(['source', 'engine', 'computed_at', 'fallback_reason']);
+
+    // The three compliance indicators the spec names, no more and no fewer.
+    expect(array_column($body['data']['compliance'], 'indicator'))
+        ->toBe(['ra11032_processing', 'permit_validity', 'renewal']);
+});
+
+it('excludes pending filings from the approval rate denominator', function () {
+    $decisions = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.decisions');
+
+    $byOutcome = array_column($decisions['rows'], 'count', 'outcome');
+
+    // "Decisioned" is approved + returned + rejected. Pending and cancelled are
+    // in the table but must not reach the denominator — dividing by the grand
+    // total is the specific mistake the spec warns about.
+    expect($decisions['decisioned'])
+        ->toBe($byOutcome['approved'] + $byOutcome['returned'] + $byOutcome['rejected']);
+    expect($decisions['total'])->toBe(array_sum($byOutcome));
+
+    if ($decisions['decisioned'] === 0) {
+        expect($decisions['approval_rate'])->toBeNull();
+    } else {
+        expect((float) $decisions['approval_rate'])
+            ->toBe(round(($decisions['approved'] / $decisions['decisioned']) * 100, 1));
+    }
+});
+
+it('measures RA 11032 tiers against the statute and not against the recorded deadline', function () {
+    $tiers = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.processing_tiers');
+
+    expect(array_column($tiers, 'tier'))->toBe(['simple', 'complex', 'highly_technical']);
+
+    // The statutory limits are law (RA 11032, the Ease of Doing Business Act), not
+    // configurable service targets.
+    expect(array_column($tiers, 'statutory_working_days'))->toBe([3, 7, 20]);
+
+    foreach ($tiers as $tier) {
+        if ($tier['observations'] === 0) {
+            // A tier with no decided filing has no mean, and MUST NOT report as
+            // compliant: a bar drawn at zero days against a 20-day limit would
+            // read as excellent performance rather than as absent data.
+            expect($tier['mean_working_days'])->toBeNull();
+            expect($tier['breaching'])->toBeFalse();
+            expect($tier['within_statutory_rate'])->toBeNull();
+
+            continue;
+        }
+
+        // `breaching` and `within_statutory` must be on the same yardstick, or the
+        // panel contradicts itself: a high pass rate beside a breach flag reads as
+        // a bug even when both numbers are individually right.
+        expect($tier['breaching'])->toBe($tier['mean_working_days'] > $tier['statutory_working_days']);
+        expect($tier['within_statutory'])->toBeLessThanOrEqual($tier['observations']);
+
+        // No tolerance band on a legal threshold.
+        expect($tier['overage_days'])
+            ->toBe(round($tier['mean_working_days'] - $tier['statutory_working_days'], 1));
+    }
+});
+
+it('derives the bottleneck from the computed means rather than naming an office', function () {
+    $stages = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.stages');
+
+    if ($stages['rows'] === []) {
+        expect($stages['bottleneck'])->toBeNull();
+
+        return;
+    }
+
+    // Slowest first, so the bottleneck is the head of the table and cannot be a
+    // separately-decided answer that disagrees with the rows above it.
+    $means = array_column($stages['rows'], 'mean_days');
+    expect($means)->toBe(array_reverse(collect($means)->sort()->values()->all()));
+    expect($stages['bottleneck']['code'])->toBe($stages['rows'][0]['code']);
+    expect($stages['bottleneck']['mean_days'])->toBe($stages['rows'][0]['mean_days']);
+});
+
+it('nests the permit expiry windows cumulatively', function () {
+    $expiry = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.expiry');
+
+    $rows = array_column($expiry['rows'], null, 'window');
+    expect($rows)->toHaveKeys(['next_30d', 'next_60d', 'next_90d', 'expired']);
+
+    // 30d ⊂ 60d ⊂ 90d, as the mockup's own figures do.
+    expect($rows['next_30d']['total'])->toBeLessThanOrEqual($rows['next_60d']['total']);
+    expect($rows['next_60d']['total'])->toBeLessThanOrEqual($rows['next_90d']['total']);
+
+    // Each row's per-type counts have to add up to its own total, or a column is
+    // being dropped from the table.
+    foreach ($expiry['rows'] as $row) {
+        expect(array_sum($row['counts']))->toBe($row['total']);
+    }
+});
+
+it('divides the inspection pass rate by completed inspections, not scheduled', function () {
+    $inspections = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.inspections');
+
+    foreach ([...$inspections['rows'], $inspections['combined']] as $row) {
+        expect($row['passed'] + $row['failed'] + $row['conditional'])
+            ->toBeLessThanOrEqual($row['completed']);
+
+        if ($row['completed'] === 0) {
+            // Nothing completed means no rate. Reporting 0% would say every
+            // inspection failed, when none has happened.
+            expect($row['pass_rate'])->toBeNull();
+        } else {
+            expect((float) $row['pass_rate'])->toBe(round(($row['passed'] / $row['completed']) * 100, 1));
+        }
+    }
+});
+
+it('reports a compliance indicator it cannot compute as null with a reason', function () {
+    $compliance = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.compliance');
+
+    foreach ($compliance as $indicator) {
+        if ($indicator['rate'] === null) {
+            // Either there was nothing to divide, or the numerator is unknowable
+            // and a reason says so. What must never happen is a null rate with an
+            // empty denominator AND no explanation, because the screen then has
+            // nothing honest to print.
+            expect($indicator['denominator'] === 0 || $indicator['unavailable_reason'] !== null)
+                ->toBeTrue("Indicator {$indicator['indicator']} has no rate and no reason.");
+
+            continue;
+        }
+
+        expect($indicator['denominator'])->toBeGreaterThan(0);
+        expect((float) $indicator['rate'])
+            ->toBe(round(($indicator['numerator'] / $indicator['denominator']) * 100, 1));
+    }
+});
+
+it('plots businesses from their own coordinates rather than reporting none', function () {
+    $map = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.map');
+
+    // The seeder writes latitude and longitude on every business-location
+    // address, so this screen has a real point layer. It rendered an empty map for
+    // a while because it read coordinates off the inspections feed, where they are
+    // null on every row — an empty state that was honest about what it had been
+    // handed and wrong about the register.
+    expect($map['mapped'])->toBeGreaterThan(0);
+    expect($map['plotted'])->toBeGreaterThan(0);
+    expect($map['plotted'])->toBeLessThanOrEqual($map['mapped']);
+
+    foreach ($map['points'] as $point) {
+        expect($point['latitude'])->toBeGreaterThan(14.0)->toBeLessThan(15.0);
+        expect($point['longitude'])->toBeGreaterThan(120.0)->toBeLessThan(121.5);
+        expect($point['permit_state'])->toBeIn(['active', 'lapsed']);
+    }
+});
+
+it('says a form of organization is unrecorded rather than reporting four zeros', function () {
+    $forms = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk()
+        ->json('data.organization_forms');
+
+    expect(array_column($forms['rows'], 'form'))
+        ->toBe(['sole_proprietorship', 'corporation', 'partnership', 'cooperative']);
+
+    // The column exists and nothing populates it. The parts must still sum, so a
+    // reader can see the breakdown is empty because the field is blank and not
+    // because Malabon has no corporations.
+    expect($forms['recorded'] + $forms['unrecorded'])->toBe($forms['total']);
+
+    foreach ($forms['rows'] as $row) {
+        if ($forms['recorded'] === 0) {
+            expect($row['count'])->toBe(0);
+            expect($row['share'])->toBeNull();
+        }
+    }
+});
+
+it('generates an analytics dashboard PDF', function () {
+    $response = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->get('/api/v1/analytics/dashboard/report')
         ->assertOk();
 
     expect($response->headers->get('content-type'))->toBe('application/pdf');
