@@ -23,6 +23,27 @@ Artisan::command('inspire', function () {
  */
 Schedule::command('biztrack:scan-permits')->daily()->withoutOverlapping();
 
+/*
+ * Push register rows to the R statistics service and store what it computes.
+ *
+ * This is what makes the analytics screens R-backed: they read the stored
+ * snapshot and never call R themselves, so a page load costs one indexed read
+ * and cannot be slowed or broken by R being slow or down. Nothing breaks if this
+ * does not run — the screens keep serving the last snapshot and say how old it
+ * is, and fall back to the PHP port for anything with no snapshot at all. What
+ * breaks is freshness, which is why ANALYTICS_STALE_AFTER_HOURS is 25: a figure
+ * that has missed a nightly run gets flagged rather than shown as current.
+ *
+ * Deliberately after scan-permits. That scan writes the expiry-reminder ledger
+ * the Renewal Risk screen counts "Reminders Sent" from, so refreshing first would
+ * report every night's figure a day late.
+ *
+ * withoutOverlapping because a refresh spans a year of review history plus the
+ * full renewal watchlist, and two concurrent passes would only queue register
+ * queries behind each other for the same result.
+ */
+Schedule::command('analytics:refresh')->dailyAt('03:00')->withoutOverlapping();
+
 // Daily database + uploads backup (R32; spatie/laravel-backup).
 Schedule::command('backup:clean')->daily()->at('01:30');
 Schedule::command('backup:run')->daily()->at('02:00');
