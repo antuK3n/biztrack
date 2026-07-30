@@ -30,3 +30,8 @@ Route::prefix('auth')->group(function () {
 if (file_exists(__DIR__.'/workflow.php')) {
     require __DIR__.'/workflow.php';
 }
+
+// Business Location Insights — the apply wizard's zoning step (spec §5).
+if (file_exists(__DIR__.'/location.php')) {
+    require __DIR__.'/location.php';
+}
