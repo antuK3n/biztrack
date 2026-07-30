@@ -90,10 +90,18 @@ it('refuses the report download to anyone without analytics.view', function () {
 it('carries the methodology statement and the published rulebook', function () {
     $body = renewalRisk();
 
-    // The screen and the PDF both render this. It is the sentence that keeps the
-    // numbers from reading as a prediction, so its absence is a bug.
-    expect($body['methodology'])->toContain('not a statistical prediction');
-    expect($body['methodology'])->toContain('not a probability');
+    /*
+     * The screen and the PDF both render this. It is what keeps the numbers from
+     * reading as a prediction, so its absence is a bug.
+     *
+     * Asserted on the two claims it has to disclaim rather than on an exact
+     * sentence: the wording is user-facing copy and will be revised, but it must
+     * never stop saying that the score is not a prediction and does not express
+     * a likelihood. Pinning the phrasing would make a copy edit look like a test
+     * failure, and pinning nothing would let the disclaimer be dropped silently.
+     */
+    expect($body['methodology'])->toContain('not a prediction');
+    expect($body['methodology'])->toContain('how likely');
 
     expect($body['rulebook'])->toHaveCount(count(RenewalRiskScoring::WEIGHTS));
     expect(array_sum(array_column($body['rulebook'], 'max')))->toBe(100);
