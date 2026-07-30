@@ -38,8 +38,24 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
+
+            /*
+             * SQLite allows one writer at a time, and this file is shared by the
+             * API serving live testers, the analytics refresh, and the history
+             * seeder. On the defaults a writer arriving during another write
+             * fails immediately rather than waiting: the seeder died mid-run with
+             * "database is locked" and rolled back ~1,600 filings, and a tester
+             * sign-in returned a 500 for the same reason.
+             *
+             * busy_timeout makes a blocked writer wait. WAL lets readers keep
+             * reading while a write is in progress, which is what a page load
+             * needs — under the default rollback journal a long write blocks
+             * reads as well.
+             *
+             * PostgreSQL ignores both, so the production compose is unaffected.
+             */
+            'busy_timeout' => env('DB_BUSY_TIMEOUT', 10000),
+            'journal_mode' => env('DB_JOURNAL_MODE', 'WAL'),
             'synchronous' => null,
             'transaction_mode' => 'DEFERRED',
         ],
