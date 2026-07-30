@@ -10,7 +10,9 @@ use App\Models\Application;
 use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Services\RAnalytics;
 use App\Support\AnalyticsDatasets;
+use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
 use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
@@ -140,6 +142,88 @@ class AnalyticsController extends Controller
             'days' => $this->horizonDays($request),
             'limit' => $this->limit($request),
         ]);
+    }
+
+    /**
+     * Recompute every snapshot from R now, instead of waiting for 03:00.
+     *
+     * The screens are deliberately batch-fed — a page load reads a stored
+     * snapshot and never calls R — so without this there is no way to see a
+     * filing you just made reflected in the figures until the nightly run. That
+     * is right for serving pages and wrong for a demo.
+     *
+     * Reports what happened per dataset rather than returning a bare 204. A
+     * refresh can partly succeed: R may compute three datasets and fail the
+     * fourth, leaving the screens showing a mix of fresh and stale figures, each
+     * labelled with its own timestamp. The two failures worth telling apart are
+     * "R is switched off" and "R did not answer", because the fix differs.
+     */
+    public function refresh(RAnalytics $r): JsonResponse
+    {
+        $outcome = AnalyticsRefresher::run($r);
+
+        if ($outcome['disabled']) {
+            return response()->json([
+                'message' => 'R analytics is switched off, so there is nothing to refresh. The screens are computing locally.',
+                'refreshed' => 0,
+            ], 409);
+        }
+
+        if ($outcome['unreachable']) {
+            return response()->json([
+                'message' => 'The R statistics service did not answer. The screens keep serving the last figures and say how old they are.',
+                'refreshed' => 0,
+            ], 503);
+        }
+
+        /*
+         * A run where every dataset failed is a 502 with the error envelope, so
+         * the client's existing 4xx/5xx path surfaces `message` and the caller
+         * does not have to inspect counts to notice nothing happened.
+         */
+        if ($outcome['succeeded'] === 0 && $outcome['failed'] > 0) {
+            return response()->json([
+                'message' => $this->refreshMessage($outcome),
+                'errors' => [],
+            ], 502);
+        }
+
+        // Success keeps the { data: ... } envelope every other endpoint uses.
+        return response()->json([
+            'data' => [
+                'message' => $this->refreshMessage($outcome),
+                'refreshed' => $outcome['succeeded'],
+                'failed' => $outcome['failed'],
+                'engine_version' => $outcome['engine_version'],
+                'results' => $outcome['results'],
+            ],
+        ]);
+    }
+
+    /** @param  array{succeeded: int, failed: int, engine_version: string|null}  $outcome */
+    private function refreshMessage(array $outcome): string
+    {
+        $engine = $outcome['engine_version'] !== null ? 'R '.$outcome['engine_version'] : 'R';
+
+        if ($outcome['failed'] === 0) {
+            return sprintf(
+                '%d figure set%s recomputed by %s.',
+                $outcome['succeeded'],
+                $outcome['succeeded'] === 1 ? '' : 's',
+                $engine,
+            );
+        }
+
+        if ($outcome['succeeded'] === 0) {
+            return sprintf('%s could not compute any figures. The screens keep the last ones.', $engine);
+        }
+
+        return sprintf(
+            '%d recomputed by %s, %d failed. Those screens keep their previous figures.',
+            $outcome['succeeded'],
+            $engine,
+            $outcome['failed'],
+        );
     }
 
     /** Printable Renewal Risk report. */
