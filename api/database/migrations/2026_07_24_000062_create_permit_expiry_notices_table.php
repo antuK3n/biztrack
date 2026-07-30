@@ -13,7 +13,9 @@ return new class extends Migration
         Schema::create('permit_expiry_notices', function (Blueprint $table) {
             $table->id();
             $table->foreignId('permit_id')->constrained()->cascadeOnDelete();
-            $table->string('notice_kind');   // threshold_60 | threshold_30 | threshold_7 | expired | renewal_due
+            // threshold_30 | threshold_15 | threshold_7 | threshold_1 (the R spec
+            // §3 reminder buckets) | expired | renewal_due
+            $table->string('notice_kind');
             $table->timestamps();
             $table->unique(['permit_id', 'notice_kind']);
         });
