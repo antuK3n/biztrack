@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ChevronDownIcon, DownloadIcon, PaymentsIcon } from '../../components/icons'
+import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
@@ -40,9 +41,27 @@ const STATUS_OPTIONS = [
   { value: 'refunded', label: 'Refunded' },
 ]
 
-/** "2026-07-24" comparison key for a payment's paid date (empty when unpaid). */
-function paidDay(p: Payment): string {
-  return p.paid_at ? p.paid_at.slice(0, 10) : ''
+/*
+ * "2026-07-24" comparison key for a payment's paid date (empty when unpaid).
+ *
+ * The register stores UTC; the applicant is in Asia/Manila, eight hours ahead.
+ * Slicing the ISO string took the UTC calendar day, so anything paid between
+ * midnight and 8am Manila belonged to the previous day as far as the filter
+ * was concerned — while the row beside it displayed the Manila date. Picking
+ * "today" hid a payment the same screen said was made today. The date the
+ * filter matches has to be the date the list shows, so derive both from the
+ * viewer's own calendar.
+ */
+const dayKeyFmt = new Intl.DateTimeFormat('en-CA', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+})
+
+export function paidDay(p: Payment): string {
+  if (!p.paid_at) return ''
+  const d = new Date(p.paid_at)
+  return Number.isNaN(d.getTime()) ? '' : dayKeyFmt.format(d)
 }
 
 function sortPayments(list: Payment[], sortKey: string): Payment[] {
@@ -77,14 +96,16 @@ function TaxOrderCard({ payment, detail }: { payment: Payment; detail: FeeDetail
       {detail === 'loading' ? (
         <p className="mt-4 text-sm text-ink-muted">Loading fee details…</p>
       ) : fee ? (
-        <ul className="mt-3 space-y-2">
-          {fee.line_items.map((li, i) => (
-            <li key={i} className="flex items-baseline justify-between text-base text-ink">
-              <span>{li.label}</span>
-              <span className="tnum">{formatMoney(li.amount)}</span>
-            </li>
-          ))}
-        </ul>
+        /*
+         * The same breakdown the application page and the Pay page render.
+         * This card used to keep its own flat list, which grouped nothing by
+         * office and printed a line still awaiting an officer's figure as
+         * "₱0.00" — a receipt claiming a fee was zero when it was simply not
+         * set yet. One receipt, told one way.
+         */
+        <div className="mt-3">
+          <TaxOrderBreakdown fee={fee} />
+        </div>
       ) : (
         <ul className="mt-3 space-y-2">
           <li className="flex items-baseline justify-between text-base text-ink">

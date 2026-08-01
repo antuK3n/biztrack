@@ -172,6 +172,13 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         )}
 
         <div>
+          {/*
+            FieldLabel is a span, so this label was decorative: the input's
+            only accessible name was its placeholder, which PRODUCT.md
+            prohibits and which disappears the moment anything is typed.
+            A real label wrapper fixes the association (WCAG 2.1 AA 3.3.2).
+          */}
+          <label className="block">
           <FieldLabel>{staff ? 'Work email' : 'Email or number'}</FieldLabel>
           <input
             type="email"
@@ -189,6 +196,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             aria-describedby={errors.email ? 'login-email-error' : undefined}
             className={inputCls}
           />
+          </label>
           {errors.email && (
             <p id="login-email-error" className="mt-1.5 text-sm font-medium text-s-red">
               {errors.email}
@@ -197,8 +205,14 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         </div>
 
         <div>
-          <FieldLabel>Password</FieldLabel>
+          {/* PasswordInput contains its own reveal button, so it is labelled
+              by htmlFor rather than wrapped — a label may not contain a second
+              interactive control. */}
+          <label htmlFor="login-password" className="block">
+            <FieldLabel>Password</FieldLabel>
+          </label>
           <PasswordInput
+            id="login-password"
             name="password"
             autoComplete="current-password"
             placeholder="Password"

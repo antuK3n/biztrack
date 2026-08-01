@@ -55,3 +55,32 @@ Not provisioned in this build; the officer-request "meeting" type is out of scop
 ## 7. Known limits
 - Expo push needs EAS credentials; in-app notification center is the offline floor.
 - TLS: put the host behind the LGU reverse proxy or add certbot to nginx for a real domain.
+
+## PHP upload limits
+
+`DocumentController` validates `max:10240` — 10 MB — and the applicant is told
+that. PHP's own defaults are lower (`upload_max_filesize=2M`,
+`post_max_size=8M`), and PHP rejects an oversized upload *before* Laravel runs,
+so the applicant gets a raw 413 rather than a validation message.
+
+The gap is the whole 2–10 MB range, which is exactly where a phone photo of a
+barangay clearance or a scanned lease falls. It presents as "the upload failed"
+with no reason.
+
+Set these wherever PHP runs in production (php.ini, the FPM pool, or the
+container image):
+
+    upload_max_filesize = 12M
+    post_max_size       = 13M
+
+Slightly above 10 MB on purpose: `post_max_size` has to cover the whole request
+body, not just the file, and a multipart POST carries the other fields too.
+
+For local development `php artisan serve` reads the ini, not `-d` flags passed to
+the parent process, so the dev server is started with:
+
+    PHP_INI_SCAN_DIR="$(php -r 'echo PHP_CONFIG_FILE_SCAN_DIR;'):$(pwd)/.dev-php" \
+      php artisan serve --port=8080
+
+`api/.dev-php/uploads.ini` holds the two settings. Scanned in addition to the
+normal config, so no global php.ini is modified.

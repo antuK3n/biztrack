@@ -249,6 +249,56 @@ function plainAmount(raw: string): string {
   return raw.replace(/,/g, '').trim()
 }
 
+/* ── Attachments ──────────────────────────────────────────────────────── */
+
+/** What the API accepts (DocumentController: mimes:pdf,jpg,jpeg,png, max:10240). */
+const ACCEPTED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png']
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+/**
+ * Why this file cannot be sent, checked before it leaves the browser.
+ *
+ * Everything here was previously discovered only by uploading and reading
+ * whatever the server said back, and what it said back was not usable: an
+ * empty PDF came back as "Upload a PDF, JPG, or PNG file." (it is one), and a
+ * file over the request limit came back as a raw PHP notice that the client
+ * rendered as "Something went wrong on our end" — blaming the server for the
+ * applicant's 12 MB scan and inviting them to retry it forever. Naming the
+ * actual defect, before the upload, is both faster and the only version that
+ * tells the applicant what to do next.
+ */
+function fileRejection(file: File): string | null {
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  if (!ACCEPTED_EXTENSIONS.includes(ext)) {
+    return `“${file.name}” is not a file we can read. Upload a PDF, JPG, or PNG.`
+  }
+  if (file.size === 0) {
+    return `“${file.name}” is empty. Check the file opens on your device, then upload it again.`
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return `“${file.name}” is ${formatBytes(file.size)}. The limit is 10 MB — try a smaller scan or photo.`
+  }
+  return null
+}
+
+/**
+ * An upload error the applicant can act on. The API's own messages are used
+ * as-is; the two failures that arrive without a usable message are the ones
+ * worth translating, because both mean "your file is too big" and neither says
+ * so. (413 is the web server refusing the request before Laravel sees it;
+ * "failed to upload" is PHP truncating a file past upload_max_filesize.)
+ */
+function uploadErrorMessage(err: unknown): string {
+  const apiError = toApiError(err)
+  if (apiError.status === 413) {
+    return 'That file is too large to upload. Try a smaller scan or photo, under 10 MB.'
+  }
+  if (/failed to upload/i.test(apiError.message)) {
+    return 'That file did not finish uploading — it may be too large. Try a smaller scan or photo.'
+  }
+  return apiError.message
+}
+
 /* ── Small prototype glyphs ───────────────────────────────────────────── */
 
 function CloudSavedIcon({ size = 26 }: { size?: number }) {
@@ -342,7 +392,9 @@ function LinesStep({
   return (
     <div className="space-y-4">
       <div>
-        <FieldLabel required>Search your line of business</FieldLabel>
+        <label htmlFor="psic-search" className="block">
+          <FieldLabel required>Search your line of business</FieldLabel>
+        </label>
         <div className="relative">
           <SearchIcon
             size={18}
@@ -444,6 +496,7 @@ function LinesStep({
                     <div className="min-w-0 flex-1">
                       {isOther ? (
                         <>
+                          <label className="block">
                           <FieldLabel required>Your line of business</FieldLabel>
                           <input
                             value={line.line_of_business}
@@ -460,12 +513,14 @@ function LinesStep({
                             className={inputCls}
                             aria-invalid={needsText}
                           />
+                          </label>
                         </>
                       ) : (
                         <p className="truncate text-sm text-ink">{code?.title}</p>
                       )}
                     </div>
                     <div className="w-44">
+                      <label className="block">
                       <FieldLabel required>Capital (₱)</FieldLabel>
                       <input
                         inputMode="decimal"
@@ -485,6 +540,7 @@ function LinesStep({
                         className={`${inputCls} tnum`}
                         aria-invalid={needsCapital}
                       />
+                      </label>
                     </div>
                     <button
                       type="button"
@@ -616,6 +672,8 @@ export function ApplyWizard() {
   /* The permit card whose SUBMISSION dialog is open (p041). */
   const [heldPrompt, setHeldPrompt] = useState<{ id: number; code: string; name: string } | null>(null)
   const [heldPromptFile, setHeldPromptFile] = useState<File | null>(null)
+  /** Why the certificate just chosen in the SUBMISSION dialog can't be used. */
+  const [heldPromptError, setHeldPromptError] = useState<string | null>(null)
   const [heldBusy, setHeldBusy] = useState<string | null>(null)
 
   // Prototype presentational modals — none of these fabricate API calls.
@@ -637,6 +695,15 @@ export function ApplyWizard() {
   const draftIdParam = searchParams.get('draft')
   const [hydrating, setHydrating] = useState<boolean>(Boolean(draftIdParam))
   const hydratedRef = useRef(false)
+  /*
+   * A reopen that did not finish. The wizard has the draft's ids by then but
+   * not its answers, so every field reads blank — and autosave, which cannot
+   * tell "the applicant cleared this" from "we never loaded it", would write
+   * that blank over the saved draft. Nothing about a failed read may be
+   * written back: hold the writes and say so, rather than showing an empty
+   * form that looks like the work is gone.
+   */
+  const [hydrateFailed, setHydrateFailed] = useState<string | null>(null)
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((f) => ({ ...f, [key]: value }))
@@ -1128,6 +1195,10 @@ export function ApplyWizard() {
    * forms, and the fee profile all round-trip through the API.
    */
   async function persistOnLeave(): Promise<boolean> {
+    // Same rule as autosave: a draft we failed to read is a draft we must not
+    // write. Stepping through the wizard cannot be allowed to launder a blank
+    // form into a save.
+    if (hydrateFailed) return false
     inFlightRef.current = true
     setSaving(true)
     setSubmitError(null)
@@ -1330,7 +1401,7 @@ export function ApplyWizard() {
    * reads, so the saved indicator can never claim more than actually happened.
    */
   useEffect(() => {
-    if (hydrating || refs.loading || tracking) return
+    if (hydrating || refs.loading || tracking || hydrateFailed) return
     if (!syncedRef.current) {
       syncedRef.current = true
       // A reopened draft opens in sync with what the server already holds.
@@ -1345,7 +1416,7 @@ export function ApplyWizard() {
     const timer = setTimeout(() => void autosave(snapshot), AUTOSAVE_DELAY_MS)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snapshot, autosaveNonce, applicationId, canCreateDraft, hydrating, refs.loading, tracking])
+  }, [snapshot, autosaveNonce, applicationId, canCreateDraft, hydrating, refs.loading, tracking, hydrateFailed])
 
   /* Closing the tab mid-form should not silently take the answers with it. */
   useEffect(() => {
@@ -1390,6 +1461,11 @@ export function ApplyWizard() {
 
   async function handleUpload(docTypeId: number, file: File) {
     if (!applicationId) return
+    const rejection = fileRejection(file)
+    if (rejection) {
+      setSubmitError(rejection)
+      return
+    }
     setUploadingType(docTypeId)
     setSubmitError(null)
     try {
@@ -1408,7 +1484,7 @@ export function ApplyWizard() {
         setOcr(doc.ocr_suggestions)
       }
     } catch (err) {
-      setSubmitError(toApiError(err).message)
+      setSubmitError(uploadErrorMessage(err))
     } finally {
       setUploadingType(null)
     }
@@ -1482,7 +1558,7 @@ export function ApplyWizard() {
             delete next[code]
             return next
           })
-          setSubmitError(toApiError(err).message)
+          setSubmitError(uploadErrorMessage(err))
         })
         .finally(() => {
           const { [code]: _done, ...rest } = pendingHeldRef.current
@@ -1496,13 +1572,18 @@ export function ApplyWizard() {
   /** "Other Requirements": each upload APPENDS, so multiple files are kept. */
   async function handleOtherUpload(file: File) {
     if (!applicationId || !otherType) return
+    const rejection = fileRejection(file)
+    if (rejection) {
+      setSubmitError(rejection)
+      return
+    }
     setUploadingType(otherType.id)
     setSubmitError(null)
     try {
       const doc = await documents.upload(applicationId, otherType.id, file)
       setOtherDocs((d) => [...d, { id: doc.id, name: file.name, size: file.size }])
     } catch (err) {
-      setSubmitError(toApiError(err).message)
+      setSubmitError(uploadErrorMessage(err))
     } finally {
       setUploadingType(null)
     }
@@ -1659,7 +1740,10 @@ export function ApplyWizard() {
             })
         }
       } catch (err) {
-        if (active) setSubmitError(toApiError(err).message)
+        // Includes anything thrown while unpacking the response, not just the
+        // request: a half-restored wizard is the dangerous case, because it
+        // holds the draft's ids and none of its answers.
+        if (active) setHydrateFailed(toApiError(err).message)
       } finally {
         if (active) setHydrating(false)
       }
@@ -1766,6 +1850,29 @@ export function ApplyWizard() {
   }
   if (refs.error) {
     return <Alert variant="error" title="We couldn’t start a new application">{toApiError(refs.error).message}</Alert>
+  }
+  /*
+   * The reopen failed. Every field would read blank, which is the one thing
+   * this screen must never imply, so say what happened instead and offer the
+   * way back in. The saved draft is untouched — nothing was written.
+   */
+  if (hydrateFailed) {
+    return (
+      <div className="mx-auto max-w-lg py-10">
+        <Alert variant="error" title="We couldn’t open this draft">
+          {hydrateFailed} Your saved draft has not been changed.
+        </Alert>
+        <div className="mt-6 flex justify-center gap-3">
+          <PillButton onClick={() => window.location.reload()}>Try again</PillButton>
+          <PillButton
+            className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
+            onClick={() => navigate('/drafts')}
+          >
+            Back to drafts
+          </PillButton>
+        </div>
+      </div>
+    )
   }
 
   const part = stepIndex + 1
@@ -2073,6 +2180,7 @@ export function ApplyWizard() {
           )}
           <div className="mt-4 space-y-4">
             <div>
+              <label className="block">
               <FieldLabel required>DTI / SEC / CDA Registration Number</FieldLabel>
               <input
                 value={form.registration_number}
@@ -2082,6 +2190,7 @@ export function ApplyWizard() {
                 className={inputCls}
                 aria-invalid={Boolean(fieldErrors.registration_number)}
               />
+              </label>
               {fieldErrors.registration_number && (
                 <p className="mt-1 text-xs font-medium text-s-red">
                   {fieldErrors.registration_number}
@@ -2090,6 +2199,7 @@ export function ApplyWizard() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
+                <label className="block">
                 <FieldLabel required>Tax Identification Number (TIN)</FieldLabel>
                 <input
                   inputMode="numeric"
@@ -2102,11 +2212,13 @@ export function ApplyWizard() {
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.tin)}
                 />
+                </label>
                 {fieldErrors.tin && (
                   <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.tin}</p>
                 )}
               </div>
               <div>
+                <label className="block">
                 <FieldLabel required>Business Name</FieldLabel>
                 <input
                   value={form.name}
@@ -2116,10 +2228,12 @@ export function ApplyWizard() {
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.name)}
                 />
+                </label>
                 {fieldErrors.name && <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.name}</p>}
               </div>
             </div>
             <div>
+              <label className="block">
               <FieldLabel>Trade Name / Franchise</FieldLabel>
               <input
                 value={form.trade_name}
@@ -2127,6 +2241,7 @@ export function ApplyWizard() {
                 placeholder="Trade name, if any"
                 className={inputCls}
               />
+              </label>
             </div>
             <div>
               <FieldLabel required>Type of Registration</FieldLabel>
@@ -2209,6 +2324,7 @@ export function ApplyWizard() {
                 {/* A read-only echo: the picker lives in the Line of Business
                     section, so there is no asterisk on a field nobody can
                     fill here. */}
+                <label className="block">
                 <FieldLabel>Line of Business</FieldLabel>
                 <select className={inputCls} disabled>
                   <option>
@@ -2217,8 +2333,10 @@ export function ApplyWizard() {
                       : 'You choose this later, in the Line of Business section'}
                   </option>
                 </select>
+                </label>
               </div>
               <div>
+                <label className="block">
                 <FieldLabel required>House No. &amp; Street Name</FieldLabel>
                 <input
                   value={form.line1}
@@ -2228,9 +2346,11 @@ export function ApplyWizard() {
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.line1)}
                 />
+                </label>
                 {fieldErrors.line1 && <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.line1}</p>}
               </div>
               <div>
+                <label className="block">
                 <FieldLabel required>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
@@ -2246,11 +2366,13 @@ export function ApplyWizard() {
                     </option>
                   ))}
                 </select>
+                </label>
                 {fieldErrors.barangay_id && (
                   <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
               <div>
+                <label className="block">
                 <FieldLabel>Locational Group/Landmark</FieldLabel>
                 <input
                   value={form.line2}
@@ -2258,6 +2380,7 @@ export function ApplyWizard() {
                   placeholder="Locational Group/Landmark"
                   className={inputCls}
                 />
+                </label>
               </div>
 
               {/*
@@ -2300,6 +2423,7 @@ export function ApplyWizard() {
               {form.is_rented && (
                 <div className="flex flex-col gap-4 rounded-xl border border-line p-4">
                   <div>
+                    <label className="block">
                     <FieldLabel required>Lessor's Name</FieldLabel>
                     <input
                       value={form.lessor_name}
@@ -2309,11 +2433,13 @@ export function ApplyWizard() {
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_name)}
                     />
+                    </label>
                     {fieldErrors.lessor_name && (
                       <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.lessor_name}</p>
                     )}
                   </div>
                   <div>
+                    <label className="block">
                     <FieldLabel required>Lessor's Address</FieldLabel>
                     <input
                       value={form.lessor_address}
@@ -2323,6 +2449,7 @@ export function ApplyWizard() {
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_address)}
                     />
+                    </label>
                     {fieldErrors.lessor_address && (
                       <p className="mt-1 text-xs font-medium text-s-red">
                         {fieldErrors.lessor_address}
@@ -2331,6 +2458,7 @@ export function ApplyWizard() {
                   </div>
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
+                      <label className="block">
                       <FieldLabel>Lessor's Contact Number</FieldLabel>
                       <input
                         inputMode="tel"
@@ -2341,6 +2469,7 @@ export function ApplyWizard() {
                         className={inputCls}
                         aria-invalid={Boolean(fieldErrors.lessor_contact)}
                       />
+                      </label>
                       {fieldErrors.lessor_contact && (
                         <p className="mt-1 text-xs font-medium text-s-red">
                           {fieldErrors.lessor_contact}
@@ -2348,6 +2477,7 @@ export function ApplyWizard() {
                       )}
                     </div>
                     <div>
+                      <label className="block">
                       <FieldLabel required>Monthly Rental (₱)</FieldLabel>
                       <input
                         inputMode="decimal"
@@ -2358,6 +2488,7 @@ export function ApplyWizard() {
                         className={`${inputCls} tnum`}
                         aria-invalid={Boolean(fieldErrors.monthly_rental)}
                       />
+                      </label>
                       {fieldErrors.monthly_rental && (
                         <p className="mt-1 text-xs font-medium text-s-red">
                           {fieldErrors.monthly_rental}
@@ -2370,6 +2501,7 @@ export function ApplyWizard() {
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
+                  <label className="block">
                   <FieldLabel required>Emergency Contact Person</FieldLabel>
                   <input
                     value={form.emergency_contact_name}
@@ -2379,6 +2511,7 @@ export function ApplyWizard() {
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
                   />
+                  </label>
                   {fieldErrors.emergency_contact_name && (
                     <p className="mt-1 text-xs font-medium text-s-red">
                       {fieldErrors.emergency_contact_name}
@@ -2386,6 +2519,7 @@ export function ApplyWizard() {
                   )}
                 </div>
                 <div>
+                  <label className="block">
                   <FieldLabel required>Emergency Contact Number</FieldLabel>
                   <input
                     inputMode="tel"
@@ -2396,6 +2530,7 @@ export function ApplyWizard() {
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
                   />
+                  </label>
                   {fieldErrors.emergency_contact_number && (
                     <p className="mt-1 text-xs font-medium text-s-red">
                       {fieldErrors.emergency_contact_number}
@@ -2731,10 +2866,12 @@ export function ApplyWizard() {
           onCancel={() => {
             setHeldPrompt(null)
             setHeldPromptFile(null)
+            setHeldPromptError(null)
           }}
           onConfirm={() => {
             if (heldPromptFile) submitHeldPermit(heldPrompt, heldPromptFile)
             setHeldPromptFile(null)
+            setHeldPromptError(null)
           }}
         >
           <p className="text-xl font-bold text-ink">{heldPrompt.name}</p>
@@ -2760,11 +2897,22 @@ export function ApplyWizard() {
               accept=".pdf,.jpg,.jpeg,.png"
               className="sr-only"
               onChange={(e) => {
-                setHeldPromptFile(e.target.files?.[0] ?? null)
+                const picked = e.target.files?.[0] ?? null
                 e.target.value = ''
+                // Reject here, not three screens later: this file is queued and
+                // only uploaded once a draft exists, so a bad one chosen now
+                // failed silently long after the applicant had moved on.
+                const rejection = picked ? fileRejection(picked) : null
+                setHeldPromptError(rejection)
+                setHeldPromptFile(rejection ? null : picked)
               }}
             />
           </label>
+          {heldPromptError && (
+            <p role="alert" className="mt-2 text-xs font-medium text-s-red">
+              {heldPromptError}
+            </p>
+          )}
           <p className="mt-4 text-xs leading-relaxed text-ink-secondary">
             Submitting a certificate you already hold is not an application: you skip this office’s
             form, nothing is charged for it, and your copy goes to the reviewers with the rest of

@@ -152,7 +152,11 @@ export function ResetPasswordPage() {
           </Alert>
         )}
         <div>
-          <FieldLabel>Enter New Password</FieldLabel>
+          {/* FieldLabel is a span; htmlFor is what actually names the field
+              (the reveal button rules out wrapping). WCAG 2.1 AA 3.3.2. */}
+          <label htmlFor="reset-password" className="block">
+            <FieldLabel>Enter New Password</FieldLabel>
+          </label>
           <PasswordField
             id="reset-password"
             placeholder="Password"
@@ -172,7 +176,9 @@ export function ResetPasswordPage() {
           />
         </div>
         <div>
-          <FieldLabel>Confirm New Password</FieldLabel>
+          <label htmlFor="reset-confirm" className="block">
+            <FieldLabel>Confirm New Password</FieldLabel>
+          </label>
           <PasswordField
             id="reset-confirm"
             placeholder="Confirm Password"
