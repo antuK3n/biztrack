@@ -8,6 +8,7 @@ import type {
   ApplicationListItem,
   ApplicationType,
   Assignment,
+  AssignmentPageMeta,
   AuditLog,
   Barangay,
   Business,
@@ -30,8 +31,8 @@ import type {
   Notification,
   OfficeForm,
   OfficerRequest,
-  Paged,
   PageMeta,
+  PageParams,
   Payment,
   PaymentMethod,
   Permit,
@@ -42,6 +43,7 @@ import type {
   RenewalRiskReport,
   RequestType,
   TimelineEntry,
+  TranscriptMeta,
 } from './types'
 
 /*
@@ -78,12 +80,28 @@ async function unwrapComputed<T>(
  * without it a screen shows the first page and silently implies it is the whole
  * set. Callers are expected to render the total.
  */
-async function unwrapPaged<T>(
-  promise: Promise<{ data: { data: T[]; meta: PageMeta } }>,
-): Promise<Paged<T>> {
+async function unwrapPaged<T, M extends PageMeta = PageMeta>(
+  promise: Promise<{ data: { data: T[]; meta: M } }>,
+): Promise<{ data: T[]; meta: M }> {
   const res = await promise
   return { data: res.data.data, meta: res.data.meta }
 }
+
+/**
+ * The page size a list wrapper asks for when its caller is a picker, not a page.
+ *
+ * Every list endpoint is now bounded server-side, default 50 and hard-capped at
+ * 200. That is right for a screen with paging controls and wrong for the two
+ * places a list is loaded to be *chosen from* — the officer picker on the review
+ * screen and the application select on the compose form both filter the whole
+ * list in the browser, so a 50-row page would silently drop the officer or the
+ * filing you were looking for. Those wrappers ask for the ceiling.
+ *
+ * This is a stopgap, not the answer: both controls should move to a server-side
+ * search. It is here so that bounding the endpoints does not break them in the
+ * meantime.
+ */
+const PICKER_PAGE_SIZE = 200
 
 /**
  * Authenticated file download: fetch the endpoint as a blob (Bearer header is
@@ -129,7 +147,10 @@ export const reference = {
 /* ── Businesses ───────────────────────────────────────────────────────── */
 
 export const businesses = {
-  list: () => unwrap<Business[]>(api.get('/businesses')),
+  /** The caller's own businesses, newest first. Paged (default 50). */
+  list: (params: PageParams = {}) => unwrap<Business[]>(api.get('/businesses', { params })),
+  /** Same list, keeping the page meta. */
+  page: (params: PageParams = {}) => unwrapPaged<Business>(api.get('/businesses', { params })),
   get: (id: number) => unwrap<Business>(api.get(`/businesses/${id}`)),
   create: (body: BusinessPayload) => unwrap<Business>(api.post('/businesses', body)),
   update: (id: number, body: BusinessPayload) => unwrap<Business>(api.put(`/businesses/${id}`, body)),
@@ -140,15 +161,28 @@ export const businesses = {
 
 /* ── Applications ─────────────────────────────────────────────────────── */
 
-export interface ApplicationFilters {
+export interface ApplicationFilters extends PageParams {
   status?: string
   type?: string
   q?: string
 }
 
 export const applications = {
+  /**
+   * Filings visible to the caller, newest first.
+   *
+   * Paged server-side — this returned 1,668 rows and 832 KB to the super admin.
+   * `list()` still resolves to a plain array so existing callers keep working;
+   * it asks for the 200-row ceiling because its remaining callers filter in the
+   * browser. Screens that show a list should use `page()` and render the total.
+   */
   list: (filters: ApplicationFilters = {}) =>
-    unwrap<ApplicationListItem[]>(api.get('/applications', { params: filters })),
+    unwrap<ApplicationListItem[]>(
+      api.get('/applications', { params: { per_page: PICKER_PAGE_SIZE, ...filters } }),
+    ),
+  /** Same list, keeping the page meta. Prefer this on any screen with a list. */
+  page: (filters: ApplicationFilters = {}) =>
+    unwrapPaged<ApplicationListItem>(api.get('/applications', { params: filters })),
   get: (id: number) => unwrap<Application>(api.get(`/applications/${id}`)),
   create: (body: {
     business_id: number
@@ -252,10 +286,27 @@ export const documents = {
 /* ── Messaging (per-application thread; v2) ───────────────────────────── */
 
 export const messages = {
-  /** Inbox for the Messages page: one row per conversation, newest first. */
-  threads: () => unwrap<MessageThreadSummary[]>(api.get('/message-threads')),
+  /** Inbox for the Messages page: one row per conversation, newest first. Paged. */
+  threads: (params: PageParams = {}) =>
+    unwrap<MessageThreadSummary[]>(api.get('/message-threads', { params })),
+  /** Same inbox, keeping the page meta. */
+  threadsPage: (params: PageParams = {}) =>
+    unwrapPaged<MessageThreadSummary>(api.get('/message-threads', { params })),
+  /**
+   * One conversation, oldest message first.
+   *
+   * Bounded to the most recent `meta.window` turns rather than page one of an
+   * ascending list, so the transcript always ends on the latest message.
+   */
   list: (applicationId: number) =>
     unwrap<Message[]>(api.get(`/applications/${applicationId}/messages`)),
+  /** Same conversation, keeping the transcript meta (total vs returned). */
+  listWithMeta: async (applicationId: number): Promise<{ data: Message[]; meta: TranscriptMeta }> => {
+    const res = await api.get<{ data: Message[]; meta: TranscriptMeta }>(
+      `/applications/${applicationId}/messages`,
+    )
+    return { data: res.data.data, meta: res.data.meta }
+  },
   /** Send a message; optional attachment is posted as multipart. */
   send: (applicationId: number, body: string, attachment?: File | null) => {
     if (attachment) {
@@ -280,8 +331,17 @@ export const messages = {
 
 /* ── Officer requests / Other Requirements (v2) ───────────────────────── */
 
+export interface RequestFilters extends PageParams {
+  status?: string
+}
+
 export const requests = {
-  list: () => unwrap<OfficerRequest[]>(api.get('/requests')),
+  /** Requests visible to the caller, newest first. Paged (default 50). */
+  list: (filters: RequestFilters = {}) =>
+    unwrap<OfficerRequest[]>(api.get('/requests', { params: filters })),
+  /** Same list, keeping the page meta. */
+  page: (filters: RequestFilters = {}) =>
+    unwrapPaged<OfficerRequest>(api.get('/requests', { params: filters })),
   /** Officer creates a request against an application. */
   create: (
     applicationId: number,
@@ -319,7 +379,9 @@ export const payments = {
   fee: (applicationId: number) => unwrap<FeeAssessment>(api.get(`/applications/${applicationId}/fee`)),
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
-  history: () => unwrap<Payment[]>(api.get('/payments')),
+  history: (params: PageParams = {}) => unwrap<Payment[]>(api.get('/payments', { params })),
+  /** Same history, keeping the page meta. */
+  historyPage: (params: PageParams = {}) => unwrapPaged<Payment>(api.get('/payments', { params })),
   /** Download the simulated payment receipt PDF (Bearer blob; v2). */
   receipt: (id: number, filename: string) => downloadBlob(`/payments/${id}/receipt`, filename),
 }
@@ -330,9 +392,33 @@ export interface AssignmentWithApplication extends Assignment {
   application: Assignment['application'] & { documents?: Application['documents'] }
 }
 
+export interface AssignmentFilters extends PageParams {
+  /** The assignment's own state: pending | completed | returned. */
+  status?: string
+  /**
+   * The *application's* status, which is what the queue tabs split on.
+   * Comma-separated, e.g. 'submitted,pending_payment,under_review,returned'.
+   * Filter here rather than in the browser — see AssignmentPageMeta.
+   */
+  application_status?: string
+}
+
 export const assignments = {
-  list: (filters: { status?: string } = {}) =>
+  /**
+   * The officer queue, newest assignment first.
+   *
+   * Paged server-side — this returned 4,620 rows and 2.2 MB to the super admin
+   * and 1,293 to a single office. `list()` still resolves to a plain array so
+   * existing callers keep working, but a screen that splits this list by
+   * application status MUST pass `application_status` and read the tab totals
+   * from `page().meta.application_status_counts`; filtering a page in the
+   * browser silently shows one page's worth and calls it the queue.
+   */
+  list: (filters: AssignmentFilters = {}) =>
     unwrap<Assignment[]>(api.get('/assignments', { params: filters })),
+  /** Same queue, keeping the page meta and the whole-set status counts. */
+  page: (filters: AssignmentFilters = {}) =>
+    unwrapPaged<Assignment, AssignmentPageMeta>(api.get('/assignments', { params: filters })),
   get: (id: number) =>
     unwrap<Assignment & { application: Application }>(api.get(`/assignments/${id}`)),
   approve: (id: number, remarks?: string) =>
@@ -364,7 +450,15 @@ export const inspections = {
 /* ── Permits ──────────────────────────────────────────────────────────── */
 
 export const permits = {
-  list: () => unwrap<Permit[]>(api.get('/permits')),
+  /**
+   * Permits the caller may see, newest issuance first.
+   *
+   * Paged, and office-scoped: this used to return all 4,122 permits to every
+   * office reviewer, not just BPLO. An owner's own list is unaffected.
+   */
+  list: (params: PageParams = {}) => unwrap<Permit[]>(api.get('/permits', { params })),
+  /** Same list, keeping the page meta. */
+  page: (params: PageParams = {}) => unwrapPaged<Permit>(api.get('/permits', { params })),
   get: (id: number) => unwrap<Permit>(api.get(`/permits/${id}`)),
   verify: (permitNumber: string) =>
     unwrap<import('./types').VerifyResult>(api.get(`/verify/${permitNumber}`)),
@@ -375,9 +469,23 @@ export const permits = {
 /* ── Notifications ────────────────────────────────────────────────────── */
 
 export const notifications = {
-  list: async (): Promise<{ data: Notification[]; unread: number }> => {
-    const res = await api.get<{ data: Notification[]; meta: { unread: number } }>('/notifications')
-    return { data: res.data.data, unread: res.data.meta?.unread ?? 0 }
+  /**
+   * The notification centre, newest first. Paged (default 50).
+   *
+   * `unread` is the count across every notification, not the page — the badge
+   * would otherwise under-report as soon as the unread ones fall past page one.
+   */
+  // `meta` is optional in the return type on purpose: callers build this shape
+  // by hand for optimistic read/read-all updates, and requiring the page meta
+  // there would make a local state update a paging concern.
+  list: async (
+    params: PageParams = {},
+  ): Promise<{ data: Notification[]; unread: number; meta?: PageMeta }> => {
+    const res = await api.get<{
+      data: Notification[]
+      meta: PageMeta & { unread: number }
+    }>('/notifications', { params })
+    return { data: res.data.data, unread: res.data.meta?.unread ?? 0, meta: res.data.meta }
   },
   read: (id: number) => api.post(`/notifications/${id}/read`),
   readAll: () => api.post('/notifications/read-all'),
@@ -450,10 +558,39 @@ export const analytics = {
 
 /* ── Admin ────────────────────────────────────────────────────────────── */
 
+export interface AdminUserFilters extends PageParams {
+  q?: string
+  role?: string
+  /** Narrow to one office — what the review screen's officer picker wants. */
+  department_id?: number
+}
+
+export interface AdminBusinessFilters extends PageParams {
+  q?: string
+  status?: BusinessStatus
+}
+
 export const admin = {
-  users: () => unwrap<AdminUser[]>(api.get('/admin/users')),
-  /** Real business roster for the Owner Status table (v2). */
-  businesses: () => unwrap<AdminBusiness[]>(api.get('/admin/businesses')),
+  /**
+   * The staff directory, alphabetical.
+   *
+   * Paged server-side. Asks for the ceiling because the review screen's officer
+   * picker loads this and narrows to one department in the browser — pass
+   * `department_id` instead and this can go back to a normal page.
+   */
+  users: (filters: AdminUserFilters = {}) =>
+    unwrap<AdminUser[]>(
+      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...filters } }),
+    ),
+  /** Same directory, keeping the page meta. Prefer this on the Users screen. */
+  usersPage: (filters: AdminUserFilters = {}) =>
+    unwrapPaged<AdminUser>(api.get('/admin/users', { params: filters })),
+  /** Real business roster for the Owner Status table (v2). Paged (default 50). */
+  businesses: (filters: AdminBusinessFilters = {}) =>
+    unwrap<AdminBusiness[]>(api.get('/admin/businesses', { params: filters })),
+  /** Same roster, keeping the page meta. */
+  businessesPage: (filters: AdminBusinessFilters = {}) =>
+    unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
@@ -461,10 +598,14 @@ export const admin = {
   updateUser: (id: number, body: Partial<AdminUserPayload>) =>
     unwrap<AdminUser>(api.put(`/admin/users/${id}`, body)),
   toggleActive: (id: number) => unwrap<AdminUser>(api.post(`/admin/users/${id}/toggle-active`)),
-  auditLogs: async (page = 1): Promise<{ data: AuditLog[]; lastPage: number }> => {
-    const res = await api.get<{ data: AuditLog[]; meta?: { last_page?: number } }>('/admin/audit-logs', {
+  auditLogs: async (page = 1): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
+    const res = await api.get<{ data: AuditLog[]; meta?: Partial<PageMeta> }>('/admin/audit-logs', {
       params: { page },
     })
-    return { data: res.data.data, lastPage: res.data.meta?.last_page ?? 1 }
+    return {
+      data: res.data.data,
+      lastPage: res.data.meta?.last_page ?? 1,
+      total: res.data.meta?.total ?? res.data.data.length,
+    }
   },
 }

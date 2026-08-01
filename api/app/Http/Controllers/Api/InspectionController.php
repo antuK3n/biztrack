@@ -26,11 +26,6 @@ class InspectionController extends Controller
         'application.business.address.barangay',
     ];
 
-    /** Rows per page when the caller does not say, and the most it may ask for. */
-    private const PER_PAGE = 50;
-
-    private const MAX_PER_PAGE = 200;
-
     /**
      * The inspection list.
      *
@@ -48,6 +43,12 @@ class InspectionController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'status' => ['sometimes', 'string', 'max:40'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $query = Inspection::with($this->eager);
 
         $this->scopeToDepartment($request, $query);
@@ -56,21 +57,13 @@ class InspectionController extends Controller
             $query->where('status', $status);
         }
 
-        $perPage = min(
-            max((int) $request->query('per_page', self::PER_PAGE), 1),
-            self::MAX_PER_PAGE,
-        );
-
-        $inspections = $query->orderByDesc('scheduled_at')->paginate($perPage);
+        $inspections = $query->orderByDesc('scheduled_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
 
         return response()->json([
             'data' => InspectionResource::collection($inspections->items()),
-            'meta' => [
-                'current_page' => $inspections->currentPage(),
-                'last_page' => $inspections->lastPage(),
-                'per_page' => $inspections->perPage(),
-                'total' => $inspections->total(),
-            ],
+            'meta' => $this->pageMeta($inspections),
         ]);
     }
 
