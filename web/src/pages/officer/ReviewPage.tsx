@@ -422,6 +422,16 @@ export function ReviewPage() {
   const canAdjustFee = Boolean(user?.permissions.includes('fee.adjust'))
   const canAssign = Boolean(user?.permissions.includes('oic.assign'))
   const canListUsers = Boolean(user?.permissions.includes('user.manage'))
+  /*
+   * Rejecting kills the whole application across every office, so it sits behind
+   * its own permission that BPLO and admin hold and the sanitary and fire
+   * reviewers do not. The button was shown to all of them: a CHO officer could
+   * open the composer, type a reason, confirm, and get "You do not have
+   * permission to perform this action" — having already written the thing.
+   * Those offices return a filing to the applicant instead, which is the control
+   * still below.
+   */
+  const canReject = Boolean(user?.permissions.includes('application.reject'))
 
   // Opens as a record of the filing; Edit turns on the office's own fields.
   const [mode, setMode] = useState<ReviewMode>('view')
@@ -464,6 +474,11 @@ export function ReviewPage() {
    * has since been reassigned). Rather than dying on the raw binding error, ask
    * the queue whether this number is one of our applications and bounce to its
    * real assignment; only give up when nothing matches.
+   *
+   * This runs only after a 404, and it is deliberately the last thing tried: the
+   * queue feed is the office's entire assignment history — 2.1 MB for an admin —
+   * so a mistyped URL should not be quietly pulling that down. Once /assignments
+   * takes an `application_id` filter this becomes one small request instead.
    */
   const [strayId, setStrayId] = useState<'checking' | 'unresolved' | null>(null)
   const missing = Boolean(error) && toApiError(error).status === 404
@@ -549,7 +564,17 @@ export function ReviewPage() {
     )
 
   const app: Application = data.application
-  const business = app.business as unknown as ReviewBusiness
+  /*
+   * A business can be removed from the register once its filings are decided,
+   * and the API sends `business: null` for those — 375 of the assignments on
+   * this system. The sheet is a record of what was filed and still has to open;
+   * an empty ReviewBusiness leaves every field rendering its own "—" rather
+   * than taking the page down. (`Application['business']` is typed
+   * non-nullable, which is why the type checker never saw this.)
+   */
+  const rawBusiness = app.business as unknown as ReviewBusiness | null
+  const businessRemoved = !rawBusiness
+  const business: ReviewBusiness = rawBusiness ?? {}
   const address = business.address ?? null
   const { house, street } = splitLine1(address?.line1)
   const officerName = data.officer?.name ?? data.department.name
@@ -715,7 +740,16 @@ export function ReviewPage() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <ClipboardIcon size={30} className="shrink-0 text-royal" />
-          <h1 className="truncate text-2xl font-bold text-ink">{business.name ?? '—'}</h1>
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-bold text-ink">
+              {business.name ?? app.tracking_id}
+            </h1>
+            {businessRemoved && (
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Business removed from the register
+              </p>
+            )}
+          </div>
         </div>
         <span className="hidden items-center gap-2 text-xs italic text-ink-muted sm:flex">
           <CloudIcon />
@@ -742,14 +776,16 @@ export function ReviewPage() {
             </div>
             {editing && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setPopup('reject')}
-                  disabled={busy}
-                  className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
-                >
-                  Reject
-                </button>
+                {canReject && (
+                  <button
+                    type="button"
+                    onClick={() => setPopup('reject')}
+                    disabled={busy}
+                    className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                  >
+                    Reject
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={approve}

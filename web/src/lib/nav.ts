@@ -1,5 +1,6 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
+  AuditIcon,
   ChartIcon,
   DraftsIcon,
   FolderIcon,
@@ -47,6 +48,12 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Analytics', icon: ChartIcon, to: '/analytics', permission: 'analytics.view' },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
+  /*
+   * Audit Logs was built, routed and permissioned, and then never linked: the
+   * only way to /admin/audit-logs was to type it. Transparency is the thing this
+   * product claims over eBOSS (PRODUCT.md §4), so the trail belongs in the rail.
+   */
+  { label: 'Audit Logs', icon: AuditIcon, to: '/admin/audit-logs', permission: 'audit.view' },
 ]
 
 export function navItemsFor(user: User): NavItem[] {

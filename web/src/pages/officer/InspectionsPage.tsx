@@ -23,8 +23,23 @@ function chipFor(item: Inspection): { tone: ChipTone; label: string } {
   return { tone: 'yellow', label: 'For Inspection' }
 }
 
+/**
+ * The business a visit was made to, when there still is one.
+ *
+ * A business can be removed from the register after its permits are decided, and
+ * the API sends `business: null` for every inspection that pointed at one — page
+ * 2 of this list alone holds four. The visit is still on the record and still has
+ * to be readable. (`Inspection['application']['business']` is typed
+ * non-nullable, which is why the type checker never saw this — see the report.)
+ */
+function businessNameOf(app: Inspection['application']): { name: string; removed: boolean } {
+  const name = app.business?.name
+  return name ? { name, removed: false } : { name: app.tracking_id, removed: true }
+}
+
 function InspectionRow({ item }: { item: Inspection }) {
   const chip = chipFor(item)
+  const business = businessNameOf(item.application)
   return (
     <li>
       <Link
@@ -32,7 +47,12 @@ function InspectionRow({ item }: { item: Inspection }) {
         className="flex items-stretch overflow-hidden rounded-lg bg-white shadow-card transition-shadow hover:shadow-raised"
       >
         <div className="min-w-0 flex-1 px-6 py-4">
-          <p className="truncate text-[17px] font-bold text-ink">{item.application.business.name}</p>
+          <p className="truncate text-[17px] font-bold text-ink">{business.name}</p>
+          {business.removed && (
+            <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Business removed from the register
+            </p>
+          )}
           <p className="mt-0.5 text-sm italic text-ink-muted">{formatDate(item.scheduled_at)}</p>
         </div>
         <StatusChip tone={chip.tone} className="w-28 shrink-0 rounded-none! px-4 py-3 text-sm">
@@ -56,10 +76,17 @@ export function InspectionsPage() {
   const { data, loading, error, reload } = useAsync(() => inspections.list({ page }), [page])
 
   // Append rather than replace: paging in should extend the list an officer is
-  // reading, not drop them back at the top of a fresh one.
+  // reading, not drop them back at the top of a fresh one. Appending by id keeps
+  // that idempotent — Try again after a failed page 3 re-fetches page 3, and a
+  // blind concat would have shown every one of those rows twice under duplicate
+  // React keys.
   useEffect(() => {
     if (!data) return
-    setRows((prev) => (data.meta.current_page === 1 ? data.data : [...prev, ...data.data]))
+    setRows((prev) => {
+      if (data.meta.current_page === 1) return data.data
+      const seen = new Set(prev.map((r) => r.id))
+      return [...prev, ...data.data.filter((r) => !seen.has(r.id))]
+    })
   }, [data])
 
   const total = data?.meta.total ?? 0

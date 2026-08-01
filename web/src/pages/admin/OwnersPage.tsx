@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { admin } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
@@ -13,6 +13,7 @@ import {
   SortFilter,
   StatusChip,
   inputCls,
+  useDialogKeyboard,
 } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { BuildingIcon } from '../../components/icons'
@@ -126,11 +127,39 @@ interface HistoryEntry {
   note: string
 }
 
+const STATUS_DOT: Record<BusinessStatus, string> = {
+  active: 'bg-s-green',
+  flagged: 'bg-s-yellow',
+  suspended: 'bg-s-purple',
+  blacklisted: 'bg-s-red',
+}
+
+/**
+ * How far back the history reads.
+ *
+ * The audit trail has no per-target filter, so this modal can only scan the
+ * pages it pulls: 8 × 25 = the 200 most recent entries. It used to read page 1
+ * alone, and the newest page is almost always sign-ins, so the timeline was
+ * empty for every business while still calling itself complete.
+ */
+const HISTORY_PAGES = 8
+
 function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }) {
-  const { data, loading } = useAsync(() => admin.auditLogs(1), [])
+  const { data, loading } = useAsync(
+    () => Promise.all(Array.from({ length: HISTORY_PAGES }, (_, i) => admin.auditLogs(i + 1))),
+    [],
+  )
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  // This overlay reimplemented ProtoModal's markup without its keyboard
+  // handling: no focus move on open, no Escape, and Tab walked out of it.
+  useDialogKeyboard(panelRef, onClose, closeRef)
+
+  const scanned = (data ?? []).reduce((n, p) => n + p.data.length, 0)
 
   const entries = useMemo<HistoryEntry[]>(() => {
-    const fromLogs: HistoryEntry[] = (data?.data ?? [])
+    const fromLogs: HistoryEntry[] = (data ?? [])
+      .flatMap((p) => p.data)
       .filter(
         (log: AuditLog) =>
           log.auditable_type.endsWith('Business') &&
@@ -138,29 +167,30 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
           /status/.test(log.action),
       )
       .map((log) => {
-        const changed = (log.changes as { status?: string; reason?: string } | null) ?? {}
-        const st = (changed.status as BusinessStatus) ?? 'active'
-        const meta = STATUS_META[st] ?? STATUS_META.active
+        /*
+         * BusinessStatusController writes { from, to, reason }. This read
+         * `changes.status`, which is never there, and fell back to 'active' — so
+         * a blacklisting rendered in the timeline as "Active", in green, with the
+         * reason dropped. Read the key the API actually writes, and when the
+         * status really is missing say so rather than inventing "Active".
+         */
+        const changed = (log.changes as { from?: string; to?: string; reason?: string } | null) ?? {}
+        const to = changed.to as BusinessStatus | undefined
+        const meta = to ? STATUS_META[to] : undefined
+        const from = changed.from ? (STATUS_META[changed.from as BusinessStatus]?.label ?? changed.from) : null
         return {
           key: `log-${log.id}`,
-          status: meta.label,
-          tone:
-            st === 'blacklisted'
-              ? 'bg-s-red'
-              : st === 'flagged'
-                ? 'bg-s-yellow'
-                : st === 'suspended'
-                  ? 'bg-s-purple'
-                  : 'bg-s-green',
+          status: meta ? (from ? `${from} → ${meta.label}` : meta.label) : 'Status changed',
+          tone: to ? (STATUS_DOT[to] ?? 'bg-line') : 'bg-line',
           date: log.created_at,
-          note: `${log.user?.name ?? 'System'}${changed.reason ? ` · ${changed.reason}` : ''}`,
+          note: [log.user?.name ?? 'Actor not recorded', changed.reason].filter(Boolean).join(' · '),
         }
       })
 
     // Registration bookends the timeline.
     fromLogs.push({
       key: 'registered',
-      status: 'Active',
+      status: 'Registered',
       tone: 'bg-s-green',
       date: row.created_at,
       note: `${row.owner?.name ?? 'Owner'} · Business registered.`,
@@ -169,16 +199,18 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
   }, [data, row])
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Status History"
-    >
-      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-md bg-white shadow-overlay">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Status History"
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-md bg-white shadow-overlay"
+      >
         <div className="bg-royal px-5 py-3 text-base font-bold tracking-wide text-white">Status History</div>
         <p className="border-b border-line px-5 py-3 text-sm text-ink-secondary">
-          {row.name} · immutable timeline
+          {row.name}
+          {!loading && ` · status changes found in the ${scanned.toLocaleString()} most recent audit entries`}
         </p>
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
@@ -202,6 +234,7 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
           )}
         </div>
         <button
+          ref={closeRef}
           type="button"
           onClick={onClose}
           className="bg-modal-cancel py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
@@ -217,22 +250,56 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
 
 type ModalState = { kind: 'change' | 'history'; row: AdminBusiness } | null
 
+/** Rows per request. The roster is 705 businesses and grows with the city. */
+const PAGE_SIZE = 25
+
 export function OwnersPage() {
-  const { data, loading, error, reload, setData } = useAsync(() => admin.businesses(), [])
   const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
   const [modal, setModal] = useState<ModalState>(null)
 
-  const rows = useMemo(() => {
-    const all = data ?? []
-    const q = search.trim().toLowerCase()
-    if (!q) return all
-    return all.filter(
-      (r) => r.name.toLowerCase().includes(q) || (r.owner?.name ?? '').toLowerCase().includes(q),
-    )
-  }, [data, search])
+  /*
+   * Searched and paged on the server. Both used to happen in the browser over
+   * the whole roster, which meant every visit pulled all 705 rows and rendered
+   * all 705 — and now that /admin/businesses is paged, a browser-side search
+   * would only ever have looked at the 50 rows it happened to hold while the
+   * footer called that the whole roster.
+   */
+  const { data, loading, error, reload, setData } = useAsync(
+    () => admin.businessesPage({ q: query || undefined, page, per_page: PAGE_SIZE }),
+    [query, page],
+  )
 
+  // Let the admin finish typing before asking the server.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      setQuery(search.trim())
+      setPage(1)
+    }, 300)
+    return () => window.clearTimeout(id)
+  }, [search])
+
+  const rows = data?.data ?? []
+  const total = data?.meta.total ?? 0
+  const lastPage = data?.meta.last_page ?? 1
+
+  /**
+   * Fold a status change back into the row it came from.
+   *
+   * Merged, not replaced. POST /admin/businesses/{id}/status answers with only
+   * `{ id, status, status_label }` — no name, no owner, no created_at — so
+   * swapping the whole row in blanked the Business column and turned Owner into
+   * "—" the moment an admin changed a status. Typing in the search box then took
+   * the page down on `r.name.toLowerCase()`. Keeping the fields the response
+   * does not carry is correct whatever the endpoint returns.
+   */
   function applyChange(updated: AdminBusiness) {
-    setData((prev) => (prev ?? []).map((r) => (r.id === updated.id ? updated : r)))
+    setData((prev) =>
+      prev
+        ? { ...prev, data: prev.data.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)) }
+        : prev!,
+    )
     setModal(null)
   }
 
@@ -316,10 +383,34 @@ export function OwnersPage() {
               </tbody>
             </table>
           </div>
-          <div className="border-t border-line px-5 py-3.5">
+          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
             <p className="text-sm text-ink-muted">
-              Showing {rows.length} of {(data ?? []).length} businesses
+              Showing {rows.length.toLocaleString()} of {total.toLocaleString()} businesses
+              {query && ' matching your search'}
             </p>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                aria-label="Previous page"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas disabled:opacity-40"
+              >
+                ‹
+              </button>
+              <span className="text-xs text-ink-muted">
+                Page {page.toLocaleString()} of {lastPage.toLocaleString()}
+              </span>
+              <button
+                type="button"
+                aria-label="Next page"
+                onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
+                disabled={page >= lastPage || loading}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas disabled:opacity-40"
+              >
+                ›
+              </button>
+            </div>
           </div>
         </ProtoCard>
       )}
