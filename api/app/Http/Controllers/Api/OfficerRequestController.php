@@ -92,9 +92,21 @@ class OfficerRequestController extends Controller
         ], 201);
     }
 
-    /** List — owner sees requests on own apps; officer sees dept-visible/created. */
+    /**
+     * List — owner sees requests on own apps; officer sees dept-visible/created.
+     *
+     * Paginated, newest first. 123 rows was 157 KB unpaged: each row carries the
+     * full reply thread, so this list is heavy per row rather than long, and it
+     * grows with conversation rather than with filings.
+     */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'status' => ['sometimes', 'string', 'max:40'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $query = OfficerRequest::with($this->eager());
         $user = $request->user();
 
@@ -114,9 +126,18 @@ class OfficerRequestController extends Controller
             $query->whereHas('application', fn ($a) => $a->where('applicant_user_id', $user->id));
         }
 
-        $requests = $query->orderByDesc('created_at')->get();
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
 
-        return response()->json(['data' => OfficerRequestResource::collection($requests)]);
+        $requests = $query->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
+
+        return response()->json([
+            'data' => OfficerRequestResource::collection($requests->items()),
+            'meta' => $this->pageMeta($requests),
+        ]);
     }
 
     /**
@@ -128,6 +149,9 @@ class OfficerRequestController extends Controller
     public function respond(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant', 'createdBy');
+        // A request whose application has gone is unanswerable, not a 500: the
+        // ownership check below dereferences it, so say so before it does.
+        abort_unless($officerRequest->application, 404, 'The application behind this request no longer exists.');
         abort_unless(
             $officerRequest->application->applicant_user_id === $request->user()->id,
             403,
@@ -214,6 +238,7 @@ class OfficerRequestController extends Controller
     public function close(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant');
+        abort_unless($officerRequest->application, 404, 'The application behind this request no longer exists.');
         // Closing a request reads and decides on the filing behind it, so the
         // same office boundary applies (checklist item 56).
         ApplicationVisibility::authorize(

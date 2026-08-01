@@ -13,17 +13,32 @@ use Illuminate\Http\Request;
  */
 class NotificationController extends Controller
 {
+    /**
+     * The notification centre. Paginated, newest first.
+     *
+     * `unread` is counted with its own query rather than off the loaded rows.
+     * Counting the collection was correct only while the collection was every
+     * notification the user had; the moment the list is bounded, the badge would
+     * count the unread ones on page one and quietly under-report — the sort of
+     * wrong number nobody reports because it always looks reasonable.
+     */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $notifications = $request->user()->notifications()
             ->orderByDesc('created_at')
-            ->get();
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
 
-        $unread = $notifications->whereNull('read_at')->count();
+        $unread = $request->user()->notifications()->whereNull('read_at')->count();
 
         return response()->json([
-            'data' => NotificationResource::collection($notifications),
-            'meta' => ['unread' => $unread],
+            'data' => NotificationResource::collection($notifications->items()),
+            'meta' => $this->pageMeta($notifications) + ['unread' => $unread],
         ]);
     }
 

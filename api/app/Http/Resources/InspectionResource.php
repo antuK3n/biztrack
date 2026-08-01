@@ -10,7 +10,19 @@ class InspectionResource extends JsonResource
 {
     public function toArray(Request $request): array
     {
-        $app = $this->whenLoaded('application') ? $this->application : null;
+        /*
+         * relationLoaded, not whenLoaded.
+         *
+         * `whenLoaded('application')` with a single argument returns a
+         * MissingValue *object* when the relation is absent, and an object is
+         * truthy — so this ternary took the "loaded" branch every time and
+         * `$this->application` lazy-loaded a row. Invisible in the inspection
+         * list, where the relation really is eager-loaded; a query per row
+         * everywhere InspectionResource is nested without it, which is every
+         * ApplicationResource (`inspections.department`, `inspections.inspector`
+         * — no `inspections.application`) and the assignment detail page.
+         */
+        $app = $this->relationLoaded('application') ? $this->application : null;
         $address = $app && $app->relationLoaded('business') && $app->business && $app->business->relationLoaded('address')
             ? $app->business->address
             : null;

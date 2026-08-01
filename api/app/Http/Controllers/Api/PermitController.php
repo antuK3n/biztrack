@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\Permit;
+use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -19,25 +20,49 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class PermitController extends Controller
 {
-    private array $eager = ['permitType', 'business', 'application'];
+    private array $eager = ['permitType', 'business:id,name', 'application:id,tracking_id'];
 
+    /**
+     * Issued permits. Paginated, newest issuance first.
+     *
+     * Two things were wrong here. Unpaged it returned 4,122 rows and 1.7 MB —
+     * every permit ever issued, on the request that renders "my permits".
+     *
+     * And it returned all 4,122 to *every office reviewer*, not just BPLO: the
+     * gate was the bare `permit.view_all`, which the RBAC seeder grants to
+     * sanitary, fire, zoning, OBO, CENRO and the market office alike. Measured
+     * on the live register, a market administrator could list 2 applications and
+     * 4,122 permits. `permit.view_all` gets the same reading `application.view_all`
+     * already got in checklist item 56 — "filings other than my own, in the
+     * offices I am routed to" — because the alternative is that the office
+     * boundary holds on the filing and falls over on its outcome.
+     */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $query = Permit::with($this->eager);
+        $this->scopeToReader($request, $query);
 
-        if (! $request->user()->hasPermission('permit.view_all')) {
-            $query->whereHas('business', fn ($b) => $b->where('owner_user_id', $request->user()->id));
-        }
+        // issued_at is nullable on legacy rows; the id tiebreak keeps the page
+        // boundary stable instead of letting equal keys shuffle between pages.
+        $permits = $query->orderByDesc('issued_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
 
-        $permits = $query->orderByDesc('issued_at')->get();
-
-        return response()->json(['data' => PermitResource::collection($permits)]);
+        return response()->json([
+            'data' => PermitResource::collection($permits->items()),
+            'meta' => $this->pageMeta($permits),
+        ]);
     }
 
     public function show(Request $request, Permit $permit): JsonResponse
     {
-        $permit->load($this->eager);
         $this->authorizeView($request, $permit);
+        $permit->load($this->eager);
 
         return response()->json(['data' => new PermitResource($permit)]);
     }
@@ -45,8 +70,8 @@ class PermitController extends Controller
     /** dompdf permit certificate (CITY OF MALABON header, QR data-URI). */
     public function pdf(Request $request, Permit $permit): Response
     {
-        $permit->load(['permitType.department', 'business.address.barangay', 'business.owner', 'application']);
         $this->authorizeView($request, $permit);
+        $permit->load(['permitType.department', 'business.address.barangay', 'business.owner', 'application']);
 
         $verifyUrl = rtrim((string) config('app.frontend_url'), '/').'/verify/'.$permit->permit_number;
         $b = $permit->business;
@@ -78,15 +103,56 @@ class PermitController extends Controller
         return $file->download("permit-{$permit->permit_number}.pdf");
     }
 
-    private function authorizeView(Request $request, Permit $permit): void
+    /**
+     * Narrow a permit query to what this reader may see.
+     *
+     * Owner: permits of businesses they own. BPLO / super admin: the register.
+     * Every other office reviewer: permits issued off filings their office was
+     * routed to — the same boundary ApplicationVisibility draws, reached through
+     * the permit's application.
+     */
+    private function scopeToReader(Request $request, $query): void
     {
-        if ($request->user()->hasPermission('permit.view_all')) {
+        $user = $request->user();
+
+        if (ApplicationVisibility::readsEveryOffice($user)) {
             return;
         }
-        abort_unless(
-            $permit->business && $permit->business->owner_user_id === $request->user()->id,
-            403,
-            'This permit is not yours.'
-        );
+
+        if (! $user->hasPermission('permit.view_all')) {
+            $query->whereHas('business', fn ($b) => $b->where('owner_user_id', $user->id));
+
+            return;
+        }
+
+        $query->where(function ($sub) use ($user) {
+            $sub->whereHas('business', fn ($b) => $b->where('owner_user_id', $user->id))
+                ->orWhereHas('application', fn ($a) => ApplicationVisibility::scope($a, $user));
+        });
+    }
+
+    /**
+     * Read one permit. Same boundary as the list — a 403 on the list that a
+     * direct id read walks around is not a boundary, and `/permits/{id}/pdf`
+     * carries the owner's name and street address, which the public verify
+     * endpoint deliberately does not.
+     */
+    private function authorizeView(Request $request, Permit $permit): void
+    {
+        $user = $request->user();
+
+        if ($permit->business && $permit->business->owner_user_id === $user->id) {
+            return;
+        }
+        if (ApplicationVisibility::readsEveryOffice($user)) {
+            return;
+        }
+
+        $permit->loadMissing('application');
+        $ok = $user->hasPermission('permit.view_all')
+            && $permit->application
+            && ApplicationVisibility::canView($user, $permit->application);
+
+        abort_unless($ok, 403, 'This permit is not yours.');
     }
 }

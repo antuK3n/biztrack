@@ -20,15 +20,41 @@ class ChatbotController extends Controller
 {
     public function __construct(private ChatbotResponder $responder) {}
 
+    /** How many turns of the assistant transcript one request returns. */
+    private const WINDOW = 200;
+
+    /**
+     * The caller's assistant transcript, oldest turn first.
+     *
+     * Bounded to the most recent {@see self::WINDOW} turns. The conversation is
+     * per-user and never deleted, so "every turn since the account was made" is
+     * the payload this was quietly heading for.
+     */
     public function index(Request $request): JsonResponse
     {
         $conversation = ChatbotConversation::forUser($request->user()->id);
-        $messages = $conversation
-            ? $conversation->messages()->orderBy('id')->get()
-            : collect();
+        if (! $conversation) {
+            return response()->json([
+                'data' => [],
+                'meta' => ['total' => 0, 'returned' => 0, 'window' => self::WINDOW],
+            ]);
+        }
+
+        $total = $conversation->messages()->count();
+        $messages = $conversation->messages()
+            ->orderByDesc('id')
+            ->limit(self::WINDOW)
+            ->get()
+            ->sortBy('id')
+            ->values();
 
         return response()->json([
             'data' => $messages->map(fn (ChatbotMessage $m) => $this->serialize($m))->values(),
+            'meta' => [
+                'total' => $total,
+                'returned' => $messages->count(),
+                'window' => self::WINDOW,
+            ],
         ]);
     }
 
