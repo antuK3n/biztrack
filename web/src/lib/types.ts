@@ -487,6 +487,20 @@ export interface AnalyticsProvenance {
   notice: string | null
 }
 
+/** Page meta returned by paginated list endpoints. */
+export interface PageMeta {
+  current_page: number
+  last_page: number
+  per_page: number
+  total: number
+}
+
+/** A page of results together with its meta. Both must reach the screen. */
+export interface Paged<T> {
+  data: T[]
+  meta: PageMeta
+}
+
 /** An analytics payload together with its provenance. Both must reach the screen. */
 export interface Computed<T> {
   data: T

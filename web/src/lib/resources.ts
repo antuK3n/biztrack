@@ -30,6 +30,8 @@ import type {
   Notification,
   OfficeForm,
   OfficerRequest,
+  Paged,
+  PageMeta,
   Payment,
   PaymentMethod,
   Permit,
@@ -65,6 +67,20 @@ async function unwrap<T>(promise: Promise<{ data: { data: T } }>): Promise<T> {
 async function unwrapComputed<T>(
   promise: Promise<{ data: { data: T; meta: AnalyticsProvenance } }>,
 ): Promise<Computed<T>> {
+  const res = await promise
+  return { data: res.data.data, meta: res.data.meta }
+}
+
+/**
+ * Like unwrap, but keeps the page meta a paginated list carries.
+ *
+ * The meta is not optional detail on a list that can run to thousands of rows:
+ * without it a screen shows the first page and silently implies it is the whole
+ * set. Callers are expected to render the total.
+ */
+async function unwrapPaged<T>(
+  promise: Promise<{ data: { data: T[]; meta: PageMeta } }>,
+): Promise<Paged<T>> {
   const res = await promise
   return { data: res.data.data, meta: res.data.meta }
 }
@@ -331,8 +347,13 @@ export const assignments = {
 /* ── Inspections ──────────────────────────────────────────────────────── */
 
 export const inspections = {
-  list: (filters: { status?: string } = {}) =>
-    unwrap<Inspection[]>(api.get('/inspections', { params: filters })),
+  /**
+   * Paged. The unpaged version returned every inspection on record — 2,850 rows
+   * and 1.8 MB once the register held three years of history — and the page took
+   * the browser down trying to render them. Newest first.
+   */
+  list: (filters: { status?: string; page?: number; per_page?: number } = {}) =>
+    unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
