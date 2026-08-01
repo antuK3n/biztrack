@@ -26,6 +26,26 @@ class InspectionController extends Controller
         'application.business.address.barangay',
     ];
 
+    /** Rows per page when the caller does not say, and the most it may ask for. */
+    private const PER_PAGE = 50;
+
+    private const MAX_PER_PAGE = 200;
+
+    /**
+     * The inspection list.
+     *
+     * Paginated, and it has to be. This returned every inspection ever recorded:
+     * with a register carrying three years of history that is 2,850 rows and
+     * 1.8 MB of JSON on a single request, each row eager-loading its department,
+     * inspector, application, business, address and barangay. The endpoint
+     * answered 200 and the browser then tried to render all of them, which is
+     * what took the page down. It went unnoticed while the register held sixteen.
+     *
+     * Newest first, also deliberately. Ascending by scheduled_at meant page one
+     * opened on 2023 — correct when the list was "the next few visits", useless
+     * once it spans years. An officer wants the visit they are about to do or
+     * have just done.
+     */
     public function index(Request $request): JsonResponse
     {
         $query = Inspection::with($this->eager);
@@ -36,9 +56,22 @@ class InspectionController extends Controller
             $query->where('status', $status);
         }
 
-        $inspections = $query->orderBy('scheduled_at')->get();
+        $perPage = min(
+            max((int) $request->query('per_page', self::PER_PAGE), 1),
+            self::MAX_PER_PAGE,
+        );
 
-        return response()->json(['data' => InspectionResource::collection($inspections)]);
+        $inspections = $query->orderByDesc('scheduled_at')->paginate($perPage);
+
+        return response()->json([
+            'data' => InspectionResource::collection($inspections->items()),
+            'meta' => [
+                'current_page' => $inspections->currentPage(),
+                'last_page' => $inspections->lastPage(),
+                'per_page' => $inspections->perPage(),
+                'total' => $inspections->total(),
+            ],
+        ]);
     }
 
     public function show(Request $request, Inspection $inspection): JsonResponse
