@@ -21,11 +21,38 @@ class BusinessStatusController extends Controller
         'blacklisted' => 'Blacklisted',
     ];
 
-    public function index(): JsonResponse
+    /**
+     * The business roster. Paginated, newest registration first.
+     *
+     * 705 rows and 122 KB unpaged. `q` and `status` are here so the admin can
+     * find the one business they came for instead of paging to it — a roster you
+     * can only walk is a roster nobody uses.
+     */
+    public function index(Request $request): JsonResponse
     {
-        $businesses = Business::with('owner:id,name')
-            ->orderByDesc('created_at')
-            ->get()
+        $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $query = Business::with('owner:id,name');
+
+        if ($q = $request->query('q')) {
+            $query->where(fn ($sub) => $sub
+                ->where('name', 'like', "%{$q}%")
+                ->orWhereHas('owner', fn ($o) => $o->where('name', 'like', "%{$q}%")));
+        }
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+
+        $page = $query->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
+
+        $businesses = collect($page->items())
             ->map(fn (Business $b) => [
                 'id' => $b->id,
                 'name' => $b->name,
@@ -35,7 +62,10 @@ class BusinessStatusController extends Controller
                 'created_at' => optional($b->created_at)->toISOString(),
             ])->values();
 
-        return response()->json(['data' => $businesses]);
+        return response()->json([
+            'data' => $businesses,
+            'meta' => $this->pageMeta($page),
+        ]);
     }
 
     public function updateStatus(Request $request, Business $business): JsonResponse

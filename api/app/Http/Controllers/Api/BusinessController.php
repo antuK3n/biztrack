@@ -23,14 +23,31 @@ class BusinessController extends Controller
 
     private array $eager = ['address.barangay', 'lines.psicCode'];
 
+    /**
+     * The caller's own businesses, newest first.
+     *
+     * Already owner-scoped, so this is small today — but it is the one list an
+     * applicant with a portfolio can grow without limit, and each row carries
+     * its address and every line of business. Bounded on the same terms as the
+     * rest so there is no list left that answers "all of them".
+     */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $businesses = Business::with($this->eager)
             ->where('owner_user_id', $request->user()->id)
             ->orderByDesc('created_at')
-            ->get();
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
 
-        return response()->json(['data' => BusinessResource::collection($businesses)]);
+        return response()->json([
+            'data' => BusinessResource::collection($businesses->items()),
+            'meta' => $this->pageMeta($businesses),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -187,10 +204,18 @@ class BusinessController extends Controller
 
     private function validateBusiness(Request $request): array
     {
-        // Normalise the TIN before the rule runs, so applicants may type the
-        // separators they are used to (123 456 789 000, 123.456.789, plain
-        // digits) and we still store one canonical form.
-        if (filled($request->input('tin'))) {
+        /*
+         * Normalise the TIN before the rule runs, so applicants may type the
+         * separators they are used to (123 456 789 000, 123.456.789, plain
+         * digits) and we still store one canonical form.
+         *
+         * Only when it is a scalar. `(string) $request->input('tin')` on a
+         * `tin[]=x` body is a TypeError against normalizeTin's string parameter,
+         * so posting an array here answered 500 — a crash in the pre-validation
+         * tidy-up, before the rule that would have said "enter a valid TIN" ever
+         * ran. Left alone, the `string` rule below rejects it with a 422.
+         */
+        if (is_scalar($request->input('tin')) && filled($request->input('tin'))) {
             $request->merge(['tin' => self::normalizeTin((string) $request->input('tin'))]);
         }
 

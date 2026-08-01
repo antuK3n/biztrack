@@ -16,9 +16,27 @@ use Illuminate\Validation\Rules\Password as PasswordRule;
  */
 class UserController extends Controller
 {
+    /**
+     * The staff directory. Paginated, alphabetical.
+     *
+     * Alphabetical rather than newest-first on purpose: this is a directory you
+     * look somebody up in, not a feed. 81 rows and 39 KB today, but the payload
+     * carries every role and every permission per user, so it grows faster than
+     * the row count suggests.
+     */
     public function index(Request $request): JsonResponse
     {
-        $query = User::with('department', 'roles.permissions')->orderBy('name');
+        $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'role' => ['sometimes', 'nullable', 'string', 'max:60'],
+            'department_id' => ['sometimes', 'nullable', 'integer', 'exists:departments,id'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $query = User::with('department', 'roles.permissions')
+            ->orderBy('name')
+            ->orderBy('id');
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
@@ -28,8 +46,18 @@ class UserController extends Controller
         if ($role = $request->query('role')) {
             $query->whereHas('roles', fn ($r) => $r->where('name', $role));
         }
+        // Lets the officer picker on the review screen ask for one office's
+        // staff instead of paging the whole directory to find them.
+        if ($departmentId = $request->query('department_id')) {
+            $query->where('department_id', $departmentId);
+        }
 
-        return response()->json(['data' => UserResource::collection($query->get())]);
+        $users = $query->paginate($this->perPage($request));
+
+        return response()->json([
+            'data' => UserResource::collection($users->items()),
+            'meta' => $this->pageMeta($users),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -90,7 +118,25 @@ class UserController extends Controller
             'password' => ['nullable', PasswordRule::min(8)],
         ]);
 
-        $user->fill(collect($data)->except(['roles', 'email'])->toArray());
+        /*
+         * `password` is dropped unless one was actually typed.
+         *
+         * It used to go straight through this fill(). The rule is `nullable`, so
+         * an edit form that always posts its password field — empty, because the
+         * admin came to fix a typo in a surname — sends `password: ""`, and
+         * ConvertEmptyStringsToNull turns that into null. The `hashed` cast
+         * passes null through untouched, and `users.password` is NOT NULL, so
+         * the whole edit died on a PDOException and the endpoint answered 500:
+         * the surname change was lost and the message said nothing about
+         * passwords. Where the column is nullable the same write succeeds and is
+         * worse — a 200 that has locked the account out of every password it
+         * will ever be given.
+         */
+        $writable = collect($data)->except(['roles', 'email']);
+        if (! filled($data['password'] ?? null)) {
+            $writable->forget('password');
+        }
+        $user->fill($writable->toArray());
         if (isset($data['email'])) {
             $user->email = strtolower(trim($data['email']));
         }
