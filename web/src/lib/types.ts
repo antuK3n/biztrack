@@ -501,6 +501,38 @@ export interface Paged<T> {
   meta: PageMeta
 }
 
+/** Common paging query params every list endpoint accepts. */
+export interface PageParams {
+  page?: number
+  per_page?: number
+}
+
+/**
+ * The officer queue's page meta.
+ *
+ * `application_status_counts` is counted over the whole department-scoped set,
+ * not the page. The queue tabs split on the *application's* status and used to
+ * do it in the browser over an unpaged list; against a page, a count taken from
+ * the rows in hand is always ≤ per_page and always looks plausible, which is the
+ * worst kind of wrong number. Read the tab totals from here.
+ */
+export interface AssignmentPageMeta extends PageMeta {
+  application_status_counts: Partial<Record<ApplicationStatus, number>>
+}
+
+/**
+ * How much of a conversation one request returns.
+ *
+ * Message and chatbot transcripts come back as the most recent `window` turns in
+ * ascending order, not as page one of an ascending list — a chat paged from the
+ * top opens on the oldest thing anybody said. `total` says how many turns exist.
+ */
+export interface TranscriptMeta {
+  total: number
+  returned: number
+  window: number
+}
+
 /** An analytics payload together with its provenance. Both must reach the screen. */
 export interface Computed<T> {
   data: T

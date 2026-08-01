@@ -29,11 +29,37 @@ class ApplicationController extends Controller
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
         'documents.documentType', 'feeAssessment', 'payments',
         'assignments.department', 'assignments.officer',
-        'inspections.department', 'inspections.inspector', 'permits.permitType', 'permits.business', 'permits.application',
+        'inspections.department', 'inspections.inspector',
+        /*
+         * InspectionResource emits an `application` stub, so the relation has to
+         * be here. It was not, and the resource lazy-loaded it one row at a time
+         * — a query per inspection on every application detail view. Two columns
+         * are enough for what the stub actually serialises.
+         */
+        'inspections.application:id,tracking_id',
+        'permits.permitType', 'permits.business', 'permits.application',
     ];
 
+    /**
+     * The filing list. Paginated, newest first.
+     *
+     * Unpaged this returned 1,668 rows and 832 KB to the super admin — every
+     * filing in the register on one request, most of them years decided. The
+     * ordering was already right; the bound was the missing half.
+     *
+     * `q` is capped because it goes into two LIKE patterns: an unbounded search
+     * string is a free full-table scan per keystroke on a register this size.
+     */
     public function index(Request $request): JsonResponse
     {
+        $request->validate([
+            'status' => ['sometimes', 'string', 'max:40'],
+            'type' => ['sometimes', 'string', 'max:40'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $query = Application::with(['business:id,name', 'permitTypes:id,code,name']);
 
         // Owners see their own; an office sees the filings routed to it; BPLO
@@ -54,9 +80,14 @@ class ApplicationController extends Controller
             });
         }
 
-        $apps = $query->orderByDesc('created_at')->get();
+        $apps = $query->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->paginate($this->perPage($request));
 
-        return response()->json(['data' => ApplicationListResource::collection($apps)]);
+        return response()->json([
+            'data' => ApplicationListResource::collection($apps->items()),
+            'meta' => $this->pageMeta($apps),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
@@ -210,9 +241,19 @@ class ApplicationController extends Controller
         ]);
     }
 
+    /**
+     * End the application (permission `application.reject` on the route).
+     *
+     * The office boundary applies to the strongest decision in the flow as much
+     * as to reading it. `application.reject` is BPLO and the super admin today,
+     * both of whom read every office, so this changes no behaviour — it stops
+     * the check being the one thing that has to be remembered if the permission
+     * is ever widened.
+     */
     public function reject(Request $request, Application $application): JsonResponse
     {
-        // Gated by permission:application.review on the route.
+        $this->authorizeView($request, $application);
+
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:1000'],
         ], [
@@ -321,9 +362,24 @@ class ApplicationController extends Controller
         $money = ['nullable', 'numeric', 'min:0', 'max:10000000000'];
         $count = ['nullable', 'integer', 'min:0', 'max:100000'];
 
+        /*
+         * A ceiling on the whole object, not just on the keys named below.
+         *
+         * The rules cover the fields the calculator reads, but `fee_profile`
+         * itself is stored verbatim as JSON, so anything else the caller sends
+         * is kept unchallenged — a sixty-level nested array came back 201. The
+         * office-form endpoint already caps its opaque payload at 16 KB; this is
+         * the same guard on the other opaque payload.
+         */
+        $boundedProfile = function (string $attribute, mixed $value, callable $fail) {
+            if (is_array($value) && strlen((string) json_encode($value)) > 16384) {
+                $fail('The fee details are too large (max 16KB).');
+            }
+        };
+
         return [
-            'fee_profile' => ['sometimes', 'nullable', 'array'],
-            'fee_profile.lines' => ['sometimes', 'array'],
+            'fee_profile' => ['sometimes', 'nullable', 'array', $boundedProfile],
+            'fee_profile.lines' => ['sometimes', 'array', 'max:200'],
             // Ties a line back to the PSIC selection so reopened drafts restore.
             'fee_profile.lines.*.psic_code_id' => ['nullable', 'integer'],
             'fee_profile.lines.*.category' => ['required_with:fee_profile.lines', 'string', 'max:80'],

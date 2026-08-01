@@ -37,24 +37,80 @@ class MessageController extends Controller
      */
     public function threads(Request $request): JsonResponse
     {
+        $request->validate([
+            'per_page' => ['sometimes', 'integer'],
+            'page' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
         $user = $request->user();
         $isOfficer = $user->hasPermission('application.view_all');
 
-        $threads = MessageThread::query()
-            ->tap(fn ($q) => ApplicationVisibility::scope($q, $user, 'application'))
-            ->with([
-                'application.business:id,name',
-                'application.applicant:id,name',
-                'application.assignments.department',
-                'application.assignments.officer:id,name',
-            ])
-            ->withCount('messages')
-            ->get();
+        /*
+         * One query over applications, not two collections merged in PHP.
+         *
+         * The old shape read every visible thread, appended every threadless
+         * application, sorted the union with sortByDesc and returned the lot:
+         * 376 rows and 184 KB for the super admin, and unbounded by
+         * construction. You cannot page a list whose order is decided after the
+         * rows are loaded, so the ordering has to move into SQL first — and once
+         * it has, the applicant's threadless filings and the officer's threads
+         * are the same query with a different WHERE.
+         */
+        $lastMessageAt = Message::query()
+            ->selectRaw('MAX(messages.created_at)')
+            ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+            ->whereColumn('message_threads.application_id', 'applications.id');
 
-        // One extra query for each thread's newest message beats loading every
+        $messagesCount = Message::query()
+            ->selectRaw('COUNT(*)')
+            ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+            ->whereColumn('message_threads.application_id', 'applications.id');
+
+        $query = Application::query()
+            ->select('applications.*')
+            ->addSelect(['last_message_at' => $lastMessageAt])
+            ->addSelect(['messages_count' => $messagesCount])
+            ->with([
+                'business:id,name',
+                'applicant:id,name',
+                'assignments.department',
+                'assignments.officer:id,name',
+                'messageThread:id,application_id',
+            ]);
+
+        ApplicationVisibility::scope($query, $user);
+
+        if ($isOfficer) {
+            // An office joins a conversation that exists; it does not open one.
+            $query->whereHas('messageThread');
+        } else {
+            /*
+             * An applicant who has not said anything yet still needs a way in,
+             * so their filed applications appear whether or not a thread exists.
+             * A conversation that already exists always appears, draft or not —
+             * a draft can be messaged about before it is filed, and dropping the
+             * row would lose the thread rather than hide it.
+             */
+            $query->where(fn ($q) => $q
+                ->whereHas('messageThread')
+                ->orWhere('status', '!=', 'draft'));
+        }
+
+        // Newest activity first; a filing nobody has written on yet sorts by
+        // when it last changed, which is what the old sort_key did.
+        $applications = $query
+            ->orderByRaw('COALESCE(last_message_at, applications.updated_at) DESC')
+            ->orderByDesc('applications.id')
+            ->paginate($this->perPage($request));
+
+        // One extra query for this page's newest messages beats loading every
         // message just to render the preview line.
+        $threadIds = collect($applications->items())
+            ->map(fn (Application $app) => $app->messageThread?->id)
+            ->filter()
+            ->values();
         $latestIds = Message::query()
-            ->whereIn('thread_id', $threads->pluck('id'))
+            ->whereIn('thread_id', $threadIds)
             ->selectRaw('MAX(id) as id')
             ->groupBy('thread_id')
             ->pluck('id');
@@ -63,34 +119,26 @@ class MessageController extends Controller
             ->get()
             ->keyBy('thread_id');
 
-        $rows = $threads->map(fn (MessageThread $thread) => $this->threadRow(
-            $thread->application,
-            $user,
-            $isOfficer,
-            $latest->get($thread->id),
-            (int) $thread->messages_count
-        ));
+        $rows = collect($applications->items())
+            ->map(fn (Application $app) => $this->threadRow(
+                $app,
+                $user,
+                $isOfficer,
+                $app->messageThread ? $latest->get($app->messageThread->id) : null,
+                (int) $app->messages_count,
+            ))
+            ->filter()
+            ->values()
+            ->map(function (array $row) {
+                unset($row['sort_key']);
 
-        // An applicant who has not said anything yet still needs a way in.
-        if (! $isOfficer) {
-            $rows = $rows->concat(
-                Application::query()
-                    ->where('applicant_user_id', $user->id)
-                    ->where('status', '!=', 'draft')
-                    ->whereDoesntHave('messageThread')
-                    ->with(['business:id,name', 'applicant:id,name', 'assignments.department', 'assignments.officer:id,name'])
-                    ->get()
-                    ->map(fn (Application $app) => $this->threadRow($app, $user, $isOfficer, null, 0))
-            );
-        }
+                return $row;
+            });
 
-        $rows = $rows->filter()->sortByDesc('sort_key')->values()->map(function (array $row) {
-            unset($row['sort_key']);
-
-            return $row;
-        });
-
-        return response()->json(['data' => $rows]);
+        return response()->json([
+            'data' => $rows,
+            'meta' => $this->pageMeta($applications),
+        ]);
     }
 
     /** One inbox row, named from the reader's side of the conversation. */
@@ -162,16 +210,54 @@ class MessageController extends Controller
             ?? 'Business Permits and Licensing Office';
     }
 
+    /** How many messages of a conversation one request will return. */
+    private const MESSAGE_WINDOW = 200;
+
+    /**
+     * One application's conversation, oldest message first.
+     *
+     * Bounded to the most recent {@see self::MESSAGE_WINDOW} turns rather than
+     * page one of an ascending list. A chat paginated from the top opens on the
+     * first thing anybody said, which is the same mistake `/inspections` made
+     * with `scheduled_at` ascending — technically a page, useless as a view. The
+     * window is returned in ascending order so the transcript still reads
+     * forwards, and `meta.total` says how many turns exist in all.
+     *
+     * The longest thread on the register is 8 messages, so this changes nothing
+     * anybody can see today; it removes the "load every row" that was one long
+     * dispute away from mattering.
+     */
     public function index(Request $request, Application $application): JsonResponse
     {
         $this->authorizeParticipant($request, $application);
 
         $thread = $application->messageThread;
-        $messages = $thread
-            ? $thread->messages()->with(['sender:id,name,department_id', 'attachments'])->get()
-            : collect();
+        if (! $thread) {
+            return response()->json([
+                'data' => [],
+                'meta' => ['total' => 0, 'returned' => 0, 'window' => self::MESSAGE_WINDOW],
+            ]);
+        }
 
-        return response()->json(['data' => MessageResource::collection($messages)]);
+        $total = $thread->messages()->count();
+        $messages = $thread->messages()
+            ->with(['sender:id,name,department_id', 'attachments'])
+            ->reorder()
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(self::MESSAGE_WINDOW)
+            ->get()
+            ->sortBy([['created_at', 'asc'], ['id', 'asc']])
+            ->values();
+
+        return response()->json([
+            'data' => MessageResource::collection($messages),
+            'meta' => [
+                'total' => $total,
+                'returned' => $messages->count(),
+                'window' => self::MESSAGE_WINDOW,
+            ],
+        ]);
     }
 
     public function store(Request $request, Application $application): JsonResponse
@@ -214,7 +300,16 @@ class MessageController extends Controller
         });
 
         Audit::log('message.sent', $message);
-        $this->notify->newMessage($application, $this->counterparty($request, $application));
+        /*
+         * No counterparty is a real state, not an impossible one: User is
+         * soft-deletable, so an officer replying on the filing of a since-removed
+         * account has nobody to notify. counterparty() is typed ?User now and
+         * this skips the ping — sending the message must not 500 because the
+         * notification had nowhere to go.
+         */
+        if ($recipient = $this->counterparty($request, $application)) {
+            $this->notify->newMessage($application, $recipient);
+        }
 
         return response()->json([
             'data' => new MessageResource($message->load(['sender:id,name,department_id', 'attachments'])),
@@ -248,8 +343,8 @@ class MessageController extends Controller
         );
     }
 
-    /** The other side of the thread relative to the sender. */
-    private function counterparty(Request $request, Application $application): User
+    /** The other side of the thread relative to the sender, if there is one. */
+    private function counterparty(Request $request, Application $application): ?User
     {
         $application->loadMissing('applicant');
         // Officer sent → notify applicant. Applicant sent → notify the reviewing officer(s).
