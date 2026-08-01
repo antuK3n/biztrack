@@ -21,13 +21,22 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'inspection', label: 'For Inspection' },
 ]
 
-/** Application statuses that still sit on the review/approval side of the flow. */
-const APPROVAL_STATUSES = ['submitted', 'pending_payment', 'pending_payment', 'under_review', 'returned']
+/**
+ * Application statuses that still sit on the review/approval side of the flow.
+ *
+ * `pending_payment` appeared twice here and in PENDING_PAYMENT_STATUSES, which is
+ * the signature of a rename that collapsed two statuses onto one value. Checked
+ * against ApplicationStatus: draft, submitted, pending_payment, under_review,
+ * for_inspection, approved, rejected, returned, cancelled. Every pre-decision
+ * status except draft is covered, and draft belongs out — an unfiled draft is not
+ * an officer's work.
+ */
+const APPROVAL_STATUSES = ['submitted', 'pending_payment', 'under_review', 'returned']
 /** Statuses on the inspection/approved side. */
 const INSPECTION_STATUSES = ['for_inspection', 'approved', 'issued']
 
 /** Pre-payment statuses show the orange block; everything else is paid. */
-const PENDING_PAYMENT_STATUSES = ['submitted', 'pending_payment', 'pending_payment']
+const PENDING_PAYMENT_STATUSES = ['submitted', 'pending_payment']
 
 function QueueRow({ item }: { item: Assignment }) {
   const app = item.application
