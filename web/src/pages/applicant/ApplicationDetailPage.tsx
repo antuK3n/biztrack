@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   CalendarIcon,
@@ -109,16 +109,71 @@ function EyeChip({
 /** Tax Order of Payment overlay (p51 card language). */
 function FeeDialog({ app, onClose }: { app: Application; onClose: () => void }) {
   const fee = app.fee_assessment
+  const panelRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+
+  /*
+   * This dialog announced itself as aria-modal but behaved like a panel: focus
+   * stayed on the button behind it, Tab walked straight out into the page it
+   * was covering, and Escape did nothing — so a keyboard user could open their
+   * Tax Order of Payment and have no way to close it. ProtoModal already does
+   * this properly; this one is hand-rolled, so it has to do it itself.
+   */
+  useEffect(() => {
+    openerRef.current = document.activeElement as HTMLElement | null
+    panelRef.current?.focus()
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const panel = panelRef.current
+      if (!panel) return
+      const focusable = panel.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )
+      // Nothing to cycle between: keep focus on the panel rather than letting
+      // it fall through to the page underneath.
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && (active === first || active === panel)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      // Put the user back where they were, not at the top of the document.
+      openerRef.current?.focus?.()
+    }
+  }, [onClose])
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Tax Order of Payment"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl rounded-md bg-white px-8 py-7 shadow-overlay"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Tax Order of Payment"
+        tabIndex={-1}
+        className="w-full max-w-xl rounded-md bg-white px-8 py-7 shadow-overlay focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
@@ -139,7 +194,16 @@ function FeeDialog({ app, onClose }: { app: Application; onClose: () => void }) 
         </div>
         <div className="display-serif mt-6 flex items-baseline justify-between border-t border-ink/40 pt-4 text-2xl text-ink">
           <span>Total Amount:</span>
-          <span className="tnum">{formatMoney(fee?.total_amount)}</span>
+          {/*
+            No assessment is not a bill for nothing. "₱0.00" here reads as
+            "you owe nothing", which is the opposite of "the offices have not
+            worked out what you owe yet".
+          */}
+          {fee ? (
+            <span className="tnum">{formatMoney(fee.total_amount)}</span>
+          ) : (
+            <span className="text-base text-ink-muted">Not assessed yet</span>
+          )}
         </div>
       </div>
     </div>
