@@ -17,6 +17,7 @@ use App\Models\Permit;
 use App\Models\User;
 use App\Support\Audit;
 use App\Support\Numbering;
+use App\Support\Ra11032;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
@@ -86,9 +87,21 @@ class WorkflowService
             if (! $app->tracking_id) {
                 $app->update(['tracking_id' => Numbering::trackingId()]);
             }
+            /*
+             * The tier decides the deadline. This was a flat ten working days for
+             * every filing, under a comment claiming RA 11032 — a figure the
+             * statute does not contain and more than three times what a simple
+             * transaction is allowed. Complexity was never set here either, so the
+             * tier panel structurally excluded every filing made through the real
+             * wizard.
+             */
+            $tier = Ra11032::tierFor($app);
+            $submittedAt = now();
+
             $app->update([
-                'submitted_at' => now(),
-                'deadline_at' => now()->addWeekdays(10), // RA 11032 working days
+                'submitted_at' => $submittedAt,
+                'complexity' => $tier,
+                'deadline_at' => Ra11032::deadlineFor($submittedAt, $tier),
             ]);
             $this->transition($app, ApplicationStatus::Submitted);
             $this->assessFees($app);

@@ -14,6 +14,10 @@ class Business extends Model
 
     protected $fillable = [
         'owner_user_id', 'name', 'trade_name', 'registration_type',
+        // Absent from this list, mass assignment dropped it in silence: the
+        // controller set it, create() ignored it, and the Form of Organization
+        // panel read null on every business the application itself registered.
+        'form_of_organization',
         'registration_number', 'tin', 'ban', 'is_active', 'status',
         'is_rented', 'lessor_name', 'lessor_address', 'lessor_contact',
         'monthly_rental', 'emergency_contact_name', 'emergency_contact_number',

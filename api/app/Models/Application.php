@@ -18,6 +18,10 @@ class Application extends Model
     protected $fillable = [
         'tracking_id', 'business_id', 'applicant_user_id', 'application_type', 'title',
         'status', 'prior_permit_id', 'submitted_at', 'deadline_at', 'decided_at',
+        // Set at submission from Support\Ra11032. Absent from this list, mass
+        // assignment drops the tier in silence, and the RA 11032 panel — which
+        // requires a non-null complexity — cannot see the filing at all.
+        'complexity',
         'rejection_reason', 'fee_profile', 'payment_mode',
     ];
 

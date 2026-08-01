@@ -1,30 +1,3 @@
-# plumber.R — the integration surface Laravel talks to.
-#
-# R stays a separate program and remains the statistics engine. The direction of
-# data flow is the thing to understand here: LARAVEL PUSHES ROWS TO R. R never
-# touches the database. Laravel owns all SQL, which keeps RBAC and office scoping
-# in exactly one place, and R is a pure compute service — rows in, statistics out.
-#
-#     php artisan analytics:refresh
-#         ├─ Laravel queries the register
-#         ├─ POSTs the row sets here
-#         ├─ R computes (R/service.R, over R/spc.R)
-#         └─ Laravel persists the result
-#
-#     page load ──> Laravel reads the persisted result   (no R involved)
-#
-# So these endpoints are called by the refresh command, not by page loads. That
-# is what makes an analytics screen fast and what stops an R outage from breaking
-# one — it only stops the figures getting newer.
-#
-# This replaces an earlier GET surface that served precomputed outputs/*.csv.
-# Those endpoints did not fit "Laravel pushes rows" and are gone; the synthetic
-# CSV pipeline (run_all.R) is untouched and remains how the R side is developed
-# and validated independently of Laravel.
-#
-# SECURITY: bind to localhost only. Plumber has no authentication of its own, so
-# anything that can reach this port can read register data. run_api.R binds
-# 127.0.0.1 and the live tunnel forwards only the web port. Do not expose this.
 
 library(plumber)
 library(jsonlite)
@@ -125,13 +98,6 @@ function(req, res) {
   .compute(req, res, service_renewal_risk)
 }
 
-#' Run one compute function against a request body.
-#'
-#' Errors come back as a 500 carrying the R condition message. Laravel treats any
-#' non-2xx as "R unavailable" and falls back to its own port, labelling the screen
-#' accordingly — so the useful thing to return is the actual message, which is the
-#' only clue about what in the payload R could not handle.
-#' @keywords internal
 .compute <- function(req, res, fn) {
   payload <- tryCatch(
     jsonlite::fromJSON(req$postBody, simplifyVector = TRUE, simplifyDataFrame = TRUE),
