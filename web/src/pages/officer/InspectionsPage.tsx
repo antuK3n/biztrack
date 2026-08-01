@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeftIcon, CalendarIcon, CheckCircleFilledIcon, SearchIcon, XCircleIcon, XIcon } from '../../components/icons'
 import { EmptyState, ErrorState, Skeleton, SkeletonList } from '../../components/ui/primitives'
@@ -43,29 +43,64 @@ function InspectionRow({ item }: { item: Inspection }) {
   )
 }
 
+/**
+ * The inspection list.
+ *
+ * Paged, because this register carries thousands of visits and rendering the
+ * whole set is what took the page down. One page arrives at a time, and the
+ * reader is told the total so a first page is never mistaken for the whole list.
+ */
 export function InspectionsPage() {
-  const { data, loading, error, reload } = useAsync(() => inspections.list(), [])
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<Inspection[]>([])
+  const { data, loading, error, reload } = useAsync(() => inspections.list({ page }), [page])
+
+  // Append rather than replace: paging in should extend the list an officer is
+  // reading, not drop them back at the top of a fresh one.
+  useEffect(() => {
+    if (!data) return
+    setRows((prev) => (data.meta.current_page === 1 ? data.data : [...prev, ...data.data]))
+  }, [data])
+
+  const total = data?.meta.total ?? 0
+  const hasMore = data ? data.meta.current_page < data.meta.last_page : false
+  const firstLoad = loading && rows.length === 0
 
   return (
     <div>
       <PageTitle right={<SortFilter />}>Inspections</PageTitle>
 
-      {loading ? (
+      {firstLoad ? (
         <SkeletonList rows={5} />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
-      ) : !data || data.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={SearchIcon}
           title="No inspections scheduled"
           description="When an application needs a site visit, it will show up here."
         />
       ) : (
-        <ul className="space-y-4">
-          {data.map((item) => (
-            <InspectionRow key={item.id} item={item} />
-          ))}
-        </ul>
+        <>
+          <p className="mb-3 text-sm text-ink-muted">
+            Showing {rows.length.toLocaleString()} of {total.toLocaleString()}, most recent first.
+          </p>
+          <ul className="space-y-4">
+            {rows.map((item) => (
+              <InspectionRow key={item.id} item={item} />
+            ))}
+          </ul>
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={loading}
+              className="mt-5 w-full rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas disabled:cursor-wait disabled:text-ink-muted"
+            >
+              {loading ? 'Loading…' : 'Load more'}
+            </button>
+          )}
+        </>
       )}
     </div>
   )
