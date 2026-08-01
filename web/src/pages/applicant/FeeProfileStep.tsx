@@ -176,9 +176,21 @@ export const MAX_PESOS = 10_000_000_000
 export const MAX_COUNT = 100_000
 const MAX_FLOOR_AREA = 1_000_000
 
-/** "1000000" → "1,000,000"; keeps at most two decimals, drops everything else. */
-export function formatAmountInput(raw: string): string {
-  const cleaned = raw.replace(/[^\d.]/g, '')
+/**
+ * "1000000" → "1,000,000"; keeps at most two decimals, drops everything else.
+ *
+ * Accepts a number as well as a string. This formatter is fed by two very
+ * different sources: keystrokes, which are always strings, and saved amounts
+ * coming back from the API, which are not — `monthly_rental` arrives as a JSON
+ * number while the contract calls it a string. A draft with rented premises
+ * used to throw "raw.replace is not a function" here mid-restore, which left
+ * the wizard holding a blank form it then tried to save over the real one.
+ * A formatter has no business deciding an amount is unusable because of its
+ * JSON type.
+ */
+export function formatAmountInput(raw: string | number | null | undefined): string {
+  if (raw === null || raw === undefined) return ''
+  const cleaned = String(raw).replace(/[^\d.]/g, '')
   const dot = cleaned.indexOf('.')
   const whole = (dot === -1 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, '')
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
@@ -608,17 +620,27 @@ function NumberField({
   const format = kind === 'money' ? formatAmountInput : formatCountInput
   return (
     <div>
-      <FieldLabel required={required}>{label}</FieldLabel>
-      <input
-        inputMode={kind === 'money' ? 'decimal' : 'numeric'}
-        value={value}
-        onChange={(e) => onChange(format(e.target.value))}
-        onBlur={onBlur}
-        placeholder={placeholder}
-        disabled={disabled}
-        aria-invalid={Boolean(error)}
-        className={`${inputCls} tnum disabled:opacity-50`}
-      />
+      {/*
+        FieldLabel renders a span, so the visible label was not attached to
+        anything: a screen reader announced the placeholder, or on fields
+        without one, nothing at all. Wrapping in a real label associates them
+        without needing an id on every field (WCAG 2.1 AA 1.3.1 / 3.3.2, and
+        PRODUCT.md's "no placeholder-as-label"). The error stays outside the
+        label so it is not read as part of the field's name.
+      */}
+      <label className="block">
+        <FieldLabel required={required}>{label}</FieldLabel>
+        <input
+          inputMode={kind === 'money' ? 'decimal' : 'numeric'}
+          value={value}
+          onChange={(e) => onChange(format(e.target.value))}
+          onBlur={onBlur}
+          placeholder={placeholder}
+          disabled={disabled}
+          aria-invalid={Boolean(error)}
+          className={`${inputCls} tnum disabled:opacity-50`}
+        />
+      </label>
       {error && <FieldError>{error}</FieldError>}
     </div>
   )
