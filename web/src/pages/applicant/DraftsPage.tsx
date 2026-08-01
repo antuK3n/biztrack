@@ -121,7 +121,15 @@ export function DraftsPage() {
                           <p className="truncate text-[15px] font-bold text-ink">{name}</p>
                           <PencilIcon size={17} className="shrink-0 text-royal-deep" />
                         </div>
-                        <p className="mt-1 text-xs text-ink-secondary">Edited: {formatDate(d.created_at)}</p>
+                        {/*
+                          `created_at` is the day the draft was started, not
+                          the day it was last touched — the API does not expose
+                          an updated_at. Labelling it "Edited" told an applicant
+                          who worked on this draft an hour ago that they last
+                          edited it three weeks back, which is the sort of thing
+                          that makes someone doubt their work was saved.
+                        */}
+                        <p className="mt-1 text-xs text-ink-secondary">Started: {formatDate(d.created_at)}</p>
                       </div>
                     </Link>
                   </li>

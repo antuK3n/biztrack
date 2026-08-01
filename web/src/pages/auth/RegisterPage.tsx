@@ -78,6 +78,7 @@ function Field({
   required,
   error,
   errorId,
+  controlId,
   children,
   className = '',
 }: {
@@ -85,12 +86,22 @@ function Field({
   required?: boolean
   error?: string
   errorId: string
+  /** id of the control this labels — without it the label is decoration. */
+  controlId: string
   children: ReactNode
   className?: string
 }) {
   return (
     <div className={className}>
-      <FieldLabel required={required}>{label}</FieldLabel>
+      {/*
+        FieldLabel renders a span, so every field on this form was previously
+        announced by its placeholder alone — and the two password fields, which
+        have a reveal button inside them, could not be wrapped in a label at
+        all. htmlFor works for all of them (WCAG 2.1 AA 1.3.1 / 3.3.2).
+      */}
+      <label htmlFor={controlId} className="block">
+        <FieldLabel required={required}>{label}</FieldLabel>
+      </label>
       {children}
       {error && (
         <p id={errorId} className="mt-1.5 text-sm font-medium text-s-red">
@@ -205,8 +216,9 @@ export function RegisterPage() {
         )}
 
         <div className="grid gap-x-5 gap-y-4 sm:grid-cols-2">
-          <Field label="First Name" required error={errors.first_name} errorId="reg-first-error">
+          <Field label="First Name" required error={errors.first_name} errorId="reg-first-error" controlId="reg-first">
             <input
+              id="reg-first"
               autoComplete="given-name"
               placeholder="First Name"
               value={values.first_name}
@@ -217,8 +229,9 @@ export function RegisterPage() {
               className={inputCls}
             />
           </Field>
-          <Field label="Last Name" required error={errors.last_name} errorId="reg-last-error">
+          <Field label="Last Name" required error={errors.last_name} errorId="reg-last-error" controlId="reg-last">
             <input
+              id="reg-last"
               autoComplete="family-name"
               placeholder="Last Name"
               value={values.last_name}
@@ -232,8 +245,9 @@ export function RegisterPage() {
 
           {/* The prototype's "Home Address" band — our account record keys on
               middle name / suffix / gender instead, laid out in the same slot. */}
-          <Field label="Middle Name" error={errors.middle_name} errorId="reg-middle-error">
+          <Field label="Middle Name" error={errors.middle_name} errorId="reg-middle-error" controlId="reg-middle">
             <input
+              id="reg-middle"
               autoComplete="additional-name"
               placeholder="Middle Name (optional)"
               value={values.middle_name}
@@ -242,8 +256,9 @@ export function RegisterPage() {
             />
           </Field>
           <div className="grid grid-cols-2 gap-x-5">
-            <Field label="Suffix" error={errors.suffix} errorId="reg-suffix-error">
+            <Field label="Suffix" error={errors.suffix} errorId="reg-suffix-error" controlId="reg-suffix">
               <input
+                id="reg-suffix"
                 autoComplete="honorific-suffix"
                 placeholder="Jr., III"
                 maxLength={10}
@@ -252,8 +267,9 @@ export function RegisterPage() {
                 className={inputCls}
               />
             </Field>
-            <Field label="Gender" required error={errors.gender} errorId="reg-gender-error">
+            <Field label="Gender" required error={errors.gender} errorId="reg-gender-error" controlId="reg-gender">
               <select
+                id="reg-gender"
                 value={values.gender}
                 onChange={(e) => setValue('gender', e.target.value as FormValues['gender'])}
                 onBlur={() => blurValidate('gender')}
@@ -270,8 +286,9 @@ export function RegisterPage() {
             </Field>
           </div>
 
-          <Field label="Email Address" required error={errors.email} errorId="reg-email-error">
+          <Field label="Email Address" required error={errors.email} errorId="reg-email-error" controlId="reg-email">
             <input
+              id="reg-email"
               type="email"
               autoComplete="email"
               inputMode="email"
@@ -284,8 +301,9 @@ export function RegisterPage() {
               className={inputCls}
             />
           </Field>
-          <Field label="Contact Number" required error={errors.mobile_number} errorId="reg-mobile-error">
+          <Field label="Contact Number" required error={errors.mobile_number} errorId="reg-mobile-error" controlId="reg-mobile">
             <input
+              id="reg-mobile"
               type="tel"
               autoComplete="tel-national"
               inputMode="tel"
@@ -299,8 +317,9 @@ export function RegisterPage() {
             />
           </Field>
 
-          <Field label="Password" required error={errors.password} errorId="reg-password-error">
+          <Field label="Password" required error={errors.password} errorId="reg-password-error" controlId="reg-password">
             <PasswordInput
+              id="reg-password"
               name="password"
               placeholder="Password"
               value={values.password}
@@ -310,8 +329,9 @@ export function RegisterPage() {
               describedBy={errors.password ? 'reg-password-error' : undefined}
             />
           </Field>
-          <Field label="Confirm Password" required error={errors.password_confirmation} errorId="reg-confirm-error">
+          <Field label="Confirm Password" required error={errors.password_confirmation} errorId="reg-confirm-error" controlId="reg-confirm">
             <PasswordInput
+              id="reg-confirm"
               name="password_confirmation"
               placeholder="Re-enter Password"
               value={values.password_confirmation}

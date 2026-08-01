@@ -26,6 +26,19 @@ class Business extends Model
     protected $casts = [
         'is_active' => 'boolean',
         'is_rented' => 'boolean',
+        /*
+         * Cast so the JSON type is stable. The column is `numeric` and had no
+         * cast, so SQLite handed back an int for a whole amount and a float
+         * otherwise: the same field serialized as a different type depending on
+         * what someone had typed. types.ts declared `string | null`, the wizard
+         * called .replace() on it, and reopening a saved draft threw
+         * "raw.replace is not a function" mid-restore — which blanked the form
+         * and then let autosave PUT the empty form back over the saved draft.
+         * The draft survived only because `name` is required server-side.
+         *
+         * decimal:2 matches how every other money field is already serialized.
+         */
+        'monthly_rental' => 'decimal:2',
     ];
 
     /** Statuses that bar the owner from filing new applications. */

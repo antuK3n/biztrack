@@ -86,6 +86,9 @@ export function ForgotPasswordPage() {
           </Alert>
         )}
         <div>
+          {/* Wrapped so the visible label actually names the input; it was a
+              span, leaving the placeholder as the only accessible name. */}
+          <label className="block">
           <FieldLabel>Email Address</FieldLabel>
           <input
             type="email"
@@ -103,6 +106,7 @@ export function ForgotPasswordPage() {
             aria-describedby={error ? 'forgot-email-error' : undefined}
             className={inputCls}
           />
+          </label>
           {error && (
             <p id="forgot-email-error" className="mt-1.5 text-sm font-medium text-s-red">
               {error}

@@ -140,7 +140,12 @@ export function PayPage() {
         </div>
         <div className="display-serif mt-6 flex items-baseline justify-between border-t border-ink/40 pt-4 text-2xl text-ink">
           <span>Total Amount:</span>
-          <span className="tnum">{formatMoney(assessment?.total_amount)}</span>
+          {/* Nothing assessed is not nothing owed — say which one it is. */}
+          {assessment ? (
+            <span className="tnum">{formatMoney(assessment.total_amount)}</span>
+          ) : (
+            <span className="text-base text-ink-muted">Not assessed yet</span>
+          )}
         </div>
       </ProtoCard>
 
