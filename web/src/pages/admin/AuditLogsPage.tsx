@@ -44,7 +44,15 @@ function LogRow({ log }: { log: AuditLog }) {
             {log.action}
           </StatusChip>
         </td>
-        <td className="px-5 py-3.5 font-medium text-ink">{log.user?.name ?? 'System'}</td>
+        {/*
+          "System" was asserted for every entry the trail carries no actor for —
+          28% of them, and every one is a `user.logged_in` row, which a person
+          performed. An audit log that names the wrong actor is worse than one
+          that admits it does not know, so an absent actor now reads as absent.
+        */}
+        <td className="px-5 py-3.5 font-medium text-ink">
+          {log.user?.name ?? <span className="text-ink-muted">Not recorded</span>}
+        </td>
         <td className="px-5 py-3.5 text-ink-secondary">
           {shortType(log.auditable_type)} #{log.auditable_id}
         </td>

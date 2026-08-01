@@ -1,11 +1,102 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import { ChevronDownIcon } from '../icons'
 
 /*
  * Shared prototype-fidelity primitives (docs/rehaul-spec.md).
  * Every rebuilt screen composes these so the app reads as ONE product.
  */
+
+/**
+ * Make a dialog usable from the keyboard (WCAG 2.1 AA — 2.1.2 No Keyboard Trap,
+ * 2.4.3 Focus Order). Point `panelRef` at the dialog panel and pass whatever
+ * closes it. Three things it does:
+ *
+ *  - moves focus into the dialog on open, and back to whatever opened it on
+ *    close, so the reading position is never lost;
+ *  - closes on Escape, matching every other dialog the user has ever met;
+ *  - cycles Tab inside the dialog instead of walking out into the dead page.
+ *
+ * Extracted from ProtoModal because two hand-rolled overlays — the officer
+ * Details sheet and the Owner Status history — reimplemented the markup without
+ * any of this. Both opened with focus still on the button behind the overlay,
+ * ignored Escape, and let Tab walk out into a page the user could no longer see.
+ * `initialFocusRef` picks the control to land on; the panel itself is the
+ * fallback for a dialog whose only control is its Close button.
+ */
+export function useDialogKeyboard(
+  panelRef: RefObject<HTMLElement | null>,
+  onClose: () => void,
+  initialFocusRef?: RefObject<HTMLElement | null>,
+) {
+  // Read through a ref so a handler recreated on every render does not tear the
+  // listener down and re-run the focus move under it.
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null
+    // Captured now, not read in the cleanup: by teardown the ref has already
+    // been nulled, so focus would never come back.
+    const panel = panelRef.current
+    const target = initialFocusRef?.current ?? panel
+    if (target) {
+      // A panel is not focusable by default; make it so for this one move.
+      if (target === panel && !panel.hasAttribute('tabindex')) panel.setAttribute('tabindex', '-1')
+      target.focus()
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        closeRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = panel?.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      )
+      if (!focusable || focusable.length === 0) return
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+
+      if (event.shiftKey && (active === first || !panel?.contains(active))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (active === last || !panel?.contains(active))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      /*
+       * Put the reader back where they were.
+       *
+       * The test used to be `panel.contains(document.activeElement)`, which never
+       * once passed. This is a passive effect, so its cleanup runs *after* React
+       * has detached the panel — the focused element is gone by then and the
+       * browser has already reset focus to <body>. So the condition read false
+       * every time and focus was silently dropped to the top of the document on
+       * every dialog close, which is the same lost reading position the focus
+       * trap exists to prevent.
+       *
+       * `body` (or nothing) is precisely the signature of focus falling off a
+       * removed node. Anything else means the close did something deliberate with
+       * focus — a confirm that navigates — and is left alone.
+       */
+      const active = document.activeElement
+      const focusWasLost = !active || active === document.body
+      if (focusWasLost || panel?.contains(active)) opener?.focus()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+}
 
 /** Blue/red-header modal with the split Cancel/Confirm footer (PDF p18/p35/p47/p82). */
 export function ProtoModal({
@@ -36,60 +127,8 @@ export function ProtoModal({
   const panelRef = useRef<HTMLDivElement | null>(null)
   const cancelRef = useRef<HTMLButtonElement | null>(null)
 
-  /*
-   * Keyboard operability (WCAG 2.1 AA — 2.1.2 No Keyboard Trap, 2.4.3 Focus
-   * Order). Without this the dialog opens and focus stays on the button behind
-   * the overlay, so a keyboard or screen-reader user tabs around a page they can
-   * no longer see. Three things it fixes:
-   *
-   *  - focus moves into the dialog on open, and back to whatever opened it on
-   *    close, so the reading position is never lost;
-   *  - Escape dismisses, matching every other dialog the user has ever met;
-   *  - Tab cycles inside the dialog instead of walking out into the dead page.
-   */
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
-    // Captured now, not read in the cleanup: by teardown the ref has already
-    // been nulled, so `panelRef.current` there would always be null and focus
-    // would never come back.
-    const panel = panelRef.current
-    cancelRef.current?.focus()
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onCancel()
-        return
-      }
-      if (event.key !== 'Tab') return
-
-      const focusable = panel?.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      )
-      if (!focusable || focusable.length === 0) return
-
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const active = document.activeElement
-
-      if (event.shiftKey && (active === first || !panel?.contains(active))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-      // Only pull focus back if it is still inside the dialog being torn down;
-      // a confirm that navigates has already put focus somewhere deliberate.
-      if (panel?.contains(document.activeElement)) opener?.focus()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // Focus in on open, Escape to dismiss, Tab kept inside. See useDialogKeyboard.
+  useDialogKeyboard(panelRef, onCancel, cancelRef)
 
   /*
    * `z-[2000] transform-gpu` rather than `z-50`, for two separate reasons that

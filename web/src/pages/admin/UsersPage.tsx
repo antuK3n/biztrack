@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { admin, reference } from '../../lib/resources'
@@ -15,6 +15,7 @@ import {
   SortFilter,
   StatusChip,
   inputCls,
+  useDialogKeyboard,
 } from '../../components/ui/Proto'
 import { UsersIcon } from '../../components/icons'
 
@@ -74,18 +75,27 @@ function InfoModal({
   onClose: () => void
   children: ReactNode
 }) {
+  const panelRef = useRef<HTMLDivElement | null>(null)
+  const closeRef = useRef<HTMLButtonElement | null>(null)
+  // This overlay reimplemented ProtoModal's markup without its keyboard
+  // handling: it opened with focus still on the row button behind it, ignored
+  // Escape, and let Tab walk out into the page underneath.
+  useDialogKeyboard(panelRef, onClose, closeRef)
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-md bg-white shadow-overlay">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-md bg-white shadow-overlay"
+      >
         <div className="bg-royal px-5 py-3 text-base font-bold tracking-wide text-white">{title}</div>
         {subtitle && <div className="border-b border-line px-5 py-3">{subtitle}</div>}
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         <button
+          ref={closeRef}
           type="button"
           onClick={onClose}
           className="bg-modal-cancel py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
@@ -114,11 +124,39 @@ function humanizeAction(action: string): string {
     .join(' ')
 }
 
-function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
-  const { data, loading } = useAsync(() => admin.auditLogs(1), [])
-  const name = fullName(user)
-  const entries = (data?.data ?? []).filter((log) => log.user?.name === name)
+/**
+ * How far back the officer activity panel reads.
+ *
+ * The audit trail has no per-actor filter, so this screen can only scan the
+ * pages it pulls: 8 × 25 = the 200 most recent entries. That is a window, not a
+ * total, and the panel below says so — see recentActivity.
+ */
+const ACTIVITY_PAGES = 8
 
+/** The most recent audit entries, across ACTIVITY_PAGES pages, newest first. */
+async function recentActivity(): Promise<{ logs: AuditLog[]; scanned: number }> {
+  const pages = await Promise.all(
+    Array.from({ length: ACTIVITY_PAGES }, (_, i) => admin.auditLogs(i + 1)),
+  )
+  const logs = pages.flatMap((p) => p.data)
+  return { logs, scanned: logs.length }
+}
+
+function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void }) {
+  const { data, loading } = useAsync(recentActivity, [])
+  const name = fullName(user)
+  const entries = (data?.logs ?? []).filter((log) => log.user?.name === name)
+  const scanned = data?.scanned ?? 0
+
+  /*
+   * This panel used to read page 1 of the audit trail — 25 of 21,919 entries,
+   * and the newest 25 are almost always sign-ins, which the trail records with
+   * no actor at all. So it showed "Total Actions 0 · Last Active —" for officers
+   * with real histories, which reads as "this officer has done nothing" rather
+   * than "this screen cannot see that far back". A window is now named as a
+   * window: the figure says what it counted over, and an empty result says the
+   * window was empty rather than asserting the officer has never acted.
+   */
   return (
     <InfoModal
       title="Details"
@@ -135,15 +173,15 @@ function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void 
         </div>
       }
     >
-      <div className="grid grid-cols-3 gap-3 border-b border-line pb-4">
+      <div className="grid grid-cols-3 gap-3">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Total Actions</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Recent Actions</p>
           <p className="tnum mt-0.5 text-sm font-bold text-ink">{loading ? '…' : entries.length.toLocaleString()}</p>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Last Active</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Last Seen Here</p>
           <p className="mt-0.5 text-sm font-bold text-ink">
-            {loading ? '…' : entries[0] ? formatDateTime(entries[0].created_at) : '—'}
+            {loading ? '…' : entries[0] ? formatDateTime(entries[0].created_at) : 'Not in this window'}
           </p>
         </div>
         <div>
@@ -151,12 +189,20 @@ function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void 
           <p className="mt-0.5 text-sm font-bold text-ink">{user.is_active ? 'Active' : 'Inactive'}</p>
         </div>
       </div>
+      <p className="mt-2 border-b border-line pb-4 text-xs text-ink-secondary">
+        {loading
+          ? 'Reading the audit trail…'
+          : `Counted over the ${scanned.toLocaleString()} most recent audit entries, not this officer's whole history.`}
+      </p>
 
       <ul className="mt-4 space-y-0">
         {loading ? (
           <li className="py-6 text-center text-sm text-ink-muted">Loading activity…</li>
         ) : entries.length === 0 ? (
-          <li className="py-6 text-center text-sm text-ink-muted">No recorded activity for this officer yet.</li>
+          <li className="py-6 text-center text-sm text-ink-muted">
+            Nothing from this officer in the {scanned.toLocaleString()} most recent audit entries. Older
+            activity is in the full audit log.
+          </li>
         ) : (
           entries.map((log: AuditLog, i) => (
             <li key={log.id} className="relative flex gap-3 pb-5">
@@ -314,7 +360,14 @@ function EditModal({
       confirmLabel="Confirm"
       onCancel={onClose}
       onConfirm={save}
-      confirmDisabled={busy}
+      /*
+       * Office is a required field, and "No office" was silently unsendable:
+       * the payload omits department_id when it is blank, so picking "No office"
+       * closed the modal reporting success with the officer's office unchanged.
+       * Requiring a real office is the honest half of that; actually clearing one
+       * needs department_id to accept null in AdminUserPayload — see the report.
+       */
+      confirmDisabled={busy || !form.department_id}
     >
       <div className="mb-5 flex items-center gap-3 border-b border-line pb-4">
         <span className="flex h-10 w-10 items-center justify-center rounded-full bg-royal-tint text-royal" aria-hidden="true">
