@@ -295,7 +295,17 @@ export interface Assignment {
   application: {
     id: number
     tracking_id: string
-    business: { name: string }
+    /**
+     * Null when the business has been removed from the register.
+     *
+     * `Business` soft-deletes, and its filings stay: 63 businesses are deleted,
+     * which is 375 of 4,620 assignments. This was declared non-nullable, so the
+     * type checker never questioned `.business.name` and three screens threw on
+     * it — and with no error boundary in the app, each throw blanked the whole
+     * page rather than the row. It hid because the newest 200 rows are clean;
+     * the nulls start around page 5.
+     */
+    business: { name: string } | null
     application_type: ApplicationType
     status: ApplicationStatus
   }
@@ -317,13 +327,15 @@ export interface Inspection {
   application: {
     id: number
     tracking_id: string
-    business: { name: string }
+    /** Null once the business is removed from the register — see Assignment. */
+    business: { name: string } | null
+    /** Null with the business: the address hangs off it. */
     address: {
       line1: string
       barangay: { name: string }
       latitude: number | null
       longitude: number | null
-    }
+    } | null
   }
 }
 
