@@ -98,11 +98,7 @@ final class DashboardAnalytics
      *
      * @var array<string, array{label: string, statutory_working_days: int}>
      */
-    private const TIERS = [
-        'simple' => ['label' => 'Simple', 'statutory_working_days' => 3],
-        'complex' => ['label' => 'Complex', 'statutory_working_days' => 7],
-        'highly_technical' => ['label' => 'Highly technical', 'statutory_working_days' => 20],
-    ];
+    private const TIERS = Ra11032::TIERS;
 
     /** Cumulative expiry horizons, in days. */
     private const EXPIRY_WINDOWS = [30, 60, 90];

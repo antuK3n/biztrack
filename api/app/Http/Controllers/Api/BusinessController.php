@@ -18,6 +18,9 @@ use Illuminate\Support\Facades\DB;
  */
 class BusinessController extends Controller
 {
+    /** The four structures the wizard offers, and the only values the panel bands. */
+    private const ORGANIZATION_FORMS = ['sole_proprietorship', 'partnership', 'corporation', 'cooperative'];
+
     private array $eager = ['address.barangay', 'lines.psicCode'];
 
     public function index(Request $request): JsonResponse
@@ -40,6 +43,7 @@ class BusinessController extends Controller
                 'name' => $data['name'],
                 'trade_name' => $data['trade_name'] ?? null,
                 'registration_type' => $data['registration_type'] ?? null,
+                'form_of_organization' => self::formOfOrganization($data),
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
                 'is_rented' => (bool) ($data['is_rented'] ?? false),
@@ -84,6 +88,7 @@ class BusinessController extends Controller
                 'name' => $data['name'],
                 'trade_name' => $data['trade_name'] ?? null,
                 'registration_type' => $data['registration_type'] ?? null,
+                'form_of_organization' => self::formOfOrganization($data),
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
                 'is_rented' => (bool) ($data['is_rented'] ?? false),
@@ -147,6 +152,39 @@ class BusinessController extends Controller
         ]);
     }
 
+    /**
+     * The applicant's organisation structure, for the Form of Organization panel.
+     *
+     * Nothing in the application ever wrote `businesses.form_of_organization`, so
+     * it was null on every real business and the panel could only be filled by the
+     * seeder. The value was being collected all along — the wizard's "Type of
+     * Registration" field offers exactly Sole Proprietorship, Partnership,
+     * Corporation and Cooperative, and writes them into `registration_type`, a
+     * column whose own field label is "DTI / SEC / CDA Registration Number".
+     *
+     * So the structure was landing in the column meant for the registering agency.
+     * Rather than move it and break every existing row and the wizard with it,
+     * copy it across when it is one of the four structures. An explicit
+     * form_of_organization wins if a caller sends one, and anything unrecognised
+     * (a real DTI/SEC/CDA value, as the seeder writes) leaves the column null
+     * rather than guessing.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private static function formOfOrganization(array $data): ?string
+    {
+        $explicit = $data['form_of_organization'] ?? null;
+        if (is_string($explicit) && in_array($explicit, self::ORGANIZATION_FORMS, true)) {
+            return $explicit;
+        }
+
+        $registrationType = $data['registration_type'] ?? null;
+
+        return is_string($registrationType) && in_array($registrationType, self::ORGANIZATION_FORMS, true)
+            ? $registrationType
+            : null;
+    }
+
     private function validateBusiness(Request $request): array
     {
         // Normalise the TIN before the rule runs, so applicants may type the
@@ -161,6 +199,7 @@ class BusinessController extends Controller
             // Trade name stays optional: most sole proprietors have none.
             'trade_name' => ['nullable', 'string', 'max:255'],
             'registration_type' => ['required', 'string', 'max:50'],
+            'form_of_organization' => ['nullable', 'string', 'in:sole_proprietorship,partnership,corporation,cooperative'],
             'registration_number' => ['required', 'string', 'max:100'],
             // Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
             // the taxpayer has one. Normalised above into hyphenated groups.
