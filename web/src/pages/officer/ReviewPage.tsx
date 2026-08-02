@@ -946,6 +946,51 @@ export function ReviewPage() {
           </div>
           <div className="mt-4 border-b-2 border-royal" />
 
+          {/*
+            * Amendment from: — checklist items 82/84.
+            *
+            * Amendment filings only, and unlettered on purpose: on the paper
+            * BPLO form this block sits in the header beside the application
+            * type, not among the lettered sections, and renumbering A–E for
+            * one of three filing types would make the sheet stop matching its
+            * paper counterpart for the other two.
+            *
+            * An officer cannot review an amendment without it. Before this
+            * existed the sheet said "Application for Amendment" and then
+            * showed the business exactly as a new filing does, leaving the
+            * reviewer to work out what had changed by comparing it to the
+            * register themselves.
+            */}
+          {app.application_type === 'amendment' && (
+            <section className="mt-7 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4">
+              <h2 className="text-[15px] font-bold text-ink">Amendment From</h2>
+              {app.amendments && app.amendments.summary.length > 0 ? (
+                <ul className="mt-2 space-y-1">
+                  {app.amendments.summary.map((kind) => (
+                    <li key={kind} className="flex items-start gap-2 text-sm text-ink">
+                      <span className="mt-0.5 font-bold text-royal" aria-hidden="true">
+                        ✓
+                      </span>
+                      <span>{kind}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                /*
+                 * Filings made before the wizard asked the question. Saying so
+                 * is the honest reading: the applicant did not decline to
+                 * answer, they were never asked, and an officer who treats a
+                 * blank as "nothing is being amended" would reject a filing
+                 * for the system's omission.
+                 */
+                <p className="mt-2 text-sm text-ink-muted">
+                  This filing predates the amendment question and does not record what is being
+                  amended. Ask the applicant through Messages before deciding.
+                </p>
+              )}
+            </section>
+          )}
+
           {/* A — Business Information & Registration */}
           <section className="mt-7">
             <SectionHeading letter="A">Business Information &amp; Registration</SectionHeading>

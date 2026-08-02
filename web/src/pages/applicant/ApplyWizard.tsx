@@ -18,7 +18,8 @@ import {
 } from '../../components/ui/Proto'
 import { formatBytes, formatDate } from '../../lib/format'
 import { toApiError } from '../../lib/api'
-import { applications, businesses, documents, officeForms, permits, reference } from '../../lib/resources'
+import { applications, businesses, documents, officeForms, reference } from '../../lib/resources'
+import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import {
   OFFICE_FORM_CODES,
@@ -297,6 +298,38 @@ const EMPTY: FormState = {
   lines: [],
   permit_type_ids: [],
 }
+
+/**
+ * The paper form's "Amendment from:" block (checklist items 82/84). Held apart
+ * from FormState because it belongs to the APPLICATION, not to the business —
+ * the same shop can file one amendment for a change of location and another
+ * for a change of ownership, and only the filing knows which is which.
+ */
+interface AmendmentState {
+  ownership: boolean
+  location: boolean
+  nature: boolean
+  /** "Others (specify)" — the text is the tick; blank means not ticked. */
+  other: string
+}
+
+const EMPTY_AMENDMENT: AmendmentState = {
+  ownership: false,
+  location: false,
+  nature: false,
+  other: '',
+}
+
+/**
+ * The three checkbox amendments, in the order the paper form prints them.
+ * "Others (specify)" is not here: it is a text field that ticks itself, so it
+ * is rendered separately rather than pretending to be a fourth checkbox.
+ */
+const AMENDMENT_KINDS: { key: 'ownership' | 'location' | 'nature'; label: string }[] = [
+  { key: 'ownership', label: 'Ownership' },
+  { key: 'location', label: 'Location' },
+  { key: 'nature', label: 'Nature of Business' },
+]
 
 const REGISTRATION_TYPES = [
   { value: 'sole_proprietorship', label: 'Sole Proprietorship' },
@@ -746,6 +779,25 @@ export function ApplyWizard() {
   const [priorPermitId, setPriorPermitId] = useState<number | null>(null)
   const [prefillNote, setPrefillNote] = useState<string | null>(null)
   const [prefilling, setPrefilling] = useState(false)
+  /*
+   * Items 82/84 — what this amendment amends.
+   *
+   * The paper BPLO form's "Amendment from:" block is four checkboxes:
+   * Ownership, Location, Nature of Business, Others (specify). Nothing in the
+   * wizard asked any of them, so /apply?type=amendment was the new-application
+   * form with a different heading — the one question that makes a filing an
+   * amendment was the one question it never put.
+   *
+   * `other` carries its own tick: on the paper you cannot check Others without
+   * writing the other in, so typed text IS the answer and there is no fifth
+   * boolean to drift out of step with it.
+   */
+  const [amendment, setAmendment] = useState<AmendmentState>(EMPTY_AMENDMENT)
+  const amendmentChosen =
+    amendment.ownership ||
+    amendment.location ||
+    amendment.nature ||
+    amendment.other.trim() !== ''
 
   // OCR-lite suggestion banner (v2) — dismissible; suggestions only.
   const [ocr, setOcr] = useState<OcrSuggestions | null>(null)
@@ -756,15 +808,19 @@ export function ApplyWizard() {
     [isReuse],
   )
   /*
-   * Item 50 — the permits the owner already holds, so a renewal can name the
-   * one it is for instead of "this business, and whatever it happens to have".
-   * A shop with a Mayor's Permit expiring in January and a sanitary permit
-   * expiring in June is renewing one of them, not both.
+   * Items 50/85 — the permits the CHOSEN business holds, so a renewal can name
+   * the one it is for instead of "this business, and whatever it happens to
+   * have". A shop with a Mayor's Permit expiring in January and a sanitary
+   * permit expiring in June is renewing one of them, not both.
+   *
+   * These come from the prefill now, not from `GET /permits`. That endpoint is
+   * the owner's whole portfolio and it is paginated: an applicant with more
+   * permits than one page could open a renewal and find the permit they came
+   * to renew simply absent from the list. The prefill answers for one business
+   * and drops the revoked and suspended ones, which are not renewable at all.
    */
-  const ownedPermits = useAsync<Permit[]>(
-    () => (isReuse ? permits.list() : Promise.resolve([])),
-    [isReuse],
-  )
+  const [renewablePermits, setRenewablePermits] = useState<Permit[]>([])
+  const [loadingPermits, setLoadingPermits] = useState(false)
 
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
@@ -835,6 +891,7 @@ export function ApplyWizard() {
     setPrefillBusinessId(selectedId)
     setPriorPermitId(null)
     setPrefillNote(null)
+    setRenewablePermits([])
     if (!selectedId) {
       // Keep the permit selection: the section map never changes mid-flow.
       setForm((f) => ({ ...EMPTY, permit_type_ids: f.permit_type_ids }))
@@ -874,7 +931,11 @@ export function ApplyWizard() {
         permit_type_ids:
           f.permit_type_ids.length > 0 ? f.permit_type_ids : result.suggested_permit_type_ids,
       }))
-      setPriorPermitId(result.last_permit?.id ?? null)
+      // Item 85: the choice of permit is the applicant's to make, so the list
+      // arrives unticked. `last_permit` only suggests where to look — it is
+      // the newest issued, which is rarely the one about to lapse.
+      setRenewablePermits(result.renewable_permits ?? [])
+      setPriorPermitId(null)
       if (result.last_permit) {
         setPrefillNote(`Prefilled from your last permit ${result.last_permit.permit_number}.`)
       } else {
@@ -885,6 +946,27 @@ export function ApplyWizard() {
       setPrefillBusinessId(null)
     } finally {
       setPrefilling(false)
+    }
+  }
+
+  /**
+   * Item 85 — the renewable permits of a business we did not just pick.
+   *
+   * A reopened draft already has its business; re-running the full prefill
+   * would overwrite the applicant's edits with the registry's copy of them, so
+   * this takes the permit list from the same response and nothing else.
+   */
+  async function loadRenewablePermits(bid: number, type: 'renewal' | 'amendment') {
+    setLoadingPermits(true)
+    try {
+      const result = await businesses.prefill(bid, type)
+      setRenewablePermits(result.renewable_permits ?? [])
+    } catch {
+      // Non-fatal: the picker says it has nothing to offer, and the applicant
+      // can still carry on and upload the paper permit.
+      setRenewablePermits([])
+    } finally {
+      setLoadingPermits(false)
     }
   }
 
@@ -1066,19 +1148,6 @@ export function ApplyWizard() {
     [form.lines, psic],
   )
 
-  /*
-   * Item 50 — the permits the chosen business currently holds, soonest to
-   * expire first: that is the one somebody opening a renewal came here about.
-   * A business with nothing issued yet has no list to show.
-   */
-  const renewablePermits: Permit[] = useMemo(() => {
-    if (!isReuse || prefillBusinessId === null) return []
-    return (ownedPermits.data ?? [])
-      .filter((p) => p.business?.id === prefillBusinessId)
-      .slice()
-      .sort((a, b) => (a.valid_until ?? '').localeCompare(b.valid_until ?? ''))
-  }, [isReuse, prefillBusinessId, ownedPermits.data])
-
   const priorPermitChoice: Permit | null = useMemo(
     () => renewablePermits.find((p) => p.id === priorPermitId) ?? null,
     [renewablePermits, priorPermitId],
@@ -1132,10 +1201,18 @@ export function ApplyWizard() {
           if (isReuse && prefillBusinessId === null) {
             missing.push(applicationType === 'renewal' ? 'The business you are renewing' : 'The business you are amending')
           }
-          // Item 50: a business holds several permits with different expiry
+          // Item 50/85: a business holds several permits with different expiry
           // dates, so "renew this business" names nothing an office can act on.
           if (applicationType === 'renewal' && renewablePermits.length > 0 && priorPermitId === null) {
             missing.push('Which permit you are renewing')
+          }
+          /*
+           * Items 82/84 — an amendment amending nothing is not a filing. The
+           * counter would have to send it back to ask the question the form
+           * was supposed to have asked, so it is asked here instead.
+           */
+          if (applicationType === 'amendment' && !amendmentChosen) {
+            missing.push('What is being amended (ownership, location, nature of business, or other)')
           }
           if (!form.name.trim()) missing.push('Business Name')
           if (!form.registration_number.trim()) missing.push('DTI / SEC / CDA Registration Number')
@@ -1237,6 +1314,7 @@ export function ApplyWizard() {
       prefillBusinessId,
       priorPermitId,
       renewablePermits,
+      amendmentChosen,
     ],
   )
 
@@ -1369,9 +1447,28 @@ export function ApplyWizard() {
       payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
+      ...amendmentPayload(),
     })
     setApplicationId(app.id)
     return app.id
+  }
+
+  /**
+   * The amendment answers on the wire, or nothing at all.
+   *
+   * Sent only for an amendment: the API zeroes these columns for any other
+   * type, and a `new` filing posting `amendment_ownership: false` would be
+   * saying no to a question its form never asked.
+   */
+  function amendmentPayload(): AmendmentAnswers {
+    if (applicationType !== 'amendment') return {}
+
+    return {
+      amendment_ownership: amendment.ownership,
+      amendment_location: amendment.location,
+      amendment_nature: amendment.nature,
+      amendment_other: amendment.other.trim() || null,
+    }
   }
 
   /**
@@ -1559,7 +1656,14 @@ export function ApplyWizard() {
      * a second after the business is picked — before the applicant has said
      * which of its permits they are renewing.
      */
-    (applicationType !== 'renewal' || renewablePermits.length === 0 || priorPermitId !== null)
+    (applicationType !== 'renewal' || renewablePermits.length === 0 || priorPermitId !== null) &&
+    /*
+     * Items 82/84: same reasoning for an amendment. Prefill fills the business
+     * section in one go, so without this a draft — and its amendment columns,
+     * all false — would be written a second after the business is picked and
+     * before the applicant has said what they are amending.
+     */
+    (applicationType !== 'amendment' || amendmentChosen)
 
   /** Push every section entered so far in one go. */
   async function autosave(target: string) {
@@ -1588,6 +1692,9 @@ export function ApplyWizard() {
           permit_type_ids: form.permit_type_ids,
           fee_profile: feeProfile,
           payment_mode: paymentMode,
+          // Items 82/84: what is being amended can change while the draft is
+          // open, so it rides on every autosave, not only on creation.
+          ...amendmentPayload(),
         })
         // Which permit is being renewed can change after the draft exists, and
         // it is not part of the general application update (item 50).
@@ -1626,8 +1733,10 @@ export function ApplyWizard() {
         paymentMode,
         applicationType,
         priorPermitId,
+        // Items 82/84: ticking a box is an edit, so autosave has to see it.
+        amendment,
       }),
-    [title, form, officeData, feeDraft, paymentMode, applicationType, priorPermitId],
+    [title, form, officeData, feeDraft, paymentMode, applicationType, priorPermitId, amendment],
   )
   const syncedRef = useRef(false)
 
@@ -1675,6 +1784,11 @@ export function ApplyWizard() {
         setPrefillBusinessId(null)
         setPriorPermitId(null)
         setPrefillNote(null)
+        setRenewablePermits([])
+        // Items 82/84: the amendment block is part of this section, so Clear
+        // All has to take it too or it would clear the fields around an answer
+        // and leave the answer standing.
+        setAmendment(EMPTY_AMENDMENT)
       }
     } else if (phase === 'address') {
       // The lines of business are inputs of this part now (item 69), so
@@ -1908,6 +2022,21 @@ export function ApplyWizard() {
         setTitle(app.title ?? '')
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
+        /*
+         * Items 82/84 — restore what the applicant said they were amending.
+         * Without this the boxes reopen blank and the next autosave writes
+         * that blank over the answer, which is the draft losing it silently.
+         */
+        setAmendment(
+          app.amendments
+            ? {
+                ownership: app.amendments.ownership,
+                location: app.amendments.location,
+                nature: app.amendments.nature,
+                other: app.amendments.other ?? '',
+              }
+            : EMPTY_AMENDMENT,
+        )
         setForm({
           name: b.name ?? '',
           trade_name: b.trade_name ?? '',
@@ -1973,8 +2102,11 @@ export function ApplyWizard() {
           .map((pt) => `office:${pt.code}`)
         setVisited([...BASE_PHASES, ...officeKeys])
         // Item 50: which permit this renewal is for, chosen when the draft was
-        // started and re-choosable now.
+        // started and re-choosable now — which is why the list has to be here
+        // too (item 85), or reopening a draft would offer nothing to change it
+        // to and the choice would look like it had been lost.
         if (app.application_type !== 'new') {
+          void loadRenewablePermits(b.id, app.application_type)
           void applications
             .priorPermit(app.id)
             .then((r) => {
@@ -2049,6 +2181,27 @@ export function ApplyWizard() {
    */
   useEffect(() => {
     if (!form.registration_type) return
+    /*
+     * Only the four structures get mirrored.
+     *
+     * A renewal or amendment prefills `registration_type` from the business on
+     * record, and on real rows that column holds the REGISTERING AGENCY —
+     * "DTI", "SEC", "CDA" — rather than a structure. BusinessController's
+     * formOfOrganization documents the same mismatch from the other side.
+     *
+     * Mirrored blindly, "DTI" lands in fee_profile.business_structure, which
+     * accepts only the four, and from then on EVERY autosave on the filing
+     * answers 422. The failure is silent in the worst way: the applicant is
+     * told the draft is unsaved, keeps typing, and nothing they enter after
+     * picking their business ever reaches the server. Renewals and amendments
+     * were the only filings affected, because they are the only ones that
+     * prefill this field instead of asking for it.
+     *
+     * Skipping leaves the structure blank, which is the honest state — the
+     * applicant is asked for their Type of Registration on this same step, and
+     * that picker offers exactly the four, so answering it fills this in.
+     */
+    if (!REGISTRATION_TYPES.some((rt) => rt.value === form.registration_type)) return
     setFeeDraft((d) =>
       d.business_structure === form.registration_type
         ? d
@@ -2385,7 +2538,7 @@ export function ApplyWizard() {
                   <FieldLabel required={applicationType === 'renewal' && renewablePermits.length > 0}>
                     Which permit are you {applicationType === 'renewal' ? 'renewing' : 'amending'}?
                   </FieldLabel>
-                  {ownedPermits.loading ? (
+                  {loadingPermits ? (
                     <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
                   ) : renewablePermits.length === 0 ? (
                     <p className="text-xs text-ink-secondary">
@@ -2455,6 +2608,72 @@ export function ApplyWizard() {
                     </p>
                   )}
                 </div>
+              )}
+
+              {/*
+                * Items 82/84 — the paper form's "Amendment from:" block, which
+                * the wizard has never asked. It sits with the business and
+                * permit selection because it is the same decision: which
+                * record, and what about it is changing.
+                */}
+              {applicationType === 'amendment' && (
+                <fieldset
+                  className="mt-5 border-0 p-0"
+                  // React's onBlur is focusout, so one handler on the group
+                  // covers all four controls: the group is the question, and
+                  // leaving any part of it is having been asked.
+                  onBlur={() => touch('amendment')}
+                >
+                  <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+                    What are you amending?
+                    <span className="text-s-red"> *</span>
+                  </legend>
+                  <p className="mb-2 text-xs text-ink-secondary">
+                    Tick everything that is changing. You can choose more than one.
+                  </p>
+                  <div className="space-y-2">
+                    {AMENDMENT_KINDS.map((kind) => (
+                      <label
+                        key={kind.key}
+                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-input-border bg-white px-4 py-2.5 text-sm font-medium text-ink"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={amendment[kind.key]}
+                          onChange={(e) =>
+                            setAmendment((a) => ({ ...a, [kind.key]: e.target.checked }))
+                          }
+                          className="h-4 w-4 shrink-0 accent-royal"
+                        />
+                        <span>{kind.label}</span>
+                      </label>
+                    ))}
+                    {/*
+                      * "Others (specify)" is one control, not a checkbox with a
+                      * box beside it: on the paper you cannot tick Others
+                      * without writing the other in, so typing IS ticking and a
+                      * separate tick could only ever contradict the text.
+                      */}
+                    <label className="block rounded-lg border border-input-border bg-white px-4 py-2.5">
+                      <span className="mb-1.5 block text-[13px] font-semibold text-ink">
+                        Others (specify)
+                      </span>
+                      <input
+                        value={amendment.other}
+                        onChange={(e) => setAmendment((a) => ({ ...a, other: e.target.value }))}
+                        placeholder="e.g. change of business name"
+                        maxLength={255}
+                        className={inputCls}
+                      />
+                    </label>
+                  </div>
+                  {touched.amendment && !amendmentChosen && (
+                    <p role="alert" className="mt-2 text-xs font-medium text-s-red">
+                      Choose at least one. An amendment that amends nothing is not a filing the
+                      BPLO can act on.
+                    </p>
+                  )}
+                </fieldset>
               )}
             </div>
           )}
@@ -3164,6 +3383,18 @@ export function ApplyWizard() {
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
                 {priorPermitChoice.permit_number}
               </p>
+            )}
+            {/* Items 82/84 — last chance to see what this filing changes. */}
+            {applicationType === 'amendment' && amendmentChosen && (
+              <>
+                <p className="mt-6 text-lg font-medium text-royal">Amending</p>
+                <p className="text-sm text-ink-muted">
+                  {[
+                    ...AMENDMENT_KINDS.filter((k) => amendment[k.key]).map((k) => k.label),
+                    ...(amendment.other.trim() ? [`Others: ${amendment.other.trim()}`] : []),
+                  ].join(' · ')}
+                </p>
+              </>
             )}
           </div>
         </div>
