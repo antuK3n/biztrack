@@ -24,13 +24,18 @@ import { ComputedAt } from './ComputedAt'
 import { GenerateReportButton } from './GenerateReportButton'
 
 /*
- * Business Growth Analysis — docs/r-integration-spec.md §4.
+ * Business Lifecycle Monitoring — docs/r-integration-spec.md §4.
  *
- * Naming and formulas both follow the client's paper. Mockup 122 retitles this
- * "Business Lifecycle Monitoring" and renames the second KPI, but the paper is
- * the document that gets presented and questioned, so it wins where the two
- * disagree. The paper's names are "Business Growth Analysis" for the screen and
- * "Business Renewal Performance" for the cohort KPI.
+ * Naming follows mockup 122; formulas follow the client's paper. The spec sets
+ * that split explicitly — "Mockup is newer, follow it for naming, follow the
+ * paper for formulas" — and the rest of the stack already honours it:
+ * BusinessGrowthAnalytics, AnalyticsDatasets and the payload types all call this
+ * Business Lifecycle Monitoring. This file and the tab strip had reversed it on
+ * the grounds that the paper is what gets presented, which left one screen
+ * disagreeing with its own API about what it is called.
+ *
+ * The paper's names, for anyone reading it alongside: "Business Growth Analysis"
+ * for the screen and "Business Renewal Performance" for the cohort KPI.
  *
  * Everything is computed server-side (App\Support\BusinessGrowthAnalytics, or R's
  * POST /growth/lifecycle) and rendered as given. Where a figure genuinely cannot
@@ -368,7 +373,7 @@ export function BusinessGrowthPage() {
           </span>
         }
       >
-        Business Growth Analysis
+        Business Lifecycle Monitoring
       </PageTitle>
 
       <AnalyticsTabs />
@@ -399,7 +404,7 @@ export function BusinessGrowthPage() {
                   ? 'No renewal reached'
                   : `${survival.survival.toFixed(0)}%`
               }
-              label="Business Renewal Performance"
+              label="Cohort Survival Rate"
               metric="cohort_survival.survival"
               hint={
                 survival.survival === null
