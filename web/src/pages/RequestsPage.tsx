@@ -13,7 +13,7 @@ import {
 } from '../components/ui/Proto'
 import type { ChipTone } from '../components/ui/Proto'
 import { toApiError } from '../lib/api'
-import { formatDate, formatDateTime } from '../lib/format'
+import { businessName, formatDate, formatDateTime } from '../lib/format'
 import { applications, documents, reference, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
@@ -393,7 +393,7 @@ function ComposeModal({
             <option value="">Select an application…</option>
             {apps.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.business.name} · {a.tracking_id}
+                {businessName(a.business)} · {a.tracking_id}
               </option>
             ))}
           </select>

@@ -60,3 +60,7 @@ setup('authenticate as admin', async ({ page }) => {
 setup('authenticate as business owner', async ({ page }) => {
   await saveSession(page, 'owner', 'public', 'owner.json')
 })
+
+setup('authenticate as a BPLO officer', async ({ page }) => {
+  await saveSession(page, 'bplo', 'staff', 'bplo.json')
+})
