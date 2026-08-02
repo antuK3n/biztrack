@@ -12,10 +12,11 @@ import { NavLink } from 'react-router-dom'
 const TABS = [
   { to: '/analytics', label: 'Overview', end: true },
   { to: '/analytics/renewal-risk', label: 'Renewal Risk', end: false },
-  // The paper's §4 is "Business Growth Analysis". Mockup 122 retitles it
-  // "Business Lifecycle Monitoring", but the paper is what gets presented and
-  // questioned, so the paper wins on naming (docs/r-integration-spec.md §4).
-  { to: '/analytics/business-growth', label: 'Business Growth', end: false },
+  // The paper's §4 is "Business Growth Analysis"; mockup 122 retitles it
+  // "Business Lifecycle Monitoring" and the mockup is newer, so it wins on
+  // naming (docs/r-integration-spec.md §4). Shortened here only because a tab
+  // strip has no room for the full title.
+  { to: '/analytics/business-growth', label: 'Lifecycle', end: false },
   { to: '/analytics/processing-time', label: 'Processing Time', end: false },
 ]
 

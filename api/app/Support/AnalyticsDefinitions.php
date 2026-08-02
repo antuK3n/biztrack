@@ -436,7 +436,7 @@ final class AnalyticsDefinitions
             ],
 
             'cohort_survival.survival' => [
-                'label' => 'Business Renewal Performance',
+                'label' => 'Cohort Survival Rate',
                 'formula' => 'The share still renewing without a gap at the furthest cycle any business in the register has reached.',
                 'covers' => 'The furthest cycle, which may rest on very few businesses — the number still at risk at that point is carried alongside for exactly that reason. A register only a few years old will report this off a handful of chains.',
                 'why' => 'One number for how well the register holds on to businesses over time. It is the least self-evident figure on the screen, which is why the count behind it is never shown without it.',

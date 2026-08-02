@@ -116,7 +116,7 @@ class AnalyticsController extends Controller
         return $this->serve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
     }
 
-    /** Printable Business Growth Analysis report. */
+    /** Printable Business Lifecycle Monitoring report. */
     public function businessGrowthReport(Request $request): Response
     {
         $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
