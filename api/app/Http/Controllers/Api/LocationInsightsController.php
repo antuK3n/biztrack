@@ -35,7 +35,7 @@ class LocationInsightsController extends Controller
             'latitude' => ['required', 'numeric', 'between:-90,90'],
             'longitude' => ['required', 'numeric', 'between:-180,180'],
             // The applicant's own line, when they have picked one. The zoning
-            // step runs before the Line of Business step, so absent is normal.
+            // map is picked before the line further down the step, so absent is normal.
             'psic_code_id' => ['nullable', 'integer', 'exists:psic_codes,id'],
             'business_id' => ['nullable', 'integer'],
         ]);

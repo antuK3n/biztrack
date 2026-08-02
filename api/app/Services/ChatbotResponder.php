@@ -208,7 +208,7 @@ class ChatbotResponder
             'label' => 'Capital',
             'codes' => [],
             'aliases' => ['capital', 'capitalization', 'capitalisation', 'puhunan'],
-            'answer' => 'Capital sits under each line of business in the Line of Business step, and it is required. '
+            'answer' => 'Capital sits under each line of business in the Location & Zoning step, and it is required. '
                 ."Enter, in pesos, what you have put into that line.\n"
                 .'For a new business it is what your business tax is assessed on, because there is no full year of gross sales to go on yet.',
         ],
@@ -224,7 +224,7 @@ class ChatbotResponder
             'label' => 'Line of Business',
             'codes' => [],
             'aliases' => ['line of business', 'psic', 'psic code', 'nature of business'],
-            'answer' => 'Line of Business is what you actually sell or do, chosen from the PSIC list in the Line of Business step. '
+            'answer' => 'Line of Business is what you actually sell or do, chosen from the PSIC list in the Location & Zoning step. '
                 ."Search for the closest description and pick it.\n"
                 .'It sets the tax rate for that line, so pick the one that matches the activity. You can add more than one line if you do more than one thing.',
         ],
