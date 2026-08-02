@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { SVGProps } from 'react'
+import type { ReactNode, SVGProps } from 'react'
 import { ChevronRightIcon } from '../components/icons'
 import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
@@ -67,6 +67,50 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   )
 }
 
+/*
+ * One labelled control in the Edit Profile grid.
+ *
+ * FieldLabel renders a styled span, so on its own it captions a field without
+ * naming it — a screen reader reaching the input announces "edit text" and
+ * nothing else. Wrapping it in a real `label` with `htmlFor` is what gives each
+ * input its accessible name (WCAG 2.1 AA, 3.3.2 Labels or Instructions).
+ */
+function ProfileField({
+  id,
+  label,
+  error,
+  hint,
+  children,
+}: {
+  id: string
+  label: string
+  error?: string
+  /** Shown under the control — used to explain why email is not editable. */
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <div>
+      <label htmlFor={id}>
+        <FieldLabel>{label}</FieldLabel>
+      </label>
+      {children}
+      {hint && <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>}
+      <FieldError id={`${id}-error`} message={error} />
+    </div>
+  )
+}
+
+/** The pencil affordance the PDF puts inside each editable profile input. */
+function InputPencil() {
+  return (
+    <PencilIcon
+      size={16}
+      className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal"
+    />
+  )
+}
+
 type OpenModal = 'profile' | 'password' | null
 
 export function SettingsPage() {
@@ -78,8 +122,18 @@ export function SettingsPage() {
   const [formError, setFormError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({})
 
+  /*
+   * Every name part registration collects, because Profile prints all of them.
+   * The screen renders first + middle + last + suffix; a modal that only edited
+   * first and last showed the applicant a name they had no way to correct,
+   * which is checklist item 74. Gender is here for the same reason: sign-up
+   * requires it, so leaving it out made it the one answer nobody could revise.
+   */
   const [firstName, setFirstName] = useState(user?.first_name ?? '')
+  const [middleName, setMiddleName] = useState(user?.middle_name ?? '')
   const [lastName, setLastName] = useState(user?.last_name ?? '')
+  const [suffix, setSuffix] = useState(user?.suffix ?? '')
+  const [gender, setGender] = useState<string>(user?.gender ?? '')
   const [phone, setPhone] = useState(user?.mobile_number ?? '')
   const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
@@ -87,7 +141,10 @@ export function SettingsPage() {
 
   function openProfile() {
     setFirstName(user?.first_name ?? '')
+    setMiddleName(user?.middle_name ?? '')
     setLastName(user?.last_name ?? '')
+    setSuffix(user?.suffix ?? '')
+    setGender(user?.gender ?? '')
     setPhone(user?.mobile_number ?? '')
     setNote(null)
     setFormError(null)
@@ -110,9 +167,17 @@ export function SettingsPage() {
     setFormError(null)
     setFieldErrors({})
     try {
+      /*
+       * Optional parts are sent even when blank, on purpose. An empty string
+       * reaches the API as null and clears the stored value — which is the only
+       * way to take a middle name or suffix back off once it has been saved.
+       */
       const { data } = await api.put<{ data: User }>('/auth/profile', {
         first_name: firstName.trim(),
+        middle_name: middleName.trim(),
         last_name: lastName.trim(),
+        suffix: suffix.trim(),
+        gender,
         mobile_number: phone.trim(),
       })
       setUser(data.data)
@@ -166,6 +231,9 @@ export function SettingsPage() {
       {open === 'profile' && (
         <ProtoModal
           title="Edit Profile"
+          // Seven fields now rather than four; the narrow panel squeezed the
+          // two-column grid to about 14 characters per input.
+          wide
           cancelLabel="Cancel"
           confirmLabel={saving ? 'Saving…' : 'Save Changes'}
           onCancel={() => setOpen(null)}
@@ -184,40 +252,90 @@ export function SettingsPage() {
             </p>
           )}
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
-            <div>
-              <FieldLabel>First Name</FieldLabel>
+            <ProfileField id="profile-first" label="First Name" error={fieldErrors.first_name?.[0]}>
               <div className="relative">
                 <input
+                  id="profile-first"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   placeholder="First Name"
+                  autoComplete="given-name"
                   aria-invalid={fieldErrors.first_name ? true : undefined}
                   aria-describedby={fieldErrors.first_name ? 'profile-first-error' : undefined}
                   className={`${inputCls} pr-10`}
                 />
-                <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
+                <InputPencil />
               </div>
-              <FieldError id="profile-first-error" message={fieldErrors.first_name?.[0]} />
-            </div>
-            <div>
-              <FieldLabel>Last Name</FieldLabel>
+            </ProfileField>
+            <ProfileField id="profile-middle" label="Middle Name" error={fieldErrors.middle_name?.[0]}>
               <div className="relative">
                 <input
+                  id="profile-middle"
+                  value={middleName}
+                  onChange={(e) => setMiddleName(e.target.value)}
+                  placeholder="Leave blank if none"
+                  autoComplete="additional-name"
+                  aria-invalid={fieldErrors.middle_name ? true : undefined}
+                  aria-describedby={fieldErrors.middle_name ? 'profile-middle-error' : undefined}
+                  className={`${inputCls} pr-10`}
+                />
+                <InputPencil />
+              </div>
+            </ProfileField>
+            <ProfileField id="profile-last" label="Last Name" error={fieldErrors.last_name?.[0]}>
+              <div className="relative">
+                <input
+                  id="profile-last"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   placeholder="Last Name"
+                  autoComplete="family-name"
                   aria-invalid={fieldErrors.last_name ? true : undefined}
                   aria-describedby={fieldErrors.last_name ? 'profile-last-error' : undefined}
                   className={`${inputCls} pr-10`}
                 />
-                <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
+                <InputPencil />
               </div>
-              <FieldError id="profile-last-error" message={fieldErrors.last_name?.[0]} />
-            </div>
-            <div>
-              <FieldLabel>Mobile Number</FieldLabel>
+            </ProfileField>
+            <ProfileField id="profile-suffix" label="Suffix" error={fieldErrors.suffix?.[0]}>
               <div className="relative">
                 <input
+                  id="profile-suffix"
+                  value={suffix}
+                  onChange={(e) => setSuffix(e.target.value)}
+                  placeholder="Jr., Sr., III"
+                  autoComplete="honorific-suffix"
+                  aria-invalid={fieldErrors.suffix ? true : undefined}
+                  aria-describedby={fieldErrors.suffix ? 'profile-suffix-error' : undefined}
+                  className={`${inputCls} pr-10`}
+                />
+                <InputPencil />
+              </div>
+            </ProfileField>
+            <ProfileField id="profile-gender" label="Gender" error={fieldErrors.gender?.[0]}>
+              {/*
+                Blank is a real option, not a prompt. The column is nullable and
+                accounts created before sign-up asked for gender hold null —
+                forcing one of the two here would make an unrelated name edit
+                impossible to save on those accounts.
+              */}
+              <select
+                id="profile-gender"
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                aria-invalid={fieldErrors.gender ? true : undefined}
+                aria-describedby={fieldErrors.gender ? 'profile-gender-error' : undefined}
+                className={inputCls}
+              >
+                <option value="">Not specified</option>
+                <option value="M">Male</option>
+                <option value="F">Female</option>
+              </select>
+            </ProfileField>
+            <ProfileField id="profile-phone" label="Mobile Number" error={fieldErrors.mobile_number?.[0]}>
+              <div className="relative">
+                <input
+                  id="profile-phone"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="09XX XXX XXXX"
@@ -227,17 +345,25 @@ export function SettingsPage() {
                   aria-describedby={fieldErrors.mobile_number ? 'profile-phone-error' : undefined}
                   className={`${inputCls} pr-10`}
                 />
-                <PencilIcon size={16} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-royal" />
+                <InputPencil />
               </div>
-              <FieldError id="profile-phone-error" message={fieldErrors.mobile_number?.[0]} />
-            </div>
-            <div>
-              <FieldLabel>Email</FieldLabel>
-              <input value={user?.email ?? ''} readOnly aria-readonly="true" className={`${inputCls} bg-canvas text-ink-muted`} />
-              <p className="mt-1.5 text-xs text-ink-muted">
-                Your email is your sign-in ID and can't be changed here. Contact the City BPLO to update it.
-              </p>
-            </div>
+            </ProfileField>
+            <ProfileField
+              id="profile-email"
+              label="Email"
+              hint="Your email is your sign-in ID and can't be changed here. Contact the City BPLO to update it."
+            >
+              {/* readOnly, not disabled: a disabled input drops out of the tab
+                  order, so a keyboard user can never reach the address to read
+                  or copy it. */}
+              <input
+                id="profile-email"
+                value={user?.email ?? ''}
+                readOnly
+                aria-readonly="true"
+                className={`${inputCls} bg-canvas text-ink-muted`}
+              />
+            </ProfileField>
           </div>
         </ProtoModal>
       )}
@@ -258,7 +384,9 @@ export function SettingsPage() {
           )}
           <div className="grid gap-5 py-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <FieldLabel>Current Password</FieldLabel>
+              <label htmlFor="settings-current">
+                <FieldLabel>Current Password</FieldLabel>
+              </label>
               <PasswordInput
                 id="settings-current"
                 placeholder="Current Password"
@@ -272,7 +400,9 @@ export function SettingsPage() {
               <FieldError id="settings-current-error" message={fieldErrors.current_password?.[0]} />
             </div>
             <div>
-              <FieldLabel>Enter New Password</FieldLabel>
+              <label htmlFor="settings-password">
+                <FieldLabel>Enter New Password</FieldLabel>
+              </label>
               <PasswordInput
                 id="settings-password"
                 placeholder="Password"
@@ -285,7 +415,9 @@ export function SettingsPage() {
               <FieldError id="settings-password-error" message={fieldErrors.password?.[0]} />
             </div>
             <div>
-              <FieldLabel>Confirm New Password</FieldLabel>
+              <label htmlFor="settings-confirm">
+                <FieldLabel>Confirm New Password</FieldLabel>
+              </label>
               <PasswordInput
                 id="settings-confirm"
                 placeholder="Confirm Password"
