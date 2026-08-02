@@ -57,7 +57,6 @@ type BasePhase =
   | 'privacy'
   | 'permits'
   | 'business'
-  | 'lines'
   | 'address'
   | 'documents'
   | 'fees'
@@ -72,6 +71,13 @@ type BasePhase =
  * what it may be, so asking for the address before the paperwork matches how
  * the counter actually works.
  *
+ * Item 69 — Line of Business used to have a step of its own, three sections
+ * further on, while Location & Zoning asked the same question in a plain
+ * dropdown so the zoning verdict had a trade to be about. Two asks, one answer.
+ * The picker (search, multi-select, "Other (not listed)" free text, capital per
+ * line) now lives in Location & Zoning and the separate section is gone: the
+ * fuller control survives, the duplicate does not.
+ *
  * The LGU Section then comes after everything that describes the business,
  * because its office form sheets are filled in *from* those answers. When the
  * cards sat second, an applicant picked their clearances before the system knew
@@ -80,17 +86,23 @@ type BasePhase =
  * sanitary, environmental, fire and occupancy sheets open with the business
  * already identified on them.
  *
- * It is not literally last, and it cannot be: both of the sections that follow
- * are computed from which clearances were picked. `requiredDocs` is the union
- * of the document types attached to the selected permit types, and the tax
- * profile's required questions vary by permit code. Putting the cards after
- * either one would ask the applicant to satisfy a list that does not exist yet.
+ * Item 76 asks for the LGU Section "at the last part before submitting", and
+ * this is as late as it can honestly go. It is not literally last, and it
+ * cannot be: both of the sections that follow are computed from which
+ * clearances were picked. `requiredDocs` is the union of the document types
+ * attached to the selected permit types, and the tax profile's required
+ * questions vary by permit code. Putting the cards after either one would ask
+ * the applicant to satisfy a list that does not exist yet — Documentary
+ * Requirements would open empty and the Business & Tax Profile would omit the
+ * occupancy and market questions entirely. So the cards sit immediately before
+ * the first section derived from them, with only their own office sheets in
+ * between, and the half of item 76 that is achievable — that a clearance must
+ * actually be chosen — is enforced in `missingFor` below.
  */
 const BASE_PHASES: BasePhase[] = [
   'privacy',
   'address',
   'business',
-  'lines',
   'permits',
   'fees',
   'documents',
@@ -101,7 +113,6 @@ const BASE_LABELS: Record<BasePhase, string> = {
   privacy: 'Data Privacy Consent',
   permits: 'Permits & Certificates',
   business: 'Business Information',
-  lines: 'Line of Business',
   address: 'Location & Zoning',
   documents: 'Documentary Requirements',
   fees: 'Business & Tax Profile',
@@ -141,6 +152,51 @@ const OTHER_PSIC_CODE = '00000'
  * food manufacturing instead of the sari-sari store.
  */
 const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120', '96200', '36000']
+
+/*
+ * ── Item 86 · where a pin may be dropped ──────────────────────────────────
+ *
+ * A bounding box around Malabon City, and deliberately nothing more.
+ *
+ * The system holds no zone polygons and no coastline (the comments on the
+ * zoning step and the zoning modal have said so since the step was built), so
+ * the only thing that can be checked here honestly is whether the point is
+ * anywhere near the city at all. The box is drawn from the coordinates the repo
+ * already uses for Malabon — the map's default centre at Malabon City Hall
+ * (14.6572, 120.9573), the seeded demo businesses (14.6690/120.9560,
+ * 14.6712/120.9605), the analytics heat-map centre (14.669, 120.957) and the
+ * analytics history seeder's 14.655–14.685 spread — widened to the city's
+ * roughly 6 km × 6 km extent so that a real address near a boundary is not
+ * refused. Every coordinate already in the repo falls inside it.
+ *
+ * What this does NOT do, and what the applicant is therefore never told it
+ * does: it does not prove the pin is inside the city limits (a bounding box
+ * around an irregular city necessarily includes slivers of Navotas, Caloocan
+ * and Valenzuela), and it does not detect water. Malabon is a river delta —
+ * the Tullahan, the Tenejeros-Tanza and the fishpond belt run through it — so
+ * "not on water" cannot be answered without a coastline or hydrography layer,
+ * which would mean an external service (an OSM/Overpass water query, or a
+ * shipped GeoJSON of the city). Neither exists here, and a water check that
+ * silently passed everything would be worse than none: it would put the city's
+ * name behind a guarantee nobody made. CPDO still evaluates the actual location
+ * during processing, which is what the step has always said.
+ */
+const MALABON_BOUNDS = {
+  minLat: 14.645,
+  maxLat: 14.7,
+  minLng: 120.93,
+  maxLng: 120.985,
+}
+
+/** True when a pin is inside the Malabon bounding box described above. */
+function withinMalabon(latitude: number, longitude: number): boolean {
+  return (
+    latitude >= MALABON_BOUNDS.minLat &&
+    latitude <= MALABON_BOUNDS.maxLat &&
+    longitude >= MALABON_BOUNDS.minLng &&
+    longitude <= MALABON_BOUNDS.maxLng
+  )
+}
 
 /** A single running step: either a base phase or one office form sheet. */
 type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
@@ -389,6 +445,13 @@ function FormSheet({
  * is always "Other (not listed)": pick it and you type your own trade, which
  * the API stores on business_lines.line_of_business. The separate fee-profile
  * category field stays a datalist by design.
+ *
+ * Item 69 — this is now the only place the question is asked. It is rendered
+ * inside Location & Zoning, which used to ask it a second time with a plain
+ * dropdown; the dropdown is gone and this control moved, rather than the other
+ * way round, because search, several lines at once, and a free-text escape for
+ * a trade the PSIC list has never heard of are all things a shop owner needs
+ * and none of them survive in a <select>.
  */
 function LinesStep({
   codes,
@@ -663,6 +726,13 @@ export function ApplyWizard() {
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
+  /*
+   * Item 86 — why the last click on the map was not accepted. Held separately
+   * from the form because a refused pin must not become the answer: the
+   * coordinates on the form stay whatever they were, and this says what
+   * happened instead of the pin silently not moving.
+   */
+  const [pinError, setPinError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   /* Autosave bookkeeping — see the autosave effect below. */
@@ -852,21 +922,6 @@ export function ApplyWizard() {
   const clearanceTypes = permitTypes.filter((pt) => pt.code !== BUSINESS_PERMIT_CODE)
   const barangays: Barangay[] = refs.data?.barangays ?? []
   const psic: PsicCode[] = refs.data?.psic ?? []
-  /*
-   * Alphabetical for the location step's dropdown. Section B searches, so its
-   * order does not matter; a plain <select> is only scannable if the 135 trades
-   * read alphabetically, and "Other (not listed)" sits last where it belongs
-   * rather than sorted under O.
-   */
-  const psicByTitle: PsicCode[] = useMemo(
-    () =>
-      [...psic].sort((a, b) => {
-        if (a.code === OTHER_PSIC_CODE) return 1
-        if (b.code === OTHER_PSIC_CODE) return -1
-        return a.title.localeCompare(b.title)
-      }),
-    [psic],
-  )
   const otherType: DocumentType | undefined = (refs.data?.documentTypes ?? []).find(
     (dt) => dt.code === OTHER_DOC_CODE,
   )
@@ -895,10 +950,9 @@ export function ApplyWizard() {
   const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
 
   /*
-   * The line of business the applicant declared, when they have one. The zoning
-   * step is Part 1 and the Line of Business step comes later, so on a new filing
-   * this is usually undefined until they come back to the map — renewals and
-   * amendments have it from the start because the prior filing is prefilled.
+   * The first line of business the applicant declared, when they have one. It
+   * is chosen on the zoning step itself now (item 69), so by the time the
+   * zoning modal opens there is always one to name.
    */
   const declaredLine = psic.find((c) => c.id === form.lines[0]?.psic_code_id)
 
@@ -919,10 +973,10 @@ export function ApplyWizard() {
 
   /*
    * The business as every office sheet will carry it. The LGU Section now runs
-   * after Location, Business Information and Line of Business precisely so this
-   * is complete by the time a sheet opens — the sanitary, environmental, fire
-   * and occupancy forms all begin by asking for the same name, address and
-   * trade, and the applicant has answered all three already.
+   * after Location & Zoning and Business Information precisely so this is
+   * complete by the time a sheet opens — the sanitary, environmental, fire and
+   * occupancy forms all begin by asking for the same name, address and trade,
+   * and the applicant has answered all three already.
    *
    * A blank reads as "—" rather than an empty box: the sheets are reachable
    * from the section map before the sections behind them are finished, and an
@@ -1040,17 +1094,39 @@ export function ApplyWizard() {
     (n: StepNode): string[] => {
       if (n.kind === 'office') return officeFormMissing(n.code, officeData[n.code] ?? {})
       switch (n.phase) {
-        case 'permits':
+        case 'permits': {
           /*
-           * The clearance cards are additive, not a required pick: the Mayor's /
-           * Business Permit is attached implicitly, and applying for it alone is
-           * a real case (the seeded renewal storyline is exactly that). So the
-           * only thing that can block here is reference data that arrived
-           * without the BUSINESS permit type.
+           * Item 76 — a clearance must actually be chosen here.
+           *
+           * The cards used to be additive: the Mayor's / Business Permit is
+           * attached implicitly, so an applicant could walk past this section
+           * without touching it and the step still passed. The client's point is
+           * that walking past it is not a decision — the sanitary, fire,
+           * environmental and occupancy clearances are the substance of the
+           * filing, and a file that reaches BPLO with none of them named is one
+           * the counter has to send back.
+           *
+           * Either half of the card satisfies it. Apply means "issue me one";
+           * Submit means "I already hold this, here is the copy". They are
+           * opposites in what they ask the office to do and identical in what
+           * they tell us — that this clearance has been dealt with — so
+           * requiring one or the other, rather than Apply specifically, is what
+           * stops the rule from forcing an applicant to apply for a certificate
+           * already in their hand.
            */
-          return form.permit_type_ids.length > 0
+          if (form.permit_type_ids.length === 0) {
+            return ['Permit types could not be loaded. Reload the page and try again.']
+          }
+          // The Mayor's / Business Permit rides along on every application, so
+          // it can never count as the applicant having chosen anything.
+          const appliedFor = permitTypes.some(
+            (pt) => pt.code !== BUSINESS_PERMIT_CODE && form.permit_type_ids.includes(pt.id),
+          )
+          const submitted = Object.keys(held).length > 0
+          return appliedFor || submitted
             ? []
-            : ['Permit types could not be loaded. Reload the page and try again.']
+            : ['At least one clearance — Apply for it, or Submit the copy you already hold']
+        }
         case 'business': {
           const missing: string[] = []
           if (isReuse && prefillBusinessId === null) {
@@ -1068,34 +1144,41 @@ export function ApplyWizard() {
           if (!form.registration_type) missing.push('Type of Registration')
           return missing
         }
-        case 'lines': {
-          if (form.lines.length === 0) return ['Select at least one line of business']
+        case 'address': {
           const missing: string[] = []
+          /*
+           * Item 69 — the whole Line of Business question is answered here now,
+           * and these three checks are the ones the deleted `lines` step used to
+           * make. Required on this step, as the mockup marks it, and not merely
+           * because Location Insights wants it: the zoning modal this step opens
+           * into announces conformity *for a named trade*, and CPDO's locational
+           * clearance is a judgment about a use, not about a coordinate.
+           */
+          if (form.lines.length === 0) missing.push('Line of Business')
           const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
           const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
           if (otherLine && !otherLine.line_of_business.trim()) {
             missing.push('Your line of business (typed in, for “Other”)')
           }
+          // Capital is what the business tax and the capitalization-based fees
+          // are computed from, so a blank one is not a detail.
           if (form.lines.some((l) => !l.capitalization.trim())) {
             missing.push('Capital for every line of business')
           }
-          return missing
-        }
-        case 'address': {
-          const missing: string[] = []
-          /*
-           * Required here, as the mockup marks it, and not merely because the
-           * insights want it: the zoning modal this step opens into announces
-           * conformity *for a named trade*, and CPDO's locational clearance is a
-           * judgment about a use, not about a coordinate. Section B still owns
-           * capital and any further lines.
-           */
-          if (!form.lines[0]?.psic_code_id) missing.push('Line of Business')
           if (!form.line1.trim()) missing.push('House No. & Street Name')
           if (!form.barangay_id) missing.push('Barangay')
           // CPDO rules on the zoning clearance from where the business actually
           // is, so the pin is part of the answer, not a nicety.
           if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
+          /*
+           * Item 86 — re-checked here and not only in the click handler. A
+           * renewal prefills its coordinates from the business on record and a
+           * reopened draft restores whatever was saved, so a pin that never
+           * passed through the map's own check can still be sitting on the form.
+           */
+          else if (!withinMalabon(form.latitude, form.longitude)) {
+            missing.push('A pin within Malabon')
+          }
           // Only when renting: the API enforces the same three with required_if.
           if (form.is_rented) {
             if (!form.lessor_name.trim()) missing.push("Lessor's Name")
@@ -1141,6 +1224,9 @@ export function ApplyWizard() {
       officeData,
       requiredDocs,
       uploaded,
+      // Item 76: a submitted certificate is one of the two ways the LGU
+      // Section is satisfied, so its tick has to move when `held` does.
+      held,
       consent,
       feeDraft,
       applicationType,
@@ -1225,16 +1311,6 @@ export function ApplyWizard() {
         : PHONE_ERROR
       : touched.emergency_contact_number
         ? 'Enter a contact number for that person.'
-        : '',
-    /*
-     * The zoning step's Line of Business select is required and has always
-     * rendered `fieldErrors.lines` beneath it — but no such key was ever
-     * defined here, so the message could not appear no matter what. The
-     * applicant saw Next disabled and no reason why on the field itself.
-     */
-    lines:
-      touched.lines && !form.lines[0]?.psic_code_id
-        ? 'Choose the line of business this location is for — the zoning verdict is about a trade, not a coordinate.'
         : '',
   }
 
@@ -1325,13 +1401,16 @@ export function ApplyWizard() {
           // the server only knows now that it has the new permit list.
           setOfficeFormsVersion((v) => v + 1)
         }
-      } else if (phase === 'address' || phase === 'business' || phase === 'lines') {
+      } else if (phase === 'address' || phase === 'business') {
         if (applicationId) {
           const bid = businessId ?? prefillBusinessId
           if (bid) await businesses.update(bid, businessPayload())
-        } else if (phase === 'lines' && canCreateDraft) {
-          // Last step before uploads: there must be something to attach
-          // documents to, even if the autosave debounce has not fired yet.
+        } else if (phase === 'business' && canCreateDraft) {
+          // The last section that describes the business, and so the earliest
+          // point a draft can legally exist (item 69 folded Line of Business
+          // into Location & Zoning, which now runs before this one). There has
+          // to be something to attach documents to by the time uploads start,
+          // even if the autosave debounce has not fired yet.
           await ensureDraftRaw()
         }
       } else if (phase === 'fees') {
@@ -1435,44 +1514,6 @@ export function ApplyWizard() {
   function closeZoning() {
     setShowZoning(false)
     setInsightsQuery(null)
-  }
-
-  /**
-   * Set or clear the primary line of business from the location step.
-   *
-   * Location Insights compares the pin against businesses in the same PSIC
-   * group, so two of its four figures need a declared line. Line of Business is
-   * Section B, three steps after the map, which meant every first-time filing
-   * opened the zoning modal with nothing to compare and the panel reported half
-   * its answers as unavailable. Asking here is the smallest fix that keeps
-   * zoning as Part 1, which the mockup fixes.
-   *
-   * This writes into the same `form.lines` Section B edits — not a parallel
-   * field — so the answer carries forward prefilled instead of being asked
-   * twice. Capital is deliberately left blank: it does not affect insights, the
-   * API takes it as nullable, and Section B still refuses to advance without it.
-   */
-  function setPrimaryLine(psicCodeId: number | null) {
-    setForm((f) => {
-      const [first, ...rest] = f.lines
-      if (psicCodeId === null) {
-        /*
-         * Only withdraw the bare stub this control created. Once the applicant
-         * has given the line capital or a typed trade name it is their work,
-         * and clearing an optional dropdown should not delete it.
-         */
-        return first && !first.capitalization.trim() && !first.line_of_business.trim()
-          ? { ...f, lines: rest }
-          : f
-      }
-      if (!first) {
-        return {
-          ...f,
-          lines: [{ psic_code_id: psicCodeId, capitalization: '', line_of_business: '' }],
-        }
-      }
-      return { ...f, lines: [{ ...first, psic_code_id: psicCodeId }, ...rest] }
-    })
   }
 
   function back() {
@@ -1635,10 +1676,19 @@ export function ApplyWizard() {
         setPriorPermitId(null)
         setPrefillNote(null)
       }
-    } else if (phase === 'lines') {
-      setForm((f) => ({ ...f, lines: [] }))
     } else if (phase === 'address') {
-      setForm((f) => ({ ...f, line1: '', line2: '', barangay_id: '', latitude: null, longitude: null }))
+      // The lines of business are inputs of this part now (item 69), so
+      // "clear all inputs for this part" has to take them with it.
+      setForm((f) => ({
+        ...f,
+        lines: [],
+        line1: '',
+        line2: '',
+        barangay_id: '',
+        latitude: null,
+        longitude: null,
+      }))
+      setPinError(null)
     } else if (phase === 'permits') {
       // Clearances only: the Mayor's / Business Permit is never cleared.
       setForm((f) => ({ ...f, permit_type_ids: businessTypeId === null ? [] : [businessTypeId] }))
@@ -1982,18 +2032,39 @@ export function ApplyWizard() {
   }, [applicationId, officeFormsVersion])
 
   /*
-   * Entering the Business & Tax Profile step: seed structure from the business
-   * section's registration type and per-line capitalization from the Line of
-   * Business step (once, without clobbering anything the user already typed).
+   * Item 72 — Business Structure is not a second question.
+   *
+   * "Type of Registration" on the business section and "Business Structure" on
+   * the tax profile are the same fact under two names: a sole proprietorship is
+   * registered with DTI and taxed as one, and no applicant has ever answered
+   * them differently on purpose. So the registration type IS the structure, and
+   * the tax profile shows it read-only instead of asking again.
+   *
+   * It has to be mirrored on every change, not seeded once into a blank: the
+   * field is read-only on that step now, so a structure left behind by an
+   * edited registration type would be wrong and unfixable from where it is
+   * shown. Ungated by `phase` for the same reason — the applicant can jump back
+   * to Business Information from the section map, change it, and jump forward
+   * past the fee step to Review without ever landing on 'fees'.
+   */
+  useEffect(() => {
+    if (!form.registration_type) return
+    setFeeDraft((d) =>
+      d.business_structure === form.registration_type
+        ? d
+        : { ...d, business_structure: form.registration_type },
+    )
+  }, [form.registration_type])
+
+  /*
+   * Entering the Business & Tax Profile step: seed each line's capitalization
+   * from what was declared against that line in Location & Zoning (once,
+   * without clobbering anything the user already typed here).
    */
   useEffect(() => {
     if (phase !== 'fees') return
     setFeeDraft((d) => {
-      let nextDraft = d
-      if (!d.business_structure && form.registration_type) {
-        nextDraft = { ...nextDraft, business_structure: form.registration_type }
-      }
-      const categories = { ...nextDraft.categories }
+      const categories = { ...d.categories }
       let seeded = false
       for (const line of form.lines) {
         if (!categories[line.psic_code_id]) {
@@ -2005,9 +2076,9 @@ export function ApplyWizard() {
           seeded = true
         }
       }
-      return seeded ? { ...nextDraft, categories } : nextDraft
+      return seeded ? { ...d, categories } : d
     })
-  }, [phase, form.registration_type, form.lines])
+  }, [phase, form.lines])
 
   /* Success screen after submit (kept). */
   if (tracking) {
@@ -2081,6 +2152,10 @@ export function ApplyWizard() {
           Name the filing, not the business: one business can have three
           applications open, and "Nena's Sari-Sari Store" three times over is
           not a list anyone can use. Blank keeps the business name.
+
+          Item 70 — the fallback placeholder read "Title of Application", which
+          is the label back again in grey and tells a first-time applicant
+          nothing about what to type. An example of a filing name does.
         */}
         <label className="min-w-0 flex-1">
           <span className="sr-only">Application title</span>
@@ -2088,7 +2163,7 @@ export function ApplyWizard() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={120}
-            placeholder={form.name.trim() || 'Title of Application'}
+            placeholder={form.name.trim() || 'e.g. 2026 renewal — Catmon branch'}
             className="w-full max-w-md truncate rounded-md border border-input-border bg-white px-3 py-1.5 text-xl font-bold text-ink placeholder:font-bold placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
           />
         </label>
@@ -2480,16 +2555,6 @@ export function ApplyWizard() {
         </FormSheet>
       )}
 
-      {/* ── Lines of business (form sheet) ─────────────────────────────── */}
-      {phase === 'lines' && (
-        <FormSheet meta={typeMeta}>
-          <SectionMarker letter="B" label="Line of Business" />
-          <div className="mt-4">
-            <LinesStep codes={psic} lines={form.lines} onChange={(lines) => update('lines', lines)} />
-          </div>
-        </FormSheet>
-      )}
-
       {/* ── Zoning clearance — Selecting Business Location (p27) ───────── */}
       {/*
        * This step is location CAPTURE for the zoning / locational clearance,
@@ -2497,22 +2562,79 @@ export function ApplyWizard() {
        * conformance is evaluated by the Zoning Office (CPDO) during
        * processing. The copy here says "zoning clearance", never "Mayor's
        * permit" (user-testing feedback).
+       *
+       * The one thing it does decide is item 86: a pin nowhere near Malabon is
+       * refused outright, because no amount of CPDO review makes a business in
+       * another city licensable here. That is a bounding-box check and nothing
+       * more — see MALABON_BOUNDS.
        */}
       {phase === 'address' && (
         <div>
           <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
           <div className="mb-2 h-px bg-ink/40" />
           <p className="mb-6 text-xs text-ink-secondary">
-            Pin your exact location and enter your address. These details go to the City Planning
+            Pin your exact location and enter your address. The pin has to fall within Malabon —
+            BPLO can only license a business inside the city. These details go to the City Planning
             and Development Office (CPDO), which evaluates your zoning / locational clearance
             during processing.
           </p>
+
+          {/*
+            * Item 69 — the one and only Line of Business question.
+            *
+            * It belongs on this screen because the zoning verdict is about a
+            * trade rather than a coordinate, and because Location Insights
+            * compares the pin against businesses in the same PSIC group. It used
+            * to be a plain dropdown here AND a full picker three sections later,
+            * which asked the same thing twice and made the second ask look like
+            * a different question. The picker is the one that survived: it
+            * searches all 135 trades, takes more than one line, carries the
+            * capital each line needs for the business tax, and has a free-text
+            * escape for a trade the PSIC list has never heard of. None of that
+            * survives in a <select>.
+            *
+            * Full width above the map rather than squeezed into the address
+            * column beside it — each selected line needs a title, a capital box
+            * and a Remove control on one row, and the picker's own search
+            * results are the widest thing on the step.
+            */}
+          <div className="mb-7 rounded-2xl bg-white px-5 py-5 shadow-card sm:px-6">
+            <FieldLabel required>Line of Business</FieldLabel>
+            <p className="mb-3 text-xs text-ink-secondary">
+              What this location will be used for. Add every line you trade in — each one is
+              assessed separately.
+            </p>
+            <LinesStep codes={psic} lines={form.lines} onChange={(lines) => update('lines', lines)} />
+            {form.lines.length === 0 && (
+              <p className="mt-2.5 text-xs font-medium text-s-red">
+                Required: choose at least one line of business. The zoning verdict is about a trade,
+                not a coordinate.
+              </p>
+            )}
+          </div>
+
           <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
             <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
               <MapPicker
                 latitude={form.latitude}
                 longitude={form.longitude}
-                onPick={(lat, lng) => setForm((f) => ({ ...f, latitude: lat, longitude: lng }))}
+                onPick={(lat, lng) => {
+                  /*
+                   * Item 86 — a pin outside the city is refused rather than
+                   * stored and argued with later. The wording names exactly what
+                   * was checked (is it near Malabon) and no more: this cannot
+                   * tell land from water, so it never says it did. See
+                   * MALABON_BOUNDS for what the check is and is not.
+                   */
+                  if (!withinMalabon(lat, lng)) {
+                    setPinError(
+                      `That point (${lat}, ${lng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                    )
+                    return
+                  }
+                  setPinError(null)
+                  setForm((f) => ({ ...f, latitude: lat, longitude: lng }))
+                }}
               />
               {form.latitude !== null ? (
                 <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
@@ -2523,43 +2645,22 @@ export function ApplyWizard() {
                   Required: click the map to drop a pin where your business is.
                 </p>
               )}
+              {pinError && (
+                <p role="alert" className="bg-white px-4 pb-2 text-xs font-medium text-s-red">
+                  {pinError}
+                </p>
+              )}
+              {/*
+                * The pin locates the premises; it does not clear them. Said
+                * plainly so the boundary check above is not mistaken for a
+                * verdict on the site itself — there are no zone polygons and no
+                * water layer here, and CPDO looks at the actual location.
+                */}
+              <p className="bg-white px-4 pb-2.5 text-xs text-ink-muted">
+                CPDO checks the actual site during processing.
+              </p>
             </div>
             <div className="space-y-4">
-              <div>
-                {/*
-                  * Live, and first on the screen, as the mockup has it.
-                  *
-                  * This was a disabled echo reading "You choose this later, in
-                  * the Line of Business section" — which made the mockup's own
-                  * Location Insights unanswerable. Two of its four figures
-                  * compare the pin against businesses in the same PSIC group,
-                  * and Section B is three steps further on, so every new filing
-                  * opened the zoning modal with nothing to compare against and
-                  * the panel reported half its answers unavailable.
-                  *
-                  * Section B still owns capital and any additional lines; this
-                  * sets the primary line only, and Section B shows it prefilled.
-                  */}
-                <label className="block">
-                <FieldLabel required>Line of Business</FieldLabel>
-                <select
-                  value={form.lines[0]?.psic_code_id ?? ''}
-                  onChange={(e) => setPrimaryLine(e.target.value ? Number(e.target.value) : null)}
-                  onBlur={() => touch('lines')}
-                  className={inputCls}
-                >
-                  <option value="">Select your line of business</option>
-                  {psicByTitle.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.code === OTHER_PSIC_CODE ? c.title : `${c.code} — ${c.title}`}
-                    </option>
-                  ))}
-                </select>
-                </label>
-                {fieldErrors.lines && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.lines}</p>
-                )}
-              </div>
               <div>
                 <label className="block">
                 <FieldLabel required>House No. &amp; Street Name</FieldLabel>
@@ -2666,11 +2767,17 @@ export function ApplyWizard() {
                   <div>
                     <label className="block">
                     <FieldLabel required>Lessor's Address</FieldLabel>
+                    {/*
+                      * Item 70 — this example named "Poblacion", which is not a
+                      * Malabon barangay at all. Catmon is one of the 21 the
+                      * reference data actually seeds, so the example now reads
+                      * like an address somebody here could really be typing.
+                      */}
                     <input
                       value={form.lessor_address}
                       onChange={(e) => update('lessor_address', e.target.value)}
                       onBlur={() => touch('lessor_address')}
-                      placeholder="e.g. 12 Mabini Street, Poblacion"
+                      placeholder="e.g. 12 Mabini Street, Catmon"
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_address)}
                     />
@@ -2690,7 +2797,7 @@ export function ApplyWizard() {
                         value={form.lessor_contact}
                         onChange={(e) => update('lessor_contact', e.target.value)}
                         onBlur={() => touch('lessor_contact')}
-                        placeholder="09XX XXX XXXX"
+                        placeholder="e.g. 0917 123 4567"
                         className={inputCls}
                         aria-invalid={Boolean(fieldErrors.lessor_contact)}
                       />
@@ -2751,7 +2858,7 @@ export function ApplyWizard() {
                     value={form.emergency_contact_number}
                     onChange={(e) => update('emergency_contact_number', e.target.value)}
                     onBlur={() => touch('emergency_contact_number')}
-                    placeholder="09XX XXX XXXX"
+                    placeholder="e.g. 0917 123 4567"
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
                   />
@@ -3008,6 +3115,13 @@ export function ApplyWizard() {
           <div className="mt-1">
             <FeeProfileStep
               applicationType={applicationType}
+              /*
+               * Item 72 — where the Business Structure answer came from, so the
+               * step can show it rather than ask it a second time. Blank only
+               * if reference data or a draft arrived without one, and the step
+               * falls back to asking in that case.
+               */
+              registrationType={form.registration_type}
               permitCodes={permitTypes
                 .filter((pt) => form.permit_type_ids.includes(pt.id))
                 .map((pt) => pt.code)}
