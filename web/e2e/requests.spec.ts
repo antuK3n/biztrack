@@ -105,3 +105,50 @@ test('a removed business is named as removed, not left blank', async ({ page }) 
   // The healthy row still reads normally.
   expect(options.find((o) => o.includes('BIZ-2026-00100'))).toContain('Dela Cruz Trading')
 })
+
+/*
+ * Checklist item 89 — "requests for other requirements should have recipients".
+ *
+ * The recipient is shown rather than picked, because the model has exactly one
+ * to offer: only the business_owner role holds `request.respond`, so a request
+ * addressed to an office would arrive somewhere nobody could answer it. What
+ * has to be true of a field that states rather than asks is that it is still
+ * readable — `readOnly`, not `disabled`, or the keyboard skips it and screen
+ * readers commonly drop it (WCAG 2.1 AA), which would hide the very fact the
+ * field exists to state.
+ */
+test('the composer names who the request is going to, readably', async ({ page }) => {
+  await page.route('**/api/v1/applications*', async (route) => {
+    const url = new URL(route.request().url())
+    if (!/\/api\/v1\/applications\/?$/.test(url.pathname)) return route.fallback()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ data: WITH_DELETED_BUSINESS }),
+    })
+  })
+
+  await page.goto('/requests')
+  await page.getByRole('button', { name: /request/i }).first().click()
+  await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
+
+  const recipient = page.getByLabel(/to \(recipient\)/i)
+  await expect(recipient).toBeVisible()
+  await expect(recipient).toHaveAttribute('readonly', '')
+  await expect(recipient).toBeEnabled()
+
+  // Empty until a filing is chosen — there is no recipient before there is an
+  // application, and inventing one would be the fake picker in another costume.
+  await expect(recipient).toHaveValue('')
+
+  // By value: the option label carries the business name, which is the thing
+  // under test, so selecting by it would assert nothing.
+  await page.getByLabel(/application/i).first().selectOption('90002')
+
+  /*
+   * This stub carries no `applicant`, which is the real nullable case: User
+   * soft-deletes and its filings stay. The fallback has to name somebody rather
+   * than go blank, and it still has to say which business.
+   */
+  await expect(recipient).toHaveValue(/business owner on file · applicant for Dela Cruz Trading/i)
+})

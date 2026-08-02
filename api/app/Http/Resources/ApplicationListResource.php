@@ -22,6 +22,17 @@ class ApplicationListResource extends JsonResource
                 'id' => $this->business->id,
                 'name' => $this->business->name,
             ] : null,
+            /*
+             * Who filed it. The officer request composer has to name the person
+             * a requirement is being sent to before it is sent (checklist item
+             * 89), and the picker it reads is this list. Null is a real state
+             * rather than a bug: User soft-deletes, so a filing can outlive the
+             * account that made it — readers fall back to the business.
+             */
+            'applicant' => $this->relationLoaded('applicant') && $this->applicant ? [
+                'id' => $this->applicant->id,
+                'name' => $this->applicant->name,
+            ] : null,
             'submitted_at' => optional($this->submitted_at)->toISOString(),
             'deadline_at' => optional($this->deadline_at)->toISOString(),
             'permit_types' => $this->relationLoaded('permitTypes')

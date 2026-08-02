@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\PermitType;
 use App\Models\PsicCode;
@@ -84,6 +85,50 @@ it('names the conversation after the applicant for a reviewing officer', functio
         ->and($row['counterparty']['is_officer'])->toBeFalse()
         ->and($row['counterparty']['subtitle'])->toBe('Thread Test Bakery')
         ->and($row['last_message']['mine'])->toBeFalse();
+});
+
+/*
+ * Item 73: "Messages should have something that will determine which admin is
+ * responsible for handling your certain applications." `counterparty` answers
+ * "who wrote to me last", which is a different question, drifts as different
+ * officers reply, and says nothing at all before anybody has written — so the
+ * office is now named on its own.
+ */
+it('names the responsible office on a conversation about a routed filing', function () {
+    // Assignments are only created once the fee clears, so a routed filing has
+    // to be borrowed from the register rather than built here.
+    $assignment = ApplicationAssignment::with('application.applicant')
+        ->whereHas('application.applicant')
+        ->firstOrFail();
+    $appId = $assignment->application_id;
+
+    $this->withHeaders(authAs($assignment->application->applicant->email))
+        ->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Which office has this?'])
+        ->assertCreated();
+
+    $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
+        ->firstWhere('application_id', $appId);
+
+    expect($row['responsible_office'])->not->toBeNull()
+        // ONE office, never the routing list: a filing with four clearances has
+        // four assignments, and printing all of them answers nothing.
+        ->and($row['responsible_office'])->toHaveKeys(['code', 'name', 'officer'])
+        ->and($row['responsible_office']['name'])->not->toBe('');
+});
+
+it('leaves the responsible office null while nothing is routed yet', function () {
+    // A filing nobody has been assigned genuinely has no responsible office;
+    // naming one would be inventing it.
+    $appId = ownerApplicationId();
+
+    authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Early question.'])
+        ->assertCreated();
+
+    $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
+        ->firstWhere('application_id', $appId);
+
+    expect($row['responsible_office'])->toBeNull();
 });
 
 it('offers the applicant a way in before anyone has said anything', function () {
