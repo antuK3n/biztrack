@@ -803,6 +803,21 @@ export function ApplyWizard() {
   const clearanceTypes = permitTypes.filter((pt) => pt.code !== BUSINESS_PERMIT_CODE)
   const barangays: Barangay[] = refs.data?.barangays ?? []
   const psic: PsicCode[] = refs.data?.psic ?? []
+  /*
+   * Alphabetical for the location step's dropdown. Section B searches, so its
+   * order does not matter; a plain <select> is only scannable if the 135 trades
+   * read alphabetically, and "Other (not listed)" sits last where it belongs
+   * rather than sorted under O.
+   */
+  const psicByTitle: PsicCode[] = useMemo(
+    () =>
+      [...psic].sort((a, b) => {
+        if (a.code === OTHER_PSIC_CODE) return 1
+        if (b.code === OTHER_PSIC_CODE) return -1
+        return a.title.localeCompare(b.title)
+      }),
+    [psic],
+  )
   const otherType: DocumentType | undefined = (refs.data?.documentTypes ?? []).find(
     (dt) => dt.code === OTHER_DOC_CODE,
   )
@@ -993,6 +1008,14 @@ export function ApplyWizard() {
         }
         case 'address': {
           const missing: string[] = []
+          /*
+           * Required here, as the mockup marks it, and not merely because the
+           * insights want it: the zoning modal this step opens into announces
+           * conformity *for a named trade*, and CPDO's locational clearance is a
+           * judgment about a use, not about a coordinate. Section B still owns
+           * capital and any further lines.
+           */
+          if (!form.lines[0]?.psic_code_id) missing.push('Line of Business')
           if (!form.line1.trim()) missing.push('House No. & Street Name')
           if (!form.barangay_id) missing.push('Barangay')
           // CPDO rules on the zoning clearance from where the business actually
@@ -1278,6 +1301,44 @@ export function ApplyWizard() {
   function closeZoning() {
     setShowZoning(false)
     setInsightsQuery(null)
+  }
+
+  /**
+   * Set or clear the primary line of business from the location step.
+   *
+   * Location Insights compares the pin against businesses in the same PSIC
+   * group, so two of its four figures need a declared line. Line of Business is
+   * Section B, three steps after the map, which meant every first-time filing
+   * opened the zoning modal with nothing to compare and the panel reported half
+   * its answers as unavailable. Asking here is the smallest fix that keeps
+   * zoning as Part 1, which the mockup fixes.
+   *
+   * This writes into the same `form.lines` Section B edits — not a parallel
+   * field — so the answer carries forward prefilled instead of being asked
+   * twice. Capital is deliberately left blank: it does not affect insights, the
+   * API takes it as nullable, and Section B still refuses to advance without it.
+   */
+  function setPrimaryLine(psicCodeId: number | null) {
+    setForm((f) => {
+      const [first, ...rest] = f.lines
+      if (psicCodeId === null) {
+        /*
+         * Only withdraw the bare stub this control created. Once the applicant
+         * has given the line capital or a typed trade name it is their work,
+         * and clearing an optional dropdown should not delete it.
+         */
+        return first && !first.capitalization.trim() && !first.line_of_business.trim()
+          ? { ...f, lines: rest }
+          : f
+      }
+      if (!first) {
+        return {
+          ...f,
+          lines: [{ psic_code_id: psicCodeId, capitalization: '', line_of_business: '' }],
+        }
+      }
+      return { ...f, lines: [{ ...first, psic_code_id: psicCodeId }, ...rest] }
+    })
   }
 
   function back() {
@@ -2321,19 +2382,39 @@ export function ApplyWizard() {
             </div>
             <div className="space-y-4">
               <div>
-                {/* A read-only echo: the picker lives in the Line of Business
-                    section, so there is no asterisk on a field nobody can
-                    fill here. */}
+                {/*
+                  * Live, and first on the screen, as the mockup has it.
+                  *
+                  * This was a disabled echo reading "You choose this later, in
+                  * the Line of Business section" — which made the mockup's own
+                  * Location Insights unanswerable. Two of its four figures
+                  * compare the pin against businesses in the same PSIC group,
+                  * and Section B is three steps further on, so every new filing
+                  * opened the zoning modal with nothing to compare against and
+                  * the panel reported half its answers unavailable.
+                  *
+                  * Section B still owns capital and any additional lines; this
+                  * sets the primary line only, and Section B shows it prefilled.
+                  */}
                 <label className="block">
-                <FieldLabel>Line of Business</FieldLabel>
-                <select className={inputCls} disabled>
-                  <option>
-                    {form.lines.length > 0
-                      ? psic.find((c) => c.id === form.lines[0].psic_code_id)?.title ?? 'Line of Business'
-                      : 'You choose this later, in the Line of Business section'}
-                  </option>
+                <FieldLabel required>Line of Business</FieldLabel>
+                <select
+                  value={form.lines[0]?.psic_code_id ?? ''}
+                  onChange={(e) => setPrimaryLine(e.target.value ? Number(e.target.value) : null)}
+                  onBlur={() => touch('lines')}
+                  className={inputCls}
+                >
+                  <option value="">Select your line of business</option>
+                  {psicByTitle.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code === OTHER_PSIC_CODE ? c.title : `${c.code} — ${c.title}`}
+                    </option>
+                  ))}
                 </select>
                 </label>
+                {fieldErrors.lines && (
+                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.lines}</p>
+                )}
               </div>
               <div>
                 <label className="block">
