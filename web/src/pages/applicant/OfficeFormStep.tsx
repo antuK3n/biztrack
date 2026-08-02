@@ -241,7 +241,22 @@ function ApplicationDateField({ data }: { data: OfficeFormData }) {
   )
 }
 
-const WATER_SOURCES = ['Level III (Waterworks)', 'Deep Well', 'Bottled / Refill', 'Other']
+/*
+ * The option sets are exported so demoOfficeForm() can pick from them by index
+ * rather than repeating the strings. A chip row silently accepts a value that
+ * is not one of its options — it just renders nothing as selected — so a typo
+ * in a duplicated literal would look like an empty required field.
+ */
+export const WATER_SOURCES = ['Level III (Waterworks)', 'Deep Well', 'Bottled / Refill', 'Other']
+
+export const SANITARY_CLASSIFICATIONS = [
+  'Food Establishment',
+  'Non-Food Establishment',
+  'Personal / Public Service',
+  'Industrial',
+]
+
+export const OCCUPANCY_SCOPES = ['Full', 'Partial']
 
 function SanitaryFields({
   data,
@@ -283,12 +298,7 @@ function SanitaryFields({
         <div>
           <FieldLabel required>Sanitary Classification</FieldLabel>
           <ChipRow
-            options={[
-              'Food Establishment',
-              'Non-Food Establishment',
-              'Personal / Public Service',
-              'Industrial',
-            ]}
+            options={SANITARY_CLASSIFICATIONS}
             value={get(data, 'sanitary_classification')}
             onChange={(v) => set('sanitary_classification', v)}
           />
@@ -454,7 +464,7 @@ function OccupancyFields({
           <div>
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
-              options={['Full', 'Partial']}
+              options={OCCUPANCY_SCOPES}
               value={get(data, 'application_type')}
               onChange={(v) => set('application_type', v)}
             />

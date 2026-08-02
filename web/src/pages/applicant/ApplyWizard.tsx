@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
@@ -20,6 +20,7 @@ import { formatBytes, formatDate } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, businesses, documents, officeForms, permits, reference } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
+import { DEMO_AUTOFILL, demoDocumentFile, demoOfficeForm } from '../../lib/demoFill'
 import {
   OFFICE_FORM_CODES,
   OfficeFormSheet,
@@ -126,6 +127,27 @@ function stepKey(n: StepNode): string {
  * permit-type code, which is how a reopened draft knows which card to mark.
  */
 const HELD_DOC_PREFIX = 'HELD_'
+
+/**
+ * Says a step was filled in by the demo autofill rather than by the person at
+ * the keyboard.
+ *
+ * Prefilled answers that look hand-entered are the whole risk of this feature:
+ * an officer reviewing a demo filing, or a panelist looking over a shoulder,
+ * has to be able to tell invented answers from real ones. The generated
+ * attachments carry the same disclosure drawn into the image, so it survives
+ * being opened outside the wizard.
+ */
+function DemoDataBanner({ children }: { children: ReactNode }) {
+  return (
+    <p className="mb-5 flex items-start gap-2 rounded-sm border border-royal/30 bg-royal-tint px-4 py-3 text-xs text-royal-deep">
+      <span aria-hidden="true">⚡</span>
+      <span>
+        <span className="font-semibold">Demo data.</span> {children}
+      </span>
+    </p>
+  )
+}
 
 /** An attachment already on the draft: the id is what a removal needs. */
 interface UploadedFile {
@@ -611,6 +633,8 @@ export function ApplyWizard() {
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
   /* Bumped after a permit re-sync to refetch server-derived office-form answers. */
   const [officeFormsVersion, setOfficeFormsVersion] = useState(0)
+  /* Whether the saved office sheets have come back; gates demo autofill. */
+  const [officeFormsLoaded, setOfficeFormsLoaded] = useState(false)
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -902,6 +926,94 @@ export function ApplyWizard() {
   useEffect(() => {
     setStep((s) => Math.min(s, sequence.length - 1))
   }, [sequence.length])
+
+  /*
+   * ── Demo autofill (VITE_DEMO_AUTOFILL) ─────────────────────────────────
+   *
+   * Fills a step as it is reached, so a run through the wizard is Next → Next
+   * → Submit. Everything still goes out over the same endpoints the applicant's
+   * own answers would: these effects only supply values, they never write to
+   * the API themselves and they never relax a validation rule.
+   */
+
+  /** Requirements this session has already generated an attachment for. */
+  const demoFilledDocsRef = useRef<Set<number>>(new Set())
+
+  /*
+   * What is attached right now, readable without depending on it.
+   *
+   * The upload loop below has to skip requirements a reopened draft already
+   * carries, but naming `uploaded` in its dependency list makes every completed
+   * upload re-run the effect — and the cleanup from the previous run stops the
+   * loop where it stands. That killed the run after the first attachment and
+   * left the rest claimed but never sent.
+   */
+  const uploadedRef = useRef(uploaded)
+  useEffect(() => {
+    uploadedRef.current = uploaded
+  }, [uploaded])
+
+  /* Office sheets: fill the applicant-typed fields, keep the derived ones. */
+  useEffect(() => {
+    if (!DEMO_AUTOFILL || !officeCode || !officeFormsLoaded) return
+    setOfficeData((prev) => {
+      const existing = prev[officeCode] ?? {}
+      const demo = demoOfficeForm(officeCode, applicationId ?? 0)
+      /*
+       * Answered-ness is judged on the keys the demo writes, not on the sheet
+       * being non-empty. Stepping through a sheet saves it, and the server
+       * writes its derived answers back, so a sheet nobody has typed into still
+       * comes back holding the filing date and the application type — an
+       * emptiness check would see those and decline to fill anything.
+       */
+      const answered = Object.keys(demo).some(
+        (k) => typeof existing[k] === 'string' && (existing[k] as string).trim() !== '',
+      )
+      if (answered) return prev
+      return { ...prev, [officeCode]: { ...existing, ...demo } }
+    })
+  }, [officeCode, officeFormsLoaded, applicationId])
+
+  /* Documentary requirements: generate and upload one attachment apiece. */
+  useEffect(() => {
+    if (!DEMO_AUTOFILL || phase !== 'documents' || !applicationId) return
+    setConsent(true)
+
+    const pending = requiredDocs.filter(
+      (dt) =>
+        dt.is_required !== false &&
+        !uploadedRef.current[dt.id] &&
+        !demoFilledDocsRef.current.has(dt.id),
+    )
+    if (pending.length === 0) return
+
+    /*
+     * Claim every requirement before awaiting any of them, so a re-run cannot
+     * pick up one this loop has not reached yet and attach it twice.
+     *
+     * A failed upload stays claimed rather than being released for retry:
+     * releasing it would let the effect re-enter immediately and spin. The
+     * error surfaces through handleUpload, and leaving the step clears the
+     * claims.
+     */
+    for (const dt of pending) demoFilledDocsRef.current.add(dt.id)
+
+    let active = true
+    void (async () => {
+      for (const dt of pending) {
+        if (!active) return
+        // Sequential: handleUpload tracks a single in-flight type, and this
+        // keeps the requirement list filling in visibly from the top.
+        await handleUpload(dt.id, await demoDocumentFile(dt.name))
+      }
+    })()
+
+    return () => {
+      // Only leaving the step stops the run now that `uploaded` is read
+      // through a ref; nothing in the loop's own progress re-triggers this.
+      active = false
+    }
+  }, [phase, applicationId, requiredDocs])
 
   /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
   useEffect(() => {
@@ -1766,7 +1878,7 @@ export function ApplyWizard() {
     officeForms
       .list(applicationId)
       .then((forms) => {
-        if (!active || forms.length === 0) return
+        if (!active) return
         setOfficeData((prev) => {
           const nextData = { ...prev }
           for (const f of forms) {
@@ -1780,6 +1892,17 @@ export function ApplyWizard() {
       })
       .catch(() => {
         /* Non-fatal: office forms are optional free-form JSON. */
+      })
+      .finally(() => {
+        /*
+         * Demo autofill waits on this. The merge above skips any code already
+         * present as a KEY, not merely any code with answers, so a demo sheet
+         * written before the fetch returns would permanently mask the sheet the
+         * applicant actually saved. Marked in `finally` because a failed fetch
+         * still has to release the gate — otherwise a transient error leaves
+         * the sheets blank with no way to fill them.
+         */
+        if (active) setOfficeFormsLoaded(true)
       })
     return () => {
       active = false
@@ -2545,17 +2668,30 @@ export function ApplyWizard() {
 
       {/* ── Per-office application forms (p040-043) ────────────────────── */}
       {officeCode && (
-        <OfficeFormSheet
-          code={officeCode}
-          data={officeData[officeCode] ?? {}}
-          onChange={(d) => setOfficeData((prev) => ({ ...prev, [officeCode]: d }))}
-        />
+        <>
+          {DEMO_AUTOFILL && (
+            <DemoDataBanner>
+              This sheet was prefilled for testing. Every answer is editable and saves normally.
+            </DemoDataBanner>
+          )}
+          <OfficeFormSheet
+            code={officeCode}
+            data={officeData[officeCode] ?? {}}
+            onChange={(d) => setOfficeData((prev) => ({ ...prev, [officeCode]: d }))}
+          />
+        </>
       )}
 
       {/* ── Documents + Data Privacy Consent (p36) ─────────────────────── */}
       {phase === 'documents' && (
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <SectionMarker letter="C" label="Documentary Requirements" />
+          {DEMO_AUTOFILL && (
+            <DemoDataBanner>
+              Placeholder attachments are generated and uploaded for each requirement. Replace any
+              of them with a real file.
+            </DemoDataBanner>
+          )}
           <p className="mt-2 text-xs text-ink-muted">
             Upload each requirement as a PDF or image (max 10 MB). Items marked with{' '}
             <span className="font-semibold text-s-red">*</span> are required. You can change files
