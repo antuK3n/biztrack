@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
+use App\Http\Controllers\Api\Admin\OfficeSignatoryController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;

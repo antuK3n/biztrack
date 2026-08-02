@@ -18,4 +18,10 @@ class Department extends Model
     {
         return $this->hasMany(PermitType::class);
     }
+
+    /** The names printed in this office's form signature blocks. */
+    public function signatories(): HasMany
+    {
+        return $this->hasMany(OfficeSignatory::class);
+    }
 }
