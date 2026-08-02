@@ -488,6 +488,24 @@ export type AnalyticsFallbackReason =
   /** R is switched off for this environment. */
   | 'r_disabled'
 
+/**
+ * What one figure on an analytics screen measures, and why it is on the screen.
+ *
+ * Written server-side in AnalyticsDefinitions.php, next to the queries these
+ * sentences describe. It arrives in `meta` rather than `data` for the same
+ * reason `engine` does: how a figure was derived is not one of the figures.
+ */
+export interface MetricDefinition {
+  /** The name as printed on screen. */
+  label: string
+  /** How the number is produced, with the denominator named. */
+  formula: string
+  /** Which rows it is over — the window, and what is left out. */
+  covers: string
+  /** What decision it informs, and who makes it. */
+  why: string
+}
+
 export interface AnalyticsProvenance {
   source: AnalyticsSource
   engine: string
@@ -497,6 +515,8 @@ export interface AnalyticsProvenance {
   stale_after_hours: number
   fallback_reason: AnalyticsFallbackReason | null
   notice: string | null
+  /** Keyed by dot path into the payload, e.g. `decisions.approval_rate`. */
+  definitions: Record<string, MetricDefinition>
 }
 
 /** Page meta returned by paginated list endpoints. */
