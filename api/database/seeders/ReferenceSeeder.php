@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\DocumentType;
+use App\Models\OfficeSignatory;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use Illuminate\Database\Seeder;
@@ -344,5 +345,31 @@ class ReferenceSeeder extends Seeder
         $req($cec, ['LOCATIONAL' => [], 'VALID_ID' => []]);
         $req($zoning, ['LEASE_TITLE' => [], 'BRGY_CLEARANCE' => [], 'VALID_ID' => []]);
         $req($market, ['BRGY_CLEARANCE' => [], 'VALID_ID' => []]);
+
+        /*
+         * --- Form signatories -------------------------------------------------
+         *
+         * Starting values only. These are the officeholders named in the printed
+         * CENRO application form (MCG-CENRO-FO-001 v2.0) as of August 2026.
+         *
+         * firstOrCreate, deliberately, where the rest of this seeder uses
+         * updateOrCreate: every other row here is reference data the seeder owns,
+         * but a signatory name is owned by the admin the moment they edit it.
+         * Re-seeding must not quietly restore a predecessor's name over the
+         * correction that replaced them. Seed only offices whose names were read
+         * off an actual document — a guess is worse than a blank.
+         */
+        $signatory = function (string $deptCode, array $rows) use ($dept) {
+            foreach ($rows as $i => [$role, $name]) {
+                OfficeSignatory::firstOrCreate(
+                    ['department_id' => $dept($deptCode), 'role' => $role],
+                    ['name' => $name, 'sort_order' => $i, 'is_active' => true],
+                );
+            }
+        };
+        $signatory('CENRO', [
+            ['Evaluator', 'Elizabeth E. Gutierrez'],
+            ['Chief-CENRO', 'Mark Lloyd A. Mesina'],
+        ]);
     }
 }
