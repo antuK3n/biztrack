@@ -97,3 +97,42 @@ occupancy) with different expiry dates, so "the last one" is not an answer.
 amendment form as reference documents. Both fixes above are derived from the
 schema the manuscript alignment already established, not from the paper. If
 the LGU's form asks for more, this is the floor rather than the finish.
+
+---
+
+## Status after the August 3 pass
+
+`tsc -b --force` clean · **485 Pest / 4,264 assertions** · **40 Playwright** ·
+live tester database untouched (max application id 3375, unchanged).
+
+Note: `tsc --noEmit` checks **nothing** in this repo — the root `tsconfig.json`
+is `files: []` with only project references. Use `tsc -b`. Several earlier
+"type-check clean" claims were made with `--noEmit` and were worthless.
+
+| # | Status | Evidence / what was actually done |
+|---|--------|-----------------------------------|
+| 66 | Done (was already) | Barangay select reads "Select your barangay" |
+| 67 | Done (was already) | "Other (not listed)" + free text + searchable picker |
+| 68 | Done, premise corrected | PSIC matching was **not** broken — verified in SQL across all 706 registered points. The real bug: picking "Other (not listed)" told the applicant to "choose your Line of Business first". Now distinguishes `line_not_chosen` from `line_unclassified`. Copy tightened; the zoning disclaimer kept |
+| 69 | Done | The standalone step is gone and the *searchable multi-select* moved onto Location & Zoning — the weaker `<select>` is not what survived |
+| 70 | Done | 5 placeholders fixed; ~25 audited and left. "Poblacion" corrected — not a Malabon barangay |
+| 71 | Done (earlier today) | Consent is step 1 of 8 and blocks advance |
+| 72 | Done | Business Structure is derived read-only from Type of Registration, with a stale-value bug fixed |
+| 73 | Done | "Handled by <Office> · <Officer>" on thread header and cards; one office per thread |
+| 74 | Done | Middle name, suffix, gender editable. Fixed a bug where a saved middle name could never be cleared |
+| 75 | Done | Watermark removed; "(Simulated)" title and "no real funds were collected" footer kept |
+| 76 | Partly | At least one clearance now required. **Step not moved** — `documents` and `fees` are computed from `permits`, so it cannot go later. Deviation documented in code |
+| 77 | Done (was already) | `/staff/login` separate from `/login` |
+| 78 | Done | `analytics.view` granted to `bplo_staff` only. Verified live: bplo 200, sanitary 403, owner 403 |
+| 79 | Done | Approved permits on Profile with View + PDF; certificate layout; signatories read from `office_signatories`, never hardcoded |
+| 80 | Partly | Rejection reasons now reach the applicant. Reject promoted for every office as **"Return with remarks"**. Per-office *rejection* not built — see Open questions |
+| 81 | Done (was already) | Approved/issued filtered out of Track, with a pointer to Profile |
+| 82 | Done | Amendment kinds collected, persisted, shown to the officer |
+| 83 | Done (earlier today) | Crash from `business: null` on a soft-deleted business |
+| 84 | Done | The four paper-form checkboxes — Ownership / Location / Nature / Others (specify) |
+| 85 | Partly | Renewal now lists the business's renewable permits from the server, excludes revoked/suspended, links `prior_permit_id`. Interpreted "ID" as the permit number |
+| 86 | Partly | Malabon boundary check enforced in two places. **Water detection not done** — no hydrography data; nothing claims it was checked |
+| 87 | Done, root cause differed | Not the soft-delete class. `inspections.application:id,tracking_id` never loaded the business, so the payload said "removed from register" when it meant "not loaded" |
+| 88 | Done | Search on both Track pages, with an announced result count |
+| 89 | Done | Explicit recipient shown. Found the From-office picker wrote a column **no screen read** |
+| 90 | Partly | Applicant fully client-side. Officer: filter is a real server query; search/sort run over loaded rows and the page says so |
