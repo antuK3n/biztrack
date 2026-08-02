@@ -465,12 +465,22 @@ function FsicFields({
           />
           <div>
             <FieldLabel>Authorized Representative</FieldLabel>
+            {/*
+             * Item 70 — the placeholder used to carry the rule ("Auto-filled
+             * from Business Permit if blank"), which is the one thing about this
+             * field that must survive the first keystroke and is exactly what a
+             * placeholder does not. It is a hint below the box now, and the
+             * placeholder is an example, as every other one on these sheets is.
+             */}
             <input
               value={get(data, 'authorized_representative')}
               onChange={(e) => set('authorized_representative', e.target.value)}
-              placeholder="Auto-filled from Business Permit if blank"
+              placeholder="e.g. Juan Dela Cruz"
               className={inputCls}
             />
+            <p className="mt-1 text-xs text-ink-muted">
+              Leave blank to use the name on the Business Permit application.
+            </p>
           </div>
           <ApplicationDateField data={data} />
         </div>

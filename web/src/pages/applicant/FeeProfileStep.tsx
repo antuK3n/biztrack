@@ -16,8 +16,12 @@ export interface FeeCategoryDraft {
 }
 
 export interface FeeProfileDraft {
+  /**
+   * Item 72 — mirrored from the business's registration type rather than
+   * asked here; see the Business Structure block in FeeProfileStep below.
+   */
   business_structure: string
-  /** Keyed by psic_code_id of the Part 2 line of business. */
+  /** Keyed by psic_code_id of the line of business declared in Location & Zoning. */
   categories: Record<number, FeeCategoryDraft>
   floor_area_sqm: string
   employees: string
@@ -444,7 +448,7 @@ export function buildFeeProfile(
     applicationType: ApplicationType
     /** Selected permit-type codes (BUSINESS, OCCUPANCY, MARKET, …). */
     permitCodes: string[]
-    /** psic_code_id of each Part 2 line, in order. */
+    /** psic_code_id of each declared line of business, in order. */
     lineIds: number[]
   },
 ): FeeProfile {
@@ -457,7 +461,7 @@ export function buildFeeProfile(
     const cat = draft.categories[id]
     if (!cat?.category.trim()) continue
     lines.push({
-      // psic_code_id keys the line back to the Part 2 selection so a reopened
+      // psic_code_id keys the line back to the Location & Zoning selection so a reopened
       // draft restores each category onto the right line of business.
       psic_code_id: id,
       category: cat.category.trim(),
@@ -659,6 +663,7 @@ function NumberField({
 
 export function FeeProfileStep({
   applicationType,
+  registrationType,
   permitCodes,
   lines,
   value,
@@ -667,9 +672,15 @@ export function FeeProfileStep({
   onPaymentModeChange,
 }: {
   applicationType: ApplicationType
+  /**
+   * Item 72 — the Type of Registration answered in Business Information, which
+   * IS the business structure. Given, this step shows the answer instead of
+   * asking for it again; blank, it asks (see the section below).
+   */
+  registrationType?: string
   /** Selected permit-type codes. */
   permitCodes: string[]
-  /** Part 2 lines of business: psic_code_id + display title. */
+  /** Lines of business declared in Location & Zoning: psic_code_id + title. */
   lines: { id: number; title: string }[]
   value: FeeProfileDraft
   onChange: (next: FeeProfileDraft) => void
@@ -681,6 +692,13 @@ export function FeeProfileStep({
   const hasBusiness = permitCodes.includes('BUSINESS')
   const hasOccupancy = permitCodes.includes('OCCUPANCY')
   const hasMarket = permitCodes.includes('MARKET')
+  /*
+   * The structure carried over from Business Information, matched to its
+   * label. Unrecognised values fall through to null and the question is asked
+   * normally — showing a raw slug like "sole_proprietorship" read-only would be
+   * worse than asking.
+   */
+  const derivedStructure = STRUCTURES.find((s) => s.value === registrationType) ?? null
 
   /*
    * Errors surface once a field has been left, or immediately if what is in
@@ -727,34 +745,77 @@ export function FeeProfileStep({
       <section>
         <SectionMarker letter={nextLetter()} label="Business Structure & Classification" />
         <div className="mt-4 space-y-5">
-          <div>
-            <FieldLabel required>Business Structure</FieldLabel>
-            <div className="flex flex-wrap gap-2.5">
-              {STRUCTURES.map((s) => {
-                const selected = value.business_structure === s.value
-                return (
-                  <button
-                    key={s.value}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => set('business_structure', selected ? '' : s.value)}
-                    className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                      selected
-                        ? 'border-royal bg-input text-ink'
-                        : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                    }`}
-                  >
-                    <span
-                      className={`h-3.5 w-3.5 rounded-full border-2 ${
-                        selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                      }`}
-                    />
-                    {s.label}
-                  </button>
-                )
-              })}
+          {derivedStructure ? (
+            /*
+             * Item 72 — the answer, not the question again.
+             *
+             * "Type of Registration" (Business Information) and "Business
+             * Structure" (here) are one fact with two names, and asking twice
+             * invited two answers that the fee engine and the registration
+             * record would then disagree about. It is shown rather than hidden
+             * because it changes the tax: a cooperative and a sole
+             * proprietorship are assessed differently, and the applicant is
+             * signing for this figure.
+             *
+             * `readOnly`, never `disabled`: a disabled input drops out of the
+             * tab order and most screen readers pass over it, so the applicant
+             * who most needs to hear what this step assumed about them would be
+             * the one who never reaches it. Same reason as the carried-over
+             * fields on the office sheets and the locked gross-sales box below.
+             */
+            <div className="sm:max-w-sm">
+              <label className="block">
+                <FieldLabel>
+                  Business Structure
+                  <span className="font-normal text-ink-muted"> (from your application)</span>
+                </FieldLabel>
+                <input
+                  value={derivedStructure.label}
+                  readOnly
+                  aria-readonly="true"
+                  className={`${inputCls} cursor-not-allowed bg-line/60 text-ink-secondary`}
+                />
+              </label>
+              <p className="mt-1 text-xs text-ink-muted">
+                Taken from the Type of Registration you chose in Business Information. To change it,
+                go back to that section.
+              </p>
             </div>
-          </div>
+          ) : (
+            /*
+             * Only reachable if the registration type never arrived — a draft
+             * saved before it was required, say. Better to ask than to leave the
+             * fee engine without a structure it needs.
+             */
+            <div>
+              <FieldLabel required>Business Structure</FieldLabel>
+              <div className="flex flex-wrap gap-2.5">
+                {STRUCTURES.map((s) => {
+                  const selected = value.business_structure === s.value
+                  return (
+                    <button
+                      key={s.value}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => set('business_structure', selected ? '' : s.value)}
+                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`h-3.5 w-3.5 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {s.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           <div>
             <FieldLabel required>Line of Business Classification</FieldLabel>
@@ -832,7 +893,7 @@ export function FeeProfileStep({
               })}
               {lines.length === 0 && (
                 <p className="text-sm text-ink-muted">
-                  No lines of business selected yet. Add them in the Line of Business section.
+                  No lines of business selected yet. Add them in the Location &amp; Zoning section.
                 </p>
               )}
             </div>
