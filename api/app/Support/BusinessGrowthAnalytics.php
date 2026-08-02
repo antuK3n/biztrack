@@ -118,6 +118,16 @@ final class BusinessGrowthAnalytics
             'top_n' => self::TOP_N,
             'survival_methodology' => self::SURVIVAL_METHODOLOGY,
 
+            /*
+             * R reads `grace_days` off this payload and falls back to its own
+             * literal 30 when the key is absent — which it was, so the two
+             * engines agreed only by coincidence. Sending it makes this constant
+             * the single source: change it here and both engines move together,
+             * instead of the R side silently keeping the old cut-off and
+             * reporting a different lapse count for the same register.
+             */
+            'grace_days' => self::RENEWAL_GRACE_DAYS,
+
             'registrations' => self::countRegistrations($periodStart, $now, includeEnd: true),
             'registrations_prior' => self::countRegistrations($priorStart, $periodStart),
             'closures' => self::closures($periodStart, $now),
