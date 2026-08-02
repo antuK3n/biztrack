@@ -79,3 +79,20 @@ const PAYMENT_METHOD_LABELS: Record<string, string> = {
 export function paymentMethodLabel(method: string): string {
   return PAYMENT_METHOD_LABELS[method] ?? method
 }
+
+/**
+ * What to call a filing's business when the register no longer holds one.
+ *
+ * `Business` soft-deletes and its filings stay behind, so any list that runs
+ * deep enough reaches an application whose business is gone. The name is the
+ * first thing every one of those screens prints, which is why getting it wrong
+ * took whole pages down rather than single rows.
+ *
+ * The replacement says what happened rather than hiding it. An officer looking
+ * at a request queue needs to know the business was removed from the register —
+ * that is usually the reason the filing stalled, and blanking the cell or
+ * printing the tracking ID alone would leave them hunting for it.
+ */
+export function businessName(business: { name: string } | null): string {
+  return business?.name ?? 'Business removed from register'
+}
