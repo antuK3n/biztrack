@@ -33,3 +33,4 @@ Revenue Code.pdf
 
 # Playwright MCP session artifacts
 .playwright-mcp/
+api/database/e2e.sqlite
