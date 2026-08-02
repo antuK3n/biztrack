@@ -17,6 +17,20 @@ import { useAsync } from '../../lib/useAsync'
  * which trade it matched, and the mean distance says it is straight-line — an
  * applicant deciding where to open a shop is entitled to know that "320 m" is
  * as-the-crow-flies and that the comparison set is their own PSIC group.
+ *
+ * ## On the wording (checklist item 68: "remove descriptions that sound AI")
+ *
+ * Labels are noun phrases and carry no full stop, because they are the left-hand
+ * column of a table and not sentences. The trailing qualifiers went: "in the
+ * area", "operating nearby" and "of nearby similar businesses" all restated the
+ * radius that the row above already gives, and stacked restatement is exactly
+ * what reads as machine-written padding.
+ *
+ * What did NOT go: the note under each figure saying what it counted, and the
+ * closing line saying these figures are not part of the zoning decision. Both
+ * are load-bearing. Four confident numbers in a modal headed CONGRATULATIONS
+ * will be read as part of the conformity finding unless something says they are
+ * not.
  */
 
 interface LocationInsightsData {
@@ -27,8 +41,16 @@ interface LocationInsightsData {
     thresholds: { medium_from: number; high_from: number }
   }
   similar: {
-    /** False when the applicant has not named their line of business yet. */
+    /** False when there is no PSIC group to compare against — see `reason`. */
     available: boolean
+    /**
+     * Why there is no figure, when there is none.
+     *
+     * `line_not_chosen` is the applicant's to fix; `line_unclassified` is not —
+     * they picked "Other (not listed)", which classifies nothing, and asking them
+     * to choose a line again would send them back for something they already did.
+     */
+    reason: 'line_not_chosen' | 'line_unclassified' | null
     psic_group: string | null
     psic_title: string | null
     count: number | null
@@ -128,6 +150,23 @@ function Unavailable({ children }: { children: string }) {
   )
 }
 
+/*
+ * Why a "similar businesses" figure is missing.
+ *
+ * The two cases used to share one message, "choose your Line of Business first",
+ * which is wrong half the time: an applicant who picked "Other (not listed)" did
+ * choose, and sending them back to choose again gets them nowhere. Checklist item
+ * 67 lets them type their own trade under Other, so that half is about to grow.
+ */
+const SIMILAR_UNAVAILABLE: Record<'line_not_chosen' | 'line_unclassified', string> = {
+  line_not_chosen: 'choose your line of business first',
+  line_unclassified: 'your line is not in the PSIC list',
+}
+
+function similarUnavailableReason(reason: 'line_not_chosen' | 'line_unclassified' | null): string {
+  return SIMILAR_UNAVAILABLE[reason ?? 'line_not_chosen']
+}
+
 export function LocationInsightsPanel({
   insights,
   loading,
@@ -163,8 +202,8 @@ export function LocationInsightsPanel({
        */}
       {!loading && error !== null && (
         <p className="mt-1.5 text-sm text-ink-secondary">
-          We couldn&rsquo;t load the insights for this location. This does not affect your
-          application — you can continue.
+          We couldn&rsquo;t load these figures. They are not part of your application, so you
+          can continue.
         </p>
       )}
 
@@ -176,11 +215,11 @@ export function LocationInsightsPanel({
             </caption>
             <tbody className="divide-y divide-line/70">
               <InsightRow
-                label={`Similar businesses within ${radius}.`}
+                label={`Similar businesses within ${radius}`}
                 note={
                   insights.similar.available
                     ? `Same PSIC group as your line${
-                        insights.similar.psic_title ? ` — ${insights.similar.psic_title}` : ''
+                        insights.similar.psic_title ? `: ${insights.similar.psic_title}` : ''
                       }`
                     : undefined
                 }
@@ -188,13 +227,13 @@ export function LocationInsightsPanel({
                 {insights.similar.available && insights.similar.count !== null ? (
                   <span className="tnum">{insights.similar.count}</span>
                 ) : (
-                  <Unavailable>choose your Line of Business first</Unavailable>
+                  <Unavailable>{similarUnavailableReason(insights.similar.reason)}</Unavailable>
                 )}
               </InsightRow>
 
               <InsightRow
-                label="Overall commercial activity in the area."
-                note={`All registered businesses within ${radius} · Low 0–5 · Medium 6–10 · High ${insights.concentration.thresholds.high_from}+`}
+                label="Registered businesses in total"
+                note={`Within ${radius} · Low 0–5 · Medium 6–10 · High ${insights.concentration.thresholds.high_from}+`}
               >
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-xs font-semibold ${
@@ -207,23 +246,23 @@ export function LocationInsightsPanel({
               </InsightRow>
 
               <InsightRow
-                label="Dominant line of business operating nearby."
+                label="Most common line of business"
                 note={
                   insights.common_type.available
-                    ? `${insights.common_type.count} of ${insights.common_type.of_total} nearby businesses`
+                    ? `${insights.common_type.count} of ${insights.common_type.of_total}`
                     : undefined
                 }
               >
                 {insights.common_type.available ? (
                   insights.common_type.category
                 ) : (
-                  <Unavailable>no registered businesses in range</Unavailable>
+                  <Unavailable>{`none registered within ${radius}`}</Unavailable>
                 )}
               </InsightRow>
 
               <InsightRow
-                label="Average distance of nearby similar businesses."
-                note={insights.similar.average_distance_m !== null ? 'Straight-line mean' : undefined}
+                label="Average distance to a similar business"
+                note={insights.similar.average_distance_m !== null ? 'Straight line, not walking distance' : undefined}
               >
                 {insights.similar.average_distance_m !== null ? (
                   <span className="tnum">{insights.similar.average_distance_m} m</span>
@@ -231,7 +270,7 @@ export function LocationInsightsPanel({
                   <Unavailable>
                     {insights.similar.available
                       ? 'none in range'
-                      : 'choose your Line of Business first'}
+                      : similarUnavailableReason(insights.similar.reason)}
                   </Unavailable>
                 )}
               </InsightRow>
@@ -241,10 +280,11 @@ export function LocationInsightsPanel({
           {/*
            * Says out loud what the panel is for. Without this an applicant can
            * read four confident figures as part of the conformity decision, which
-           * is the one thing they are not.
+           * is the one thing they are not. Trimmed for tone in checklist item 68
+           * but not for meaning — the sentence is deliberate and stays.
            */}
           <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-            For your information only — these figures are not part of the zoning decision.
+            These figures are not part of the zoning decision.
           </p>
         </>
       )}

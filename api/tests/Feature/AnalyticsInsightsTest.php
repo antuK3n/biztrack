@@ -49,18 +49,26 @@ function seedWeeklyTurnaround(string $departmentCode, array $weeklyMeans, ?Carbo
 
 /* ── access ───────────────────────────────────────────────────────────── */
 
-it('serves the processing time monitor to the super admin only', function () {
+it('serves the processing time monitor to the super admin and to BPLO', function () {
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/analytics/processing-time')
         ->assertOk();
 
-    // An office reviewer holds application.view_all but not analytics.view;
-    // letting them read this would summarise filings never routed to them.
-    test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson('/api/v1/analytics/processing-time')
-        ->assertForbidden();
-
+    /*
+     * Checklist item 78 — "the dashboard should be transferred to BPLO admin,
+     * not super admin". BPLO is the issuing office that coordinates every other
+     * office's clearance and is the one office role already holding
+     * application.view_any_office, so the aggregate summarises nothing it could
+     * not already open one filing at a time.
+     */
     test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/processing-time')
+        ->assertOk();
+
+    // An ordinary office reviewer holds application.view_all but not
+    // analytics.view; letting them read this would summarise filings never
+    // routed to them.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/analytics/processing-time')
         ->assertForbidden();
 
@@ -77,8 +85,12 @@ it('refuses both analytics feeds to a caller with no session', function () {
     test()->get('/api/v1/analytics/business-growth/report')->assertUnauthorized();
 });
 
-it('serves business growth analysis to the super admin only', function () {
+it('serves business growth analysis to the super admin and to BPLO', function () {
     test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/business-growth')
+        ->assertOk();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk();
 
@@ -92,7 +104,7 @@ it('serves business growth analysis to the super admin only', function () {
 });
 
 it('refuses both report downloads to anyone without analytics.view', function () {
-    test()->withHeaders(authAs('bplo@biztrack.local'))
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->get('/api/v1/analytics/processing-time/report')
         ->assertForbidden();
 
@@ -375,17 +387,30 @@ it('generates a business growth PDF', function () {
 
 /* ── Analytics Dashboard (spec §1) ─────────────────────────────────────── */
 
-it('serves the analytics dashboard to the super admin only', function () {
+it('serves the analytics dashboard to the super admin and to BPLO', function () {
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk();
 
+    /*
+     * Checklist item 78 asked for exactly this screen. BPLO gets the panels and
+     * the PDF; the boundary below is what makes "transferred to BPLO" different
+     * from "opened to every office".
+     */
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/dashboard')
+        ->assertOk();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->get('/api/v1/analytics/dashboard/report')
+        ->assertOk();
+
     // These panels count every office's filings, decisions, inspections and
-    // permits, and the barangay ranking is a register-wide summary. An office
-    // reviewer holds application.view_all but not analytics.view; letting them
-    // read this would hand them an aggregate of filings ApplicationVisibility
-    // deliberately keeps out of their queue.
-    foreach (['sanitary@biztrack.local', 'bplo@biztrack.local', 'owner@biztrack.local'] as $email) {
+    // permits, and the barangay ranking is a register-wide summary. An ordinary
+    // office reviewer holds application.view_all but not analytics.view; letting
+    // them read this would hand them an aggregate of filings
+    // ApplicationVisibility deliberately keeps out of their queue.
+    foreach (['sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/analytics/dashboard')
             ->assertForbidden();

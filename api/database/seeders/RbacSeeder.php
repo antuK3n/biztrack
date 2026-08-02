@@ -42,6 +42,24 @@ class RbacSeeder extends Seeder
                     'request.respond', 'message.participate',
                 ],
             ],
+            /*
+             * Tester checklist item 78: "the dashboard should be transferred to
+             * BPLO admin, not super admin."
+             *
+             * `analytics.view` was written as super-admin-only on the reasoning
+             * that the aggregates count every office's filings, and letting an
+             * office reviewer read them would hand them a register-wide summary
+             * that ApplicationVisibility deliberately keeps out of their queue.
+             *
+             * That reasoning never applied to BPLO. BPLO is the issuing office
+             * that coordinates every other office's clearance, and it is the one
+             * office role that already holds `application.view_any_office` — the
+             * permission that lifts the departmental boundary. The aggregates
+             * therefore expose nothing BPLO cannot already open one filing at a
+             * time; they only save it the counting. The other office roles
+             * (sanitary, fire, zoning, OBO, CENRO, market) still do not get it,
+             * and for them the original reasoning stands unchanged.
+             */
             'bplo_staff' => [
                 'display_name' => 'BPLO Staff',
                 'description' => 'Reviews applications, adjusts fees, and issues business permits.',
@@ -50,6 +68,7 @@ class RbacSeeder extends Seeder
                     'application.review', 'application.reject',
                     'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create',
                     'message.participate', 'compliance.view', 'zoning.evaluate',
+                    'analytics.view',
                 ],
             ],
             'sanitary_officer' => [

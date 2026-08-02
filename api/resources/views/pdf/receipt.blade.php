@@ -5,12 +5,6 @@
     <style>
         * { font-family: DejaVu Sans, sans-serif; }
         body { color: #1a1a1a; margin: 0; padding: 40px; position: relative; }
-        .watermark {
-            position: fixed; top: 40%; left: 8%;
-            transform: rotate(-30deg);
-            font-size: 60px; font-weight: bold; color: #bd0000;
-            opacity: 0.12; letter-spacing: 4px; z-index: 0;
-        }
         .content { position: relative; z-index: 1; }
         .header { text-align: center; border-bottom: 3px solid #0025cc; padding-bottom: 12px; }
         .header .city { font-size: 20px; font-weight: bold; color: #0025cc; }
@@ -29,7 +23,17 @@
     </style>
 </head>
 <body>
-    <div class="watermark">SIMULATED PAYMENT</div>
+    {{--
+        The diagonal "SIMULATED PAYMENT" watermark used to sit here. It was
+        removed on the client's request (checklist #75) because it bled through
+        the figures and made the receipt hard to read when printed.
+
+        The honesty it carried is not lost: the header office line still reads
+        "Official Payment Receipt (Simulated)" and the footer still states that
+        no real funds were collected. Both must stay — payments in this system
+        are simulated, and nothing here may present itself as a real LGU
+        collection receipt.
+    --}}
     <div class="content">
         <div class="header">
             <div class="city">CITY OF MALABON</div>

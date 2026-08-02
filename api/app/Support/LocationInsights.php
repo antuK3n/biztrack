@@ -54,6 +54,12 @@ final class LocationInsights
 
     public const BAND_HIGH_FROM = 11;
 
+    /** `similar.reason`: nothing to compare against, no line of business named yet. */
+    public const NO_LINE_CHOSEN = 'line_not_chosen';
+
+    /** `similar.reason`: a line was named, but it carries no classification. */
+    public const LINE_UNCLASSIFIED = 'line_unclassified';
+
     private const EARTH_RADIUS_M = 6_371_000;
 
     /**
@@ -196,9 +202,20 @@ final class LocationInsights
      * Count of, and mean distance to, businesses in the applicant's own PSIC
      * group — the standard's own "same or related trade" (see PsicTaxonomy).
      *
-     * `available: false` is a real answer, not an error: it means the applicant
-     * has not named their line yet, or named the catch-all 00000 "Other (not
-     * listed)" row, which classifies nothing and so cannot have a related trade.
+     * `available: false` is a real answer, not an error, and `reason` says which
+     * of the two real answers it is. They are not interchangeable:
+     *
+     *  - `line_not_chosen` — the applicant has not named a line yet. The fix is
+     *    theirs: name one and the figure appears.
+     *  - `line_unclassified` — they named the catch-all 00000 "Other (not
+     *    listed)", which classifies nothing and therefore has no related trade.
+     *    Naming a line again will not help, and telling them to "choose your Line
+     *    of Business first" when they just did is how this figure earned
+     *    "Location Insights does not work properly" (checklist item 68).
+     *
+     * The distinction is about to matter far more than it did: checklist item 67
+     * lets an applicant type their own trade under Other, so the catch-all stops
+     * being the rare case.
      *
      * @param  Collection<int, array{distance_m: float, psic_code: string|null}>  $nearby
      * @return array<string, mixed>
@@ -210,6 +227,7 @@ final class LocationInsights
         if ($group === null) {
             return [
                 'available' => false,
+                'reason' => $psicCode === null ? self::NO_LINE_CHOSEN : self::LINE_UNCLASSIFIED,
                 'psic_group' => null,
                 'count' => null,
                 'average_distance_m' => null,
@@ -220,6 +238,7 @@ final class LocationInsights
 
         return [
             'available' => true,
+            'reason' => null,
             'psic_group' => $group,
             'count' => $matches->count(),
             // No neighbours means no mean. Reporting 0 m would read as "there is

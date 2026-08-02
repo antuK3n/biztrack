@@ -188,10 +188,57 @@ it('reports the similar figures as unavailable when no line of business is named
     $body = insightsFor();
 
     expect($body['data']['similar']['available'])->toBeFalse()
+        ->and($body['data']['similar']['reason'])->toBe('line_not_chosen')
         ->and($body['data']['similar']['count'])->toBeNull()
         ->and($body['data']['similar']['average_distance_m'])->toBeNull()
         ->and($body['data']['concentration']['count'])->toBe(1)
         ->and($body['data']['common_type']['available'])->toBeTrue();
+});
+
+/*
+ * Checklist item 68 — "Location Insights does not work properly."
+ *
+ * Both of the next two answer `available: false`, and until now they said so
+ * with the same silence, so the panel had to guess and guessed the same message
+ * for both: "choose your Line of Business first". For an applicant who picked
+ * "Other (not listed)" that is simply false — they did choose, and choosing
+ * again cannot help, because 00000 classifies nothing and so has no related
+ * trade to count. Being sent back for work already done is what a screen looks
+ * like when it does not work properly.
+ *
+ * `reason` is what lets the two be told apart. Checklist item 67 lets an
+ * applicant type their own trade under Other, so the second case stops being
+ * rare.
+ */
+it('says the line was never chosen, not that it was unclassifiable', function () {
+    businessAt(0.001, 0, '56301');
+
+    expect(insightsFor()['data']['similar']['reason'])->toBe('line_not_chosen');
+});
+
+it('says the chosen line is unclassifiable rather than asking for it again', function () {
+    businessAt(0.001, 0, '56301');
+
+    $body = insightsFor(['psic_code_id' => PsicCode::where('code', '00000')->value('id')]);
+
+    expect($body['data']['similar']['available'])->toBeFalse()
+        ->and($body['data']['similar']['reason'])->toBe('line_unclassified')
+        // The catch-all is a line, so it comes back on the payload; what it has
+        // no answer for is the comparison, not the question.
+        ->and($body['data']['similar']['psic_title'])->not->toBeNull()
+        // The two figures that never needed a category still answer.
+        ->and($body['data']['concentration']['count'])->toBe(1)
+        ->and($body['data']['common_type']['available'])->toBeTrue();
+});
+
+it('carries no reason when the similar figures are real', function () {
+    businessAt(0.001, 0, '56301');
+
+    $body = insightsFor(['psic_code_id' => PsicCode::where('code', '56301')->value('id')]);
+
+    expect($body['data']['similar']['available'])->toBeTrue()
+        ->and($body['data']['similar']['reason'])->toBeNull()
+        ->and($body['data']['similar']['count'])->toBe(1);
 });
 
 it('reports the mode of nearby categories', function () {

@@ -166,9 +166,11 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/export', [AnalyticsController::class, 'export']);
         /*
          * Features 6/7 moved out of the standalone r/ project and into the site.
-         * They stay on analytics.view (super admin only) because they aggregate
-         * every office's assignments — an office reviewer reading these would
-         * see round the scoping in ApplicationVisibility.
+         * They stay on analytics.view because they aggregate every office's
+         * assignments — an office reviewer reading these would see round the
+         * scoping in ApplicationVisibility. Checklist #78 added BPLO to that
+         * permission; BPLO is the one office role that already holds
+         * application.view_any_office, so the boundary is not new to it.
          */
         /*
          * The Analytics Dashboard (spec §1). Same permission and the same reason:
@@ -184,9 +186,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
         /*
          * Renewal Risk reads every business's permits, filings, findings and
-         * payments to rank them, so it belongs on the same super-admin
-         * permission as the rest — a barangay-level watchlist of who is about to
-         * fall out of compliance is not an office reviewer's business.
+         * payments to rank them, so it belongs on the same permission as the
+         * rest — a barangay-level watchlist of who is about to fall out of
+         * compliance is not an ordinary office reviewer's business.
          */
         Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
         Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);

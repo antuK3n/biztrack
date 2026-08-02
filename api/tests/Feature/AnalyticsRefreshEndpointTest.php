@@ -20,8 +20,11 @@ function refreshAs(string $email): \Illuminate\Testing\TestResponse
 
 it('refuses the refresh to anyone without analytics.view', function () {
     // Not a read: it pushes the whole register to an external service, so it sits
-    // on the same super-admin permission as the figures it recomputes.
-    refreshAs('bplo@biztrack.local')->assertForbidden();
+    // on the same permission as the figures it recomputes. BPLO now holds that
+    // permission (checklist item 78) and so is no longer asserted here — the
+    // "Refresh now" button sits on the screens it was just given, and a button
+    // that 403s would be worse than no button.
+    refreshAs('sanitary@biztrack.local')->assertForbidden();
     refreshAs('owner@biztrack.local')->assertForbidden();
 });
 
