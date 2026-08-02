@@ -509,7 +509,7 @@ function LinesStep({
                                 ),
                               )
                             }
-                            placeholder="e.g. bamboo furniture weaving"
+                            placeholder="e.g. mobile phone repair"
                             className={inputCls}
                             aria-invalid={needsText}
                           />
@@ -2247,7 +2247,7 @@ export function ApplyWizard() {
                 value={form.registration_number}
                 onChange={(e) => update('registration_number', e.target.value)}
                 onBlur={() => touch('registration_number')}
-                placeholder="Enter registration number"
+                placeholder="e.g. 3298765 (DTI) or CS201912345 (SEC)"
                 className={inputCls}
                 aria-invalid={Boolean(fieldErrors.registration_number)}
               />
@@ -2285,7 +2285,7 @@ export function ApplyWizard() {
                   value={form.name}
                   onChange={(e) => update('name', e.target.value)}
                   onBlur={() => touch('name')}
-                  placeholder="Registered business name"
+                  placeholder="e.g. Dela Cruz Trading"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.name)}
                 />
@@ -2299,7 +2299,7 @@ export function ApplyWizard() {
               <input
                 value={form.trade_name}
                 onChange={(e) => update('trade_name', e.target.value)}
-                placeholder="Trade name, if any"
+                placeholder="e.g. Aling Nena's Eatery"
                 className={inputCls}
               />
               </label>
@@ -2423,7 +2423,7 @@ export function ApplyWizard() {
                   value={form.line1}
                   onChange={(e) => update('line1', e.target.value)}
                   onBlur={() => touch('line1')}
-                  placeholder="House No. and Street Name"
+                  placeholder="e.g. 24 Rizal Street"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.line1)}
                 />
@@ -2440,7 +2440,7 @@ export function ApplyWizard() {
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.barangay_id)}
                 >
-                  <option value="">Barangay Name</option>
+                  <option value="">Select your barangay</option>
                   {barangays.map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.name}
@@ -2458,7 +2458,7 @@ export function ApplyWizard() {
                 <input
                   value={form.line2}
                   onChange={(e) => update('line2', e.target.value)}
-                  placeholder="Locational Group/Landmark"
+                  placeholder="e.g. beside Sto. Niño Chapel"
                   className={inputCls}
                 />
                 </label>
@@ -2510,7 +2510,7 @@ export function ApplyWizard() {
                       value={form.lessor_name}
                       onChange={(e) => update('lessor_name', e.target.value)}
                       onBlur={() => touch('lessor_name')}
-                      placeholder="Who you pay rent to"
+                      placeholder="e.g. Maria Santos"
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_name)}
                     />
@@ -2526,7 +2526,7 @@ export function ApplyWizard() {
                       value={form.lessor_address}
                       onChange={(e) => update('lessor_address', e.target.value)}
                       onBlur={() => touch('lessor_address')}
-                      placeholder="Lessor's address"
+                      placeholder="e.g. 12 Mabini Street, Poblacion"
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_address)}
                     />
@@ -2588,7 +2588,7 @@ export function ApplyWizard() {
                     value={form.emergency_contact_name}
                     onChange={(e) => update('emergency_contact_name', e.target.value)}
                     onBlur={() => touch('emergency_contact_name')}
-                    placeholder="Who to reach in an emergency"
+                    placeholder="e.g. Juan Dela Cruz"
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
                   />
