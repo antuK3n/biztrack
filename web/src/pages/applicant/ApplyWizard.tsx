@@ -56,11 +56,25 @@ import type {
 type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'fees' | 'review'
 /*
  * Location & Zoning comes first (revised GUI, screens 28-33: "Zoning -
- * Selecting Business Location" is Part 1 of 8, the LGU Section cards are Part
- * 3). Where the business is decides what it may be, so asking for the address
- * before the paperwork matches how the counter actually works.
+ * Selecting Business Location" is Part 1 of 8). Where the business is decides
+ * what it may be, so asking for the address before the paperwork matches how
+ * the counter actually works.
+ *
+ * The LGU Section then comes after everything that describes the business,
+ * because its office form sheets are filled in *from* those answers. When the
+ * cards sat second, an applicant picked their clearances before the system knew
+ * the business name, the address or the trade — so every office sheet opened
+ * blank and asked for what the applicant had not yet been asked. Now the
+ * sanitary, environmental, fire and occupancy sheets open with the business
+ * already identified on them.
+ *
+ * It is not literally last, and it cannot be: both of the sections that follow
+ * are computed from which clearances were picked. `requiredDocs` is the union
+ * of the document types attached to the selected permit types, and the tax
+ * profile's required questions vary by permit code. Putting the cards after
+ * either one would ask the applicant to satisfy a list that does not exist yet.
  */
-const BASE_PHASES: BasePhase[] = ['address', 'permits', 'business', 'lines', 'documents', 'fees', 'review']
+const BASE_PHASES: BasePhase[] = ['address', 'business', 'lines', 'permits', 'fees', 'documents', 'review']
 
 const BASE_LABELS: Record<BasePhase, string> = {
   permits: 'Permits & Certificates',
@@ -611,6 +625,19 @@ export function ApplyWizard() {
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
   /* Bumped after a permit re-sync to refetch server-derived office-form answers. */
   const [officeFormsVersion, setOfficeFormsVersion] = useState(0)
+  /*
+   * The round trip out of the LGU Section and back.
+   *
+   * Applying for a clearance and filling in that office's form are one decision
+   * to the applicant, so tapping Apply opens the sheet rather than quietly
+   * adding a step three pills further along that they are left to discover.
+   * `pendingOfficeJump` is the code we are on our way to — the sheet does not
+   * exist in `sequence` until the permit list updates, so the jump is finished
+   * by an effect once it appears. `officeReturn` remembers that we came from
+   * the cards, which is what turns the sheet's Next into a way back to them.
+   */
+  const [pendingOfficeJump, setPendingOfficeJump] = useState<OfficeFormCode | null>(null)
+  const [officeReturn, setOfficeReturn] = useState(false)
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -869,6 +896,33 @@ export function ApplyWizard() {
     declaredLine?.title.match(/\(([^)]+)\)\s*$/)?.[1] ?? declaredLine?.title ?? (form.name || null)
 
   /*
+   * The business as every office sheet will carry it. The LGU Section now runs
+   * after Location, Business Information and Line of Business precisely so this
+   * is complete by the time a sheet opens — the sanitary, environmental, fire
+   * and occupancy forms all begin by asking for the same name, address and
+   * trade, and the applicant has answered all three already.
+   *
+   * A blank reads as "—" rather than an empty box: the sheets are reachable
+   * from the section map before the sections behind them are finished, and an
+   * empty field looks like something the applicant forgot to type here.
+   */
+  const carriedOverBusiness = useMemo(
+    () => ({
+      name: form.name.trim() || '—',
+      tradeName: form.trade_name.trim(),
+      address:
+        [form.line1.trim(), form.line2.trim(), barangayName].filter(Boolean).join(', ') || '—',
+      // The bracketed colloquial name is the half a shop owner recognises, as
+      // in the zoning sentence above. "Other" carries what they typed instead.
+      lineOfBusiness:
+        (declaredLine?.code === OTHER_PSIC_CODE
+          ? form.lines[0]?.line_of_business.trim()
+          : declaredLine?.title) || '—',
+    }),
+    [form.name, form.trade_name, form.line1, form.line2, form.lines, barangayName, declaredLine],
+  )
+
+  /*
    * Frozen when the modal opens rather than tracked live off the pin: the point
    * being reported has to be the point the applicant was told about, and moving
    * the pin behind an open modal would silently change the figures underneath
@@ -890,16 +944,15 @@ export function ApplyWizard() {
   }, [permitTypes, form.permit_type_ids])
 
   /*
-   * Full step sequence, fixed from the moment permits are chosen (step 2).
-   * Each office form sheet slots in after the business is described, so a
-   * certificate ticked in Part 2 shows its sheet the moment it is ticked and
-   * never appears for the first time mid-flow.
+   * Full step sequence. Each office form sheet slots in directly behind the LGU
+   * Section that spawned it, so ticking a card and opening its sheet are one
+   * movement rather than two halves of the flow with three sections in between.
    */
   const sequence: StepNode[] = useMemo(() => {
     const nodes: StepNode[] = []
     for (const p of BASE_PHASES) {
       nodes.push({ kind: 'base', phase: p })
-      if (p === 'lines') {
+      if (p === 'permits') {
         for (const code of selectedOfficeCodes) nodes.push({ kind: 'office', code })
       }
     }
@@ -1150,6 +1203,16 @@ export function ApplyWizard() {
       : touched.emergency_contact_number
         ? 'Enter a contact number for that person.'
         : '',
+    /*
+     * The zoning step's Line of Business select is required and has always
+     * rendered `fieldErrors.lines` beneath it — but no such key was ever
+     * defined here, so the message could not appear no matter what. The
+     * applicant saw Next disabled and no reason why on the field itself.
+     */
+    lines:
+      touched.lines && !form.lines[0]?.psic_code_id
+        ? 'Choose the line of business this location is for — the zoning verdict is about a trade, not a coordinate.'
+        : '',
   }
 
   function businessPayload(): BusinessPayload {
@@ -1276,6 +1339,54 @@ export function ApplyWizard() {
     const target = Math.min(stepIndex + 1, sequence.length - 1)
     setStep(target)
     markVisited(stepKey(sequence[target]))
+  }
+
+  /** Move to a step we have decided to open, saving the one being left. */
+  async function jumpTo(target: number) {
+    const ok = await persistOnLeave()
+    if (!ok) return
+    setStep(target)
+    markVisited(stepKey(sequence[target]))
+  }
+
+  /*
+   * Finish the Apply → office sheet jump. It cannot happen in the click
+   * handler: the sheet is only in `sequence` once `permit_type_ids` has
+   * updated, which is a render later. Leaving the cards here also persists the
+   * new permit list, and the sheet's derived answers ("Certificate Applied
+   * For") are the server's to compute from exactly that list — arriving before
+   * the sync is what used to leave them blank.
+   */
+  useEffect(() => {
+    if (pendingOfficeJump === null) return
+    const target = sequence.findIndex(
+      (n) => n.kind === 'office' && n.code === pendingOfficeJump,
+    )
+    // Untick-then-retick races: the sheet is gone, so there is nowhere to go.
+    setPendingOfficeJump(null)
+    if (target === -1) return
+    setOfficeReturn(true)
+    void jumpTo(target)
+    // jumpTo is recreated every render and would loop; the guard above is what
+    // makes this run once per Apply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOfficeJump, sequence])
+
+  /*
+   * Leaving the sheet any other way — Back, or a jump from the section map —
+   * ends the round trip too. Otherwise the promise to return to the cards would
+   * outlive the visit that made it and reappear on the next sheet opened.
+   */
+  useEffect(() => {
+    if (!officeCode) setOfficeReturn(false)
+  }, [officeCode])
+
+  /** Back to the clearance cards from a sheet that was opened from them. */
+  async function returnToPermits() {
+    const target = sequence.findIndex((n) => n.kind === 'base' && n.phase === 'permits')
+    if (target === -1) return
+    setOfficeReturn(false)
+    await jumpTo(target)
   }
 
   async function next() {
@@ -2059,7 +2170,9 @@ export function ApplyWizard() {
                   </p>
                   {hasOfficeForm(pt.code) && !onFile && (
                     <p className="mt-2 text-xs text-ink-muted">
-                      Adds its own application form section above.
+                      {selected
+                        ? 'Its form opens when you apply — you can reopen it from the section map.'
+                        : 'Applying opens this office’s form, then brings you back here.'}
                     </p>
                   )}
                   {onFile && (
@@ -2111,6 +2224,14 @@ export function ApplyWizard() {
                             ? form.permit_type_ids.filter((id) => id !== pt.id)
                             : [...form.permit_type_ids, pt.id],
                         )
+                        /*
+                         * Applying opens that office's form straight away. The
+                         * card used to only tick itself and grow a pill further
+                         * down the section map, which left the applicant to
+                         * work out that a new form had appeared somewhere and
+                         * that they were expected to go and find it.
+                         */
+                        if (!selected && hasOfficeForm(pt.code)) setPendingOfficeJump(pt.code)
                       }}
                       className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
                         selected
@@ -2629,6 +2750,7 @@ export function ApplyWizard() {
         <OfficeFormSheet
           code={officeCode}
           data={officeData[officeCode] ?? {}}
+          business={carriedOverBusiness}
           onChange={(d) => setOfficeData((prev) => ({ ...prev, [officeCode]: d }))}
         />
       )}
@@ -2885,7 +3007,22 @@ export function ApplyWizard() {
       <div className="mt-10 grid items-start gap-6 sm:grid-cols-[minmax(9rem,auto)_1fr_minmax(9rem,auto)]">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-4">
-            {!isLast ? (
+            {/*
+              * A sheet opened from a clearance card finishes by going back to
+              * the cards, not by carrying on down the wizard: the applicant is
+              * mid-way through choosing clearances and has one form's worth of
+              * business here. Only sheets reached that way — `officeReturn` —
+              * change; reaching one from the section map still reads Next.
+              */}
+            {officeCode && officeReturn ? (
+              <PillButton
+                onClick={() => void returnToPermits()}
+                disabled={saving || stepMissing.length > 0}
+                className="min-w-28"
+              >
+                {saving ? 'Saving…' : 'Save & back to LGU Section'}
+              </PillButton>
+            ) : !isLast ? (
               <PillButton
                 onClick={() => void next()}
                 disabled={saving || stepMissing.length > 0}

@@ -20,6 +20,24 @@ import { formatDate } from '../../lib/format'
 
 export type OfficeFormData = Record<string, unknown>
 
+/**
+ * What the applicant has already told us about the business, as every office
+ * sheet needs it printed at the top.
+ *
+ * The paper versions of these four forms each open by asking for the name, the
+ * address and the trade — which the applicant has answered three sections
+ * earlier. Carrying the answers instead of re-asking is the whole point of
+ * filing online, but carrying them silently is worse than re-asking: the
+ * applicant signs a statutory declaration without ever seeing what it says
+ * about them. So they are shown, read-only, on every sheet.
+ */
+export interface CarriedOverBusiness {
+  name: string
+  tradeName: string
+  address: string
+  lineOfBusiness: string
+}
+
 /** Which permit-type codes have a prototype form, in wizard order. */
 export const OFFICE_FORM_CODES = ['SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'] as const
 export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
@@ -209,6 +227,50 @@ function DerivedField({
       />
       {hint && <p className="mt-1 text-xs text-ink-muted">{hint}</p>}
     </div>
+  )
+}
+
+/**
+ * The business, as this sheet will carry it to the office.
+ *
+ * Read-only rather than editable, and `readOnly` rather than `disabled`: a
+ * disabled input leaves the tab order and most screen readers skip it, so the
+ * one group that most needs to hear what the form says about them would be the
+ * group that could not reach it. `readOnly` looks the same and stays
+ * announceable.
+ *
+ * Every value here is a single answer shared by all four sheets, which is why
+ * locking it is safe. Anything an individual office asks in its own words — the
+ * sanitary classification, the occupancy split, the authorised representative —
+ * stays a real question on that sheet, because two forms asking a
+ * similar-sounding question are not always asking the same one.
+ */
+function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
+  return (
+    <section className="space-y-4">
+      <SectionMarker letter="✓" label="Business Details" />
+      <p className="text-xs text-ink-muted">
+        Carried over from what you have already filled in. To change any of it, go back to Business
+        Information or Location &amp; Zoning — editing it there updates every office form at once.
+      </p>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />
+        {business.tradeName !== '' && (
+          <DerivedField
+            label={<>Trade Name / Franchise<FromApplicationTag /></>}
+            value={business.tradeName}
+          />
+        )}
+        <DerivedField
+          label={<>Business Address<FromApplicationTag /></>}
+          value={business.address}
+        />
+        <DerivedField
+          label={<>Line of Business<FromApplicationTag /></>}
+          value={business.lineOfBusiness}
+        />
+      </div>
+    </section>
   )
 }
 
@@ -495,10 +557,12 @@ function OccupancyFields({
 export function OfficeFormSheet({
   code,
   data,
+  business,
   onChange,
 }: {
   code: OfficeFormCode
   data: OfficeFormData
+  business: CarriedOverBusiness
   onChange: (data: OfficeFormData) => void
 }) {
   const meta = OFFICE_FORM_META[code]
@@ -510,10 +574,15 @@ export function OfficeFormSheet({
       <h1 className="mt-1.5 text-2xl font-bold text-ink">{meta.title}</h1>
       <p className="mt-1 text-xs text-ink-muted">Form Ref: {meta.ref}</p>
       <div className="mb-6 mt-3 h-px bg-royal" />
-      {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
-      {code === 'CEC' && <CecFields data={data} set={set} />}
-      {code === 'FSIC' && <FsicFields data={data} set={set} />}
-      {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} />}
+      <div className="space-y-7">
+        {/* First, so the sheet opens by showing what it already knows rather
+          * than by asking. */}
+        <CarriedOverSection business={business} />
+        {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
+        {code === 'CEC' && <CecFields data={data} set={set} />}
+        {code === 'FSIC' && <FsicFields data={data} set={set} />}
+        {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} />}
+      </div>
     </div>
   )
 }
