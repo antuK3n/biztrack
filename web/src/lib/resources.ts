@@ -167,6 +167,21 @@ export interface ApplicationFilters extends PageParams {
   q?: string
 }
 
+/**
+ * The paper form's "Amendment from:" checkboxes, on the wire (items 82/84).
+ *
+ * All optional: drafts autosave half-answered, and the server derives
+ * `has_amendments` from these rather than trusting a client to send it.
+ * "Others (specify)" has no boolean of its own — the text is the tick, exactly
+ * as on the paper, where you cannot tick Others without naming the other.
+ */
+export interface AmendmentAnswers {
+  amendment_ownership?: boolean
+  amendment_location?: boolean
+  amendment_nature?: boolean
+  amendment_other?: string | null
+}
+
 export const applications = {
   /**
    * Filings visible to the caller, newest first.
@@ -196,7 +211,7 @@ export const applications = {
     fee_profile?: FeeProfile
     /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
     payment_mode?: 'annual' | 'quarterly'
-  }) => unwrap<Application>(api.post('/applications', body)),
+  } & AmendmentAnswers) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
     body: {
@@ -205,7 +220,7 @@ export const applications = {
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'quarterly'
-    },
+    } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),

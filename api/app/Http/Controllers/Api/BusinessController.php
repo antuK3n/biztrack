@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
+use App\Http\Resources\PermitResource;
 use App\Models\Business;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
@@ -126,7 +128,20 @@ class BusinessController extends Controller
         ]);
     }
 
-    /** Renewal/amendment prefill: business + last permit + last application. */
+    /**
+     * Renewal/amendment prefill: business + renewable permits + last application.
+     *
+     * `last_permit` alone could not answer "which permit am I renewing"
+     * (checklist item 85). A business commonly holds four — business, sanitary,
+     * fire, occupancy — with four different expiry dates, so the latest one
+     * issued is a guess, not the applicant's answer.
+     *
+     * The wizard used to build this list from `GET /permits`, the owner's whole
+     * portfolio, and filter it in the browser. That is the wrong source twice
+     * over: the endpoint is paginated, so a business's permit could sit on page
+     * two and simply not be offered; and the browser cannot be where a revoked
+     * permit is ruled out of being renewed. Both are decided here now.
+     */
     public function prefill(Request $request, Business $business): JsonResponse
     {
         $this->authorizeOwner($request, $business);
@@ -138,6 +153,24 @@ class BusinessController extends Controller
             ->with('permitType:id,code,name')
             ->orderByDesc('issued_at')
             ->first();
+
+        /*
+         * What may be renewed, soonest to expire first — the one somebody
+         * opening a renewal came here about.
+         *
+         * Expired permits stay in: a lapsed permit is exactly what is renewed,
+         * and hiding it would leave the applicant with nothing to pick. Revoked
+         * and suspended ones go: a revoked permit is not renewed, it is
+         * appealed, and offering it as a starting point invites a filing the
+         * office has to refuse. `business` and `application` ride along because
+         * PermitResource emits them and the wizard's picker reads the type name.
+         */
+        $renewablePermits = $business->permits()
+            ->with(['permitType', 'business:id,name', 'application:id,tracking_id'])
+            ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+            ->orderByRaw('valid_until is null, valid_until asc')
+            ->orderBy('id')
+            ->get();
 
         $lastApplication = $business->applications()
             ->with('permitTypes:id')
@@ -160,6 +193,10 @@ class BusinessController extends Controller
                     ] : null,
                     'valid_until' => optional($lastPermit->valid_until)->toDateString(),
                 ] : null,
+                // The full PermitResource shape, so the wizard's picker renders
+                // permit number, type and expiry from the same fields the
+                // Permits screen does rather than a second, thinner contract.
+                'renewable_permits' => PermitResource::collection($renewablePermits),
                 'last_application' => $lastApplication ? [
                     'id' => $lastApplication->id,
                     'permit_type_ids' => $lastApplication->permitTypes->pluck('id')->values(),

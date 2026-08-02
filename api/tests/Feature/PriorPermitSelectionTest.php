@@ -118,3 +118,91 @@ it('will not change the prior permit once the application has been submitted', f
         'prior_permit_id' => $permitId,
     ])->assertStatus(422);
 });
+
+/*
+ * Item 85 — "renewal needs to ask ... to know which certain permit to renew".
+ *
+ * The picker above could only offer what the browser had already fetched from
+ * GET /permits, the owner's whole paginated portfolio, filtered client-side.
+ * That is the wrong source twice over: the permit being renewed can sit on page
+ * two and never be offered at all, and whether a permit may be renewed is not
+ * the browser's judgment to make. The prefill answers for one business now.
+ */
+
+it('lists the business’s renewable permits on the prefill, soonest to expire first', function () {
+    authAs('owner@biztrack.local');
+    $business = Business::where('name', 'like', 'Nena%')->firstOrFail();
+
+    $data = $this->getJson("/api/v1/businesses/{$business->id}/prefill?type=renewal")
+        ->assertOk()
+        ->json('data.renewable_permits');
+
+    expect($data)->toHaveCount($business->permits()->count());
+
+    // Permit number, type and validity — enough for the choice to be unambiguous.
+    expect($data[0])->toHaveKeys(['id', 'permit_number', 'permit_type', 'valid_from', 'valid_until']);
+
+    $expiries = array_column($data, 'valid_until');
+    $sorted = $expiries;
+    sort($sorted);
+    expect($expiries)->toBe($sorted);
+});
+
+it('offers an expired permit — a lapsed permit is exactly what gets renewed', function () {
+    authAs('owner@biztrack.local');
+    $business = Business::where('name', 'like', 'Nena%')->firstOrFail();
+
+    $permit = $business->permits()->firstOrFail();
+    $permit->update(['status' => 'expired', 'valid_until' => now()->subMonths(2)->toDateString()]);
+
+    $ids = collect(
+        $this->getJson("/api/v1/businesses/{$business->id}/prefill?type=renewal")
+            ->assertOk()
+            ->json('data.renewable_permits')
+    )->pluck('id');
+
+    expect($ids)->toContain($permit->id);
+});
+
+it('withholds revoked and suspended permits, which are appealed and not renewed', function () {
+    authAs('owner@biztrack.local');
+    $business = Business::where('name', 'like', 'Nena%')->firstOrFail();
+
+    $permits = $business->permits()->orderBy('id')->get();
+    expect($permits)->toHaveCount(2);
+    $permits[0]->update(['status' => 'revoked']);
+    $permits[1]->update(['status' => 'suspended']);
+
+    $offered = $this->getJson("/api/v1/businesses/{$business->id}/prefill?type=renewal")
+        ->assertOk()
+        ->json('data.renewable_permits');
+
+    expect($offered)->toBe([]);
+});
+
+it('does not offer another business’s permits', function () {
+    // Two owners' permits used to reach the same client-side filter; the scope
+    // is the query's now, so a mistake there is a 403, not a mis-filter.
+    authAs('owner@biztrack.local');
+    $business = Business::where('name', 'like', 'Nena%')->firstOrFail();
+
+    $offered = collect(
+        $this->getJson("/api/v1/businesses/{$business->id}/prefill?type=renewal")
+            ->assertOk()
+            ->json('data.renewable_permits')
+    );
+
+    expect($offered)->not->toBeEmpty()
+        ->and($offered->pluck('business.id')->unique()->all())->toBe([$business->id]);
+});
+
+it('links the chosen permit to the filing, which renewal-compliance analytics count on', function () {
+    // RenewalRiskAnalytics reads applications.prior_permit_id; a null there is
+    // not a neutral omission, it quietly understates the renewal figures.
+    ['business' => $business] = renewalDraft();
+    $permit = $business->permits()->orderBy('valid_until')->firstOrFail();
+
+    ['application_id' => $appId] = renewalDraft($permit->id);
+
+    expect(Application::findOrFail($appId)->prior_permit_id)->toBe($permit->id);
+});
