@@ -10,7 +10,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import type { ReactNode } from 'react'
 import { EmptyState, ErrorState, Skeleton } from '../../components/ui/primitives'
+import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { analytics } from '../../lib/resources'
@@ -148,6 +150,22 @@ function ControlChart({ department }: { department: ProcessingTimeDepartment }) 
   )
 }
 
+/**
+ * A section title, with the server's account of the panel beside it.
+ *
+ * The info button is a sibling of the h2 rather than a child, so that "How X is
+ * measured" does not fold into the heading's accessible name and get announced
+ * on every section by anyone navigating this page by heading.
+ */
+function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
+  return (
+    <div className="mb-2.5 flex items-center">
+      <h2 className="text-xl text-ink">{children}</h2>
+      {metric && <Info metric={metric} />}
+    </div>
+  )
+}
+
 function StatusIndicator({ department }: { department: ProcessingTimeDepartment }) {
   const outside = department.status === 'outside'
   return (
@@ -155,7 +173,10 @@ function StatusIndicator({ department }: { department: ProcessingTimeDepartment 
       <p className={`text-[34px] font-bold leading-none ${outside ? 'text-s-red' : 'text-royal'}`}>
         {outside ? 'Outside' : 'Inside'}
       </p>
-      <p className="mt-2.5 text-[13px] text-ink-muted">Process Status Indicator</p>
+      <p className="mt-2.5 text-[13px] text-ink-muted">
+        Process Status Indicator
+        <Info metric="departments.status" />
+      </p>
       <p className="mt-2 text-xs text-ink-muted">
         Week of {weekLabel(department.latest_week)} averaged {department.latest_mean_days.toFixed(2)} days.
       </p>
@@ -352,38 +373,40 @@ export function ProcessingTimePage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : !data ? null : selected ? (
-        <>
+        <MetricDefinitions value={meta?.definitions}>
           <div className="grid gap-x-6 gap-y-7 lg:grid-cols-[minmax(0,1fr)_320px]">
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Department Processing Time Chart</h2>
+              <SectionHeading metric="departments">Department Processing Time Chart</SectionHeading>
               <ControlChart department={selected} />
             </section>
             <div className="space-y-5">
               <StatusIndicator department={selected} />
               <section>
-                <h2 className="mb-2.5 text-xl text-ink">Flagged Weeks</h2>
+                <SectionHeading metric="departments.flagged">Flagged Weeks</SectionHeading>
                 <FlaggedWeeks department={selected} />
               </section>
             </div>
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Gradual Slowdown Detector</h2>
+              <SectionHeading metric="departments.trend">Gradual Slowdown Detector</SectionHeading>
               <SlowdownDetector departments={departments} />
             </section>
           </div>
-
-        </>
+        </MetricDefinitions>
       ) : (
-        <EmptyState
-          title="Not enough review history to chart yet"
-          description={
-            <>
-              Across the last {data.window_weeks} weeks the offices completed {data.completed_reviews}{' '}
-              reviews, but no single week reached the {data.min_completions_per_week} completions a control
-              chart needs before its average means anything. The chart appears on its own once review
-              volume gets there.
-            </>
-          }
-        />
+        <MetricDefinitions value={meta?.definitions}>
+          <EmptyState
+            title="Not enough review history to chart yet"
+            description={
+              <>
+                Across the last {data.window_weeks} weeks the offices completed{' '}
+                {data.completed_reviews}
+                <Info metric="completed_reviews" /> reviews, but no single week reached the{' '}
+                {data.min_completions_per_week} completions a control chart needs before its average
+                means anything. The chart appears on its own once review volume gets there.
+              </>
+            }
+          />
+        </MetricDefinitions>
       )}
     </div>
   )

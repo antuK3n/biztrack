@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
+import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { analytics } from '../../lib/resources'
@@ -64,11 +66,41 @@ function BandChip({ row }: { row: RenewalRiskRow }) {
   )
 }
 
-function Headline({ value, label, hint }: { value: string; label: string; hint?: string }) {
+/**
+ * A section title, with the server's account of the panel beside it.
+ *
+ * The info button is a sibling of the h2 rather than a child. Nested, its label
+ * folds into the heading's accessible name, so anyone navigating this page by
+ * heading would hear "Businesses at Risk How Businesses at Risk is measured" on
+ * every section.
+ */
+function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
+  return (
+    <div className="mb-2.5 flex items-center">
+      <h2 className="text-xl text-ink">{children}</h2>
+      {metric && <Info metric={metric} />}
+    </div>
+  )
+}
+
+function Headline({
+  value,
+  label,
+  hint,
+  metric,
+}: {
+  value: string
+  label: string
+  hint?: string
+  metric?: string
+}) {
   return (
     <ProtoCard className="px-4 py-7 text-center">
       <p className="tnum text-[30px] font-bold leading-none text-royal">{value}</p>
-      <p className="mt-2.5 text-[13px] text-ink-muted">{label}</p>
+      <p className="mt-2.5 text-[13px] text-ink-muted">
+        {label}
+        {metric && <Info metric={metric} />}
+      </p>
       {hint && <p className="mt-1 text-[11px] text-ink-muted">{hint}</p>}
     </ProtoCard>
   )
@@ -86,22 +118,34 @@ function AtRiskTable({ rows }: { rows: RenewalRiskRow[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
+            {/*
+              aria-label pins each header's accessible name to the label alone.
+              A column header takes its name from its contents, and that name is
+              announced against every cell beneath it — so without this, every
+              score in the column would read as "Risk score How Risk score is
+              measured". The button cannot move out of the cell the way it does
+              for the section headings, so the name is stated instead.
+            */}
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
-              <th scope="col" className="px-5 py-2.5 font-semibold">
+              <th scope="col" aria-label="Business" className="px-5 py-2.5 font-semibold">
                 Business
+                <Info metric="at_risk.drivers" />
               </th>
-              <th scope="col" className="px-5 py-2.5 font-semibold">
+              <th scope="col" aria-label="Barangay" className="px-5 py-2.5 font-semibold">
                 Barangay
+                <Info metric="at_risk.barangay" />
               </th>
               {/*
                 Not "Prob. delay risk". A score out of 100 from a rule set, with
                 the band beside it so the number is never read alone.
               */}
-              <th scope="col" className="px-5 py-2.5 text-right font-semibold">
+              <th scope="col" aria-label="Risk score" className="px-5 py-2.5 text-right font-semibold">
                 Risk score
+                <Info metric="at_risk.score" />
               </th>
-              <th scope="col" className="px-5 py-2.5 font-semibold">
+              <th scope="col" aria-label="Expires" className="px-5 py-2.5 font-semibold">
                 Expires
+                <Info metric="at_risk.days_to_expiry" />
               </th>
               <th scope="col" className="px-5 py-2.5 font-semibold">
                 Recommended action
@@ -300,7 +344,7 @@ export function RenewalRiskPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : data ? (
-        <>
+        <MetricDefinitions value={meta?.definitions}>
           {/*
             Verbatim from the server. It is the sentence that stops four big
             numbers and a ranked table from reading as a forecast, so it sits
@@ -308,15 +352,29 @@ export function RenewalRiskPage() {
           */}
           <p className="mb-5 rounded-lg border border-line bg-white px-4 py-3 text-[13px] leading-relaxed text-ink-secondary">
             {data.methodology}
+            <Info metric="methodology" />
           </p>
 
           <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
-            <Headline value={data.counts.high.toLocaleString()} label="High Risk" />
-            <Headline value={data.counts.moderate.toLocaleString()} label="Moderate Risk" />
-            <Headline value={data.counts.low.toLocaleString()} label="Low Risk" />
+            <Headline
+              value={data.counts.high.toLocaleString()}
+              label="High Risk"
+              metric="counts.high"
+            />
+            <Headline
+              value={data.counts.moderate.toLocaleString()}
+              label="Moderate Risk"
+              metric="counts.moderate"
+            />
+            <Headline
+              value={data.counts.low.toLocaleString()}
+              label="Low Risk"
+              metric="counts.low"
+            />
             <Headline
               value={data.reminders_sent.toLocaleString()}
               label="Reminders Sent"
+              metric="reminders_sent"
               hint={
                 data.reminders_sent === 0
                   ? 'No expiry reminder recorded for these permits yet'
@@ -327,7 +385,7 @@ export function RenewalRiskPage() {
 
           <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-[1.6fr_1fr]">
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Businesses at Risk</h2>
+              <SectionHeading metric="at_risk">Businesses at Risk</SectionHeading>
               {data.at_risk.length > 0 ? (
                 <AtRiskTable rows={data.at_risk} />
               ) : (
@@ -341,25 +399,26 @@ export function RenewalRiskPage() {
             </section>
 
             <section>
-              <h2 className="mb-2.5 text-xl text-ink">Recommended Actions</h2>
+              <SectionHeading metric="actions">Recommended Actions</SectionHeading>
               <RecommendedActions report={data} />
             </section>
 
             <section className="lg:col-span-2">
-              <h2 className="mb-2.5 text-xl text-ink">What drives the score</h2>
+              <SectionHeading metric="rulebook">What drives the score</SectionHeading>
               <HowItWorks report={data} />
             </section>
           </div>
 
           <p className="mt-6 text-xs text-ink-muted">
             {data.scored_permits.toLocaleString()} permit
-            {data.scored_permits === 1 ? '' : 's'} scored — those expiring on or before{' '}
+            {data.scored_permits === 1 ? '' : 's'}
+            <Info metric="scored_permits" /> scored — those expiring on or before{' '}
             {data.window_end}, plus any that lapsed since {data.window_start}. Revoked and suspended
             permits are excluded.
             {data.at_risk.length < data.scored_permits &&
               ` Showing the ${data.at_risk.length} highest-scoring.`}
           </p>
-        </>
+        </MetricDefinitions>
       ) : null}
     </div>
   )

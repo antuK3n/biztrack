@@ -2,7 +2,10 @@
 
 use App\Support\AnalyticsDatasets;
 use App\Support\AnalyticsDefinitions;
+use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
+use App\Support\ProcessingTimeAnalytics;
+use App\Support\RenewalRiskAnalytics;
 
 /*
  * The definitions in AnalyticsDefinitions are shown to a reader as an
@@ -34,68 +37,176 @@ function definitionTokenExists(mixed $haystack, string $needle): bool
     return false;
 }
 
-it('defines only figures the dashboard payload actually contains', function () {
-    $payload = DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS);
-    $definitions = AnalyticsDefinitions::for(AnalyticsDatasets::DASHBOARD);
-
-    expect($definitions)->not->toBeEmpty();
-
-    foreach ($definitions as $key => $definition) {
-        $segments = explode('.', $key);
-        $panel = array_shift($segments);
-
-        // The panel must still be on the payload under the name we describe.
-        expect(array_key_exists($panel, $payload))->toBeTrue(
-            "Definition [{$key}] names panel [{$panel}], which the dashboard payload no longer has.",
-        );
+/**
+ * A built payload per dataset, and the panels a reader sees figures in.
+ *
+ * The panel lists are curated rather than derived from the payload keys. A
+ * payload also carries the window it was built over — `window_start`,
+ * `generated_at`, `period_months` and friends — and those are labels for the
+ * window, not figures derived from it. Listing them would demand a formula for
+ * a date. Adding a real panel without adding a definition fails here.
+ *
+ * @return array<string, array{payload: array<string, mixed>, panels: list<string>}>
+ */
+function analyticsDefinitionSubjects(): array
+{
+    return [
+        AnalyticsDatasets::DASHBOARD => [
+            'payload' => DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS),
+            'panels' => [
+                'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
+                'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
+                'inspections', 'officer_activity', 'map',
+            ],
+        ],
 
         /*
-         * The remaining segments identify the figure within the panel. They are
-         * matched loosely — as a key or as a string value — because the payload
-         * addresses figures both ways: `kpis.active_businesses` is a key, while
-         * `compliance.renewal` is the `indicator` value on a row. Either way, a
-         * rename breaks the match, which is the drift worth catching.
+         * `thin` is on the payload but not in this list: it is the departments
+         * the chart had to leave out, and it carries its own `reason` string
+         * explaining each omission in place. A definition would restate it.
          */
-        foreach ($segments as $segment) {
-            expect(definitionTokenExists($payload[$panel], $segment))->toBeTrue(
-                "Definition [{$key}] names figure [{$segment}], which no longer appears in the [{$panel}] panel.",
+        AnalyticsDatasets::PROCESSING_TIME => [
+            'payload' => ProcessingTimeAnalytics::build(),
+            'panels' => ['departments', 'completed_reviews'],
+        ],
+
+        AnalyticsDatasets::RENEWAL_RISK => [
+            'payload' => RenewalRiskAnalytics::build(),
+            'panels' => [
+                'at_risk', 'counts', 'reminders_sent', 'actions', 'rulebook',
+                'scored_permits', 'methodology',
+            ],
+        ],
+
+        AnalyticsDatasets::BUSINESS_GROWTH => [
+            'payload' => BusinessGrowthAnalytics::build(),
+            'panels' => [
+                'growth_rate', 'registrations', 'closures', 'status_summary',
+                'cohort_survival', 'top_barangays', 'closure_trend', 'industry_growth',
+            ],
+        ],
+    ];
+}
+
+it('defines only figures the payload actually contains', function () {
+    foreach (analyticsDefinitionSubjects() as $dataset => $subject) {
+        $payload = $subject['payload'];
+        $definitions = AnalyticsDefinitions::for($dataset);
+
+        expect($definitions)->not->toBeEmpty("Dataset [{$dataset}] ships no definitions at all.");
+
+        foreach ($definitions as $key => $definition) {
+            $segments = explode('.', $key);
+            $panel = array_shift($segments);
+
+            // The panel must still be on the payload under the name we describe.
+            expect(array_key_exists($panel, $payload))->toBeTrue(
+                "Definition [{$dataset}.{$key}] names panel [{$panel}], which the payload no longer has.",
             );
+
+            /*
+             * The remaining segments identify the figure within the panel. They
+             * are matched loosely — as a key or as a string value — because the
+             * payload addresses figures both ways: `kpis.active_businesses` is a
+             * key, while `compliance.renewal` is the `indicator` value on a row.
+             * Either way, a rename breaks the match, which is the drift worth
+             * catching.
+             *
+             * A panel that is a list can be empty when the register holds
+             * nothing to fill it — no permit near expiry, no department with
+             * enough completions to chart. There is then no key to match and no
+             * rename to catch, so the segment check is skipped rather than
+             * failed. It is skipped loudly: an empty panel is reported, so a
+             * fixture that has quietly stopped exercising a screen shows up as a
+             * gap in coverage rather than as a green test.
+             */
+            if ($segments !== [] && $payload[$panel] === []) {
+                $skipped[] = "{$dataset}.{$key}";
+
+                continue;
+            }
+
+            foreach ($segments as $segment) {
+                expect(definitionTokenExists($payload[$panel], $segment))->toBeTrue(
+                    "Definition [{$dataset}.{$key}] names figure [{$segment}], which no longer appears in the [{$panel}] panel.",
+                );
+            }
         }
+    }
+
+    if (isset($skipped)) {
+        fwrite(STDERR, "\n  Unverified against an empty panel: ".implode(', ', $skipped)."\n");
     }
 });
 
 it('carries all four fields on every definition, none of them blank', function () {
-    foreach (AnalyticsDefinitions::for(AnalyticsDatasets::DASHBOARD) as $key => $definition) {
-        expect($definition)->toHaveKeys(['label', 'formula', 'covers', 'why'], "Definition [{$key}] is missing a field.");
+    foreach (array_keys(analyticsDefinitionSubjects()) as $dataset) {
+        $definitions = AnalyticsDefinitions::for($dataset);
 
-        foreach ($definition as $field => $text) {
-            expect(trim($text))->not->toBe('', "Definition [{$key}] has an empty [{$field}].");
+        foreach ($definitions as $key => $definition) {
+            expect($definition)->toHaveKeys(
+                ['label', 'formula', 'covers', 'why'],
+                "Definition [{$dataset}.{$key}] is missing a field.",
+            );
+
+            foreach ($definition as $field => $text) {
+                expect(trim($text))->not->toBe('', "Definition [{$dataset}.{$key}] has an empty [{$field}].");
+            }
         }
     }
 });
 
-it('leaves no dashboard panel unexplained', function () {
-    $definitions = array_keys(AnalyticsDefinitions::for(AnalyticsDatasets::DASHBOARD));
+it('leaves no panel unexplained', function () {
+    foreach (analyticsDefinitionSubjects() as $dataset => $subject) {
+        $definitions = array_keys(AnalyticsDefinitions::for($dataset));
 
-    /*
-     * The panels a reader sees figures in. Context keys (`window_start`,
-     * `generated_at` and friends) are labels for the window, not figures derived
-     * from it, so they are not listed. Adding a panel to the dashboard without
-     * adding a definition fails here.
-     */
-    $panels = [
-        'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
-        'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
-        'inspections', 'officer_activity', 'map',
-    ];
+        foreach ($subject['panels'] as $panel) {
+            $covered = array_filter(
+                $definitions,
+                static fn (string $key): bool => $key === $panel || str_starts_with($key, $panel.'.'),
+            );
 
-    foreach ($panels as $panel) {
-        $covered = array_filter(
-            $definitions,
-            static fn (string $key): bool => $key === $panel || str_starts_with($key, $panel.'.'),
-        );
+            expect($covered)->not->toBeEmpty("Panel [{$dataset}.{$panel}] has no entry in AnalyticsDefinitions.");
+        }
+    }
+});
 
-        expect($covered)->not->toBeEmpty("Dashboard panel [{$panel}] has no entry in AnalyticsDefinitions.");
+/*
+ * The renewal risk score is a weighted rule score, not a fitted model. The
+ * paper and the mockup both described it as an "Estimated Probability of
+ * Delayed Renewal" and printed percentages against it; nothing in the register
+ * records whether a business eventually renewed late, so there is no outcome to
+ * have trained on and no calibration to report.
+ *
+ * docs/r-integration-spec.md settles this: keep the number and the banding, do
+ * not label it a probability or a prediction confidence. The reason is not
+ * pedantry — an officer who reads "88%" as calibrated will act on it as
+ * calibrated. This test is the guard on the wording, because the wording is the
+ * only place the claim can be made.
+ *
+ * The four terms the spec names are banned outright, along with `forecast`,
+ * and the ban covers denials too — "this is not a probability" fails here just
+ * as "88% probability" would. That is deliberate. A definition that has to
+ * deny the claim is a definition written in the claim's vocabulary, and the
+ * reader is left holding the word. Saying instead that the register records no
+ * outcome to have fitted against is both true and harder to misquote.
+ *
+ * `likely` is not on the list: it is ordinary English long before it is a
+ * statistical term, and banning it would only push prose into worse phrasing
+ * without closing any gap `likelihood` leaves open.
+ */
+it('never describes the renewal risk score as a prediction', function () {
+    $forbidden = ['probability', 'probable', 'likelihood', 'predict', 'forecast', 'confidence'];
+
+    foreach (AnalyticsDefinitions::for(AnalyticsDatasets::RENEWAL_RISK) as $key => $definition) {
+        foreach ($definition as $field => $text) {
+            foreach ($forbidden as $word) {
+                expect(str_contains(mb_strtolower($text), $word))->toBeFalse(
+                    "Definition [renewal_risk.{$key}] uses [{$word}] in [{$field}]. The score is a weighted rule "
+                    .'score with nothing fitted behind it — see the honesty constraint in docs/r-integration-spec.md.',
+                );
+            }
+        }
     }
 });
 
@@ -112,4 +223,18 @@ it('ships the definitions in meta, beside the engine rather than inside the figu
 
     // The payload R returns must stay exactly the payload R returned.
     expect($body['data'])->not->toHaveKey('definitions');
+});
+
+it('ships definitions on every analytics screen, not only the dashboard', function () {
+    foreach (['processing-time', 'renewal-risk', 'business-growth'] as $route) {
+        $response = test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson("/api/v1/analytics/{$route}");
+
+        $response->assertOk();
+
+        expect($response->json('meta.definitions'))->not->toBeEmpty(
+            "The [{$route}] screen ships no definitions, so every info button on it renders nothing.",
+        );
+        expect($response->json('data'))->not->toHaveKey('definitions');
+    }
 });

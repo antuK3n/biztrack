@@ -46,6 +46,9 @@ final class AnalyticsDefinitions
     {
         return match ($dataset) {
             AnalyticsDatasets::DASHBOARD => self::dashboard(),
+            AnalyticsDatasets::PROCESSING_TIME => self::processingTime(),
+            AnalyticsDatasets::RENEWAL_RISK => self::renewalRisk(),
+            AnalyticsDatasets::BUSINESS_GROWTH => self::businessGrowth(),
             default => [],
         };
     }
@@ -209,6 +212,255 @@ final class AnalyticsDefinitions
                 'formula' => 'Registered business locations plotted from recorded coordinates, marked by whether the business currently holds a valid permit.',
                 'covers' => 'Only businesses with coordinates on record, which is fewer than the register holds — the plotted count, the number with coordinates and the register total are all shown so the gap is visible. Beyond a fixed cap the remainder is noted rather than drawn.',
                 'why' => 'Turns the barangay ranking into something that can be walked. Lapsed permits are drawn rather than filtered out, since a cluster of lapsed businesses in one area is the pattern worth seeing.',
+            ],
+        ];
+    }
+
+    /**
+     * Keys are dot paths into the processing-time payload.
+     *
+     * This screen is a control chart, and a control chart is the one analytics
+     * shape whose vocabulary the reader is least likely to share. Revision 6.1
+     * (docs/r-integration-revisions.md) is a question about exactly that —
+     * "ito bang processing ay processed? o processing time is from the
+     * application until the process?" — and 6.2 struck through the word
+     * "Inside" on the status pill. So the two things these entries owe the
+     * reader before anything else are which two timestamps the clock runs
+     * between, and which direction on the chart is the good one.
+     *
+     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     */
+    private static function processingTime(): array
+    {
+        return [
+            'departments' => [
+                'label' => 'Department Processing Time Chart',
+                'formula' => 'For each week, the mean days a department took on the reviews it finished that week — clock starts when the review is assigned to the office and stops when that office completes it. The centre line and the range around it are fitted on the first 24 charted weeks and held fixed after that.',
+                'covers' => 'Reviews completed in the window that carry both an assignment and a completion time. Open reviews are excluded, so a department that never finishes anything has fewer points rather than worse ones. Days are calendar days including weekends. A week with fewer than three completions is dropped entirely rather than plotted thin, which is why the reviews behind the chart total less than the window\'s completed count.',
+                'why' => 'Lower is better: this is time an applicant spends waiting on one desk. The limits are fitted on the earliest weeks on purpose — if a recent slowdown were allowed into the calibration it would widen the very range meant to catch it, and the office would be graded against its own drift.',
+            ],
+
+            'departments.status' => [
+                'label' => 'Process Status Indicator',
+                'formula' => 'Whether the most recent charted week sat inside the fitted range, or outside it — either beyond the range itself, or flagged by the smoothed trend line.',
+                'covers' => 'The latest week only. It says nothing about the weeks before it: a department can read as normal this week and still have been outside the range for the six before, which is what the flagged list underneath is for.',
+                'why' => 'Outside does not mean a rule was broken. It means this week did not look like this department\'s own normal, which is a prompt to ask why rather than a finding in itself — a holiday backlog and a genuine breakdown look identical here.',
+            ],
+
+            'departments.flagged' => [
+                'label' => 'Flagged Weeks',
+                'formula' => 'The weeks whose mean sat outside the fitted range, listed with how far above or below the centre line they fell.',
+                'covers' => 'Charted weeks only, so a week dropped for having fewer than three completions can never appear here however slow it was.',
+                'why' => 'A single unusual week is noise; three in a quarter is a pattern. Listing them with dates lets the office match a slow stretch against something it remembers — a staff absence, a system outage, a surge — instead of guessing from a chart.',
+            ],
+
+            'departments.trend' => [
+                'label' => 'Gradual Slowdown Detector',
+                'formula' => 'A smoothed average that weights the newest week most heavily and fades older ones, compared against the same fitted centre line. Rising or easing is reported once the smoothed value has moved more than half way to the edge of its band.',
+                'covers' => 'The same charted weeks as the chart. The bar length is the size of the move regardless of direction, so a department improving quickly and one worsening quickly both show a long bar — the word beside it is what tells them apart.',
+                'why' => 'A slide of half a day a week never breaches the range and never appears in the flagged list, but a quarter of it is a week of added waiting. This is the panel that catches the drift no single week is bad enough to trigger.',
+            ],
+
+            'completed_reviews' => [
+                'label' => 'Completed reviews',
+                'formula' => 'All departmental reviews completed inside the window.',
+                'covers' => 'Every completion, including those in weeks too thin to chart. It is deliberately larger than the reviews the chart draws — the gap is the volume the chart could not say anything reliable about.',
+                'why' => 'The sample size the whole screen rests on. A control chart built on a few dozen reviews is a description of those reviews and not of the office, and this is the number that says which of the two the reader is looking at.',
+            ],
+        ];
+    }
+
+    /**
+     * Keys are dot paths into the renewal-risk payload.
+     *
+     * Read the honesty constraint in docs/r-integration-spec.md before editing
+     * a word of this. The paper and the mockup both described this column as an
+     * "Estimated Probability of Delayed Renewal" and printed percentages
+     * against it. No model exists: nothing here is fitted on historical
+     * outcomes, there is no outcome variable, and there is no calibration to
+     * report. What exists is a weighted rule score whose every rule is printed
+     * on the same screen.
+     *
+     * So these entries may not call the score a probability, a prediction, a
+     * likelihood or a confidence, and may not render it as a percentage. The
+     * risk is concrete rather than academic: an officer who reads "88%" as
+     * calibrated will act on it as calibrated, and the register cannot support
+     * that. The score's only claim is ordinal — it sorts, it does not forecast.
+     *
+     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     */
+    private static function renewalRisk(): array
+    {
+        return [
+            'at_risk' => [
+                'label' => 'Businesses at Risk',
+                'formula' => 'Permits falling due inside the horizon, scored against five rules and listed worst first. Ties are broken by whichever expires sooner.',
+                'covers' => 'Active and expired permits whose validity ends between 60 days ago and the end of the horizon — recently lapsed ones are kept in, because a permit that quietly expired last month is the case most worth chasing. Revoked and suspended permits are excluded: those are enforcement outcomes, and neither is waiting to be renewed. Only the leading rows are listed, while the band counts below are over every permit scored.',
+                'why' => 'The follow-up list. It is ordered by score rather than by expiry date so that a permit expiring in a fortnight with nothing filed and fees outstanding outranks one expiring next week whose renewal is already approved.',
+            ],
+
+            'at_risk.score' => [
+                'label' => 'Risk score',
+                'formula' => 'Points out of 100, added across five rules: how soon the permit expires (30), how far any renewal has got (25), whether this business has renewed late before (20), open compliance findings (15), and unsettled fees on the renewal (10).',
+                'covers' => 'A weighted checklist, and nothing behind it is fitted on past behaviour. The register does not record whether a business eventually renewed late, so there was no outcome to fit against and there is no accuracy figure to quote. The number sorts a queue; it says nothing about what any one business will do.',
+                'why' => 'Scoring is what lets a hundred permits be worked in the order that matters instead of by expiry date alone. Every rule and its weight is printed below the table on purpose — an officer must be able to disagree with the ranking on the merits, which they cannot do with a number whose workings are hidden.',
+            ],
+
+            'at_risk.drivers' => [
+                'label' => 'Why this permit is listed',
+                'formula' => 'The rules that scored above zero for this permit, heaviest first.',
+                'covers' => 'Only the top few are shown, so a permit scoring on all five rules displays the three that moved it most. Two of the rules are deliberately quiet: a business in its first renewal cycle scores half the punctuality weight rather than zero, because no record is not the same as a clean record, and a permit with no renewal filed at all scores nothing on fees, since the missing filing is already carried by the progress rule and would otherwise be counted twice.',
+                'why' => 'The reason is what an officer acts on — "no renewal filed" and "fees unsettled" are two different phone calls. A score with no reasons attached can only be trusted or ignored wholesale.',
+            ],
+
+            'at_risk.days_to_expiry' => [
+                'label' => 'Expires',
+                'formula' => 'Calendar days from today to the permit\'s validity date; negative once it has passed.',
+                'covers' => 'The date on the permit, not on any renewal filed against it.',
+                'why' => 'The hard deadline behind the score. It is shown beside the score rather than folded into it so the reader can see when a high score is urgency and when it is accumulated neglect.',
+            ],
+
+            'at_risk.barangay' => [
+                'label' => 'Barangay',
+                'formula' => 'The barangay recorded on the business\'s registered location.',
+                'covers' => 'Businesses with no location on record read as not recorded rather than being dropped from the list. A business holding more than one location row is shown one of them.',
+                'why' => 'Follow-up is done on foot. Grouping the list by barangay is what turns it into a route.',
+            ],
+
+            'counts.high' => [
+                'label' => 'High Risk',
+                'formula' => 'Permits scoring 50 or above.',
+                'covers' => 'Every permit scored in the window, not only those listed in the table above.',
+                'why' => 'The size of the immediate-follow-up queue, which is the number that decides whether this week\'s chasing can be done by the desk or needs help.',
+            ],
+
+            'counts.moderate' => [
+                'label' => 'Moderate Risk',
+                'formula' => 'Permits scoring 25 up to 49.',
+                'covers' => 'Every permit scored in the window.',
+                'why' => 'The reminder queue — cases a notice will probably resolve without anyone calling. Watching this band grow while the high band holds steady is what an early warning looks like.',
+            ],
+
+            'counts.low' => [
+                'label' => 'Low Risk',
+                'formula' => 'Permits scoring under 25.',
+                'covers' => 'Every permit scored in the window. A permit that is not yet due and has nothing else against it lands here by design: the progress rule is switched off entirely more than 30 days out, because without that the whole register would score at least Moderate and this band would be empty.',
+                'why' => 'The band that makes the other two mean something. If nearly everything is high risk, nothing is.',
+            ],
+
+            'reminders_sent' => [
+                'label' => 'Reminders Sent',
+                'formula' => 'Expiry notices already issued against the permits in scope — the 60, 30 and 7 day warnings, and the renewal-due notice.',
+                'covers' => 'Counted from notices actually recorded as sent, so it reads zero until the nightly permit scan has run at least once. That zero is true rather than missing: no notice has gone out. The lapse notice is not counted — it reports a status change and is not a request to renew, and pooling it in would inflate this figure with messages nobody was asked to act on.',
+                'why' => 'Separates a business that has ignored three warnings from one that has had none, which are the same score and opposite conversations.',
+            ],
+
+            'actions' => [
+                'label' => 'Recommended Actions',
+                'formula' => 'Each band\'s count, carried through to the action it implies: immediate follow-up above 50, a reminder from 25, monitoring below that.',
+                'covers' => 'All scored permits. The action follows from the band alone and nothing else — it is a restatement of the score, not a second judgement about the business.',
+                'why' => 'Requested directly in review: "kaya ako sinusunod, ng risk — so dapat meron ka diyan." A risk figure with no action attached leaves the officer to invent the response, and two officers will invent different ones.',
+            ],
+
+            'rulebook' => [
+                'label' => 'What drives the score',
+                'formula' => 'The five rules and the most each can contribute, listed with what each one measures.',
+                'covers' => 'The rules as the scorer applies them, read from the same constants the scoring runs on rather than retyped here.',
+                'why' => 'This panel is the reason the score is allowed to exist. A composite number is only defensible if a reader can take it apart, and printing the weights is what lets an officer say the punctuality rule is too harsh instead of only that the ranking feels wrong.',
+            ],
+
+            'scored_permits' => [
+                'label' => 'Permits scored',
+                'formula' => 'All permits that fell inside the window and were put through the rules.',
+                'covers' => 'The denominator behind the three band counts, and larger than the table, which lists only the leading rows.',
+                'why' => 'Stated so the band counts can be read as shares. Forty high-risk permits out of sixty is a different office from forty out of four thousand.',
+            ],
+
+            'methodology' => [
+                'label' => 'How this list is built',
+                'formula' => 'The five rules in plain words, shipped from the scorer rather than written on the screen.',
+                'covers' => 'The whole screen.',
+                'why' => 'It travels with the figure so the caveat cannot be separated from the number by a screenshot. This is the sentence that says the score counts warning signs already on the register rather than reaching past today, and it is the one an officer is most likely to need quoted back at them.',
+            ],
+        ];
+    }
+
+    /**
+     * Keys are dot paths into the business-growth payload.
+     *
+     * The trap on this screen is that its panels do not all count the same
+     * population. Registrations and the barangay ranking include businesses
+     * later removed from the register, because they were genuinely registered
+     * in the period; the industry breakdown excludes them, because it describes
+     * what is trading now. Both are defensible and the difference is invisible
+     * in the bars, so each entry says which population it is over.
+     *
+     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     */
+    private static function businessGrowth(): array
+    {
+        return [
+            'growth_rate' => [
+                'label' => 'Business Growth Rate',
+                'formula' => 'New registrations this period minus the period before, divided by the period before, as a percentage.',
+                'covers' => 'Counted from the registration date, including businesses since removed from the register — they were registered, and dropping them would rewrite past periods every time one closed. Reported as no prior period rather than as growth when the earlier period is empty, since everything divided by nothing is not infinite growth.',
+                'why' => 'Whether the register is growing, against its own recent past rather than a target. Both raw counts are shown beside it because a percentage swing on small numbers is mostly noise.',
+            ],
+
+            'registrations' => [
+                'label' => 'New registrations',
+                'formula' => 'Businesses whose registration date falls inside the period.',
+                'covers' => 'Dated from creation, so a business that registered and never filed anything still counts.',
+                'why' => 'The raw figure under the growth rate, and the one an annual report is written from.',
+            ],
+
+            'closures' => [
+                'label' => 'Closures (Period)',
+                'formula' => 'Businesses removed from the register during the period.',
+                'covers' => 'Dated by when the registration was removed, which is not when the business stopped trading — nothing in the register records that. A business that shut last year and was struck off this month is counted this month.',
+                'why' => 'The other half of growth. Read beside new registrations it says whether the register is growing or merely churning.',
+            ],
+
+            'status_summary' => [
+                'label' => 'Business Status Summary',
+                'formula' => 'Every business ever registered, sorted into one of four states as things stand today: closed if struck off, inactive if never permitted, active if it holds a permit still in force, and expired otherwise. Shares are of those four.',
+                'covers' => 'Derived from permits, not from the moderation flag on the business record — that field answers whether an account is in good standing, which is a different question. A suspended or revoked permit is enough to make a business expired rather than inactive, but never active.',
+                'why' => 'How much of the register is live, which is the figure behind any claim about coverage. The four states are ordered so that each is decided before the next is asked, so a business cannot fall into two.',
+            ],
+
+            'cohort_survival' => [
+                'label' => 'Business Renewal Performance',
+                'formula' => 'Of the businesses that reached a given renewal, the share that had come through every earlier one without a gap in cover — carried forward cycle by cycle. A business still inside its current permit is set aside at that point rather than counted as a lapse.',
+                'covers' => 'Mayor\'s permit chains only, so a year in which a business renewed its sanitary and fire clearances too is counted once rather than three times. A permit is treated as continuous if the next one starts within a day of the last one ending, and as lapsed once the gap passes 30 days. Businesses removed from the register are excluded, as are revoked and suspended permits.',
+                'why' => 'It describes what this cohort did and is not a forecast of what any business will do next. Setting aside businesses still inside their permit is the whole point: a business registered last month has had no renewal to miss, and counting it as a success would flatter the figure while counting it as a failure would be a false accusation.',
+            ],
+
+            'cohort_survival.survival' => [
+                'label' => 'Renewal survival',
+                'formula' => 'The share still renewing without a gap at the furthest cycle any business in the register has reached.',
+                'covers' => 'The furthest cycle, which may rest on very few businesses — the number still at risk at that point is carried alongside for exactly that reason. A register only a few years old will report this off a handful of chains.',
+                'why' => 'One number for how well the register holds on to businesses over time. It is the least self-evident figure on the screen, which is why the count behind it is never shown without it.',
+            ],
+
+            'top_barangays' => [
+                'label' => 'Top Growing Barangays',
+                'formula' => 'New registrations per barangay this period against the period before, ranked by the increase.',
+                'covers' => 'Only businesses with a barangay on record; one holding several address rows is counted once per row. Ranked by the change rather than the total, so the busiest barangay does not appear here unless it also grew, and a barangay with no registrations before is shown as a raw count instead of an infinite percentage.',
+                'why' => 'Where new commercial activity is appearing, which is where inspection and outreach effort should move next. Ranking by size instead would return the same three barangays every period and say nothing.',
+            ],
+
+            'closure_trend' => [
+                'label' => 'Business Closure Trend',
+                'formula' => 'Registrations removed each month across the period.',
+                'covers' => 'Dated by removal from the register, as above. The first month is partial because the period begins mid-month, so its bar is short for a reason that has nothing to do with closures.',
+                'why' => 'A single period\'s closure count cannot say whether closures are rising. The month-by-month shape can, and a spike that lines up with a renewal deadline is a different story from a steady climb.',
+            ],
+
+            'industry_growth' => [
+                'label' => 'Business Industry Growth Trend',
+                'formula' => 'Lines of business on record per PSIC code, with this period\'s new registrations against the period before, ranked by how many carry that line today.',
+                'covers' => 'Counted per declared line, not per business — a business declaring three lines appears under all three. Businesses removed from the register are excluded here, unlike the registration and barangay figures, because this panel describes what is trading now. The bar length is the current total, so the ranking is by size while the growing or declining word beside it is about the change; the longest bar is not necessarily the fastest growing.',
+                'why' => 'What kind of city this is becoming, in the register\'s own classification. Feeds zoning and the concentration figure an applicant is shown before committing to a location.',
             ],
         ];
     }
