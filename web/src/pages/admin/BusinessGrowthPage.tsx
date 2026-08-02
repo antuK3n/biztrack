@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
+import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -76,11 +77,13 @@ function Headline({
   label,
   hint,
   muted,
+  metric,
 }: {
   value: string
   label: string
   hint?: string
   muted?: boolean
+  metric?: string
 }) {
   return (
     <ProtoCard className="px-4 py-7 text-center">
@@ -91,16 +94,35 @@ function Headline({
       >
         {value}
       </p>
-      <p className="mt-2.5 text-[13px] text-ink-muted">{label}</p>
+      <p className="mt-2.5 text-[13px] text-ink-muted">
+        {label}
+        {metric && <Info metric={metric} />}
+      </p>
       {hint && <p className="mt-1 text-[11px] leading-snug text-ink-muted">{hint}</p>}
     </ProtoCard>
   )
 }
 
-function SectionHeading({ children, note }: { children: ReactNode; note?: string }) {
+function SectionHeading({
+  children,
+  note,
+  metric,
+}: {
+  children: ReactNode
+  note?: string
+  metric?: string
+}) {
   return (
     <div className="mb-2.5">
-      <h2 className="text-xl text-ink">{children}</h2>
+      {/*
+        The info button is a sibling of the h2, not a child of it. Nested, its
+        label folds into the heading's accessible name, so anyone navigating
+        this page by heading hears the button on every section.
+      */}
+      <div className="flex items-center">
+        <h2 className="text-xl text-ink">{children}</h2>
+        {metric && <Info metric={metric} />}
+      </div>
       {note && <p className="mt-0.5 text-[11px] text-ink-muted">{note}</p>}
     </div>
   )
@@ -358,11 +380,12 @@ export function BusinessGrowthPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : data && survival ? (
-        <>
+        <MetricDefinitions value={meta?.definitions}>
           <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
             <Headline
               value={data.growth_rate === null ? 'No prior period' : `${signed(data.growth_rate)}%`}
               label="Business Growth Rate"
+              metric="growth_rate"
               hint={
                 data.growth_rate === null
                   ? 'nothing registered in the period before this one to compare against'
@@ -377,6 +400,7 @@ export function BusinessGrowthPage() {
                   : `${survival.survival.toFixed(0)}%`
               }
               label="Business Renewal Performance"
+              metric="cohort_survival.survival"
               hint={
                 survival.survival === null
                   ? 'no business has reached a first renewal yet'
@@ -387,11 +411,13 @@ export function BusinessGrowthPage() {
             <Headline
               value={data.closures.toLocaleString()}
               label="Closures (Period)"
+              metric="closures"
               hint={period}
             />
             <Headline
               value={top ? top.barangay : 'No data'}
               label="Top Growing Barangay"
+              metric="top_barangays"
               hint={top ? `${signed(top.delta)} new registrations vs prior` : undefined}
               muted={!top}
             />
@@ -399,12 +425,17 @@ export function BusinessGrowthPage() {
 
           <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
             <section>
-              <SectionHeading note="As of today">Business Status Summary</SectionHeading>
+              <SectionHeading note="As of today" metric="status_summary">
+                Business Status Summary
+              </SectionHeading>
               <StatusSummary report={data} />
             </section>
 
             <section>
-              <SectionHeading note={`${period}, against the ${data.period_months} months before`}>
+              <SectionHeading
+                note={`${period}, against the ${data.period_months} months before`}
+                metric="top_barangays"
+              >
                 Top Growing Barangays
               </SectionHeading>
               {data.top_barangays.length > 0 ? (
@@ -420,12 +451,17 @@ export function BusinessGrowthPage() {
             </section>
 
             <section>
-              <SectionHeading note={period}>Business Closure Trend</SectionHeading>
+              <SectionHeading note={period} metric="closure_trend">
+                Business Closure Trend
+              </SectionHeading>
               <ClosureTrend report={data} />
             </section>
 
             <section>
-              <SectionHeading note={`${period}, against the ${data.period_months} months before`}>
+              <SectionHeading
+                note={`${period}, against the ${data.period_months} months before`}
+                metric="industry_growth"
+              >
                 Business Industry Growth Trend
               </SectionHeading>
               {data.industry_growth.length > 0 ? (
@@ -441,14 +477,29 @@ export function BusinessGrowthPage() {
           </div>
 
           <p className="mt-6 text-xs text-ink-muted">
-            {data.registrations.toLocaleString()} new registrations between {data.period_start} and{' '}
+            {data.registrations.toLocaleString()}
+            <Info metric="registrations" /> new registrations between {data.period_start} and{' '}
             {data.period_end}, against {data.registrations_prior.toLocaleString()} in the{' '}
             {data.period_months} months before that. Cohort survival follows{' '}
             {survival.businesses.toLocaleString()} businesses across{' '}
             {survival.renewals_observed.toLocaleString()} observed renewal cycles, of which{' '}
             {survival.lapses.toLocaleString()} lapsed.
           </p>
-        </>
+
+          {/*
+            Verbatim from the server, and not optional. The renewal figure is a
+            Kaplan-Meier estimate over the cycles this cohort actually reached,
+            with businesses still inside their current permit set aside rather
+            than counted as failures — a reader who takes it for a plain
+            pass rate will read it as far more certain than it is. The server
+            ships the sentence with the number for that reason, so it sits on
+            the screen rather than only in the info panel.
+          */}
+          <p className="mt-2 text-xs leading-relaxed text-ink-muted">
+            {survival.methodology}
+            <Info metric="cohort_survival" />
+          </p>
+        </MetricDefinitions>
       ) : null}
     </div>
   )
