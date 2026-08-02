@@ -605,7 +605,7 @@ function NumberField({
   onBlur,
   error,
   placeholder,
-  disabled,
+  locked,
 }: {
   label: string
   required?: boolean
@@ -615,7 +615,17 @@ function NumberField({
   onBlur: () => void
   error: string
   placeholder?: string
-  disabled?: boolean
+  /**
+   * Inert because another answer on this step has already settled it.
+   *
+   * `readOnly`, never `disabled`: a disabled input drops out of the tab order
+   * and most screen readers skip past it entirely, so an applicant using one
+   * would tab from the category straight to the next line of business and never
+   * learn that a gross sales field exists, let alone why it is closed. Read-only
+   * looks identical and stays announceable — the same reason the carried-over
+   * fields on the office sheets use it.
+   */
+  locked?: boolean
 }) {
   const format = kind === 'money' ? formatAmountInput : formatCountInput
   return (
@@ -636,9 +646,10 @@ function NumberField({
           onChange={(e) => onChange(format(e.target.value))}
           onBlur={onBlur}
           placeholder={placeholder}
-          disabled={disabled}
+          readOnly={locked}
+          aria-readonly={locked || undefined}
           aria-invalid={Boolean(error)}
-          className={`${inputCls} tnum disabled:opacity-50`}
+          className={`${inputCls} tnum ${locked ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''}`}
         />
       </label>
       {error && <FieldError>{error}</FieldError>}
@@ -797,8 +808,10 @@ export function FeeProfileStep({
                           onChange={(next) => setCategory(line.id, { gross_sales: next })}
                           onBlur={() => touch(`line:${line.id}:gross_sales`)}
                           error={errorFor(`line:${line.id}:gross_sales`, cat.gross_sales)}
-                          placeholder="0.00"
-                          disabled={value.no_gross_sales}
+                          placeholder={
+                            value.no_gross_sales ? 'Closed — you declared no gross sales' : '0.00'
+                          }
+                          locked={value.no_gross_sales}
                         />
                       )}
                       {isNew && (
