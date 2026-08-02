@@ -102,3 +102,74 @@ it('keeps an inspection listed after its business is removed', function () {
         ->and($row['application']['business'])->toBeNull()
         ->and($row['application']['tracking_id'])->toBeString()->not->toBeEmpty();
 });
+
+/*
+ * The converse, and checklist item 87 — "errors in passing data for the
+ * inspections in both business owner and admin".
+ *
+ * Everything above pins `business: null` as the signal for "removed from the
+ * register". That signal is only worth anything if nothing else emits it, and
+ * two payloads did: the applicant's filing detail and the officer's review
+ * sheet both nested InspectionResource while eager-loading the stub as
+ * `inspections.application:id,tracking_id`. The business relation was therefore
+ * never loaded, the resource answered null, and every reader of that null
+ * concluded the business was gone — on filings whose business was alive.
+ *
+ * "Not loaded" and "removed" are different facts. These two tests are what stop
+ * a future narrowing of those selects from conflating them again.
+ */
+/** Put a scheduled visit on a filing whose business is still on the register. */
+function scheduleVisitOnALiveFiling(): Application
+{
+    $officer = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
+
+    $application = Application::whereHas('business')
+        ->whereHas('assignments')
+        ->firstOrFail();
+
+    Inspection::create([
+        'application_id' => $application->id,
+        'department_id' => $officer->department_id,
+        'status' => 'scheduled',
+        'scheduled_at' => now()->addDay(),
+    ]);
+
+    return $application;
+}
+
+it('names a live business on the inspections nested in an applicant filing', function () {
+    $application = scheduleVisitOnALiveFiling();
+    $owner = User::findOrFail($application->applicant_user_id);
+
+    $body = test()->withHeaders(authAs($owner->email))
+        ->getJson("/api/v1/applications/{$application->id}")
+        ->assertOk()
+        ->json('data');
+
+    expect($body['inspections'])->not->toBeEmpty();
+
+    foreach ($body['inspections'] as $inspection) {
+        expect($inspection['application'])->not->toBeNull()
+            // The name the parent resource carries, not null: the applicant is
+            // looking at their own live business.
+            ->and($inspection['application']['business']['name'])
+            ->toBe($body['business']['name']);
+    }
+});
+
+it('names a live business on the inspections nested in the review sheet', function () {
+    $application = scheduleVisitOnALiveFiling();
+    $assignmentId = $application->assignments()->firstOrFail()->id;
+
+    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/assignments/{$assignmentId}")
+        ->assertOk()
+        ->json('data');
+
+    expect($body['application']['inspections'])->not->toBeEmpty();
+
+    foreach ($body['application']['inspections'] as $inspection) {
+        expect($inspection['application']['business']['name'])
+            ->toBe($body['application']['business']['name']);
+    }
+});

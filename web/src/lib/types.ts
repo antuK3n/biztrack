@@ -332,21 +332,46 @@ export interface Inspection {
   scheduled_at: string | null
   conducted_at: string | null
   findings: string | null
-  department: { code: string; name: string }
+  /**
+   * Null when the inspecting office is not loaded on the response.
+   *
+   * InspectionResource emits `department: null` for an unloaded relation rather
+   * than omitting the key, so every consumer has to survive it. Typing it
+   * non-nullable was how `data.inspector?.name ?? data.department.name` shipped
+   * — the guarded half was guarded and the fallback was not.
+   */
+  department: { code: string; name: string } | null
   inspector: { id: number; name: string } | null
+  /**
+   * The filing the visit belongs to, when the response carried it.
+   *
+   * Null on any response that did not eager-load the relation — InspectionResource
+   * deliberately refuses to lazy-load it, because nested inside an
+   * ApplicationResource that would be a query per inspection.
+   */
   application: {
     id: number
     tracking_id: string
-    /** Null once the business is removed from the register — see Assignment. */
+    /**
+     * Null when the business is removed from the register, and also null on a
+     * stub the server built without loading it (the applicant's filing detail
+     * loads `inspections.application:id,tracking_id` and nothing deeper).
+     *
+     * Those two are not the same fact, and a screen that prints "removed from
+     * the register" for the second one is lying about a live business. Reach for
+     * the parent's own `business` when there is one; only the inspections list,
+     * which loads the relation properly, may report removal from this field.
+     */
     business: { name: string } | null
-    /** Null with the business: the address hangs off it. */
+    /** Null with the business: the address hangs off it. Same caveat. */
     address: {
       line1: string
-      barangay: { name: string }
+      /** Null when the barangay is not loaded on the response. */
+      barangay: { name: string } | null
       latitude: number | null
       longitude: number | null
     } | null
-  }
+  } | null
 }
 
 export interface Permit {
