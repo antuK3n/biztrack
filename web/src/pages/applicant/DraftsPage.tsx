@@ -105,8 +105,12 @@ export function DraftsPage() {
               {visible.map((d) => {
                 const Icon = TYPE_ICON[d.application_type] ?? FilePlusIcon
                 // The applicant's own title wins; a draft they never renamed
-                // keeps showing the business it is for.
-                const name = d.title?.trim() || d.business.name || 'My Application'
+                // keeps showing the business it is for. A draft whose business
+                // was removed falls through to the generic name rather than
+                // telling its own author the register dropped them — they will
+                // find that out on the filing itself, with the context to
+                // understand it.
+                const name = d.title?.trim() || d.business?.name || 'My Application'
                 return (
                   <li key={d.id}>
                     <Link

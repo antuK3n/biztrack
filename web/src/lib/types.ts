@@ -174,7 +174,17 @@ export interface ApplicationListItem {
   title: string | null
   status: ApplicationStatus
   status_label: string
-  business: { id: number; name: string }
+  /**
+   * Null when the business has been removed from the register — the same cause
+   * documented on Assignment below, and missed here.
+   *
+   * `Business` soft-deletes and its filings stay: 139 applications currently
+   * point at a deleted business. Declared non-nullable, this read as safe, and
+   * the officer request composer dereferenced it straight into a crash that
+   * blanked the page. It hides the same way it hid last time — the newest rows
+   * are clean, so nothing shows until a list runs deep enough to reach one.
+   */
+  business: { id: number; name: string } | null
   submitted_at: string | null
   deadline_at: string | null
   permit_types: { code: string; name: string }[]

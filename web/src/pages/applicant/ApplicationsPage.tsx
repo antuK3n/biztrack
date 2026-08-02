@@ -9,7 +9,7 @@ import {
   StatusChip,
   type ChipTone,
 } from '../../components/ui/Proto'
-import { formatDate } from '../../lib/format'
+import { businessName, formatDate } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type {
@@ -157,7 +157,7 @@ function ApplicationRow({
           className="flex min-w-0 flex-1 items-center gap-5 px-6 py-5 text-left"
         >
           <Triangle open={open} />
-          <span className="truncate text-lg font-bold text-ink">{app.business.name}</span>
+          <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
         </button>
         {pending ? (
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
