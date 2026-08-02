@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
+import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -102,20 +103,38 @@ function WarningGlyph() {
   )
 }
 
-function SectionHeading({ children, note }: { children: ReactNode; note?: string }) {
+/*
+ * `metric` is the figure's dot path in the payload (`decisions.approval_rate`).
+ * Passing it puts an info affordance beside the label that opens the server's
+ * own account of what the number measures and why it is on the screen. Omitting
+ * it renders nothing, so a panel with no definition looks unremarkable rather
+ * than broken.
+ */
+function SectionHeading({ children, note, metric }: { children: ReactNode; note?: string; metric?: string }) {
   return (
     <div className="mb-2.5">
-      <h2 className="text-xl text-ink">{children}</h2>
+      {/*
+       * The info button is a sibling of the h2, not a child of it. Nesting it
+       * inside folds "How X is measured" into the heading's accessible name, so
+       * anyone navigating by heading hears the button on every section.
+       */}
+      <div className="flex items-center">
+        <h2 className="text-xl text-ink">{children}</h2>
+        {metric && <Info metric={metric} />}
+      </div>
       {note && <p className="mt-0.5 text-[11px] text-ink-muted">{note}</p>}
     </div>
   )
 }
 
-function Kpi({ value, label, hint }: { value: string; label: string; hint?: string }) {
+function Kpi({ value, label, hint, metric }: { value: string; label: string; hint?: string; metric?: string }) {
   return (
     <ProtoCard className="px-4 py-7 text-center">
       <p className="tnum text-[30px] font-bold leading-none text-royal">{value}</p>
-      <p className="mt-2.5 text-[13px] text-ink-muted">{label}</p>
+      <p className="mt-2.5 text-[13px] text-ink-muted">
+        {label}
+        {metric && <Info metric={metric} />}
+      </p>
       {hint && <p className="mt-1 text-[11px] text-ink-muted">{hint}</p>}
     </ProtoCard>
   )
@@ -176,8 +195,17 @@ function DecisionsPanel({ report }: { report: DashboardReport }) {
             </tr>
           ))}
           <tr>
-            <th scope="row" className="px-5 py-3 text-[15px] font-bold text-royal">
+            {/*
+              * aria-label pins the header's accessible name to the label alone.
+              * A header cell takes its name from its contents, so the nested
+              * info button would otherwise fold in — every figure in this
+              * column would be announced as "Approval rate How Approval rate is
+              * measured". The button can't move out of the cell the way it did
+              * for the section headings, so the name is stated instead.
+              */}
+            <th scope="row" aria-label="Approval rate" className="px-5 py-3 text-[15px] font-bold text-royal">
               Approval rate
+              <Info metric="decisions.approval_rate" />
             </th>
             <td className="tnum px-5 py-3 text-right text-[15px] font-bold text-royal">
               {pct(approval_rate)}
@@ -458,7 +486,16 @@ function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
 
   return (
     <div className="flex-1 px-5 py-4">
-      <p className="text-[11px] uppercase tracking-wide text-ink-muted">{indicator.label}</p>
+      {/*
+       * Keyed off the row's own identifier rather than a literal, so the three
+       * indicators cannot be wired to each other's definitions — they measure
+       * three different populations, which is the whole reason they are three
+       * cards and not one.
+       */}
+      <p className="text-[11px] uppercase tracking-wide text-ink-muted">
+        {indicator.label}
+        <Info metric={`compliance.${indicator.indicator}`} />
+      </p>
       {unavailable ? (
         <p className="mt-1.5 text-[15px] font-semibold text-ink-secondary">Cannot be computed</p>
       ) : (
@@ -718,8 +755,11 @@ function InspectionsPanel({ report }: { report: DashboardReport }) {
                   {heading}
                 </th>
               ))}
-              <th scope="col" className="px-5 py-2.5 text-right font-semibold">
+              {/* aria-label: see the Approval rate header — keeps the info
+                * button out of the column's accessible name. */}
+              <th scope="col" aria-label="Pass rate" className="px-5 py-2.5 text-right font-semibold">
                 Pass rate
+                <Info metric="inspections.pass_rate" />
               </th>
             </tr>
           </thead>
@@ -777,7 +817,7 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
     <ProtoCard className="px-5 py-5">
       <div className="grid gap-5 sm:grid-cols-3">
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Response</p>
+          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Response<Info metric="officer_activity.mean_response_hours" /></p>
           {a.mean_response_hours === null ? (
             <p className="mt-1.5 text-[15px] font-semibold text-ink-secondary">No replies yet</p>
           ) : (
@@ -796,7 +836,7 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         </div>
 
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Requests</p>
+          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Requests<Info metric="officer_activity.requests_fulfilled_rate" /></p>
           {a.requests_total === 0 ? (
             <p className="mt-1.5 text-[15px] font-semibold text-ink-secondary">None raised</p>
           ) : (
@@ -812,7 +852,7 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         </div>
 
         <div>
-          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Meetings</p>
+          <p className="text-[11px] uppercase tracking-wide text-ink-muted">Meetings<Info metric="officer_activity.meetings_attended_rate" /></p>
           {a.meetings_scheduled === 0 ? (
             <p className="mt-1.5 text-[15px] font-semibold text-ink-secondary">None scheduled</p>
           ) : (
@@ -1057,22 +1097,25 @@ export function AnalyticsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : data ? (
-        <>
+        <MetricDefinitions value={meta?.definitions}>
           <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
             <Kpi
               value={num(data.kpis.active_businesses)}
               label="Active Businesses"
               hint="holding a permit valid today"
+              metric="kpis.active_businesses"
             />
             <Kpi
               value={num(data.kpis.applications_ytd)}
               label="Applications YTD"
               hint={`since ${dateLabel(data.ytd_start)}`}
+              metric="kpis.applications_ytd"
             />
             <Kpi
               value={num(data.kpis.applications_this_month)}
               label="This Month"
               hint={monthWindow}
+              metric="kpis.applications_this_month"
             />
             <Kpi
               value={
@@ -1082,17 +1125,18 @@ export function AnalyticsPage() {
               }
               label="Compliance Rate"
               hint="permit validity"
+              metric="kpis.compliance_rate"
             />
           </div>
 
           <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
             <section>
-              <SectionHeading note={monthWindow}>Application Volume</SectionHeading>
+              <SectionHeading note={monthWindow} metric="volume">Application Volume</SectionHeading>
               <VolumePanel report={data} />
             </section>
 
             <section>
-              <SectionHeading note={trailing}>
+              <SectionHeading note={trailing} metric="processing_tiers">
                 Average Processing Time by RA 11032 Tier
               </SectionHeading>
               <TierPanel report={data} />
@@ -1104,7 +1148,7 @@ export function AnalyticsPage() {
             </section>
 
             <section>
-              <SectionHeading note={trailing}>Average Time-in-Stage by Department</SectionHeading>
+              <SectionHeading note={trailing} metric="stages">Average Time-in-Stage by Department</SectionHeading>
               <StagePanel report={data} />
             </section>
           </div>
@@ -1116,7 +1160,7 @@ export function AnalyticsPage() {
 
           <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
             <section>
-              <SectionHeading note={asOf}>Permits Approaching Expiry</SectionHeading>
+              <SectionHeading note={asOf} metric="expiry">Permits Approaching Expiry</SectionHeading>
               <ExpiryPanel report={data} />
             </section>
 
@@ -1126,7 +1170,7 @@ export function AnalyticsPage() {
             </section>
 
             <section>
-              <SectionHeading note={asOf}>Top Barangays</SectionHeading>
+              <SectionHeading note={asOf} metric="top_barangays">Top Barangays</SectionHeading>
               <RankedTable
                 rows={data.top_barangays.rows}
                 nameHeading="Barangay"
@@ -1137,7 +1181,7 @@ export function AnalyticsPage() {
             </section>
 
             <section>
-              <SectionHeading note={asOf}>Top Lines of Business</SectionHeading>
+              <SectionHeading note={asOf} metric="top_lines_of_business">Top Lines of Business</SectionHeading>
               <RankedTable
                 rows={data.top_lines_of_business.rows}
                 nameHeading="Line of business"
@@ -1148,7 +1192,7 @@ export function AnalyticsPage() {
             </section>
 
             <section>
-              <SectionHeading note={asOf}>Form of Organization</SectionHeading>
+              <SectionHeading note={asOf} metric="organization_forms">Form of Organization</SectionHeading>
               <OrganizationPanel report={data} />
             </section>
 
@@ -1159,10 +1203,10 @@ export function AnalyticsPage() {
           </div>
 
           <section className="mt-7">
-            <SectionHeading note={asOf}>GIS Mapping</SectionHeading>
+            <SectionHeading note={asOf} metric="map">GIS Mapping</SectionHeading>
             <BusinessMap report={data} />
           </section>
-        </>
+        </MetricDefinitions>
       ) : null}
     </div>
   )
