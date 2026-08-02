@@ -277,14 +277,47 @@ function RemarkBubble({ author, remark }: { author: string; remark: string }) {
   )
 }
 
-/** Floating remark composer popup (p70) — used for Reject and Return. */
+/** What each decision does, said where it is being made rather than after. */
+const REMARK_COPY = {
+  reject: {
+    heading: 'Reject this application',
+    label: 'Reason for rejection',
+    help: 'This ends the application for every office. The applicant sees this reason on their Track page, so say what was wrong.',
+    confirm: 'Reject application',
+    confirmCls: 'bg-s-red hover:brightness-110',
+  },
+  return: {
+    heading: 'Return to the applicant',
+    label: 'What the applicant must fix',
+    help: 'Your office sends the filing back for revision. The applicant sees these remarks on their Track page and can resubmit.',
+    confirm: 'Return application',
+    confirmCls: 'bg-royal hover:bg-royal-hover',
+  },
+} as const
+
+/**
+ * Floating remark composer popup (p70) — used for Reject and Return.
+ *
+ * The remark is required for both, and not only because the button is disabled
+ * without one: a rejection with no reason gives the applicant a dead filing and
+ * nothing to do about it, which is the half of checklist item 80 that is not
+ * about buttons. The API agrees — `reason` on POST /applications/{id}/reject
+ * and `remarks` on POST /assignments/{id}/return are both `required`.
+ *
+ * The popup used to say only the officer's name, so Reject and Return opened
+ * the identical box and the only thing distinguishing the strongest action in
+ * the system from a recoverable one was which control you had clicked a moment
+ * earlier.
+ */
 function RemarkPopup({
+  action,
   officer,
   submitting,
   error,
   onCancel,
   onConfirm,
 }: {
+  action: 'reject' | 'return'
   officer: string
   submitting: boolean
   error: string | null
@@ -292,6 +325,8 @@ function RemarkPopup({
   onConfirm: (text: string) => void
 }) {
   const [text, setText] = useState('')
+  const copy = REMARK_COPY[action]
+  const empty = !text.trim()
   return (
     <div className="rounded-xl bg-white p-4 shadow-overlay">
       <div className="flex items-center gap-2.5">
@@ -300,16 +335,38 @@ function RemarkPopup({
             <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 4.5V20h14v-1.5C19 16 16 14 12 14Z" />
           </svg>
         </span>
-        <p className="text-sm font-bold text-ink">{officer}</p>
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-ink">{copy.heading}</p>
+          <p className="truncate text-xs text-ink-muted">{officer}</p>
+        </div>
       </div>
-      <textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="Type here…"
-        rows={3}
-        className="mt-3 w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
-      />
+      <label className="mt-3 block">
+        <span className="text-xs font-bold text-ink">
+          {copy.label} <span className="text-s-red">*</span>
+        </span>
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Type here…"
+          rows={3}
+          required
+          aria-describedby={`remark-help-${action}`}
+          className="mt-1.5 w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+        />
+      </label>
+      <p id={`remark-help-${action}`} className="mt-1 text-xs text-ink-secondary">
+        {copy.help}
+      </p>
       {error && <p className="mt-1.5 text-xs font-medium text-s-red">{error}</p>}
+      {/*
+       * Why the button is off, said out loud. A disabled control with no reason
+       * beside it is the officer's problem to solve by guessing.
+       */}
+      {empty && (
+        <p aria-live="polite" className="mt-1.5 text-xs font-medium text-ink-muted">
+          Write the reason to continue.
+        </p>
+      )}
       <div className="mt-3 flex justify-end gap-2">
         <button
           type="button"
@@ -322,10 +379,10 @@ function RemarkPopup({
         <button
           type="button"
           onClick={() => onConfirm(text.trim())}
-          disabled={submitting || !text.trim()}
-          className="rounded-md bg-royal px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 hover:bg-royal-hover disabled:opacity-60"
+          disabled={submitting || empty}
+          className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 disabled:opacity-60 ${copy.confirmCls}`}
         >
-          Confirm
+          {submitting ? 'Working…' : copy.confirm}
         </button>
       </div>
     </div>
@@ -428,8 +485,20 @@ export function ReviewPage() {
    * reviewers do not. The button was shown to all of them: a CHO officer could
    * open the composer, type a reason, confirm, and get "You do not have
    * permission to perform this action" — having already written the thing.
-   * Those offices return a filing to the applicant instead, which is the control
-   * still below.
+   *
+   * Checklist item 80 reports the other side of that fix: "no reject button in
+   * some offices". Six of the eight staff roles have none — sanitary, fire,
+   * zoning, OBO, CENRO and market (see api RbacSeeder). That is deliberate and
+   * stays: one office cannot end another office's filing.
+   *
+   * What was wrong is that those six were left looking like they could only ever
+   * approve. Their negative decision — Return with remarks, which is per-office,
+   * requires a reason, and is recoverable — was a bare text link at the far
+   * bottom of a very long sheet while Approve sat alone in the header. Both
+   * decisions now sit together where the decision is made. See the report note:
+   * a per-office REJECTION (as opposed to a return) has no state to live in —
+   * AssignmentStatus has no such case and afterReviewProgress would stall on one
+   * forever — so it is not invented here.
    */
   const canReject = Boolean(user?.permissions.includes('application.reject'))
 
@@ -659,6 +728,15 @@ export function ReviewPage() {
   }
 
   async function sendRemark(text: string) {
+    /*
+     * The composer disables Confirm on an empty box, but the guard is here as
+     * well as there: both endpoints require the text, and a rejection or return
+     * with no reason leaves the applicant a decision they cannot act on.
+     */
+    if (!text.trim()) {
+      setActionError('Write the reason before sending this decision.')
+      return
+    }
     setBusy(true)
     setActionError(null)
     try {
@@ -786,6 +864,27 @@ export function ReviewPage() {
                     Reject
                   </button>
                 )}
+                {/*
+                 * Every office's own negative decision, in the header beside
+                 * Approve rather than buried at the foot of the sheet. For the
+                 * six offices that cannot reject, this IS their reject button —
+                 * item 80's complaint was that the screen appeared to offer them
+                 * no way to say no.
+                 */}
+                <button
+                  type="button"
+                  onClick={() => setPopup('return')}
+                  disabled={busy}
+                  /*
+                   * Tinted fill with ink text, not `text-s-orange` on white:
+                   * #f2a33c against white is about 2:1 and fails WCAG 2.1 AA at
+                   * this size. The border carries the caution hue; the label
+                   * stays readable.
+                   */
+                  className="rounded-md border-2 border-s-orange bg-s-orange-tint px-7 py-2.5 text-sm font-semibold text-ink underline underline-offset-2 shadow-card hover:brightness-95 disabled:opacity-60"
+                >
+                  Return with remarks
+                </button>
                 <button
                   type="button"
                   onClick={approve}
@@ -812,7 +911,14 @@ export function ReviewPage() {
           {decided
             ? 'This review is closed. The page is a record of the application and the decision made on it.'
             : editing
-              ? 'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve, return, or reject.'
+              ? canReject
+                ? 'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve, return with remarks, or reject. Rejecting ends the application for every office; returning sends it back for revision.'
+                : /*
+                   * Said plainly rather than left to be discovered as a missing
+                   * button (item 80). Return IS this office's way of refusing,
+                   * and the reviewer should know that before hunting for Reject.
+                   */
+                  'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve or return with remarks. Returning is how your office refuses this filing — ending the application outright is the BPLO’s decision.'
               : 'View mode. Everything below is the application exactly as the applicant submitted it. Switch to Edit to fill in your office’s fields and record a decision.'}
         </span>
       </p>
@@ -1213,17 +1319,13 @@ export function ReviewPage() {
             </div>
           )}
 
-          {editing && (
-            <div className="mt-6 text-right">
-              <button
-                type="button"
-                onClick={() => setPopup('return')}
-                className="text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
-              >
-                Return with remarks
-              </button>
-            </div>
-          )}
+          {/*
+           * "Return with remarks" used to live here, as a text link under the
+           * office-use panel and nowhere else. It has moved into the header
+           * beside Approve (item 80) rather than being repeated: two controls
+           * firing the same decision from opposite ends of a 1,200-line sheet
+           * is how it came to be missed in the first place.
+           */}
 
           {/* Messages thread (v2) */}
           <MessagesPanel applicationId={app.id} />
@@ -1233,6 +1335,7 @@ export function ReviewPage() {
         <aside className="sticky top-8 hidden w-72 shrink-0 space-y-4 lg:block" aria-label="Remarks">
           {popup && (
             <RemarkPopup
+              action={popup}
               officer={officerName}
               submitting={busy}
               error={actionError}
@@ -1250,6 +1353,7 @@ export function ReviewPage() {
       {popup && (
         <div className="fixed inset-x-4 bottom-6 z-40 lg:hidden">
           <RemarkPopup
+            action={popup}
             officer={officerName}
             submitting={busy}
             error={actionError}

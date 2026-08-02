@@ -33,6 +33,24 @@ import type {
  * and stay open until the officer closes the request.
  * Officer view (request.create): the same list plus a "Request" compose modal
  * and fulfil/reject close actions on submitted requests.
+ *
+ * On recipients (checklist item 89, "the admin should choose who will receive
+ * this"): the composer names the recipient and does not offer to change it,
+ * because there is nothing to change it to. A request is answered through
+ * `POST /requests/{id}/respond`, gated on `request.respond` — a permission the
+ * business_owner role holds and no office role does — and the list scoping in
+ * OfficerRequestController::index hands an owner the requests on their own
+ * filings. So the recipient is the applicant, always, and it moves only when
+ * the chosen application does. A picker offering an office would be a control
+ * that cannot do what it says: the request would arrive nowhere, be answerable
+ * by nobody, and notify the applicant regardless.
+ *
+ * Routing a requirement to another OFFICE is a real feature and this is not it.
+ * It needs `officer_requests.recipient_user_id` / `recipient_department_id`,
+ * `request.respond` for office roles, and scoping + notification rewrites — a
+ * schema change, not a select element. Item 57 gave the admin the FROM side and
+ * that control is real; this is the TO side, and the honest version of it is a
+ * name rather than a choice.
  */
 
 /* Status chip tone (pending=orange, submitted=royal-ish, fulfilled=green, rejected=red). */
@@ -169,13 +187,33 @@ function LetterView({
             <AvatarCircle />
             <div>
               <span className="block text-lg font-bold text-ink">{request.created_by.name}</span>
-              {request.created_by.department && (
-                <span className="block text-xs italic text-ink-muted">{request.created_by.department}</span>
+              {/*
+               * The office the composer attributed this to, which is not always
+               * the requester's own — the super admin has none and picks one.
+               * `created_by.department` is the fallback for rows written before
+               * the picker existed.
+               */}
+              {(request.from_office?.name ?? request.created_by.department) && (
+                <span className="block text-xs italic text-ink-muted">
+                  {request.from_office?.name ?? request.created_by.department}
+                </span>
               )}
             </div>
           </div>
           <span className="text-sm italic text-ink-muted">{formatDateTime(request.created_at)}</span>
         </div>
+
+        {/*
+         * Addressed to, on the letter itself. An officer who has sent a dozen of
+         * these needs to see which one went to whom without opening the filing,
+         * and the applicant reading it should see their own name on it — a
+         * letter with no addressee reads like a broadcast.
+         */}
+        <p className="mt-4 text-sm text-ink-secondary sm:pl-16">
+          <span className="font-semibold text-ink">To:</span>{' '}
+          {request.recipient?.name ?? 'The business owner on file'}
+          <span className="text-ink-muted"> · applicant</span>
+        </p>
 
         <div className="mt-6 space-y-3 pl-0 text-[15px] leading-relaxed text-ink sm:pl-16">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
@@ -354,6 +392,20 @@ function ComposeModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  /*
+   * The recipient, resolved from the chosen application. Shown, not chosen —
+   * see the note at the top of this file for why there is nothing else to
+   * choose. `applicant` is nullable because User soft-deletes, and `business`
+   * is nullable for the same reason on its own table, so both are guarded.
+   */
+  const selectedApp = apps.find((a) => String(a.id) === appId) ?? null
+  const recipientName = selectedApp
+    ? (selectedApp.applicant?.name ?? 'The business owner on file')
+    : ''
+  const recipientLine = selectedApp
+    ? `${recipientName} · applicant for ${businessName(selectedApp.business)}`
+    : ''
+
   async function submit() {
     if (!appId || !departmentId || !subject.trim() || !body.trim()) return
     setBusy(true)
@@ -393,10 +445,36 @@ function ComposeModal({
             <option value="">Select an application…</option>
             {apps.map((a) => (
               <option key={a.id} value={a.id}>
-                {businessName(a.business)} · {a.tracking_id}
+                {/*
+                 * A tracking ID is minted on submit, so a draft has none and
+                 * this read "Nena Sari-Sari Store · " — a separator pointing at
+                 * nothing, which looks like data that failed to load. Say the
+                 * filing is a draft instead; that is why it has no number.
+                 */}
+                {businessName(a.business)} · {a.tracking_id || 'Draft (not yet filed)'}
               </option>
             ))}
           </select>
+        </label>
+        {/*
+         * readOnly, not disabled: a disabled input is skipped by the keyboard
+         * and often unread by screen readers, and this is information the
+         * officer needs before they send — WCAG 2.1 AA, and the same rule the
+         * review sheet follows for its record fields.
+         */}
+        <label className="block">
+          <FieldLabel>To (recipient)</FieldLabel>
+          <input
+            className={inputCls}
+            value={recipientLine}
+            readOnly
+            placeholder="Choose an application above"
+            aria-describedby="request-recipient-note"
+          />
+          <p id="request-recipient-note" className="mt-1.5 text-xs text-ink-secondary">
+            Requests go to the business owner who filed the application. Pick a
+            different application to write to a different owner.
+          </p>
         </label>
         <label className="block">
           <FieldLabel required>From office</FieldLabel>
@@ -404,6 +482,7 @@ function ComposeModal({
             className={inputCls}
             value={departmentId}
             onChange={(e) => setDepartmentId(e.target.value)}
+            aria-describedby="request-from-office-note"
           >
             <option value="">Select an office…</option>
             {(departments.data ?? []).map((d: Department) => (
@@ -412,6 +491,9 @@ function ComposeModal({
               </option>
             ))}
           </select>
+          <p id="request-from-office-note" className="mt-1.5 text-xs text-ink-secondary">
+            The office the owner sees this request coming from.
+          </p>
         </label>
         <label className="block">
           <FieldLabel required>Type</FieldLabel>
@@ -529,8 +611,20 @@ export function RequestsPage() {
                   className="flex w-full items-center gap-5 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised"
                 >
                   <AvatarCircle />
-                  <span className="w-44 shrink-0 truncate text-[15px] font-bold text-ink">
-                    {r.created_by.name}
+                  <span className="w-44 shrink-0">
+                    <span className="block truncate text-[15px] font-bold text-ink">
+                      {r.created_by.name}
+                    </span>
+                    {/*
+                     * An officer's list is everything their office has sent, so
+                     * the useful second line is who each one went to. The owner
+                     * is reading their own inbox and already knows.
+                     */}
+                    {isOfficer && (
+                      <span className="block truncate text-xs text-ink-secondary">
+                        To {r.recipient?.name ?? 'the business owner on file'}
+                      </span>
+                    )}
                   </span>
                   <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
                     <span className="font-bold">{r.subject} - </span>
