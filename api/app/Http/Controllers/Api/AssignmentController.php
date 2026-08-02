@@ -151,9 +151,19 @@ class AssignmentController extends Controller
             'application.payments', 'application.assignments.department',
             'application.assignments.officer', 'application.inspections.department',
             'application.inspections.inspector',
-            // InspectionResource serialises an application stub; without this it
-            // lazy-loaded one per inspection on every review page open.
-            'application.inspections.application:id,tracking_id',
+            /*
+             * InspectionResource serialises an application stub; without this it
+             * lazy-loaded one per inspection on every review page open.
+             *
+             * The stub carries `business`, and selecting only id + tracking_id
+             * left that relation unloaded — so the resource reported the business
+             * as null, i.e. removed from the register, on filings whose business
+             * is alive (checklist item 87). `business_id` is the foreign key the
+             * relation needs; the chain is four constant queries because every
+             * inspection here belongs to the one application already loaded.
+             */
+            'application.inspections.application:id,tracking_id,business_id',
+            'application.inspections.application.business.address.barangay',
             'application.permits.permitType',
             // PermitResource serialises business and application stubs too.
             'application.permits.business:id,name', 'application.permits.application:id,tracking_id',

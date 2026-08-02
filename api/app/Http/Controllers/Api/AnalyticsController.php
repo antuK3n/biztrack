@@ -50,10 +50,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * until the next one — the timestamp on screen is what stops that reading as a
  * bug.
  *
- * Every route in this controller sits behind `analytics.view`, which only the
- * super admin holds. That matters: these aggregates read every office's
- * assignments, so exposing them to an office reviewer would hand them a summary
- * of filings ApplicationVisibility deliberately keeps out of their queue.
+ * Every route in this controller sits behind `analytics.view`, held by the super
+ * admin and by BPLO (checklist #78). That matters: these aggregates read every
+ * office's assignments, so exposing them to an ordinary office reviewer would
+ * hand them a summary of filings ApplicationVisibility deliberately keeps out of
+ * their queue. BPLO is the exception because it already holds
+ * `application.view_any_office` and can open those filings one at a time.
  */
 class AnalyticsController extends Controller
 {

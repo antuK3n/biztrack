@@ -55,14 +55,22 @@ function renewalRisk(string $query = ''): array
 
 /* ── access ───────────────────────────────────────────────────────────── */
 
-it('serves renewal risk to the super admin only', function () {
+it('serves renewal risk to the super admin and to BPLO', function () {
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/analytics/renewal-risk')
         ->assertOk();
 
-    // A watchlist of which businesses are about to fall out of compliance is
-    // management information, not queue-processing information.
-    foreach (['sanitary@biztrack.local', 'bplo@biztrack.local', 'owner@biztrack.local'] as $email) {
+    // Checklist item 78: BPLO holds analytics.view. Renewals are BPLO's own
+    // work — it is the office that issues the permit being renewed — so the
+    // watchlist is queue-processing information for it specifically.
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/renewal-risk')
+        ->assertOk();
+
+    // For every other office a watchlist of which businesses are about to fall
+    // out of compliance is management information, not queue-processing
+    // information.
+    foreach (['sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/analytics/renewal-risk')
             ->assertForbidden();
@@ -76,7 +84,7 @@ it('refuses the feed and its report to a caller with no session', function () {
 });
 
 it('refuses the report download to anyone without analytics.view', function () {
-    test()->withHeaders(authAs('bplo@biztrack.local'))
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->get('/api/v1/analytics/renewal-risk/report')
         ->assertForbidden();
 

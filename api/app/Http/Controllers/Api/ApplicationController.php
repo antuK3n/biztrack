@@ -33,10 +33,22 @@ class ApplicationController extends Controller
         /*
          * InspectionResource emits an `application` stub, so the relation has to
          * be here. It was not, and the resource lazy-loaded it one row at a time
-         * — a query per inspection on every application detail view. Two columns
-         * are enough for what the stub actually serialises.
+         * — a query per inspection on every application detail view.
+         *
+         * The stub carries `business` and `address` (docs/api-contract.md
+         * §Inspections). Narrowing the select to id + tracking_id meant the
+         * business relation was never loaded, so the resource emitted
+         * `business: null` — which every reader takes to mean "removed from the
+         * register". The business was alive; only the query was missing. Those
+         * are different facts and the payload was stating the wrong one
+         * (checklist item 87).
+         *
+         * `business_id` joins the select because the relation cannot resolve
+         * without its foreign key. The chain costs four constant queries, not one
+         * per inspection: every inspection on a filing shares one application row.
          */
-        'inspections.application:id,tracking_id',
+        'inspections.application:id,tracking_id,business_id',
+        'inspections.application.business.address.barangay',
         'permits.permitType', 'permits.business', 'permits.application',
     ];
 
@@ -60,7 +72,12 @@ class ApplicationController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $query = Application::with(['business:id,name', 'permitTypes:id,code,name']);
+        // `applicant` is two columns and one query for the whole page; without
+        // it ApplicationListResource emits a null recipient and the request
+        // composer cannot name who it is writing to (item 89).
+        $query = Application::with([
+            'business:id,name', 'applicant:id,name', 'permitTypes:id,code,name',
+        ]);
 
         // Owners see their own; an office sees the filings routed to it; BPLO
         // and the super admin see the register. A 403 on show would mean

@@ -5,7 +5,7 @@ import { EmptyState, ErrorState, Skeleton, SkeletonList } from '../../components
 import { PageTitle, ProtoModal, SortFilter, StatusCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { formatDate } from '../../lib/format'
+import { businessName, formatDate } from '../../lib/format'
 import { inspections } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type { Inspection } from '../../lib/types'
@@ -24,22 +24,35 @@ function chipFor(item: Inspection): { tone: ChipTone; label: string } {
 }
 
 /**
- * The business a visit was made to, when there still is one.
+ * What to head a row with, and what to put under it.
  *
  * A business can be removed from the register after its permits are decided, and
- * the API sends `business: null` for every inspection that pointed at one — page
- * 2 of this list alone holds four. The visit is still on the record and still has
- * to be readable. (`Inspection['application']['business']` is typed
- * non-nullable, which is why the type checker never saw this — see the report.)
+ * the API sends `business: null` for every inspection that pointed at one — 237
+ * of the 2,852 visits on record. The visit stays on the record and still has to
+ * be readable, so the heading falls back to the shared wording from
+ * `businessName()` rather than blanking or crashing.
+ *
+ * The tracking ID rides along on every row, not only the removed ones. It is the
+ * only handle an officer has on a filing whose business is gone, and it was
+ * already the thing they read out to a caller — hiding it behind a failure case
+ * meant the common row lost it for no reason.
+ *
+ * `application` itself is nullable because InspectionResource refuses to
+ * lazy-load the relation; this list eager-loads it, so in practice it is there,
+ * but the type is honest and so is this.
  */
-function businessNameOf(app: Inspection['application']): { name: string; removed: boolean } {
-  const name = app.business?.name
-  return name ? { name, removed: false } : { name: app.tracking_id, removed: true }
+function headingFor(item: Inspection): { name: string; trackingId: string | null; removed: boolean } {
+  const app = item.application
+  return {
+    name: businessName(app?.business ?? null),
+    trackingId: app?.tracking_id ?? null,
+    removed: !app?.business,
+  }
 }
 
 function InspectionRow({ item }: { item: Inspection }) {
   const chip = chipFor(item)
-  const business = businessNameOf(item.application)
+  const heading = headingFor(item)
   return (
     <li>
       <Link
@@ -47,10 +60,14 @@ function InspectionRow({ item }: { item: Inspection }) {
         className="flex items-stretch overflow-hidden rounded-lg bg-white shadow-card transition-shadow hover:shadow-raised"
       >
         <div className="min-w-0 flex-1 px-6 py-4">
-          <p className="truncate text-[17px] font-bold text-ink">{business.name}</p>
-          {business.removed && (
-            <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              Business removed from the register
+          <p
+            className={`truncate text-[17px] font-bold ${heading.removed ? 'text-ink-muted italic' : 'text-ink'}`}
+          >
+            {heading.name}
+          </p>
+          {heading.trackingId && (
+            <p className="mt-0.5 truncate text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              {heading.trackingId}
             </p>
           )}
           <p className="mt-0.5 text-sm italic text-ink-muted">{formatDate(item.scheduled_at)}</p>
@@ -340,6 +357,22 @@ export function InspectionDetailPage() {
       <PageTitle>Business Permit</PageTitle>
 
       <div className="mx-auto max-w-3xl">
+        {/*
+          Which visit this is. The page used to open on "Business Permit ·
+          Application Status" and nothing else — an officer arriving from a list
+          of 1,249 rows had no confirmation they had opened the right one, and
+          approving or rejecting a site visit is not a decision to make on the
+          strength of the row you thought you clicked.
+        */}
+        <p className="mt-4 text-center text-xl font-bold text-ink">
+          {businessName(data.application?.business ?? null)}
+        </p>
+        {data.application?.tracking_id && (
+          <p className="mt-1 text-center text-sm font-semibold uppercase tracking-wide text-ink-muted">
+            {data.application.tracking_id}
+          </p>
+        )}
+
         <h2 className="display-serif mb-6 mt-4 text-center text-3xl text-ink">Application Status</h2>
 
         {done ? (
@@ -406,7 +439,17 @@ export function InspectionDetailPage() {
           )}
 
           <div className="flex items-center gap-2.5 text-royal">
-            <span className="text-base font-medium">{data.inspector?.name ?? data.department.name}</span>
+            {/*
+              Every link in this chain is nullable on the wire: an inspection can
+              be scheduled before an inspector is named, and InspectionResource
+              emits `department: null` for a relation it was not asked to load.
+              The old fallback guarded the inspector and then dereferenced the
+              department, which is the half-guard that made this page white-screen
+              rather than merely look thin.
+            */}
+            <span className="text-base font-medium">
+              {data.inspector?.name ?? data.department?.name ?? 'Unassigned'}
+            </span>
             <span className="flex h-9 w-9 items-center justify-center rounded-full bg-royal text-white">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2-7 4.5V20h14v-1.5C19 16 16 14 12 14Z" />
