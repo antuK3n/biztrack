@@ -377,7 +377,7 @@ final class AnalyticsDefinitions
             ],
 
             'methodology' => [
-                'label' => 'How this list is built',
+                'label' => 'Scoring method',
                 'formula' => 'The five rules in plain words, shipped from the scorer rather than written on the screen.',
                 'covers' => 'The whole screen.',
                 'why' => 'It travels with the figure so the caveat cannot be separated from the number by a screenshot. This is the sentence that says the score counts warning signs already on the register rather than reaching past today, and it is the one an officer is most likely to need quoted back at them.',
@@ -429,14 +429,14 @@ final class AnalyticsDefinitions
             ],
 
             'cohort_survival' => [
-                'label' => 'Business Renewal Performance',
+                'label' => 'Cohort survival',
                 'formula' => 'Of the businesses that reached a given renewal, the share that had come through every earlier one without a gap in cover — carried forward cycle by cycle. A business still inside its current permit is set aside at that point rather than counted as a lapse.',
                 'covers' => 'Mayor\'s permit chains only, so a year in which a business renewed its sanitary and fire clearances too is counted once rather than three times. A permit is treated as continuous if the next one starts within a day of the last one ending, and as lapsed once the gap passes 30 days. Businesses removed from the register are excluded, as are revoked and suspended permits.',
                 'why' => 'It describes what this cohort did and is not a forecast of what any business will do next. Setting aside businesses still inside their permit is the whole point: a business registered last month has had no renewal to miss, and counting it as a success would flatter the figure while counting it as a failure would be a false accusation.',
             ],
 
             'cohort_survival.survival' => [
-                'label' => 'Renewal survival',
+                'label' => 'Business Renewal Performance',
                 'formula' => 'The share still renewing without a gap at the furthest cycle any business in the register has reached.',
                 'covers' => 'The furthest cycle, which may rest on very few businesses — the number still at risk at that point is carried alongside for exactly that reason. A register only a few years old will report this off a handful of chains.',
                 'why' => 'One number for how well the register holds on to businesses over time. It is the least self-evident figure on the screen, which is why the count behind it is never shown without it.',
