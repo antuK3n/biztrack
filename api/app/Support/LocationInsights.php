@@ -67,7 +67,7 @@ final class LocationInsights
      * @param  float  $lng  the point the applicant pinned
      * @param  string|null  $psicCode  the applicant's own line of business, when they have
      *                                 already chosen one. The zoning step runs BEFORE the
-     *                                 Line of Business step, so on a new filing this is
+     *                                 Line of Business picker further down the same step, so early on this is
      *                                 usually null and the two "similar" figures are
      *                                 reported as unavailable rather than guessed.
      * @param  int|null  $excludeBusinessId  the applicant's own draft business, so they are

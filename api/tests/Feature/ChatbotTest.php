@@ -331,7 +331,14 @@ it('explains fields on the fire and occupancy sheets', function () {
 });
 
 it('explains the main wizard fields', function () {
-    expect(ask('what is capital?'))->toContain('Capital')->toContain('Line of Business step');
+    /*
+     * The step named here has to be a step that exists. Line of Business used
+     * to be a section of its own and is now asked on Location & Zoning, so an
+     * answer still directing people to the old one would send an applicant
+     * looking for a tab that is not in the map — the chatbot is read by people
+     * who are already lost.
+     */
+    expect(ask('what is capital?'))->toContain('Capital')->toContain('Location & Zoning step');
     expect(ask('what is gross sales?'))->toContain('Gross Sales')->toContain('before you take any expenses off');
     expect(ask('what is line of business?'))->toContain('Line of Business')->toContain('PSIC');
     expect(ask('what should I enter for TIN?'))->toContain('Tax Identification Number')->toContain('123-456-789-000');
