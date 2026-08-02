@@ -53,10 +53,22 @@ import type {
   PsicCode,
 } from '../../lib/types'
 
-type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'fees' | 'review'
+type BasePhase =
+  | 'privacy'
+  | 'permits'
+  | 'business'
+  | 'lines'
+  | 'address'
+  | 'documents'
+  | 'fees'
+  | 'review'
 /*
- * Location & Zoning comes first (revised GUI, screens 28-33: "Zoning -
- * Selecting Business Location" is Part 1 of 8). Where the business is decides
+ * Consent comes before collection. Everything after the first step asks the
+ * applicant for personal data, so the Data Privacy Act notice is the one thing
+ * that cannot sit behind any of it.
+ *
+ * Location & Zoning is then the first thing asked (revised GUI, screens 28-33:
+ * "Zoning - Selecting Business Location" is Part 1 of 8). Where the business is decides
  * what it may be, so asking for the address before the paperwork matches how
  * the counter actually works.
  *
@@ -74,9 +86,19 @@ type BasePhase = 'permits' | 'business' | 'lines' | 'address' | 'documents' | 'f
  * profile's required questions vary by permit code. Putting the cards after
  * either one would ask the applicant to satisfy a list that does not exist yet.
  */
-const BASE_PHASES: BasePhase[] = ['address', 'business', 'lines', 'permits', 'fees', 'documents', 'review']
+const BASE_PHASES: BasePhase[] = [
+  'privacy',
+  'address',
+  'business',
+  'lines',
+  'permits',
+  'fees',
+  'documents',
+  'review',
+]
 
 const BASE_LABELS: Record<BasePhase, string> = {
+  privacy: 'Data Privacy Consent',
   permits: 'Permits & Certificates',
   business: 'Business Information',
   lines: 'Line of Business',
@@ -1094,13 +1116,14 @@ export function ApplyWizard() {
           }
           return missing
         }
-        case 'documents': {
-          const missing = requiredDocs
+        // Nothing may be collected until this is ticked, so it blocks step one
+        // rather than the submit button seven steps later.
+        case 'privacy':
+          return consent ? [] : ['Your agreement to the Data Privacy Consent']
+        case 'documents':
+          return requiredDocs
             .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
             .map((dt) => dt.name)
-          if (!consent) missing.push('Data Privacy Consent')
-          return missing
-        }
         case 'fees':
           return feeProfileMissing(feeDraft, {
             applicationType,
@@ -2926,27 +2949,56 @@ export function ApplyWizard() {
             </div>
           )}
 
-          {/* Data Privacy Consent box — gates the wizard from moving on. */}
-          <div className="mt-7 rounded-md border border-input-border bg-white px-5 py-4">
-            <p className="text-sm font-bold uppercase tracking-wide text-royal">Data Privacy Consent</p>
-            <p className="mt-2 text-justify text-xs leading-relaxed text-ink-secondary">
-              I have read and understood the Data Privacy Policy and hereby give my consent to the City
-              Government of Malabon, and any person acting on its behalf, to collect, store, record,
-              process and update my personal data as part of its database and to share said data with the
-              national government, its agencies and instrumentalities, and other local government units,
-              pursuant to the Data Privacy Act of 2012 (RA 10173).
-            </p>
-            <label className="mt-3 flex cursor-pointer items-center gap-2.5 text-[13px] font-semibold text-royal">
-              <input
-                type="checkbox"
-                checked={consent}
-                onChange={(e) => setConsent(e.target.checked)}
-                className="h-4 w-4 accent-royal"
-              />
+        </div>
+      )}
+
+      {/* ── Data Privacy Consent — asked before anything is collected ───── */}
+      {phase === 'privacy' && (
+        <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
+            City Government of Malabon · Business Permits &amp; Licensing Office
+          </p>
+          <h1 className="mt-1.5 text-2xl font-bold text-ink">Data Privacy Consent</h1>
+          <p className="mt-1 text-xs text-ink-muted">Data Privacy Act of 2012 (RA 10173)</p>
+          <div className="mb-6 mt-3 h-px bg-royal" />
+
+          {/*
+            * First, before a single answer is collected.
+            *
+            * This used to sit at the foot of Documentary Requirements, six
+            * sections in — by which point the applicant had already handed over
+            * their name, TIN, home address, emergency contact and the location
+            * of their business. Asking afterwards inverts what consent is: it
+            * turns a decision into a formality, because refusing would mean
+            * abandoning work already done. Under RA 10173 consent is meant to
+            * be freely given and informed *before* collection, so it is the
+            * first thing on the form and nothing is asked until it is given.
+            */}
+          <p className="max-w-2xl text-justify text-sm leading-relaxed text-ink-secondary">
+            I have read and understood the Data Privacy Policy and hereby give my consent to the City
+            Government of Malabon, and any person acting on its behalf, to collect, store, record,
+            process and update my personal data as part of its database and to share said data with
+            the national government, its agencies and instrumentalities, and other local government
+            units, pursuant to the Data Privacy Act of 2012 (RA 10173).
+          </p>
+
+          <label className="mt-6 flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3.5 text-sm font-semibold text-royal">
+            <input
+              type="checkbox"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+            />
+            <span>
               I have read and agree to the Data Privacy Consent above.
-              <span className="text-s-red">*</span>
-            </label>
-          </div>
+              <span className="text-s-red"> *</span>
+            </span>
+          </label>
+
+          <p className="mt-4 max-w-2xl text-xs text-ink-muted">
+            You can withdraw this consent by contacting the BPLO, though doing so means the office
+            can no longer process an application in your name.
+          </p>
         </div>
       )}
 
@@ -3056,7 +3108,7 @@ export function ApplyWizard() {
           )}
           {isLast && !consent && (
             <p className="max-w-md text-xs text-ink-muted">
-              Tick the Data Privacy Consent in Documentary Requirements before submitting.
+              Tick the Data Privacy Consent on the first part before submitting.
             </p>
           )}
         </div>
