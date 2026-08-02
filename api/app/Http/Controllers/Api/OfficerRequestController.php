@@ -269,6 +269,16 @@ class OfficerRequestController extends Controller
 
     private function eager(): array
     {
-        return ['createdBy.department', 'application.business:id,name', 'responses.author:id,name'];
+        return [
+            'createdBy.department',
+            // The office the composer attributed this to (`from_office`), which
+            // is not always the requester's own — see OfficerRequestResource.
+            'department',
+            'application.business:id,name',
+            // The recipient (item 89). Named on the letter so both sides can see
+            // who it went to rather than inferring it from the application.
+            'application.applicant:id,name',
+            'responses.author:id,name',
+        ];
     }
 }

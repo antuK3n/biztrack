@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\MessageResource;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Message;
 use App\Models\MessageAttachment;
 use App\Models\MessageThread;
@@ -165,6 +166,22 @@ class MessageController extends Controller
                     'is_officer' => false,
                 ]
                 : $this->officeCounterparty($app, $latest),
+            /*
+             * Which office is answerable for this filing (checklist item 73).
+             *
+             * The applicant could already read a name off the conversation, but
+             * only obliquely — sometimes an officer's name, sometimes an office,
+             * depending on who happened to have spoken last — so "who am I
+             * actually dealing with about my permit" stayed a guess. This says
+             * it outright, and on both sides: the applicant learns which office
+             * holds their file, and an officer reading the same row learns which
+             * office is on it without opening the review sheet.
+             *
+             * ONE office, never the list. A filing is routed to every office
+             * that issues one of its clearances, and printing all of them
+             * answers a question nobody asked. See responsibleAssignment().
+             */
+            'responsible_office' => $this->responsibleOffice($app, $latest),
             'messages_count' => $count,
             'last_message' => $latest ? [
                 'body' => $latest->body,
@@ -208,6 +225,63 @@ class MessageController extends Controller
     {
         return $app->assignments->first()?->department?->name
             ?? 'Business Permits and Licensing Office';
+    }
+
+    /**
+     * The assignment this conversation belongs to (checklist item 73).
+     *
+     * A filing routed to four offices has four assignments and only one thread —
+     * `message_threads.application_id` is unique — so "which office" is a
+     * resolution, not a lookup. In order:
+     *
+     *   1. the office of whoever spoke last, if that was an officer. Whoever
+     *      just wrote to you is who you are dealing with, and this is the answer
+     *      the applicant is actually asking for;
+     *   2. failing that, the first office with a named officer, because a
+     *      person's queue is a stronger claim than an unopened one;
+     *   3. failing that, the first office the filing was routed to.
+     *
+     * Null when nothing is routed yet — a filing that has not been paid for has
+     * no assignments at all (see WorkflowService::routeToDepartments), and
+     * naming an office then would be inventing one.
+     */
+    private function responsibleAssignment(Application $app, ?Message $latest): ?ApplicationAssignment
+    {
+        if ($latest && $latest->sender_user_id !== $app->applicant_user_id) {
+            $bySender = $app->assignments->firstWhere('officer_user_id', $latest->sender_user_id);
+            if ($bySender) {
+                return $bySender;
+            }
+        }
+
+        return $app->assignments->first(fn ($a) => $a->officer !== null)
+            ?? $app->assignments->first();
+    }
+
+    /**
+     * The responsible office as the inbox renders it.
+     *
+     * `officer` is null on purpose when the office has not picked one up: a
+     * queue with nobody's name on it is the true state, and filling the slot
+     * with the office name again would tell the applicant a person is on it.
+     *
+     * @return array{code: ?string, name: string, officer: ?array{id: int, name: string}}|null
+     */
+    private function responsibleOffice(Application $app, ?Message $latest): ?array
+    {
+        $assignment = $this->responsibleAssignment($app, $latest);
+        if (! $assignment?->department) {
+            return null;
+        }
+
+        return [
+            'code' => $assignment->department->code,
+            'name' => $assignment->department->name,
+            'officer' => $assignment->officer ? [
+                'id' => $assignment->officer->id,
+                'name' => $assignment->officer->name,
+            ] : null,
+        ];
     }
 
     /** How many messages of a conversation one request will return. */

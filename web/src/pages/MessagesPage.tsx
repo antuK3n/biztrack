@@ -15,6 +15,14 @@ import type { MessageThreadSummary } from '../lib/types'
  * left — search, sort, one card per application — and the open thread on the
  * right behind its light-blue name bar. Both sides read the same screen; the
  * conversation is named after whoever the reader is talking to.
+ *
+ * The responsible office (checklist item 73) is stated outright rather than
+ * inferred. The counterparty line answers "who wrote to me last", which drifts
+ * as different officers reply and says nothing at all before anybody has; an
+ * applicant asking which office holds their permit got no answer from it. The
+ * API resolves ONE office per thread — see MessageController::responsibleOffice
+ * — because a filing is routed to every office that issues one of its
+ * clearances, and listing four of them is not an answer either.
  */
 
 type Sort = 'recent' | 'oldest'
@@ -35,6 +43,24 @@ function Avatar({ size = 44 }: { size?: number }) {
   )
 }
 
+/**
+ * The responsible office as one line: "Sanitary Office · Dr. Reyes", or just
+ * the office while nobody has picked the file up. Null when the filing has not
+ * been routed yet, which the callers say in their own words rather than
+ * printing an empty line.
+ *
+ * `alreadyNamed` is whatever the surrounding UI has already printed — usually
+ * the conversation's title. When the assigned officer IS that name, repeating
+ * it here turns one fact into what looks like two, so the office is given on
+ * its own instead.
+ */
+function officeLine(thread: MessageThreadSummary, alreadyNamed?: string): string | null {
+  const office = thread.responsible_office
+  if (!office) return null
+  const officer = office.officer && office.officer.name !== alreadyNamed ? office.officer.name : null
+  return officer ? `${office.name} · ${officer}` : office.name
+}
+
 function ThreadCard({
   thread,
   active,
@@ -48,6 +74,19 @@ function ThreadCard({
   const preview = last
     ? `${last.mine ? 'You' : (last.sender_name ?? thread.counterparty.name)}: ${last.body}`
     : 'No messages yet. Start the conversation.'
+  /*
+   * The office, said once. Two things on this card already tended to be it —
+   * the conversation's own name when no officer is assigned, and the unlabelled
+   * subtitle beside it — so the office could appear three times in four lines
+   * and read like three separate facts. The labelled line wins and the others
+   * stand down.
+   */
+  const office = officeLine(thread, thread.counterparty.name)
+  const handledBy = office && office !== thread.counterparty.name ? office : null
+  const subtitle =
+    thread.counterparty.subtitle && thread.counterparty.subtitle !== thread.responsible_office?.name
+      ? thread.counterparty.subtitle
+      : null
 
   return (
     <li>
@@ -64,17 +103,19 @@ function ThreadCard({
           <span className="flex items-baseline gap-2">
             <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">
               {thread.counterparty.name}
-              {thread.counterparty.subtitle && (
-                <span className="font-semibold italic text-ink-secondary">
-                  {' '}
-                  · {thread.counterparty.subtitle}
-                </span>
+              {subtitle && (
+                <span className="font-semibold italic text-ink-secondary"> · {subtitle}</span>
               )}
             </span>
             <span className="shrink-0 text-xs italic text-ink-muted">
               {formatDate(thread.updated_at)}
             </span>
           </span>
+          {handledBy && (
+            <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
+              Handled by {handledBy}
+            </span>
+          )}
           <span className="mt-0.5 block truncate text-sm text-ink-secondary">{preview}</span>
         </span>
       </button>
@@ -113,6 +154,10 @@ export function MessagesPage() {
             t.business_name,
             t.tracking_id,
             t.last_message?.body,
+            // Now that the office is on the card, it has to be findable: an
+            // applicant chasing a health clearance searches "sanitary".
+            t.responsible_office?.name,
+            t.responsible_office?.officer?.name,
           ]
             .filter(Boolean)
             .some((field) => (field as string).toLowerCase().includes(needle)),
@@ -191,10 +236,37 @@ export function MessagesPage() {
     </div>
   )
 
-  // "Central Perk · BIZ-2026-00005", never the same value twice.
+  /*
+   * The office answerable for the open filing (item 73), labelled — "Handled
+   * by" is what turns a name into an answer to the question the client asked.
+   *
+   * Three states, because there are three, and a blank line for two of them is
+   * what left the applicant guessing in the first place:
+   *
+   *   - routed, and the office is not already the title → name it;
+   *   - routed, but the office IS the title (nobody in it has picked the file
+   *     up, so the API named the conversation after the office) → repeating it
+   *     under itself says nothing, and "no officer yet" is the fact the reader
+   *     is missing;
+   *   - not routed at all → say that, rather than imply an office exists.
+   */
+  const paneOffice = selected ? officeLine(selected, selected.counterparty.name) : null
+  const paneOfficeIsTitle = Boolean(paneOffice) && paneOffice === selected?.counterparty.name
+
+  /*
+   * "Central Perk · BIZ-2026-00005", never the same value twice — and never a
+   * value the line above has already given. The unlabelled subtitle IS the
+   * office on most applicant threads, so without this last filter the header
+   * printed the office name twice, two lines apart, looking like two facts.
+   */
   const paneSubtitle = selected
     ? [selected.counterparty.subtitle, selected.tracking_id]
-        .filter((part, i, all): part is string => Boolean(part) && all.indexOf(part) === i)
+        .filter(
+          (part, i, all): part is string =>
+            Boolean(part) &&
+            all.indexOf(part) === i &&
+            part !== selected.responsible_office?.name,
+        )
         .join(' · ')
     : ''
 
@@ -207,7 +279,20 @@ export function MessagesPage() {
         <Avatar size={38} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-ink">{selected.counterparty.name}</p>
-          <p className="truncate text-sm italic text-ink-secondary">{paneSubtitle}</p>
+          <p className="truncate text-xs font-semibold text-royal">
+            {paneOffice && !paneOfficeIsTitle ? (
+              <>Handled by {paneOffice}</>
+            ) : (
+              <span className="font-medium text-ink-muted">
+                {paneOffice
+                  ? 'This office has not assigned an officer yet'
+                  : 'Not yet assigned to an office'}
+              </span>
+            )}
+          </p>
+          {paneSubtitle && (
+            <p className="truncate text-sm italic text-ink-secondary">{paneSubtitle}</p>
+          )}
         </div>
         <button
           type="button"

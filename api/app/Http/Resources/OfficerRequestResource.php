@@ -30,6 +30,42 @@ class OfficerRequestResource extends JsonResource
                     ? $creator->department->name
                     : null,
             ] : null,
+            /*
+             * The office the request is FROM, as chosen in the composer.
+             *
+             * `created_by.department` is the requester's own office and stays
+             * that, because that is what its name says. The two are not the same
+             * thing: the super admin belongs to no office and has to pick one,
+             * and an officer may raise a requirement on another office's behalf.
+             * The composer has stored `department_id` since checklist item 57
+             * but nothing ever read it back — the picker moved a column no
+             * screen displayed, which is a control that looks like it does
+             * something it does not.
+             */
+            'from_office' => $this->relationLoaded('department') && $this->department ? [
+                'id' => $this->department->id,
+                'code' => $this->department->code,
+                'name' => $this->department->name,
+            ] : null,
+            /*
+             * Who receives this (checklist item 89). It is always the applicant
+             * on the filing, and it is derived rather than stored because the
+             * model has no second recipient to offer: a request is answered
+             * through `POST /requests/{id}/respond`, gated on `request.respond`,
+             * which only the business_owner role holds — and `index()` hands an
+             * owner the requests on their own applications. So this names the
+             * one recipient there is rather than implying a choice that the
+             * schema cannot honour.
+             */
+            'recipient' => $this->relationLoaded('application')
+                && $this->application?->relationLoaded('applicant')
+                && $this->application->applicant
+                ? [
+                    'id' => $this->application->applicant->id,
+                    'name' => $this->application->applicant->name,
+                    'kind' => 'applicant',
+                ]
+                : null,
             'application' => $this->relationLoaded('application') && $this->application ? [
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,

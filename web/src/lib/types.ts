@@ -185,6 +185,12 @@ export interface ApplicationListItem {
    * are clean, so nothing shows until a list runs deep enough to reach one.
    */
   business: { id: number; name: string } | null
+  /**
+   * Who filed it. Null when the account has been removed — `User` soft-deletes
+   * and its filings stay, the same way `business` above outlives its register
+   * row — so every reader needs a fallback, not a dereference.
+   */
+  applicant: { id: number; name: string } | null
   submitted_at: string | null
   deadline_at: string | null
   permit_types: { code: string; name: string }[]
@@ -1086,6 +1092,19 @@ export interface MessageThreadSummary {
   status: string | null
   /** Whoever the reader is talking to: the applicant, or the officer/office. */
   counterparty: { name: string; subtitle: string | null; is_officer: boolean }
+  /**
+   * The office answerable for this filing (checklist item 73) — one office, the
+   * one this conversation belongs to, never the whole routing list. Null before
+   * the filing has been routed to anybody, which is a real state: assignments
+   * are only created once payment clears.
+   *
+   * `officer` stays null until somebody in that office picks the file up.
+   */
+  responsible_office: {
+    code: string | null
+    name: string
+    officer: { id: number; name: string } | null
+  } | null
   messages_count: number
   last_message: {
     body: string
@@ -1119,6 +1138,20 @@ export interface OfficerRequest {
   status: RequestStatus
   status_label: string
   created_by: { name: string; department: string | null }
+  /**
+   * The office the applicant sees this coming FROM, as picked in the composer.
+   * Distinct from `created_by.department`, which is the requester's own office:
+   * the super admin belongs to none and has to choose, and an officer may raise
+   * a requirement on another office's behalf.
+   */
+  from_office: Department | null
+  /**
+   * The recipient (checklist item 89). Always the applicant on the filing — a
+   * request is answered through `request.respond`, which only business owners
+   * hold — so this names who it went to rather than offering a choice the
+   * schema cannot honour. Null when the account has since been removed.
+   */
+  recipient: { id: number; name: string; kind: 'applicant' } | null
   application: { id: number; tracking_id: string; business_name: string }
   /** Latest reply, mirrored for older clients; `responses` is the full thread. */
   response_body: string | null
