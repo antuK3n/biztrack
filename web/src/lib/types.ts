@@ -398,6 +398,8 @@ export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
   payment_mode?: 'annual' | 'quarterly'
+  /** What this filing amends; null unless `application_type` is `amendment`. */
+  amendments?: AmendmentDetails | null
   /** Full resource embeds the complete business (address + lines). */
   business: Business
   documents: AppDocument[]
@@ -1167,11 +1169,39 @@ export interface PrefillResult {
   last_permit: {
     id: number
     permit_number: string
-    permit_type: string
+    /** `{ code, name }`, or null when the permit type row is gone. */
+    permit_type: { code: string; name: string } | null
     valid_until: string | null
   } | null
+  /**
+   * Item 85 — the permits of THIS business that may be renewed, soonest to
+   * expire first. Expired ones are here on purpose (a lapsed permit is what
+   * gets renewed); revoked and suspended ones are filtered out server-side,
+   * because a revoked permit is appealed, not renewed.
+   *
+   * This replaces filtering the owner's whole paginated permit list in the
+   * browser, which could hide the permit being renewed on page two.
+   */
+  renewable_permits: Permit[]
   last_application: { id: number; permit_type_ids: number[] } | null
   suggested_permit_type_ids: number[]
+}
+
+/**
+ * The paper BPLO form's "Amendment from:" block (checklist items 82/84).
+ * Null on new and renewal filings: that form never asks the question, which is
+ * a different fact from asking it and being told no.
+ */
+export interface AmendmentDetails {
+  /** True when at least one kind is ticked. Derived server-side. */
+  has_amendments: boolean
+  ownership: boolean
+  location: boolean
+  nature: boolean
+  /** The "Others (specify)" text; non-empty text IS the tick. */
+  other: string | null
+  /** Ready-to-render labels, e.g. `['Location', 'Others: new co-owner']`. */
+  summary: string[]
 }
 
 /** OCR-lite suggestions returned on a PDF document upload (v2 CONTRACT). */

@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\ApplicationType;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -19,6 +20,25 @@ class ApplicationResource extends JsonResource
             // business name", which every reader does.
             'title' => $this->title,
             'payment_mode' => $this->payment_mode,
+            /*
+             * The paper form's "Amendment from:" block (checklist items 82/84).
+             *
+             * Null on a new or renewal filing rather than an object of falses,
+             * so the wizard restoring a draft and the officer reading the sheet
+             * both get "this form never asked" instead of "asked and answered
+             * no" — and neither has to special-case the type to tell them
+             * apart.
+             */
+            'amendments' => $this->application_type === ApplicationType::Amendment ? [
+                'has_amendments' => (bool) $this->has_amendments,
+                'ownership' => (bool) $this->amendment_ownership,
+                'location' => (bool) $this->amendment_location,
+                'nature' => (bool) $this->amendment_nature,
+                'other' => $this->amendment_other,
+                // Rendered as-is by the officer sheet; built here so the label
+                // wording for "Nature of Business" has exactly one home.
+                'summary' => $this->resource->amendmentKinds(),
+            ] : null,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'business' => $this->whenLoaded('business', fn () => new BusinessResource($this->business)),

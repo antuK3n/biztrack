@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationListResource;
 use App\Http\Resources\ApplicationResource;
@@ -121,6 +122,7 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
+            ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
 
@@ -148,6 +150,7 @@ class ApplicationController extends Controller
             'prior_permit_id' => $data['prior_permit_id'] ?? null,
             'payment_mode' => $data['payment_mode'] ?? 'annual',
             'fee_profile' => $data['fee_profile'] ?? null,
+            ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
 
@@ -182,8 +185,21 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
+
+        /*
+         * What is being amended can change while the draft is open — an
+         * applicant who ticked Location and then realised ownership moved too
+         * has to be able to say so. Keyed on any of the four being present so a
+         * fee-profile-only autosave does not blank the answer.
+         */
+        if (array_intersect_key($data, array_flip(self::AMENDMENT_INPUTS))) {
+            $application->update(
+                $this->amendmentAttributes($data, $application->application_type?->value)
+            );
+        }
 
         if (array_key_exists('title', $data)) {
             $application->update(['title' => $this->cleanTitle($data['title'])]);
@@ -215,6 +231,24 @@ class ApplicationController extends Controller
         $this->authorizeOwner($request, $application);
         if ($application->status !== ApplicationStatus::Draft) {
             throw ValidationException::withMessages(['status' => ['Only draft applications can be submitted.']]);
+        }
+
+        /*
+         * Checklist items 82/84 — an amendment amending nothing is not a filing.
+         *
+         * The wizard blocks Next on the same rule, but the gate belongs here as
+         * well: the browser is not the only way into this endpoint, and a
+         * filing that reaches BPLO saying only "amendment" gives the counter
+         * nothing to act on. Checked at submit rather than at create because
+         * drafts autosave half-answered by design.
+         */
+        if (
+            $application->application_type === ApplicationType::Amendment
+            && ! $application->has_amendments
+        ) {
+            throw ValidationException::withMessages([
+                'has_amendments' => ['Choose what is being amended: ownership, location, nature of business, or something else you specify.'],
+            ]);
         }
 
         $application = $this->workflow->submit($application);
@@ -352,6 +386,72 @@ class ApplicationController extends Controller
             $application,
             'You may not view this application.'
         );
+    }
+
+    /**
+     * The paper form's "Amendment from:" checkboxes, as request keys.
+     *
+     * `amendment_other` is both the fourth tick and its "(specify)" text: the
+     * form has no way to tick Others without naming the other, so the text
+     * standing alone as the flag is the form's own rule, not a shortcut.
+     */
+    private const AMENDMENT_INPUTS = [
+        'amendment_ownership', 'amendment_location', 'amendment_nature', 'amendment_other',
+    ];
+
+    /** @return array<string, array<int, string>> */
+    private function amendmentRules(): array
+    {
+        return [
+            'amendment_ownership' => ['sometimes', 'boolean'],
+            'amendment_location' => ['sometimes', 'boolean'],
+            'amendment_nature' => ['sometimes', 'boolean'],
+            // The column is a plain string; 255 is where it truncates, and a
+            // silently truncated answer is worse than a rejected one.
+            'amendment_other' => ['sometimes', 'nullable', 'string', 'max:255'],
+        ];
+    }
+
+    /**
+     * The four amendment answers plus the derived `has_amendments`.
+     *
+     * Derived and never accepted from the caller: it is the OR of the other
+     * four, and a client able to set it independently could file an amendment
+     * that claims to amend something while naming nothing — which is precisely
+     * the state the submit gate above exists to refuse.
+     *
+     * A filing that is not an amendment is written back to all-false rather
+     * than left alone, so that switching a draft's type (or a caller sending
+     * the fields on a `new` filing) cannot leave amendment flags on a filing
+     * whose form never asked the question.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function amendmentAttributes(array $data, ?string $applicationType): array
+    {
+        if ($applicationType !== ApplicationType::Amendment->value) {
+            return [
+                'has_amendments' => false,
+                'amendment_ownership' => false,
+                'amendment_location' => false,
+                'amendment_nature' => false,
+                'amendment_other' => null,
+            ];
+        }
+
+        $ownership = (bool) ($data['amendment_ownership'] ?? false);
+        $location = (bool) ($data['amendment_location'] ?? false);
+        $nature = (bool) ($data['amendment_nature'] ?? false);
+        $other = trim((string) ($data['amendment_other'] ?? ''));
+
+        return [
+            'has_amendments' => $ownership || $location || $nature || $other !== '',
+            'amendment_ownership' => $ownership,
+            'amendment_location' => $location,
+            'amendment_nature' => $nature,
+            'amendment_other' => $other === '' ? null : $other,
+        ];
     }
 
     /** Trimmed title, or null so readers fall back to the business name. */

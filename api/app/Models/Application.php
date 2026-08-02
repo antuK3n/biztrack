@@ -23,6 +23,21 @@ class Application extends Model
         // requires a non-null complexity — cannot see the filing at all.
         'complexity',
         'rejection_reason', 'fee_profile', 'payment_mode',
+        /*
+         * The paper BPLO form's "Amendment from:" block (checklist items 82/84).
+         * The manuscript-alignment migration created these columns and nothing
+         * ever wrote them, so /apply?type=amendment was the new-application
+         * wizard with a different title — it never asked the one question that
+         * makes a filing an amendment. Mass assignment is how the controller
+         * fills them, so they have to be listed or the answer is dropped in
+         * silence exactly as `complexity` was above.
+         *
+         * `has_amendments` is derived, never taken from the client: it is a
+         * summary of the other four and a caller that could set it independently
+         * could claim an amendment amending nothing.
+         */
+        'has_amendments', 'amendment_ownership', 'amendment_location',
+        'amendment_nature', 'amendment_other',
     ];
 
     protected $casts = [
@@ -32,7 +47,32 @@ class Application extends Model
         'deadline_at' => 'datetime',
         'decided_at' => 'datetime',
         'fee_profile' => 'array',
+        // Without these, SQLite hands back 0/1 and the JSON payload says
+        // `"amendment_ownership": 1`, which the officer screen renders as a
+        // number rather than a ticked box.
+        'has_amendments' => 'boolean',
+        'amendment_ownership' => 'boolean',
+        'amendment_location' => 'boolean',
+        'amendment_nature' => 'boolean',
     ];
+
+    /**
+     * The amendment kinds ticked on this filing, as the paper form's four
+     * checkboxes. "Others" is the free text itself — a specified other IS the
+     * tick, which is why there is no fifth boolean column to keep in step
+     * with it.
+     *
+     * @return array<int, string>
+     */
+    public function amendmentKinds(): array
+    {
+        return array_values(array_filter([
+            $this->amendment_ownership ? 'Ownership' : null,
+            $this->amendment_location ? 'Location' : null,
+            $this->amendment_nature ? 'Nature of Business' : null,
+            filled($this->amendment_other) ? 'Others: '.$this->amendment_other : null,
+        ]));
+    }
 
     public function business(): BelongsTo
     {
