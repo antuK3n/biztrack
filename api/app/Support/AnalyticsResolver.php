@@ -42,6 +42,15 @@ final class AnalyticsResolver
         $key = AnalyticsSnapshot::keyFor($dataset, $params);
         $snapshot = AnalyticsSnapshot::where('key', $key)->first();
 
+        /*
+         * What the figures mean does not depend on which engine computed them —
+         * both emit the same schema, which is the premise the parity test
+         * enforces. So the definitions are resolved once, outside the branch: if
+         * they differed by engine they would be describing a difference that is
+         * not supposed to exist.
+         */
+        $definitions = AnalyticsDefinitions::for($dataset);
+
         if ($snapshot !== null) {
             return [
                 'data' => $snapshot->payload,
@@ -54,6 +63,7 @@ final class AnalyticsResolver
                     'stale_after_hours' => (int) config('analytics.stale_after_hours'),
                     'fallback_reason' => null,
                     'notice' => null,
+                    'definitions' => $definitions,
                 ],
             ];
         }
@@ -73,6 +83,7 @@ final class AnalyticsResolver
                 'stale_after_hours' => (int) config('analytics.stale_after_hours'),
                 'fallback_reason' => $reason,
                 'notice' => self::noticeFor($reason),
+                'definitions' => $definitions,
             ],
         ];
     }
