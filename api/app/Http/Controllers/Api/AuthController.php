@@ -205,6 +205,11 @@ class AuthController extends Controller
      * Update the signed-in user's own profile fields. Email changes are
      * intentionally not supported here: the address is the login identifier
      * and the prototype has no live re-verification flow.
+     *
+     * Every name part registration collects is editable here, because the
+     * Profile screen renders `fullName()` — middle name and suffix included —
+     * and a name a screen prints but no screen can correct is worse than one it
+     * never asked for. Same reasoning for gender: registration requires it.
      */
     public function updateProfile(Request $request): JsonResponse
     {
@@ -213,16 +218,37 @@ class AuthController extends Controller
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'suffix' => ['nullable', 'string', 'max:20'],
+            // Nullable, not `required|in:M,F` as registration has it: accounts
+            // seeded or created before the column existed hold null, and forcing
+            // a value on them would make an unrelated name edit fail validation.
+            'gender' => ['nullable', 'in:M,F'],
             'mobile_number' => ['required', 'string', 'max:20'],
         ]);
 
         $user = $request->user();
+
+        /*
+         * Absent key keeps the stored value; a key sent empty clears it.
+         *
+         * These three are optional, so the empty string is a real answer — "I
+         * have no suffix" — and ConvertEmptyStringsToNull turns it into null
+         * before it reaches here. `?? $user->middle_name` could not tell that
+         * apart from a client that never sent the field, so it read as "keep"
+         * either way and a middle name, once saved, could never be removed.
+         */
+        $optional = function (string $key) use ($data, $user) {
+            return array_key_exists($key, $data) ? $data[$key] : $user->{$key};
+        };
+
         $user->fill([
+            // `name` stays first + last: it is the framework compat column and
+            // the short form every list and notification already prints.
             'name' => trim("{$data['first_name']} {$data['last_name']}"),
             'first_name' => $data['first_name'],
-            'middle_name' => $data['middle_name'] ?? $user->middle_name,
+            'middle_name' => $optional('middle_name'),
             'last_name' => $data['last_name'],
-            'suffix' => $data['suffix'] ?? $user->suffix,
+            'suffix' => $optional('suffix'),
+            'gender' => $optional('gender'),
             'mobile_number' => $data['mobile_number'],
         ])->save();
 

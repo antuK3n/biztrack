@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { DownloadIcon, EyeIcon, ShieldCheckIcon } from '../../components/icons'
+import { AlertCircleIcon, DownloadIcon, EyeIcon, ShieldCheckIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoCard, SortFilter } from '../../components/ui/Proto'
-import { formatDate } from '../../lib/format'
-import { permits } from '../../lib/resources'
+import { businessName, formatDate } from '../../lib/format'
+import { permits as permitsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import type { Permit } from '../../lib/types'
@@ -61,6 +61,46 @@ function Triangle({ open }: { open: boolean }) {
   )
 }
 
+/*
+ * The download icon in the royal permit row used to be a second link to the
+ * permit page — same destination as the eye beside it, under an icon that
+ * promises a file. It now downloads, so the two icons mean two things.
+ */
+function PermitDownloadButton({ permit }: { permit: Permit }) {
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+
+  async function download() {
+    setBusy(true)
+    setFailed(false)
+    try {
+      await permitsApi.pdf(permit.id, `${permit.permit_number}.pdf`)
+    } catch {
+      // The permit page carries the full message; here there is room for the
+      // fact that it failed and an invitation to try the other route.
+      setFailed(true)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={download}
+      disabled={busy}
+      aria-label={
+        failed
+          ? `Download failed for ${permit.permit_type.name}. Try again`
+          : `Download ${permit.permit_type.name} as PDF`
+      }
+      className="text-white transition-opacity hover:opacity-80 disabled:opacity-50"
+    >
+      {failed ? <AlertCircleIcon size={22} /> : <DownloadIcon size={22} />}
+    </button>
+  )
+}
+
 function BusinessRow({ group }: { group: BusinessGroup }) {
   const [open, setOpen] = useState(false)
   return (
@@ -95,13 +135,7 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
               >
                 <EyeIcon size={22} />
               </Link>
-              <Link
-                to={`/permits/${permit.id}`}
-                aria-label={`Download ${permit.permit_type.name}`}
-                className="text-white transition-opacity hover:opacity-80"
-              >
-                <DownloadIcon size={22} />
-              </Link>
+              <PermitDownloadButton permit={permit} />
             </li>
           ))}
         </ul>
@@ -112,15 +146,28 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
 
 export function PermitsPage() {
   const user = useAuth((s) => s.user)
-  const { data, loading, error, reload } = useAsync(() => permits.list(), [])
+  const { data, loading, error, reload } = useAsync(() => permitsApi.list(), [])
   const list = data ?? []
 
   const groups = useMemo<BusinessGroup[]>(() => {
     const map = new Map<number, BusinessGroup>()
     for (const permit of list) {
-      const g = map.get(permit.business.id) ?? {
-        id: permit.business.id,
-        name: permit.business.name,
+      /*
+       * `business` is typed non-nullable and is not. A soft-deleted business
+       * leaves its issued permits on the register, and the default scope drops
+       * it from the eager load, so this comes back null — the same shape that
+       * took the officer queue, the inspection list and the review sheet down
+       * by reading `.name` straight off it (RemovedBusinessRenderingTest).
+       *
+       * Key 0 collects every orphaned permit into one group. They have no
+       * business id left to tell them apart by, and one row saying the register
+       * no longer holds the business is more useful than several.
+       */
+      const business = permit.business as Permit['business'] | null
+      const key = business?.id ?? 0
+      const g = map.get(key) ?? {
+        id: key,
+        name: businessName(business),
         permits: [],
         latestExpiry: null,
         soonestExpiry: null,
@@ -134,7 +181,7 @@ export function PermitsPage() {
         g.soonestExpiry = permit.valid_until
       }
       if (permit.days_until_expiry !== null && permit.days_until_expiry <= 30) g.nearing = true
-      map.set(permit.business.id, g)
+      map.set(key, g)
     }
     return [...map.values()]
   }, [list])
