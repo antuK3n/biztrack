@@ -139,10 +139,33 @@ test('line of business is asked once, and the one ask is the searchable picker',
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
 
-  // Search and the free-text escape are the two things a <select> cannot do,
-  // and both are why this is the control that was kept.
-  await expect(page.getByLabel(/search your line of business/i)).toBeVisible()
-  await expect(page.getByRole('button', { name: /other \(not listed\)/i })).toBeVisible()
+  // Search is the thing a <select> cannot do, and it is why this is the
+  // control that was kept.
+  const search = page.getByLabel(/search your line of business/i)
+  await expect(search).toBeVisible()
+
+  /*
+   * The results are a dropdown, not a slab. Permanently open, ten trades and a
+   * Selected panel pushed the map off the screen on the step whose job is
+   * picking a location.
+   */
+  const results = page.locator('#psic-results')
+  await expect(results).toBeHidden()
+  await search.click()
+  await expect(results).toBeVisible()
+
+  /*
+   * "Other (not listed)" is gone on purpose. It stored the catch-all PSIC row
+   * with a NULL revenue-code category, and 35 of the 36 business-tax rules
+   * match on that category — so a line filed under it was assessed no business
+   * tax at all. If anyone puts it back, they are reopening that.
+   */
+  await expect(page.getByRole('button', { name: /other \(not listed\)/i })).toHaveCount(0)
+
+  // Escape closes it without the applicant having to find somewhere neutral
+  // to click.
+  await page.keyboard.press('Escape')
+  await expect(results).toBeHidden()
 })
 
 test('a pin outside Malabon is refused, and says only what was checked', async ({ page }) => {
