@@ -2419,12 +2419,38 @@ export function ApplyWizard() {
                   <p className="display-serif mt-2 text-sm italic text-ink-secondary">
                     {pt.department.name}
                   </p>
-                  {hasOfficeForm(pt.code) && !onFile && (
+                  {hasOfficeForm(pt.code) && !onFile && !selected && (
                     <p className="mt-2 text-xs text-ink-muted">
-                      {selected
-                        ? 'Its form opens when you apply — you can reopen it from the section map.'
-                        : 'Applying opens this office’s form, then brings you back here.'}
+                      Applying opens this office’s form, then brings you back here.
                     </p>
+                  )}
+                  {selected && (
+                    <div className="mt-3 rounded-md border border-royal/30 bg-royal-tint px-3 py-2">
+                      <p className="text-xs font-bold text-royal">Applying for this clearance</p>
+                      <p className="mt-1 text-xs text-ink-secondary">
+                        {hasOfficeForm(pt.code)
+                          ? 'Apply reopens its form whenever you need it.'
+                          : 'No extra form — this office works from your application.'}
+                      </p>
+                      {/*
+                       * Un-applying used to be a second click on Apply, which
+                       * made the same button mean two opposite things. Stated
+                       * plainly instead, and kept away from Apply so neither is
+                       * hit by accident.
+                       */}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          update(
+                            'permit_type_ids',
+                            form.permit_type_ids.filter((id) => id !== pt.id),
+                          )
+                        }
+                        className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2"
+                      >
+                        Don’t apply for this
+                      </button>
+                    </div>
                   )}
                   {onFile && (
                     <div className="mt-3 rounded-md border border-s-green/40 bg-s-green/10 px-3 py-2">
@@ -2450,10 +2476,14 @@ export function ApplyWizard() {
                       type="button"
                       aria-pressed={Boolean(onFile)}
                       disabled={busy}
-                      onClick={() => {
-                        if (onFile) void removeHeldPermit(pt.code)
-                        else setHeldPrompt({ id: pt.id, code: pt.code, name: pt.name })
-                      }}
+                      /*
+                       * Submit always opens the upload box. It used to toggle:
+                       * a second click on "Submitted ✓" deleted the file that
+                       * had just been uploaded, with no warning and no undo.
+                       * Removing has its own labelled control above, which is
+                       * where destroying something belongs.
+                       */
+                      onClick={() => setHeldPrompt({ id: pt.id, code: pt.code, name: pt.name })}
                       className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
                         onFile
                           ? 'border-2 border-royal bg-white text-royal'
@@ -2466,23 +2496,25 @@ export function ApplyWizard() {
                       type="button"
                       aria-pressed={selected}
                       disabled={busy}
+                      /*
+                       * Apply always opens the office's form. It used to
+                       * toggle, so the second click quietly un-applied and
+                       * opened nothing — which is why the button sometimes
+                       * "just highlighted" and sometimes went to the form. The
+                       * two outcomes were a click apart and looked identical.
+                       *
+                       * Un-applying is a different intention and now has its
+                       * own control below, the way removing an uploaded copy
+                       * already did. A button whose meaning depends on state
+                       * the applicant cannot see is not a button.
+                       */
                       onClick={() => {
                         // Applying for it and already holding it are opposites.
-                        if (!selected && onFile) void removeHeldPermit(pt.code)
-                        update(
-                          'permit_type_ids',
-                          selected
-                            ? form.permit_type_ids.filter((id) => id !== pt.id)
-                            : [...form.permit_type_ids, pt.id],
-                        )
-                        /*
-                         * Applying opens that office's form straight away. The
-                         * card used to only tick itself and grow a pill further
-                         * down the section map, which left the applicant to
-                         * work out that a new form had appeared somewhere and
-                         * that they were expected to go and find it.
-                         */
-                        if (!selected && hasOfficeForm(pt.code)) setPendingOfficeJump(pt.code)
+                        if (onFile) void removeHeldPermit(pt.code)
+                        if (!selected) {
+                          update('permit_type_ids', [...form.permit_type_ids, pt.id])
+                        }
+                        if (hasOfficeForm(pt.code)) setPendingOfficeJump(pt.code)
                       }}
                       className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
                         selected
