@@ -79,19 +79,37 @@ the system is letting people avoid it by uploading a copy — and the restructur
 that moved the clearances after payment makes "upload the copy I already hold"
 a prominent, easy path.
 
+**The wording in the code we hold.** RA 9514 Sec. 12(b), recorded on the rule
+itself, makes it *10% of all fees charged by the LGU in grant of the permit*.
+Read plainly that attaches the fee to the permit grant, not to whether the
+applicant asked us for an FSIC — which is why gating it on the clearance looks
+wrong to us. We would rather be told than assume.
+
 **What we assumed meanwhile.** We changed nothing. Deciding what a citizen is
 charged on our own reading of a statute is not our call, so the behaviour was
 written down rather than quietly fixed.
 
-## A4. Same question for the sanitary inspection fee
+## A4. Is the sanitary inspection fee an issuance fee or an annual one?
 
 The sanitary inspection fee (about ₱660, assessed on floor area, Revenue Code
-Sec. 4D.01) is attached to the Sanitary clearance in exactly the same way. Is
-it charged because the establishment is inspected each year, or only when the
-City Health Office issues the permit?
+Sec. 4D.01(m)) is attached to the Sanitary clearance. Is it charged because the
+establishment is inspected every year, or only when the City Health Office
+first issues the permit?
 
-**Why it matters.** Identical to A3 — uploading a held sanitary permit
-currently escapes it.
+**Why it matters.** The Revenue Code draws exactly this distinction for
+occupancy: there is a fee for issuing the Certificate of Occupancy, and a
+separate *annual inspection* fee that our rules correctly mark as applying to
+renewals only. Sanitary has no such split — one fee, charged on new filings and
+renewals alike. Either the code genuinely does not distinguish them for
+sanitary, or we have merged two fees that the counter treats separately.
+
+**Why the difference bites.** "I already hold this one, here is a copy" is in
+practice a renewal path — a brand-new business has no prior sanitary permit to
+upload. So the fee that gets escaped is escaped by exactly the businesses that
+owe it annually, if annual is what it is.
+
+**What we assumed meanwhile.** One fee, charged whenever the sanitary clearance
+is applied for, and nothing charged when a held copy is uploaded.
 
 ## A5. When someone already holds a valid clearance, what does BPLO charge?
 
