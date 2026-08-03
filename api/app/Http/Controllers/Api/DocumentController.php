@@ -7,10 +7,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\DocumentResource;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
-use App\Models\DocumentType;
 use App\Models\PermitType;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\HeldPermits;
 use App\Support\OcrLite;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -23,16 +23,6 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class DocumentController extends Controller
 {
-    /**
-     * The permit an application is FOR. You cannot hand in a copy of the thing
-     * you are asking to be issued, so it is never offered as "already held" —
-     * a renewal proves the previous one through the PRIOR_PERMIT requirement.
-     */
-    private const OUTCOME_PERMIT_CODE = 'BUSINESS';
-
-    /** Document-type code prefix for a clearance the applicant already holds. */
-    private const HELD_CODE_PREFIX = 'HELD_';
-
     public function store(Request $request, Application $application): JsonResponse
     {
         abort_unless(
@@ -63,16 +53,23 @@ class DocumentController extends Controller
 
         if ($permitType) {
             abort_if(
-                $permitType->code === self::OUTCOME_PERMIT_CODE,
+                ! $permitType->isClearance(),
                 422,
                 "The Mayor's / Business Permit is what this application is for, so it can’t be submitted as one you already hold."
             );
+            /*
+             * This is the wizard's path, and the wizard only exists before the
+             * filing leaves the applicant. The post-payment clearance stage
+             * takes the same upload through ClearanceController, which has its
+             * own gate (the stage opens on payment) — so the two windows do not
+             * overlap and neither has to know about the other.
+             */
             abort_unless(
                 in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true),
                 422,
                 'A permit you already hold can only be submitted while the application is a draft or has been returned to you.'
             );
-            $documentTypeId = $this->heldPermitDocumentType($permitType)->id;
+            $documentTypeId = HeldPermits::documentType($permitType)->id;
         } else {
             $documentTypeId = (int) $data['document_type_id'];
         }
@@ -103,7 +100,7 @@ class DocumentController extends Controller
         // One certificate per clearance: re-submitting replaces, so the office
         // never has to work out which of two sanitary permits is the live one.
         if ($permitType) {
-            $this->forgetPreviousHeldPermit($application, $permitType, $doc->id);
+            HeldPermits::forgetAllExcept($application, $permitType, $doc->id);
         }
 
         $payload = ['data' => new DocumentResource($doc->load('documentType'))];
@@ -142,42 +139,5 @@ class DocumentController extends Controller
         abort_unless(Storage::disk('local')->exists($document->stored_path), 404, 'File not found.');
 
         return Storage::disk('local')->download($document->stored_path, $document->original_filename);
-    }
-
-    /**
-     * The document type used for a certificate the applicant already holds.
-     *
-     * Created on demand rather than seeded: the set of clearances is data, so
-     * an LGU that adds a permit type gets the matching "already held" slot
-     * without a migration. The name carries the permit, which is what makes
-     * the attachment readable in an officer's document list.
-     */
-    private function heldPermitDocumentType(PermitType $permitType): DocumentType
-    {
-        return DocumentType::firstOrCreate(
-            ['code' => self::HELD_CODE_PREFIX.$permitType->code],
-            [
-                'name' => $permitType->name.' (already held)',
-                'help_text' => 'A copy of the '.$permitType->name
-                    .' this business already holds, submitted instead of applying for it again.',
-            ],
-        );
-    }
-
-    /** Drop any earlier certificate for the same clearance, file and all. */
-    private function forgetPreviousHeldPermit(Application $application, PermitType $permitType, int $keepId): void
-    {
-        $stale = ApplicationDocument::where('application_id', $application->id)
-            ->where('permit_type_id', $permitType->id)
-            ->whereKeyNot($keepId)
-            ->get();
-
-        foreach ($stale as $old) {
-            if ($old->stored_path && Storage::disk('local')->exists($old->stored_path)) {
-                Storage::disk('local')->delete($old->stored_path);
-            }
-            Audit::log('document.removed', $old);
-            $old->delete();
-        }
     }
 }

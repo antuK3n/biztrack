@@ -2,13 +2,13 @@
 
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
-use App\Http\Controllers\Api\Admin\OfficeSignatoryController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
 use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\ChatbotController;
+use App\Http\Controllers\Api\ClearanceController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\InspectionController;
 use App\Http\Controllers\Api\MessageController;
@@ -76,6 +76,27 @@ Route::middleware('auth:sanctum')->group(function () {
         // Which permit a renewal/amendment is for (checklist item 50).
         Route::get('applications/{application}/prior-permit', [PriorPermitController::class, 'show']);
         Route::put('applications/{application}/prior-permit', [PriorPermitController::class, 'update']);
+    });
+
+    /*
+     * The LGU clearance stage (docs/clearances-after-payment.md).
+     *
+     * Owner-only throughout, checked in the controller — the read included,
+     * because which clearances a business asks for is the applicant's own
+     * decision and not something an office needs the chooser to see.
+     *
+     * On `application.create` rather than `document.upload_own` even for the
+     * held upload: all four writes are the same decision about what this filing
+     * is asking for, and splitting them across two permissions would let a role
+     * hold half a stage. Both permissions sit on business_owner today, so this
+     * narrows nothing that exists.
+     */
+    Route::middleware('permission:application.create')->group(function () {
+        Route::get('applications/{application}/clearances', [ClearanceController::class, 'index']);
+        Route::post('applications/{application}/clearances/{code}/apply', [ClearanceController::class, 'apply']);
+        Route::delete('applications/{application}/clearances/{code}/apply', [ClearanceController::class, 'unapply']);
+        Route::post('applications/{application}/clearances/{code}/held', [ClearanceController::class, 'storeHeld']);
+        Route::delete('applications/{application}/clearances/{code}/held', [ClearanceController::class, 'destroyHeld']);
     });
 
     // Documents
