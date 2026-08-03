@@ -64,36 +64,58 @@ test('the wizard will not advance until consent is given, and says why', async (
   await expect(next).toBeEnabled()
 })
 
-test('the LGU permits step comes after the business is described', async ({ page }) => {
+test('the wizard is the business permit alone — no clearances, no office sheets', async ({
+  page,
+}) => {
   /*
-   * The office forms prefill from the business sections, so those have to be
-   * answered first — otherwise every clearance sheet opens blank and the
-   * applicant retypes their business name four times, once per office.
+   * ── What changed here, and why ────────────────────────────────────────
    *
-   * Permits is not literally last: the required documents are the union of
-   * the document types on the selected permits, and the tax questions vary by
-   * permit code, so both of those steps must follow it.
+   * This test used to be called "the LGU permits step comes after the business
+   * is described", and it asserted that the permits step EXISTS and sits in a
+   * particular place: `at('business') < at('permits') < at('documentary')` and
+   * `at('permits') < at('tax profile') < at('documentary')`.
+   *
+   * Every one of those assertions had to go, because the thing they were
+   * about is gone. The six clearances moved out of the wizard entirely and
+   * became a stage that opens after the first payment
+   * (docs/clearances-after-payment.md, decided 3 August 2026). A test that
+   * still demanded a permits step would now be demanding the bug back.
+   *
+   * The old ordering rule was `permits` before `tax profile` before
+   * `documentary`, and it was forced: the documents were the union of the
+   * document types on the selected permit types and the tax questions varied by
+   * permit code, so both had to follow the cards. Note that the last two are
+   * now in the OPPOSITE order — documentary before tax profile. That is not a
+   * cosmetic swap, it is the evidence that the dependency is really gone:
+   * nothing computes either step from a later answer any more, so they run in
+   * the order the client's diagram gives rather than the order the data forced.
+   *
+   * What is asserted instead is the property that actually matters and that a
+   * merge could silently undo: the wizard describes ONE permit.
    */
-  const map = await page.locator('ol li, nav li').allTextContents()
+  const map = await page.locator('ol[aria-label="Application sections"] li').allTextContents()
   const joined = map.join(' | ').toLowerCase()
+
+  // Exactly six sections, and no office form sheet among them. The sheets used
+  // to slot into the middle of this map the moment a clearance was ticked.
+  expect(map, `the section map is not the six business-permit phases: ${joined}`).toHaveLength(6)
+  for (const gone of ['permits & certificates', 'sanitary', 'fsic', 'fire safety', 'occupancy form', 'environmental']) {
+    expect(joined, `"${gone}" is still a step in the wizard`).not.toContain(gone)
+  }
 
   const at = (label: string) => joined.indexOf(label)
   expect(at('privacy'), 'privacy consent missing from the step map').toBeGreaterThanOrEqual(0)
 
-  // Consent first; business description before permits; permits before the
-  // steps that are computed from it.
-  expect(at('privacy')).toBeLessThan(at('business'))
-  expect(at('business')).toBeLessThan(at('permits'))
-  expect(at('permits')).toBeLessThan(at('documentary'))
+  // Consent before collection; the business described before the paperwork
+  // that describes it; and the two derived steps last, in the paper's order.
+  expect(at('privacy')).toBeLessThan(at('location & zoning'))
+  expect(at('location & zoning')).toBeLessThan(at('business information'))
+  expect(at('business information')).toBeLessThan(at('documentary'))
+  expect(at('documentary')).toBeLessThan(at('tax profile'))
+  expect(at('tax profile')).toBeLessThan(at('review'))
 
-  /*
-   * Item 76 asked for the LGU Section last. This is as close as the data
-   * allows: only the two sections derived from it, plus its own office
-   * sheets, may follow. If a section ever appears between the cards and the
-   * profile, the reason above stopped being the reason.
-   */
-  expect(at('permits')).toBeLessThan(at('tax profile'))
-  expect(at('tax profile')).toBeLessThan(at('documentary'))
+  // The count is part of the promise: "Part 1 of 8" was the old flow.
+  await expect(page.getByText(/part 1 of 6/i).first()).toBeVisible()
 })
 
 test('line of business is asked once, and the one ask is the searchable picker', async ({
@@ -104,8 +126,12 @@ test('line of business is asked once, and the one ask is the searchable picker',
    * so the zoning verdict had a trade to be about, and a whole section of its
    * own three steps later. The section is gone and the picker moved onto the
    * zoning step, so the weaker control is not what survived.
+   *
+   * Scoped to the section map by its label rather than to any `ol`: the map is
+   * no longer the only ordered list the wizard renders, and a bare `ol li`
+   * would start counting rows that are not sections at all.
    */
-  const map = await page.locator('ol li').allTextContents()
+  const map = await page.locator('ol[aria-label="Application sections"] li').allTextContents()
   const asks = map.filter((label) => /line of business/i.test(label))
   expect(asks, `line of business has ${asks.length} sections of its own`).toEqual([])
 

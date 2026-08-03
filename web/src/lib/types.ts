@@ -1240,6 +1240,81 @@ export interface OfficeForm {
   form_data: Record<string, unknown>
 }
 
+/* ── LGU Clearances (the stage after the first payment) ───────────────── */
+
+/*
+ * The six supporting clearances, as their own stage rather than a wizard step
+ * (docs/clearances-after-payment.md). Each is a separate transaction with a
+ * separate office, a separate fee and a separate outcome, which is why it has
+ * a state of its own instead of being a tick on the application.
+ */
+export type ClearanceState = 'available' | 'applied' | 'submitted' | 'issued' | 'rejected'
+
+export interface Clearance {
+  permit_type: {
+    id: number
+    code: string
+    name: string
+    /** Null when the permit type has no department row (ClearanceService::row). */
+    department: { code: string; name: string } | null
+  }
+  state: ClearanceState
+  /** True when that office has an applicant-facing form sheet to fill in. */
+  has_office_form: boolean
+  /**
+   * "Saved at all", not "every field answered" — the FSIC sheet's answers are
+   * all derived server-side, so it legitimately saves an empty object.
+   */
+  office_form_complete: boolean
+  /** The copy the applicant already holds, when they submitted one instead. */
+  held_document: {
+    id: number
+    name: string
+    size: number
+    download_url?: string
+  } | null
+  /** Raised when the clearance is applied for, not when the filing is sent. */
+  assignment: { id: number; status: string | null; remarks: string | null } | null
+  /**
+   * ALREADY FORMATTED — "₱735.00". `PermitFees::peso` puts the sign on
+   * server-side, so this is display text, not an amount. Passing it through
+   * formatMoney() yields "₱0.00" (Number("₱735.00") is NaN), which would quote
+   * a free clearance on the button that spends the applicant's money.
+   *
+   * Its MEANING depends on `state`, which is easy to miss: when the clearance
+   * is not applied for it is what applying WOULD add; once it is applied for
+   * the server flips the counterfactual, so it is what that clearance IS
+   * costing on the current assessment.
+   *
+   * Null means the number cannot be computed — the market stall rental, which
+   * the office sets case by case, or a filing whose business row is gone. Not
+   * the same as free, and never to be rendered as ₱0.00.
+   */
+  fee_preview: string | null
+}
+
+/**
+ * The money and the gate, alongside the six rows.
+ *
+ * `locked_reason` is the sentence the screen shows before the first payment
+ * clears. It is shown verbatim and never paraphrased: the condition that opens
+ * the stage is the API's to state, and a second sentence written here would
+ * drift out of step with it the first time the rule changed.
+ */
+export interface ClearanceMeta {
+  unlocked: boolean
+  locked_reason: string | null
+  /*
+   * Plain numbers, not formatted and not decimal strings — `PermitFees::balance`
+   * rounds and returns floats. These DO go through formatMoney(), which is the
+   * opposite of `fee_preview` above, and the difference is worth stating rather
+   * than leaving to be discovered by a "₱0.00" on somebody's screen.
+   */
+  total_assessed: number
+  total_paid: number
+  balance_due: number
+}
+
 /* ── Public verify ────────────────────────────────────────────────────── */
 
 export interface VerifyResult {

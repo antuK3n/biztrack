@@ -18,6 +18,8 @@ import type {
   Computed,
   BusinessStatus,
   BusinessPayload,
+  Clearance,
+  ClearanceMeta,
   DashboardReport,
   Department,
   DocumentType,
@@ -69,6 +71,21 @@ async function unwrap<T>(promise: Promise<{ data: { data: T } }>): Promise<T> {
 async function unwrapComputed<T>(
   promise: Promise<{ data: { data: T; meta: AnalyticsProvenance } }>,
 ): Promise<Computed<T>> {
+  const res = await promise
+  return { data: res.data.data, meta: res.data.meta }
+}
+
+/**
+ * Like unwrap, but keeps a `meta` that is part of the answer rather than paging.
+ *
+ * The clearances endpoint is the case this exists for: its `meta` carries the
+ * lock, the reason for it, and the running balance. None of that is decoration
+ * around a list — it is half of what the screen is for — so dropping it the way
+ * `unwrap` does would leave the caller to invent a lock rule of its own.
+ */
+async function unwrapMeta<T, M>(
+  promise: Promise<{ data: { data: T; meta: M } }>,
+): Promise<{ data: T; meta: M }> {
   const res = await promise
   return { data: res.data.data, meta: res.data.meta }
 }
@@ -244,6 +261,51 @@ export const applications = {
   /** Adjust the fee assessment (permission fee.adjust; v2). */
   feeAdjust: (id: number, line_items: FeeLineItem[], total_amount: string) =>
     unwrap<FeeAssessment>(api.post(`/applications/${id}/fee/adjust`, { line_items, total_amount })),
+}
+
+/* ── LGU Clearances (the stage after the first payment) ────────────────── */
+
+/**
+ * The six supporting clearances for one application, and the balance.
+ *
+ * Contract: docs/clearances-after-payment.md. Every mutation here resolves to
+ * the WHOLE list rather than the row it touched, even though the API also
+ * returns the row on its own. That is deliberate and it is about money:
+ * applying re-runs `FeeCalculator::assess`, and the Fire Code fee is 10% of the
+ * mayor's permit plus regulatory fees (RA 9514) — so applying for one clearance
+ * can move ANOTHER clearance's `fee_preview` as well as the balance. Patching
+ * the single returned row into local state would leave the other five quoting
+ * prices the assessment no longer agrees with, and a wrong price on a button
+ * that spends the applicant's money is the worst kind of stale.
+ */
+export const clearances = {
+  /** The six rows plus `meta` (the gate, and the running balance). */
+  list: (applicationId: number) =>
+    unwrapMeta<Clearance[], ClearanceMeta>(api.get(`/applications/${applicationId}/clearances`)),
+  /** Ask this office to issue the clearance. Re-assesses; the balance moves. */
+  apply: async (applicationId: number, code: string) => {
+    await api.post(`/applications/${applicationId}/clearances/${code}/apply`)
+    return clearances.list(applicationId)
+  },
+  /** Withdraw the request. Its own labelled control, never a second Apply. */
+  unapply: async (applicationId: number, code: string) => {
+    await api.delete(`/applications/${applicationId}/clearances/${code}/apply`)
+    return clearances.list(applicationId)
+  },
+  /** Submit the copy already held. Adds no fee: nothing is being issued. */
+  submitHeld: async (applicationId: number, code: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    await api.post(`/applications/${applicationId}/clearances/${code}/held`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return clearances.list(applicationId)
+  },
+  /** Take the uploaded copy back off. Its own labelled control, never Submit. */
+  removeHeld: async (applicationId: number, code: string) => {
+    await api.delete(`/applications/${applicationId}/clearances/${code}/held`)
+    return clearances.list(applicationId)
+  },
 }
 
 /* ── Per-office application forms (UI prototype Parts 4-7) ─────────────── */
