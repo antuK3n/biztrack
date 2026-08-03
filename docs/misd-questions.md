@@ -233,3 +233,64 @@ introduction rather than answering themselves.
 - Whether a business may hold a Mayor's Permit with no other clearance
   (we now require at least one — item 76 — which changed existing behaviour)
 - Actual counter workflow: who receives, who assesses, who signs, in what order
+
+---
+
+## Fees on the clearances — ask BPLO, and ask precisely
+
+Raised after the BPLO visit: *are the clearances paid for upfront, and what
+happens to someone who already applied and paid for one elsewhere?*
+
+**What the code does today**, verified rather than assumed. There are 423
+active fee rules and every one is gated on a selected permit type:
+
+| Gated on | Rules | Examples |
+|---|---|---|
+| BUSINESS | 335 | business tax, plates, sticker, **all garbage fees** |
+| CEC | 37 | environmental |
+| SANITARY | 19 | health certificate, **sanitary inspection fee** |
+| OCCUPANCY | 18 | certificate of use/occupancy |
+| FSIC | 8 | **`fire.fsic` — the Fire Code fee** |
+| MARKET / ZONING | 4 / 4 | stall rental; locational clearance |
+
+The split is mostly right: annual charges on the business — garbage above all —
+hang off BUSINESS, so they are billed whether or not any clearance is picked.
+
+**The problem.** Two fees hang off the *clearance* that look like annual
+charges on the *business*:
+
+- `fire.fsic` — the Fire Code fee (~PHP 881, computed as 10% of the mayor's
+  permit plus regulatory fees). Under RA 9514 this is a statutory annual
+  charge collected with the business permit and remitted to BFP.
+- `sanitary.catch_all_floor_area` — the sanitary inspection fee (~PHP 660),
+  assessed on floor area.
+
+Because they are gated on the clearance, **an applicant who uploads an FSIC
+they already hold is charged neither**. If those fees are annual charges on an
+operating establishment rather than the price of issuing the certificate, the
+system is letting people escape them by uploading a copy.
+
+This is in the code now — the restructure does not create it. But moving the
+clearances after payment makes "Submit a copy I already hold" a prominent
+path, so it turns a latent leak into a common one.
+
+### Ask BPLO
+
+1. **Is the Fire Code fee owed by every business annually,** regardless of who
+   issued the FSIC or when? (We believe yes, under RA 9514. If yes, it must be
+   gated on BUSINESS, not FSIC.)
+2. **Same for the sanitary inspection fee** — is it charged because the
+   establishment is inspected each year, or only when CHO issues the permit?
+3. **When someone already holds a valid clearance from a previous year or
+   another transaction, what does BPLO charge them?** Nothing, the inspection
+   fee only, or the full clearance fee again?
+4. **Are the clearance fees collected at the BPLO cashier with the business
+   permit, or does each office collect its own?** BPLO said "payment first,
+   then they apply for the others" — we need to know whether that first payment
+   already includes the clearance fees, because it decides whether applying for
+   a clearance in our system adds to a balance or sends the applicant to
+   another counter.
+5. **Does BPLO decide which clearances a business needs, or does the applicant
+   choose?** If BPLO determines it from the line of business and location, then
+   presenting the six as a free choice is wrong — and it would explain why the
+   cards have never felt right.
