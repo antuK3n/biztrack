@@ -2,9 +2,35 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+/**
+ * Keep the local design-review script out of anything we hand to a tester.
+ *
+ * The impeccable plugin injects a `<script src="http://localhost:8400/live.js">`
+ * between marker comments in index.html, and it is committed. That is fine in
+ * development and wrong everywhere else: a browser that is not this laptop
+ * cannot reach port 8400, so every tester's console opened on
+ * ERR_CONNECTION_REFUSED — noise that buries whatever real error they were
+ * meant to report to us.
+ *
+ * Stripping it at build time rather than deleting the tag keeps the tool
+ * working locally, where it is re-injected on demand.
+ */
+function stripLocalDevScripts() {
+  return {
+    name: 'strip-local-dev-scripts',
+    apply: 'build' as const,
+    transformIndexHtml(html: string) {
+      return html.replace(
+        /<!-- impeccable-live-start -->[\s\S]*?<!-- impeccable-live-end -->\s*/g,
+        '',
+      )
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), stripLocalDevScripts()],
   server: {
     // Same-origin /api goes to the Laravel dev server, so the app works
     // unchanged behind a public tunnel (remote browsers can't reach :8080).
