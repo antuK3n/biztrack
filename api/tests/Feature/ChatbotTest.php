@@ -75,7 +75,16 @@ it('answers the hours intent with RA 11032', function () {
         ->assertCreated()
         ->json('data.body');
 
-    expect($body)->toContain('RA 11032')->toContain('10 working days');
+    /*
+      * The tiers, not a flat figure. This assertion used to pin "10 working
+      * days" — a number in neither RA 11032 nor Ra11032::TIERS — which is how
+      * a wrong statutory deadline stayed in an answer given to applicants.
+      */
+    expect($body)->toContain('RA 11032')
+        ->toContain('3 working days for simple')
+        ->toContain('7 working days for complex')
+        ->toContain('20 working days for highly technical')
+        ->not->toContain('10 working days');
 });
 
 it('greets back and falls back gracefully', function () {
@@ -227,7 +236,8 @@ it('scopes processing time to the named permit and keeps the RA 11032 rule', fun
 
     expect($body)->toContain('City Health Office')
         ->toContain('inspection')
-        ->toContain('10 working days')
+        ->toContain('3 working days for simple')
+        ->not->toContain('10 working days')
         ->not->toContain('Office of the Building Official');
 });
 
