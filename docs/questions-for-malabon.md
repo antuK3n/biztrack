@@ -643,3 +643,54 @@ and those are the ones we should not be making mandatory.
 ## E8. The Presumptive Income Level schedule from the City Treasury
 
 **Why it matters.** See A15. It is missing from the printed ordinance.
+
+## E9. Which of these seven documents does the paper form actually ask for?
+
+This one can be answered without sending anything — it is a list to tick, and
+it unblocks tester checklist item 96 ("the documentary requirements should
+match what is asked in the paper application form (should be 6)").
+
+BizTrack attaches seven documentary requirements to the Mayor's / Business
+Permit. Please mark each **required**, **required only sometimes** (and say
+when), or **not asked for**:
+
+| # | What we ask for | When we ask | Required? |
+|---|---|---|---|
+| 1 | Business Registration (DTI / SEC / CDA certificate) | every filing | |
+| 2 | Lease Contract or Land Title | every filing | |
+| 3 | Barangay Business Clearance | every filing | |
+| 4 | Community Tax Certificate (Cedula) | every filing | |
+| 5 | Valid Government ID | every filing | |
+| 6 | Occupancy Permit | every filing, optional | |
+| 7 | Previous Mayor's Permit | renewals only | |
+
+Two follow-ups:
+
+- **Is anything missing from this list?** A document the counter asks for that
+  is not one of the seven is worse than an extra one, because the applicant
+  arrives at City Hall without it.
+- **Does the counter ask for the Occupancy Permit at application time, or only
+  once the Office of the Building Official has issued it?** See below.
+
+**Why it matters.** The tester counted seven and expected six, and we cannot
+settle it from here. A new filing already shows six: the previous Mayor's
+Permit is asked for on renewals only, since a business being registered for the
+first time has none. A renewal shows seven, and the seventh is the permit being
+renewed. So the number depends on which form you are holding — and whether
+either number is right depends on E1, the form itself, which we have still
+never seen.
+
+**What we assumed meanwhile.** We removed nothing from the list, because
+deleting a requirement on a guess is the one mistake here that reaches the
+counter: an applicant told they need six documents, who turns up without the
+seventh, is turned away.
+
+The single change we did make is that the **Occupancy Permit no longer blocks
+submission** — it is still asked for, now marked optional. Two things pointed
+the same way: our own help text has always said "where applicable", and since
+the restructure in `docs/clearances-after-payment.md` the Occupancy Permit is
+one of the six LGU clearances the applicant applies for in a separate stage
+*after* the first payment. Requiring the certificate at step 4 asks a new
+business in new premises to attach a document the system is about to walk them
+through obtaining. If the answer to the table above is that BPLO does require
+it of everyone up front, this reverses with one migration.
