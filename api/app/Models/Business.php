@@ -41,6 +41,88 @@ class Business extends Model
         'monthly_rental' => 'decimal:2',
     ];
 
+    /**
+     * The four organisation structures the application collects.
+     *
+     * This is the canonical vocabulary for `registration_type`. It used to hold
+     * two vocabularies at once — the four structures AND the three registering
+     * agencies ("DTI", "SEC", "CDA") — because the wizard asked for a
+     * "DTI / SEC / CDA Registration Number" and a "Type of Registration" as two
+     * unrelated questions, and the seeders wrote the agency while the wizard
+     * wrote the structure. Checklist item 94 is that conflation: the agency is
+     * not a separate fact, it is a consequence of the structure.
+     */
+    public const ORGANIZATION_FORMS = ['sole_proprietorship', 'partnership', 'corporation', 'cooperative'];
+
+    /**
+     * Who registers each structure. This is the whole of item 94's mapping, and
+     * it is deliberately many-to-one: the SEC registers both partnerships and
+     * corporations, so an agency can never be reversed into a structure without
+     * losing information. Everything that needs an agency derives it from here;
+     * nothing stores it.
+     */
+    public const REGISTRAR_BY_FORM = [
+        'sole_proprietorship' => 'DTI',
+        'partnership' => 'SEC',
+        'corporation' => 'SEC',
+        'cooperative' => 'CDA',
+    ];
+
+    /**
+     * Legacy agency codes that CAN be read back as a structure without guessing.
+     *
+     * "SEC" is absent on purpose. It is the one agency that registers two
+     * structures, so a row saying "SEC" genuinely does not record whether the
+     * business is a partnership or a corporation, and there is no other column
+     * to ask. Anything that meets a legacy "SEC" must return null and put the
+     * question back to the applicant rather than pick one.
+     */
+    private const FORM_BY_REGISTRAR = [
+        'DTI' => 'sole_proprietorship',
+        'CDA' => 'cooperative',
+    ];
+
+    /**
+     * Read a `registration_type` as an organisation structure.
+     *
+     * Returns one of ORGANIZATION_FORMS, or null when the stored value cannot be
+     * resolved to one — an unrecognised string, or the ambiguous legacy "SEC".
+     * Null means "we do not know", never "corporation".
+     */
+    public static function normalizeRegistrationType(?string $raw): ?string
+    {
+        $value = is_string($raw) ? trim($raw) : '';
+        if ($value === '') {
+            return null;
+        }
+        if (in_array($value, self::ORGANIZATION_FORMS, true)) {
+            return $value;
+        }
+
+        return self::FORM_BY_REGISTRAR[strtoupper($value)] ?? null;
+    }
+
+    /**
+     * The agency a structure is registered with — "DTI", "SEC" or "CDA".
+     *
+     * Legacy rows that still hold an agency code answer with themselves, so a
+     * screen showing "which agency issued this number" is right about the 143
+     * un-migrated SEC rows even though their structure is unknown.
+     */
+    public static function registrarFor(?string $registrationType): ?string
+    {
+        $value = is_string($registrationType) ? trim($registrationType) : '';
+        if ($value === '') {
+            return null;
+        }
+        if (isset(self::REGISTRAR_BY_FORM[$value])) {
+            return self::REGISTRAR_BY_FORM[$value];
+        }
+        $upper = strtoupper($value);
+
+        return in_array($upper, self::REGISTRAR_BY_FORM, true) ? $upper : null;
+    }
+
     /** Statuses that bar the owner from filing new applications. */
     public function isBlockedFromApplying(): bool
     {

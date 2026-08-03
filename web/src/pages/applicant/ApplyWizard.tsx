@@ -9,6 +9,7 @@ import {
   UploadIcon,
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
+import { DocumentActions } from '../../components/DocumentActions'
 import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldLabel,
@@ -308,12 +309,122 @@ const AMENDMENT_KINDS: { key: 'ownership' | 'location' | 'nature'; label: string
   { key: 'nature', label: 'Nature of Business' },
 ]
 
-const REGISTRATION_TYPES = [
-  { value: 'sole_proprietorship', label: 'Sole Proprietorship' },
-  { value: 'partnership', label: 'Partnership' },
-  { value: 'corporation', label: 'Corporation' },
-  { value: 'cooperative', label: 'Cooperative' },
+/* ── Type of registration, and the agency it decides (item 94) ──────────── */
+
+type RegistrationAgency = 'DTI' | 'SEC' | 'CDA'
+
+/**
+ * The four structures, each with the agency that registers it.
+ *
+ * The mapping is many-to-one on purpose: the SEC registers partnerships AND
+ * corporations, so the agency can always be read off the structure but never the
+ * other way round. That asymmetry is the whole of checklist item 94 — the form
+ * used to ask for a "DTI / SEC / CDA Registration Number" BEFORE asking which of
+ * the three the applicant is registered with, so it was asking for a number
+ * without knowing whose number it wanted, and nothing checked that the two
+ * answers agreed. The structure is asked first now and the number field follows
+ * it.
+ *
+ * The API stores the structure in `businesses.registration_type` and derives the
+ * agency the same way (Business::REGISTRAR_BY_FORM).
+ */
+const REGISTRATION_TYPES: { value: string; label: string; agency: RegistrationAgency }[] = [
+  { value: 'sole_proprietorship', label: 'Sole Proprietorship', agency: 'DTI' },
+  { value: 'partnership', label: 'Partnership', agency: 'SEC' },
+  { value: 'corporation', label: 'Corporation', agency: 'SEC' },
+  { value: 'cooperative', label: 'Cooperative', agency: 'CDA' },
 ]
+
+/**
+ * How each agency's number is asked for. The label is what the input is called
+ * once the structure is known — a screen reader must never be left announcing
+ * "DTI / SEC / CDA Registration Number" at a field that now means one of them.
+ *
+ * `hint` is illustrative, never enforced. The SEC and CDA examples are real
+ * shapes read off those agencies' own published registers. DTI deliberately has
+ * none: DTI publishes no format anywhere — not in its Citizen's Charter, not in
+ * the BNRS FAQ, not in the IRR — and no authoritative specimen could be
+ * verified, so an invented example would teach applicants a shape nobody can
+ * stand behind. It points at the certificate instead.
+ */
+const REGISTRATION_AGENCIES: Record<
+  RegistrationAgency,
+  { label: string; placeholder: string; hint: string }
+> = {
+  DTI: {
+    label: 'DTI Business Name Registration Number',
+    placeholder: 'as printed on your DTI certificate',
+    hint: 'Issued by the Department of Trade and Industry. Copy it from your Certificate of Business Name Registration.',
+  },
+  SEC: {
+    label: 'SEC Registration Number',
+    placeholder: 'e.g. CS201912345',
+    hint: 'Issued by the Securities and Exchange Commission. It looks like CS201912345, though older certificates use other prefixes.',
+  },
+  CDA: {
+    label: 'CDA Registration Number',
+    placeholder: 'e.g. 9520-15005879',
+    hint: 'Issued by the Cooperative Development Authority. It looks like 9520-15005879, though the digits after the dash vary in length.',
+  },
+}
+
+/** The agency that registers a structure, or null while none is chosen. */
+function agencyFor(registrationType: string): RegistrationAgency | null {
+  return REGISTRATION_TYPES.find((rt) => rt.value === registrationType)?.agency ?? null
+}
+
+/**
+ * Read a stored `registration_type` as one of the four structures.
+ *
+ * A renewal, an amendment or a reopened draft prefills this field from the
+ * business on record, and rows written before item 94 hold the registering
+ * AGENCY there instead — "DTI", "SEC", "CDA". Left as-is, "DTI" is a truthy
+ * string that satisfies the required check while matching none of the four
+ * buttons: the question looks unanswered but the step lets you past, and the
+ * value is then mirrored into fee_profile.business_structure, which accepts only
+ * the four, so every autosave on that filing answers 422 in silence.
+ *
+ * DTI and CDA each register exactly one structure, so those translate. "SEC"
+ * does not — it covers partnership and corporation — so it comes back blank and
+ * the applicant is asked to confirm which they are. Blank is the honest answer;
+ * guessing "corporation" would be inventing a fact about their company.
+ */
+function normalizeRegistrationType(raw: string | null | undefined): string {
+  const value = (raw ?? '').trim()
+  if (!value) return ''
+  if (REGISTRATION_TYPES.some((rt) => rt.value === value)) return value
+  if (value.toUpperCase() === 'DTI') return 'sole_proprietorship'
+  if (value.toUpperCase() === 'CDA') return 'cooperative'
+  return ''
+}
+
+/**
+ * Is this plausibly a registration number at all?
+ *
+ * Deliberately loose, and the same rule for all three agencies — the looseness
+ * is evidence-based, not lazy. SEC's own published registers carry more than
+ * twenty distinct shapes (CS/A/AS/ASO/CEO prefixes with 7 to 11 digits, bare
+ * numerics from 4 digits up, trailing letters like CS200729932-A, embedded
+ * hyphens like ASO91-195123). CDA's current masterlist runs three formats at
+ * once — "9520-" plus 8, 12 or 16 digits — plus a "10744-" series. DTI
+ * publishes no format at all. So any regex tight enough to catch a wrong answer
+ * would also refuse certificates real businesses are holding, and a refused
+ * applicant cannot file at all, while a malformed number is caught by the
+ * officer who opens the uploaded certificate.
+ *
+ * What differs per agency is the label, the example and the wording of the
+ * error — not what is accepted.
+ *
+ * So this only asserts the value looks like a reference rather than a sentence:
+ * the characters these numbers are printed with, at least one digit (every
+ * specimen in every register has one), and at least four characters — the
+ * shortest real reference found anywhere, SEC's "1074". BusinessController
+ * applies the identical rule.
+ */
+function registrationNumberValid(raw: string): boolean {
+  const trimmed = raw.trim()
+  return trimmed.length >= 4 && /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-/]*$/.test(trimmed)
+}
 
 /**
  * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where the taxpayer
@@ -888,7 +999,10 @@ export function ApplyWizard() {
       setForm((f) => ({
         name: b.name,
         trade_name: b.trade_name ?? '',
-        registration_type: b.registration_type ?? '',
+        // Item 94: a business registered before the structure and the agency
+        // were untangled can still hold "DTI"/"SEC"/"CDA" here. Read it as a
+        // structure, or blank so the applicant is asked — never guessed.
+        registration_type: normalizeRegistrationType(b.registration_type),
         registration_number: b.registration_number ?? '',
         tin: b.tin ?? '',
         line1: b.address.line1 ?? '',
@@ -1140,10 +1254,31 @@ export function ApplyWizard() {
             missing.push('What is being amended (ownership, location, nature of business, or other)')
           }
           if (!form.name.trim()) missing.push('Business Name')
-          if (!form.registration_number.trim()) missing.push('DTI / SEC / CDA Registration Number')
+          /*
+           * Item 94 — the structure is listed FIRST, and the number is named
+           * after the agency that structure implies.
+           *
+           * Order matters here, not just on screen: this list is what the
+           * "still missing" summary reads out, and telling somebody to enter a
+           * registration number before telling them to say whose number it is
+           * asks the two questions in the order that caused the item.
+           *
+           * `agencyFor` returning null is also the guard against the older bug:
+           * a prefilled "DTI" is a truthy string, so `!form.registration_type`
+           * called the question answered while none of the four buttons was lit.
+           * Asking the mapping instead means only a real structure counts.
+           */
+          const agency = agencyFor(form.registration_type)
+          if (agency === null) missing.push('Type of Registration')
+          const numberLabel = agency
+            ? REGISTRATION_AGENCIES[agency].label
+            : 'Your registration number'
+          if (!form.registration_number.trim()) missing.push(numberLabel)
+          else if (!registrationNumberValid(form.registration_number)) {
+            missing.push(`A valid ${numberLabel}`)
+          }
           if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
           else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
-          if (!form.registration_type) missing.push('Type of Registration')
           return missing
         }
         case 'address': {
@@ -1282,12 +1417,65 @@ export function ApplyWizard() {
     return false
   }
 
+  /*
+   * Item 94 — the agency the chosen structure is registered with, and how that
+   * agency's number is described. Null until a structure is chosen, which is
+   * the state the whole item exists to make possible: the number cannot be
+   * asked for before we know whose number it is.
+   *
+   * Everything the number field says about itself — its <label>, its
+   * placeholder, its live description and its error — reads from this one
+   * place, so the four can never disagree about which agency is being asked
+   * about.
+   */
+  const registrationAgency = agencyFor(form.registration_type)
+  const registrationAgencyInfo = registrationAgency ? REGISTRATION_AGENCIES[registrationAgency] : null
+  const registrationNumberLabel = registrationAgencyInfo?.label ?? 'Registration Number'
+
+  /**
+   * Item 94 — choosing a structure, and what that does to the number already
+   * typed.
+   *
+   * If the AGENCY changes, the number underneath it is now answering a
+   * different question: a DTI Business Name number is not the applicant's SEC
+   * registration number, and leaving it in place would submit one agency's
+   * reference under another agency's label — exactly the mismatch this item
+   * exists to stop. So it is cleared, and the field below asks again with its
+   * new label.
+   *
+   * If the agency does NOT change it is kept. Partnership and Corporation are
+   * both registered with the SEC, so switching between them is a correction to
+   * the structure and says nothing about the number; clearing it there would
+   * punish the applicant for fixing an unrelated answer.
+   */
+  function chooseRegistrationType(next: string) {
+    const from = agencyFor(form.registration_type)
+    const to = agencyFor(next)
+    setForm((f) => ({
+      ...f,
+      registration_type: next,
+      registration_number: from !== null && from !== to ? '' : f.registration_number,
+    }))
+    if (from !== null && from !== to) setTouched((t) => ({ ...t, registration_number: false }))
+  }
+
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
-    registration_number:
-      touched.registration_number && !form.registration_number.trim()
-        ? 'Enter your DTI, SEC, or CDA registration number.'
-        : '',
+    /*
+     * Nothing to complain about before a structure is chosen: the field is not
+     * being asked yet, and an error on a question that has not been put is just
+     * noise. Once it is asked, the error names that one agency rather than
+     * listing all three.
+     */
+    registration_number: !registrationAgencyInfo
+      ? ''
+      : form.registration_number.trim()
+        ? registrationNumberValid(form.registration_number)
+          ? ''
+          : `Enter your ${registrationNumberLabel} as it is printed on your certificate — letters, numbers, spaces and dashes, and at least one digit.`
+        : touched.registration_number
+          ? `Enter your ${registrationNumberLabel}.`
+          : '',
     tin: form.tin.trim()
       ? tinValid(form.tin)
         ? ''
@@ -1518,8 +1706,16 @@ export function ApplyWizard() {
   const canCreateDraft =
     form.permit_type_ids.length > 0 &&
     form.name.trim() !== '' &&
-    form.registration_type !== '' &&
-    form.registration_number.trim() !== '' &&
+    /*
+     * Item 94: `!== ''` was not enough. A renewal prefilled from a pre-item-94
+     * business used to put "DTI" here — truthy, so the draft was created, and
+     * the same value then went to fee_profile.business_structure, which accepts
+     * only the four structures, so every autosave after that answered 422 and
+     * nothing the applicant typed reached the server. Requiring a value the
+     * mapping recognises is what makes that impossible rather than unlikely.
+     */
+    registrationAgency !== null &&
+    registrationNumberValid(form.registration_number) &&
     tinValid(form.tin) &&
     form.lines.length > 0 &&
     form.line1.trim() !== '' &&
@@ -1866,7 +2062,9 @@ export function ApplyWizard() {
         setForm({
           name: b.name ?? '',
           trade_name: b.trade_name ?? '',
-          registration_type: b.registration_type ?? '',
+          // Same normalisation as prefill (item 94): a draft saved against a
+          // pre-item-94 business can carry an agency code here.
+          registration_type: normalizeRegistrationType(b.registration_type),
           registration_number: b.registration_number ?? '',
           tin: b.tin ?? '',
           line1: b.address?.line1 ?? '',
@@ -2210,6 +2408,20 @@ export function ApplyWizard() {
           <SectionMarker letter="A" label="Business Information & Registration" />
           {isReuse && (
             <div className="mt-4 rounded-lg border border-royal/30 bg-royal-tint px-4 py-4">
+              {/*
+                * FieldLabel renders a span, so this select had no programmatic
+                * label at all: a screen reader announced "combo box" and left
+                * the applicant to guess which of their businesses it wanted.
+                * Wrapping in a real <label> associates the two, the same way
+                * every other field on this sheet does (WCAG 1.3.1 / 3.3.2).
+                *
+                * `readOnly` is not a thing on <select>, so while the list is
+                * loading or a prefill is in flight this stays `disabled` — it
+                * is genuinely momentary, unlike a field held shut by another
+                * answer, and the status text below says which of the two is
+                * happening.
+                */}
+              <label className="block">
               <FieldLabel required>Which business are you {applicationType === 'renewal' ? 'renewing' : 'amending'}?</FieldLabel>
               <select
                 className={inputCls}
@@ -2226,6 +2438,7 @@ export function ApplyWizard() {
                   </option>
                 ))}
               </select>
+              </label>
               {prefilling && <p className="mt-2 text-xs text-ink-secondary">Prefilling…</p>}
               {prefillNote && (
                 <p className="mt-2 text-xs font-medium text-royal">{prefillNote}</p>
@@ -2382,20 +2595,126 @@ export function ApplyWizard() {
             </div>
           )}
           <div className="mt-4 space-y-4">
+            {/*
+              * ── Item 94 — structure first, then that agency's number ──────
+              *
+              * These two fields used to be the other way round: the form asked
+              * for a "DTI / SEC / CDA Registration Number" and only four fields
+              * later asked which of the three you were registered with. So it
+              * wanted a number without knowing whose number it wanted, offered
+              * an example from two different agencies in one placeholder, and
+              * never checked that the number and the type agreed.
+              *
+              * The type is the question that decides the other, so it is asked
+              * first, and the number field below takes its label, its example
+              * and its error from whichever agency that answer implies —
+              * DTI for a sole proprietorship, SEC for a partnership or a
+              * corporation, CDA for a cooperative.
+              */}
+            <div>
+              <FieldLabel required>Type of Registration</FieldLabel>
+              <p className="mb-2 text-xs text-ink-secondary">
+                Choose this first — it decides which agency’s registration number we ask for
+                next.
+              </p>
+              {/*
+                * A radiogroup, not four toggle buttons. These are four mutually
+                * exclusive answers to one question, and `aria-pressed` announced
+                * them as four independent switches — a screen-reader user was
+                * told "Corporation, pressed" with no way to hear that it was one
+                * of four or that picking it unpicked another. Same markup as the
+                * "which permit are you renewing" picker above.
+                */}
+              <div role="radiogroup" aria-label="Type of Registration" className="flex flex-wrap gap-2.5">
+                {REGISTRATION_TYPES.map((rt) => {
+                  const selected = form.registration_type === rt.value
+                  return (
+                    <button
+                      key={rt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => chooseRegistrationType(selected ? '' : rt.value)}
+                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`h-3.5 w-3.5 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {rt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
             <div>
               <label className="block">
-              <FieldLabel required>DTI / SEC / CDA Registration Number</FieldLabel>
+              {/*
+                * The label TEXT changes with the chosen structure, so the
+                * input's accessible name is re-rendered rather than left saying
+                * "DTI / SEC / CDA" at a field that now means one of them.
+                * Because this is a wrapping <label>, the name follows the text
+                * automatically — there is no stale `aria-label` to forget.
+                */}
+              <FieldLabel required>{registrationNumberLabel}</FieldLabel>
               <input
                 value={form.registration_number}
                 onChange={(e) => update('registration_number', e.target.value)}
                 onBlur={() => touch('registration_number')}
-                placeholder="e.g. 3298765 (DTI) or CS201912345 (SEC)"
-                className={inputCls}
+                placeholder={registrationAgencyInfo?.placeholder ?? ''}
+                /*
+                 * Inert until the question it depends on is answered — item
+                 * 94's actual instruction, that the type is chosen before the
+                 * number is asked.
+                 *
+                 * `readOnly`, never `disabled`, as everywhere else in this
+                 * wizard: a disabled input drops out of the tab order and most
+                 * screen readers skip it, so an applicant using one would tab
+                 * from the type straight past to the TIN and never learn a
+                 * registration number is wanted, let alone why it is closed.
+                 * Read-only looks identical, stays announceable, and the
+                 * description below says what to do about it.
+                 */
+                readOnly={!registrationAgencyInfo}
+                aria-readonly={!registrationAgencyInfo || undefined}
+                className={`${inputCls} ${!registrationAgencyInfo ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''}`}
+                /*
+                 * The error joins the description when there is one, so a
+                 * screen-reader user who tabs back to a field they got wrong
+                 * hears WHY along with the field's name (WCAG 3.3.1). Without
+                 * it the message is on screen but silent to them.
+                 */
+                aria-describedby={
+                  fieldErrors.registration_number
+                    ? 'registration-number-help registration-number-error'
+                    : 'registration-number-help'
+                }
                 aria-invalid={Boolean(fieldErrors.registration_number)}
               />
               </label>
+              {/*
+                * The announcement. A label that changes under a screen-reader
+                * user is silent — nothing re-reads it once focus has moved on —
+                * so the same change is narrated here, politely, naming the
+                * agency and giving its example. This element is always mounted
+                * so the live region exists before the text it will announce.
+                */}
+              <p
+                id="registration-number-help"
+                aria-live="polite"
+                className="mt-1 text-xs text-ink-secondary"
+              >
+                {registrationAgencyInfo
+                  ? registrationAgencyInfo.hint
+                  : 'Choose your type of registration above and we will ask for that agency’s number.'}
+              </p>
               {fieldErrors.registration_number && (
-                <p className="mt-1 text-xs font-medium text-s-red">
+                <p id="registration-number-error" className="mt-1 text-xs font-medium text-s-red">
                   {fieldErrors.registration_number}
                 </p>
               )}
@@ -2445,34 +2764,6 @@ export function ApplyWizard() {
                 className={inputCls}
               />
               </label>
-            </div>
-            <div>
-              <FieldLabel required>Type of Registration</FieldLabel>
-              <div className="flex flex-wrap gap-2.5">
-                {REGISTRATION_TYPES.map((rt) => {
-                  const selected = form.registration_type === rt.value
-                  return (
-                    <button
-                      key={rt.value}
-                      type="button"
-                      aria-pressed={selected}
-                      onClick={() => update('registration_type', selected ? '' : rt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {rt.label}
-                    </button>
-                  )
-                })}
-              </div>
             </div>
           </div>
         </FormSheet>
@@ -2911,10 +3202,23 @@ export function ApplyWizard() {
                         <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
                           <CheckIcon size={16} /> Uploaded
                         </span>
+                        {/*
+                          Item 96. Until now the only thing an applicant could
+                          do with a file they had sent was replace it or delete
+                          it — there was no way to see what had actually
+                          arrived. Uploading the wrong scan is the easiest
+                          mistake on this screen and it was the one mistake the
+                          screen would not let you check for, so the reasonable
+                          move was to delete and re-upload on a hunch. View
+                          opens the stored copy, not the local File object, so
+                          what is shown is what the office will read.
+                        */}
+                        <DocumentActions id={done.id} filename={done.name} label={dt.name} />
                         <button
                           type="button"
                           onClick={() => void handleRemoveDocument(done, dt.id)}
                           disabled={Boolean(removing)}
+                          aria-label={`Remove ${dt.name}`}
                           className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
                         >
                           {removing ? 'Removing…' : 'Remove'}
@@ -2948,10 +3252,18 @@ export function ApplyWizard() {
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm text-ink">{f.name}</span>
                       <span className="tnum shrink-0 text-xs text-ink-muted">{formatBytes(f.size)}</span>
+                      {/*
+                        No label here on purpose: these rows are all the same
+                        requirement ("Other"), so the filename is the only
+                        thing that tells one from another — and it is what the
+                        accessible name has to say.
+                      */}
+                      <DocumentActions id={f.id} filename={f.name} />
                       <button
                         type="button"
                         onClick={() => void handleRemoveDocument(f)}
                         disabled={removingDoc === f.id}
+                        aria-label={`Remove ${f.name}`}
                         className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
                       >
                         {removingDoc === f.id ? 'Removing…' : 'Remove'}
