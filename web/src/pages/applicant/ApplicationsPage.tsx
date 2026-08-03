@@ -420,7 +420,10 @@ export function ApplicationsPage() {
       {finishedCount === 1
         ? '1 approved application is now in your '
         : `${finishedCount} approved applications are now in your `}
-      <Link to="/permits" className="font-semibold text-royal underline underline-offset-2 hover:no-underline">
+      {/* The link already said "Profile" while pointing at /permits, back when
+          that was a second screen wearing the same title. It goes straight
+          there now rather than through the redirect. */}
+      <Link to="/profile" className="font-semibold text-royal underline underline-offset-2 hover:no-underline">
         Profile
       </Link>
       , with the permits they produced.
