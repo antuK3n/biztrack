@@ -161,9 +161,11 @@ export function PermitDetailPage() {
       {/* Modal-like sheet: royal bar with white X (p59) */}
       <div className="overflow-hidden rounded-md bg-white shadow-overlay">
         <div className="flex items-center justify-end bg-royal px-4 py-2.5 print:hidden">
+          {/* Straight to Profile, which is where the permit was opened from now
+              that /permits only redirects there — one hop instead of two. */}
           <button
             type="button"
-            onClick={() => navigate('/permits')}
+            onClick={() => navigate('/profile')}
             aria-label="Close permit view"
             className="text-white transition-opacity hover:opacity-80"
           >
