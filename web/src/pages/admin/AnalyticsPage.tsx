@@ -1031,7 +1031,10 @@ function BusinessMap({ report }: { report: DashboardReport }) {
       <p className="mb-3 flex flex-wrap items-center gap-4 text-xs text-ink-muted">
         <span className="flex items-center gap-1.5">
           <span
-            className="h-2.5 w-2.5 rounded-full border-[1.75px] bg-white"
+            // h-3 against the lapsed h-3.5, tracking the markers' 4.5:5.5. A
+            // legend that shows a different size ratio from the thing it
+            // explains is teaching the reader the wrong cue.
+            className="h-3 w-3 rounded-full border-[1.75px] bg-white"
             style={{ borderColor: MAP_VALID }}
             aria-hidden="true"
           />
@@ -1077,7 +1080,17 @@ function BusinessMap({ report }: { report: DashboardReport }) {
                * what an officer opens this map to find, and a hollow marker is
                * carried only by its ring.
                */
-              radius={point.permit_state === 'active' ? 3.5 : 5.5}
+              /*
+               * 4.5 against 5.5, not 3.5 against 5.5. At the wider gap the
+               * lapsed disc had 2.47x the area of a valid ring and sat on top
+               * of it, so red carried about 60% of the ink on a register that
+               * is 37% lapsed — the map read as a city in far worse shape than
+               * it is, which is its own kind of dishonesty on a screen an
+               * officer skims. Closing the gap puts the ink near the true share
+               * while leaving solid-versus-hollow, the draw order and the
+               * colour to do the telling apart.
+               */
+              radius={point.permit_state === 'active' ? 4.5 : 5.5}
               pathOptions={{
                 color: point.permit_state === 'active' ? MAP_VALID : MAP_LAPSED,
                 // The ring is the whole marker when it is hollow, so the valid
