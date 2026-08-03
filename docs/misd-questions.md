@@ -32,7 +32,62 @@ match their field names rather than inventing our own.
 
 ---
 
-## 2. eBPLS — the system already in place
+## 2. Zoning — the largest gap between what we show and what we know
+
+**Ask this early and do not let it slide.** It is the one place BizTrack tells
+an applicant something it cannot support.
+
+When someone pins their location and picks a line of business, the app returns
+a green modal headed **"CONGRATULATIONS!"** stating the use is conforming. The
+system holds **no zone polygons whatsoever**. The code says so in as many
+words: it "determines nothing". The only thing standing between that screen and
+a false assurance is one line saying CPDO decides.
+
+That wording came from the client's paper and overruled an earlier, cautious
+build that said "Location recorded". So the screen is what was asked for — but
+it is asserting conformance from nothing, and an applicant who signs a lease on
+the strength of it has been misled by us.
+
+1. **Does the city have a zoning map in digital form?** Shapefile, GeoJSON,
+   KML, a CAD drawing, or a QGIS/ArcGIS project. This is squarely MISD's
+   territory and is the single ask that would turn the screen honest.
+2. **If not digital — is there an authoritative printed zoning map** and the
+   Comprehensive Land Use Plan / Zoning Ordinance it comes from? Even a scan
+   plus the ordinance text would let us classify by barangay instead of
+   pretending to classify by coordinate.
+3. **What are the actual zone classifications** used in Malabon (C-1, C-2, R-1,
+   I-1, institutional, etc.), and which business activities are allowed in
+   each? That table is what a real conformance check needs — the PSIC line we
+   already collect on the same screen is the other half.
+4. **Is a per-coordinate conformance answer even appropriate to automate,** or
+   must CPDO always rule case by case? If the latter, we should change the
+   screen to say "location recorded, CPDO will assess" and stop implying a
+   verdict. **We need this answered either way — it decides whether we build
+   the check or remove the claim.**
+5. **Who at CPDO owns the zoning determination,** and would they accept a
+   system-generated preliminary result at all?
+6. **Water and the coastline** (checklist item 86). Malabon is coastal and
+   heavily waterway-crossed. We enforce a city bounding box and deliberately do
+   **not** claim to check water, because no hydrography data exists here. Does
+   MISD hold a coastline/waterway layer, or a "no-build" / easement layer?
+   Under the Water Code there is a legal easement along waterways — if that
+   layer exists, the check becomes real rather than cosmetic.
+7. **Is there a flood-hazard or no-build overlay** the city already uses? If a
+   site cannot be permitted, saying so before the applicant pays is the whole
+   value of putting the map first.
+8. **Zoning / Locational Clearance itself** — item 5 put a CPDO clearance card
+   in the LGU section in place of the Mayor's Permit. Is that the correct
+   office, the correct name, and does it carry its own form we should be
+   collecting? (Add it to the paper forms in §1.)
+
+**What we do today, so you can state it plainly:** we record the pin, refuse
+anything outside a Malabon bounding box, show nearby-business insights that are
+explicitly *not* part of the zoning decision, and route the real determination
+to CPDO. Everything else on that screen is presentation.
+
+---
+
+## 3. eBPLS — the system already in place
 
 This is the single most important area, and it is squarely MISD's.
 
@@ -54,7 +109,7 @@ This is the single most important area, and it is squarely MISD's.
 
 ---
 
-## 3. Data — what we currently invent
+## 4. Data — what we currently invent
 
 Everything in our database is seeded or simulated. Ask what can be replaced
 with real reference data.
@@ -82,7 +137,7 @@ with real reference data.
 
 ---
 
-## 4. Accounts, roles and who may see what
+## 5. Accounts, roles and who may see what
 
 1. **What are the real office roles, and who approves what?**
    We modelled eight staff roles. Item 56 asked whether offices should be
@@ -102,7 +157,7 @@ with real reference data.
 
 ---
 
-## 5. Notifications — currently simulated
+## 6. Notifications — currently simulated
 
 Checklist items 28 and 29. Right now email goes to a log file and SMS goes to
 `sms.log`. Nothing is delivered.
@@ -119,7 +174,7 @@ Checklist items 28 and 29. Right now email goes to a log file and SMS goes to
 
 ---
 
-## 6. Hosting and handover — MISD's decision entirely
+## 7. Hosting and handover — MISD's decision entirely
 
 1. **Where will this run?** City-hall server, cloud, or vendor-hosted? This is
    the question that determines whether the project is deployable at all.
@@ -134,7 +189,7 @@ Checklist items 28 and 29. Right now email goes to a log file and SMS goes to
 
 ---
 
-## 7. Data privacy — RA 10173
+## 8. Data privacy — RA 10173
 
 1. **Who is the city's Data Protection Officer?** Our consent screen cites RA
    10173 and names "the City Government of Malabon" as controller. The DPO
@@ -148,7 +203,7 @@ Checklist items 28 and 29. Right now email goes to a log file and SMS goes to
 
 ---
 
-## 8. One question that is not about systems, but should be asked
+## 9. One question that is not about systems, but should be asked
 
 The adviser asked for renewal risk to be shown as **a probability per renewal**
 ("mga 3% ang risk nito"). We deliberately did not do that, and the reason is in
@@ -161,7 +216,7 @@ printed on the same screen.
 
 **Ask MISD (and route to the adviser): is that acceptable, or does the paper
 require the probability wording?** If it requires it, the honest path is to
-gather historical renewal outcomes first — which loops back to §3.6 above.
+gather historical renewal outcomes first — which loops back to §4.6 above.
 
 ---
 
