@@ -526,10 +526,17 @@ function LinesStep({
           <ul
             id="psic-results"
             /*
-             * Capped and scrollable. Twenty-five matches inside 18rem is a
+             * Capped and scrollable. Twenty-five matches inside 16rem is a
              * dropdown; twenty-five stacked in the page is a page.
+             *
+             * z-[1100] rather than a small z-index because the map sits
+             * directly below this and Leaflet builds its own stacking world:
+             * tile and marker panes at 200-600, controls at 1000. At z-20 the
+             * list rendered *under* the map — the results were sliced in half
+             * and the panel's white showed through beneath it, which read as a
+             * layout bug rather than a dropdown.
              */
-            className="absolute z-20 mt-1 max-h-72 w-full divide-y divide-line overflow-y-auto rounded-lg border border-input-border bg-white shadow-lg"
+            className="absolute z-[1100] mt-1 max-h-64 w-full divide-y divide-line overflow-y-auto rounded-lg border border-input-border bg-white shadow-lg"
           >
             {results.length === 0 ? (
               <li className="px-4 py-4 text-sm text-ink-secondary">
@@ -698,6 +705,48 @@ export function ApplyWizard() {
    * it by the business name", which is what the header and the Drafts page do.
    */
   const [title, setTitle] = useState('')
+  /*
+   * Whether the applicant has named this filing themselves. Until they do, the
+   * title is generated and kept in step with the business name — see
+   * `suggestedTitle`. Once they type, we stop touching it: the whole point of
+   * the field is that they can call it what they like.
+   */
+  const [titleEdited, setTitleEdited] = useState(false)
+
+  /*
+   * What to call this filing when nobody has said otherwise.
+   *
+   * It never returns empty. The first draft of this only generated once the
+   * business name existed, which is a step later than the box appears — so on
+   * the first two steps the header showed a grey truncated instruction reading
+   * "Named automatically once you a…", which is worse than the blank box it
+   * replaced. A box that holds a real name from the outset needs no caption
+   * explaining itself.
+   *
+   * The year is in it because renewals and amendments repeat annually, and a
+   * Drafts list holding three years of "Renewal — Nena's Sari-Sari Store" says
+   * nothing about which is which. A new permit happens once per business, so it
+   * is not dated.
+   */
+  const suggestedTitle = useMemo(() => {
+    const business = form.name.trim()
+    const year = new Date().getFullYear()
+    const named = (base: string) => (business ? `${base} — ${business}` : base)
+
+    switch (applicationType) {
+      case 'renewal':
+        return named(`${year} Renewal`)
+      case 'amendment':
+        return named(`${year} Amendment`)
+      default:
+        return named('New Business Permit')
+    }
+  }, [form.name, applicationType])
+
+  useEffect(() => {
+    if (titleEdited || suggestedTitle === '') return
+    setTitle(suggestedTitle)
+  }, [suggestedTitle, titleEdited])
   // Business & tax profile inputs (revenue-code fee_profile; persisted on the draft).
   const [feeDraft, setFeeDraft] = useState<FeeProfileDraft>(EMPTY_FEE_PROFILE)
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -1793,6 +1842,10 @@ export function ApplyWizard() {
         setApplicationType(app.application_type)
         setApplicationId(app.id)
         setTitle(app.title ?? '')
+        // A draft that arrives already named was named by somebody. Treat that
+        // as the applicant's own words and stop generating over it, even if the
+        // text happens to match what we would have produced.
+        setTitleEdited(Boolean(app.title?.trim()))
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
         /*
@@ -2046,19 +2099,28 @@ export function ApplyWizard() {
         {/*
           Name the filing, not the business: one business can have three
           applications open, and "Nena's Sari-Sari Store" three times over is
-          not a list anyone can use. Blank keeps the business name.
+          not a list anyone can use.
 
-          Item 70 — the fallback placeholder read "Title of Application", which
-          is the label back again in grey and tells a first-time applicant
-          nothing about what to type. An example of a filing name does.
+          But it should not have been an empty box either. It sat on step one,
+          before there was a business to name, asking the applicant to invent a
+          filing reference — a chore with a blank answer, and the first thing
+          they met. So it names itself from the type and the business as soon as
+          there is a business, and stays editable because renaming a draft is
+          its own requirement (checklist item 36).
         */}
         <label className="min-w-0 flex-1">
-          <span className="sr-only">Application title</span>
+          <span className="sr-only">
+            Application title — named automatically, edit it if you want your own
+          </span>
           <input
             value={title}
-            onChange={(e) => setTitle(e.target.value)}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              setTitleEdited(true)
+            }}
             maxLength={120}
-            placeholder={form.name.trim() || 'e.g. 2026 renewal — Catmon branch'}
+            // Only ever seen if someone clears the box themselves.
+            placeholder={suggestedTitle}
             className="w-full max-w-md truncate rounded-md border border-input-border bg-white px-3 py-1.5 text-xl font-bold text-ink placeholder:font-bold placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
           />
         </label>
