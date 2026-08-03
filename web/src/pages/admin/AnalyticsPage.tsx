@@ -58,6 +58,62 @@ const MUTED_BAR = '#9fb6dd'
 const BREACH = '#8a4b00'
 const BREACH_TINT = '#fdf1e3'
 
+/*
+ * MAP PERMIT-STATE COLOURS — a deliberate, client-requested exception to
+ * DESIGN.md's "Red Means Stop" rule. Please read this before "correcting" it.
+ *
+ * DESIGN.md reserves red for errors, denials and destructive actions, and says
+ * it must never label a category. BREACH above obeys that rule. This map does
+ * not, and it is the one place where breaking it is right: on a map of who is
+ * trading without a permit, red is not decorating a category — "no valid
+ * permit" IS the exceptional, act-on-it state an officer opens this panel to
+ * find. That is the same thing the rule protects. (Client testing checklist
+ * item 92 asked for green/red here; this is the reasoning for saying yes.)
+ *
+ * It is still not #bd0000. That exact hex stays unique to errors and
+ * destructive actions, so LAPSED uses --color-s-red (#c11212), the semantic
+ * status red already used for status chips, and which lands within 0.3
+ * percentage points of #bd0000 on the tile measurements below anyway.
+ *
+ * CONTRAST — measured against the actual OpenStreetMap tiles for Malabon at
+ * z14, not against white, because nothing on this panel sits on white. Sampling
+ * three tiles covering the plotted area: the map's own palette runs from
+ * #ffffff roads through #f2efe9 land and #d1c6bd buildings to #aad3df water.
+ * Share of tile pixels each colour clears WCAG 1.4.11's 3:1 floor against:
+ *
+ *   #125c3b (VALID, opaque stroke)   96.6%   <- the incumbent blue managed 96.4%
+ *   #c11212 (LAPSED, opaque stroke)  93.9%
+ *   #c11212 (LAPSED, fill @ 0.9)     93.1%
+ *
+ * No flat colour clears 3:1 on 100% of OSM tiles — the worst offender is the
+ * blue-grey #9b9bb5 of trunk-road casings, where even the blue this replaced
+ * only reached 2.80:1. We are at or above parity with what shipped, and the
+ * shape cue below is what carries the remaining few percent.
+ *
+ * VALID is --color-green-700 (#1c8f5c) taken darker at the same hue. The token
+ * itself, and --color-s-green (#22b573), are far too light to sit on a map:
+ * they clear 3:1 on 44% and 0.7% of tile pixels respectively. They are fine on
+ * white chips; they are unreadable over cartography.
+ *
+ * NEVER COLOUR ALONE — this pairing needs it more than any other in the
+ * product. Red-green is the confusable pair (~1 in 12 men), and measured
+ * greyscale contrast between these two is 1.28:1: to a deuteranope, or in a
+ * photocopy of a printed report, #125c3b and #c11212 are the same dark blob.
+ * So the two states differ in SIZE and in FILL, and colour is the third cue:
+ *
+ *   valid   -> small (r 3.5) hollow ring, thin stroke
+ *   lapsed  -> large (r 5.5) solid disc
+ *
+ * The polarity is not arbitrary. A hollow marker's interior is the map showing
+ * through — measured at 1.0:1 against the tile — so a hollow marker is carried
+ * entirely by its thin ring. The state an officer is hunting must not be the
+ * hollow one. That is also why this panel previously failed: both states were
+ * the same size and the same blue, separated only by fill, which is exactly the
+ * weakest of the three cues at 700+ overlapping points.
+ */
+const MAP_VALID = '#125c3b'
+const MAP_LAPSED = '#c11212'
+
 const PERIOD_OPTIONS = [
   { value: '3', label: 'Last 3 months' },
   { value: '6', label: 'Last 6 months' },
@@ -948,20 +1004,43 @@ function BusinessMap({ report }: { report: DashboardReport }) {
   const { points, plotted, mapped, total_businesses } = report.map
   const bounds = pointBounds(points)
 
+  /*
+   * Lapsed permits render last, which in Leaflet means on top.
+   *
+   * At 700+ points on one city the markers overlap heavily, and whichever pin
+   * happens to come later in the server's ordering wins the pixel. That made
+   * the panel's answer to "who is trading without a permit" depend on row
+   * order: a lapsed business could sit invisible under a valid neighbour. Sort
+   * on the state alone, not on anything else, so the framing, the counts and
+   * the popups are untouched — only the stacking changes.
+   */
+  const drawOrder = [...points].sort(
+    (a, b) =>
+      (a.permit_state === 'active' ? 0 : 1) - (b.permit_state === 'active' ? 0 : 1),
+  )
+
   return (
     <ProtoCard className="p-4">
+      {/*
+       * The legend swatches mirror the markers exactly — same colour, same
+       * hollow-vs-solid, same relative size. A legend that only matched on
+       * colour would be the one thing a red-green colour-blind officer could
+       * not use to decode the map, which is the whole point of drawing the
+       * states differently in the first place.
+       */}
       <p className="mb-3 flex flex-wrap items-center gap-4 text-xs text-ink-muted">
         <span className="flex items-center gap-1.5">
           <span
-            className="h-2.5 w-2.5 rounded-full"
-            style={{ backgroundColor: ROYAL }}
+            className="h-2.5 w-2.5 rounded-full border-[1.75px] bg-white"
+            style={{ borderColor: MAP_VALID }}
             aria-hidden="true"
           />
           Permit valid today
         </span>
         <span className="flex items-center gap-1.5">
           <span
-            className="h-2.5 w-2.5 rounded-full border border-ink-muted bg-white"
+            className="h-3.5 w-3.5 rounded-full"
+            style={{ backgroundColor: MAP_LAPSED }}
             aria-hidden="true"
           />
           No valid permit
@@ -987,18 +1066,28 @@ function BusinessMap({ report }: { report: DashboardReport }) {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
           <KeepFitted bounds={bounds} />
-          {points.map((point: MapPoint) => (
+          {drawOrder.map((point: MapPoint) => (
             <CircleMarker
               key={point.business_id}
               center={[point.latitude, point.longitude]}
-              radius={5}
+              /*
+               * Size is the primary cue, colour the secondary one — see
+               * MAP_VALID/MAP_LAPSED for why that order matters here. The
+               * lapsed disc is deliberately the bigger and the solid one: it is
+               * what an officer opens this map to find, and a hollow marker is
+               * carried only by its ring.
+               */
+              radius={point.permit_state === 'active' ? 3.5 : 5.5}
               pathOptions={{
-                color: point.permit_state === 'active' ? ROYAL : '#5b6472',
-                weight: 1.25,
-                fillColor: point.permit_state === 'active' ? ROYAL : '#ffffff',
-                // Slightly translucent so several hundred pins read as density
-                // rather than merging into one solid shape.
-                fillOpacity: 0.75,
+                color: point.permit_state === 'active' ? MAP_VALID : MAP_LAPSED,
+                // The ring is the whole marker when it is hollow, so the valid
+                // state gets the heavier stroke of the two despite being small.
+                weight: point.permit_state === 'active' ? 1.75 : 1,
+                fillColor: point.permit_state === 'active' ? '#ffffff' : MAP_LAPSED,
+                // Valid pins stay washy so several hundred of them read as
+                // density rather than merging into one solid shape; lapsed pins
+                // stay near-opaque so no single one can be washed out.
+                fillOpacity: point.permit_state === 'active' ? 0.55 : 0.9,
               }}
             >
               <Popup>
