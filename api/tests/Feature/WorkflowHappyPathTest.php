@@ -89,7 +89,10 @@ it('issues an all-office application to every department queue', function () {
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Six Office Mart',
-        'registration_type' => 'SEC',
+        // Item 94: `registration_type` is the organisation structure, not the
+        // agency. "SEC" is refused on purpose — it registers both partnerships
+        // and corporations, so it does not say which this shop is.
+        'registration_type' => 'corporation',
         'registration_number' => 'SEC-77002',
         'tin' => '123-456-789-000',
         'address' => ['line1' => '6 Office Rd.', 'barangay_id' => $barangayId],

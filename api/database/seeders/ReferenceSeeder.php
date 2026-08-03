@@ -331,9 +331,36 @@ class ReferenceSeeder extends Seeder
             }
             $pt->documentTypes()->sync($sync);
         };
+        /*
+         * The business permit's seven, and why it is seven and not six.
+         *
+         * Checklist item 96 says the list "should be 6". Six is what a NEW
+         * filing already shows: PRIOR_PERMIT is context-gated to renewals,
+         * because a business being registered for the first time has no
+         * previous Mayor's Permit and demanding one is an unclearable block
+         * rather than a requirement. A renewal shows seven, and the seventh is
+         * the permit being renewed — which the counter must see. Neither number
+         * is guessed at here; both fall out of the contexts below.
+         *
+         * What we cannot check is whether these are the SAME six the counter's
+         * paper form names. We have never been given a copy — it is the oldest
+         * open item on the list (`docs/questions-for-malabon.md` E1, and now
+         * E9, which names all seven and asks). Until it comes back, nothing is
+         * deleted from this list on a guess.
+         *
+         * OCCUPANCY is deliberately not mandatory. Its help text says "where
+         * applicable", and since `docs/clearances-after-payment.md` the
+         * Occupancy Permit is applied for in its own stage after payment — so
+         * requiring the certificate up front asks the applicant to produce the
+         * output of a stage they have not reached. It still appears in the
+         * list, marked optional, for the applicant who already holds one.
+         * Migration 2026_08_03_000020 carries the same change to databases
+         * that were seeded before it.
+         */
         $req($business, [
             'DTI_SEC_CDA' => [], 'LEASE_TITLE' => [], 'BRGY_CLEARANCE' => [],
-            'CEDULA' => [], 'VALID_ID' => [], 'OCCUPANCY' => [],
+            'CEDULA' => [], 'VALID_ID' => [],
+            'OCCUPANCY' => ['is_mandatory' => false, 'notes' => 'Where applicable — otherwise applied for in the LGU Clearances stage.'],
             'PRIOR_PERMIT' => ['context' => 'renewal', 'notes' => 'Required for renewals only.'],
         ]);
         $req($sanitary, ['SANITARY_REQ' => [], 'VALID_ID' => []]);

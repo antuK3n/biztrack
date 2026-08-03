@@ -5,16 +5,16 @@ import {
   ArrowLeftIcon,
   CheckIcon,
   ClipboardIcon,
-  DownloadIcon,
   EyeIcon,
 } from '../../components/icons'
+import { DocumentActions } from '../../components/DocumentActions'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { admin, applications, assignments, documents, officeForms as officeFormsApi } from '../../lib/resources'
+import { admin, applications, assignments, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
@@ -183,43 +183,13 @@ function OfficeReadout({ label, value }: { label: string; value: string }) {
 }
 
 /*
- * Uploaded requirement. Both actions fetch the file with the session's bearer
- * token: linking straight at the API opened the 401 JSON envelope in a new tab
- * instead of the document. View renders the PDF or image in a tab, Download
- * saves it.
+ * Uploaded requirement. The two actions moved to <DocumentActions> (item 96):
+ * they were written here for item 55 and stayed here, so the applicant's own
+ * screens never got them and the bug read as unfixed from the other seat. The
+ * shared control also carries the accessible names — a column of buttons all
+ * called "View" does not say which of nine documents it opens.
  */
 function DocumentRow({ doc }: { doc: AppDocument }) {
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState<'view' | 'download' | null>(null)
-
-  async function view() {
-    // The tab has to be opened inside the click, before any await, or the
-    // popup blocker eats it.
-    const tab = window.open('', '_blank')
-    setBusy('view')
-    setError(null)
-    try {
-      await documents.view(doc.id, tab)
-    } catch (err) {
-      tab?.close()
-      setError(toApiError(err).message)
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  async function save() {
-    setBusy('download')
-    setError(null)
-    try {
-      await documents.download(doc.id, doc.original_filename)
-    } catch (err) {
-      setError(toApiError(err).message)
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <li className="rounded-lg border border-line bg-white px-4 py-3">
       <div className="flex items-center justify-between gap-3">
@@ -234,28 +204,12 @@ function DocumentRow({ doc }: { doc: AppDocument }) {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={view}
-            disabled={busy !== null}
-            className="inline-flex items-center gap-1.5 rounded-md border border-line px-3 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
-          >
-            <EyeIcon size={14} />
-            {busy === 'view' ? 'Opening…' : 'View'}
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            disabled={busy !== null}
-            className="inline-flex items-center gap-1.5 rounded-md bg-royal px-3 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-          >
-            <DownloadIcon size={14} />
-            {busy === 'download' ? 'Saving…' : 'Download'}
-          </button>
-        </div>
+        <DocumentActions
+          id={doc.id}
+          filename={doc.original_filename}
+          label={doc.document_type.name}
+        />
       </div>
-      {error && <p className="mt-2 text-xs font-medium text-s-red">{error}</p>}
     </li>
   )
 }

@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 /*
  * The apply wizard, from a business owner's side.
@@ -223,6 +223,139 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   // Never claim a check that was not made.
   await expect(refusal).not.toContainText(/water|river|sea|zoning verdict/i)
   await expect(page.getByText(/pinned at/i)).toBeHidden()
+})
+
+/**
+ * Consent, then a complete Location & Zoning step, landing on Business
+ * Information (part 3). Everything here is the minimum the step's own gate
+ * demands — a trade with capital, a pin inside the city, an address and someone
+ * an inspector can reach.
+ */
+async function goToBusinessStep(page: Page) {
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const search = page.getByLabel(/search your line of business/i)
+  await search.click()
+  await search.fill('sari-sari')
+  await page.locator('#psic-results').getByRole('button').first().click()
+  await page.getByLabel(/capital/i).first().fill('150000')
+
+  // Centre of the map is Malabon City Hall, so this pin is always inside.
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+
+  await page.getByRole('button', { name: /^next$/i }).click()
+  // Leaving the zoning step opens the conformity modal on the way out.
+  await page.getByRole('button', { name: /proceed to application/i }).click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+}
+
+test('the type of registration is asked before the number it decides', async ({ page }) => {
+  /*
+   * Checklist item 94. The section used to ask for a "DTI / SEC / CDA
+   * Registration Number" first and the Type of Registration four fields later,
+   * so it wanted a number without knowing whose number it wanted, offered an
+   * example from two different agencies in one placeholder, and never checked
+   * that the two answers agreed.
+   *
+   * DTI registers sole proprietors, CDA registers cooperatives, and the SEC
+   * registers BOTH partnerships and corporations — so the structure decides the
+   * agency and never the reverse. That direction is what this test pins.
+   */
+  await goToBusinessStep(page)
+
+  const structure = page.getByRole('radiogroup', { name: /type of registration/i })
+  await expect(structure).toBeVisible()
+
+  // Asked first, on the page and in the "still needed" summary a screen reader
+  // hears. Ordering is the item; asserting the fields exist would not be.
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).toContainText(/type of registration.*registration number/is)
+
+  /*
+   * Before an answer the field is generic — and read-only rather than
+   * disabled, so it keeps its place in the tab order and can say why it is
+   * closed. A disabled field would simply vanish for the applicant who most
+   * needs the explanation.
+   */
+  const help = page.locator('#registration-number-help')
+  await expect(help).toHaveText(/choose your type of registration above/i)
+  const before = page.getByRole('textbox', { name: /registration number/i })
+  await expect(before).toHaveAttribute('readonly', '')
+
+  /* Sole proprietorship → DTI, and the label says so rather than listing three. */
+  await structure.getByRole('radio', { name: 'Sole Proprietorship' }).click()
+  const dti = page.getByRole('textbox', { name: /DTI Business Name Registration Number/i })
+  await expect(dti).toBeVisible()
+  await expect(dti).not.toHaveAttribute('readonly', '')
+  await expect(help).toContainText(/department of trade and industry/i)
+  await dti.fill('3298765')
+
+  /*
+   * Corporation → SEC, and the DTI number goes with it. A DTI Business Name
+   * number is not this company's SEC registration number, and leaving it in
+   * place would submit one agency's reference under another agency's label —
+   * the exact mismatch the item is about.
+   */
+  await structure.getByRole('radio', { name: 'Corporation' }).click()
+  const sec = page.getByRole('textbox', { name: /SEC Registration Number/i })
+  await expect(sec).toBeVisible()
+  await expect(sec).toHaveValue('')
+  await expect(help).toContainText(/securities and exchange commission/i)
+  await sec.fill('CS201811119')
+
+  /*
+   * Partnership → still SEC, so the number stays. Both are registered with the
+   * same agency, and clearing it here would punish the applicant for correcting
+   * an answer that says nothing about their number.
+   */
+  await structure.getByRole('radio', { name: 'Partnership' }).click()
+  await expect(page.getByRole('textbox', { name: /SEC Registration Number/i })).toHaveValue(
+    'CS201811119',
+  )
+
+  /* Cooperative → CDA. */
+  await structure.getByRole('radio', { name: 'Cooperative' }).click()
+  await expect(page.getByRole('textbox', { name: /CDA Registration Number/i })).toBeVisible()
+  await expect(help).toContainText(/cooperative development authority/i)
+
+  /*
+   * The four are one answer, not four switches. `aria-pressed` announced them
+   * as independent toggles, with no way to hear that picking one unpicked
+   * another.
+   */
+  await expect(structure.getByRole('radio')).toHaveCount(4)
+  await expect(structure.getByRole('radio', { name: 'Cooperative' })).toBeChecked()
+  await expect(structure.getByRole('radio', { name: 'Partnership' })).not.toBeChecked()
+})
+
+test('no data field on Business Information is closed with `disabled`', async ({ page }) => {
+  /*
+   * The same rule as part 2, enforced on the step that now has a field which is
+   * deliberately inert until another answer opens it (item 94). That field is
+   * exactly the kind that gets written as `disabled` by reflex.
+   */
+  await goToBusinessStep(page)
+
+  const disabledFields = await page
+    .locator('input:disabled, select:disabled, textarea:disabled')
+    .evaluateAll((els) =>
+      els.map((el) => el.getAttribute('name') ?? el.getAttribute('aria-label') ?? el.tagName),
+    )
+
+  expect(
+    disabledFields,
+    `these fields use disabled where readOnly is required: ${JSON.stringify(disabledFields)}`,
+  ).toEqual([])
 })
 
 test('placeholders show a real example, never restate the label', async ({ page }) => {
