@@ -101,3 +101,54 @@ LGU CLEARANCES — opens once the first payment clears
   for both.
 - **Are clearance fees refundable** if the applicant withdraws before the
   office acts? Not modelled.
+
+---
+
+## API contract for the rebuild
+
+Fixed here so the backend and the screen can be built against the same thing.
+
+```
+GET   /api/v1/applications/{id}/clearances
+      -> { data: [ {
+             permit_type: {id, code, name, department:{code,name}},
+             state: 'available' | 'applied' | 'submitted' | 'issued' | 'rejected',
+             has_office_form: bool,
+             office_form_complete: bool,
+             held_document: {id, name, size} | null,
+             assignment: {id, status, remarks} | null,
+             fee_preview: string | null      // what applying would add
+           } ],
+           meta: { unlocked: bool, locked_reason: string|null,
+                   total_assessed, total_paid, balance_due } }
+
+POST  /api/v1/applications/{id}/clearances/{code}/apply
+      -> re-assesses, returns the clearance row + new balance
+DELETE/api/v1/applications/{id}/clearances/{code}/apply      (un-apply)
+POST  /api/v1/applications/{id}/clearances/{code}/held       (multipart: file)
+DELETE/api/v1/applications/{id}/clearances/{code}/held
+```
+
+`unlocked` is false until the first payment clears; `locked_reason` is the
+sentence the screen shows instead of guessing one.
+
+## Decisions taken to keep moving, to be confirmed later
+
+These are assumptions, not answers. Every one is in
+`docs/questions-for-malabon.md`.
+
+1. **The applicant chooses.** The six are presented as a chooser, because that
+   is what was asked for. If BPLO in fact determines which clearances a
+   business needs from its line and location, this becomes a computed checklist
+   and the screen changes shape.
+2. **Fee gating is left exactly as it is.** The Fire Code fee and the sanitary
+   inspection fee stay gated on their clearance, so uploading a held copy still
+   escapes them. That is arguably wrong under RA 9514, but changing what a
+   citizen is charged on our own reading of a statute is not a call to make
+   without BPLO. It is written down rather than quietly fixed.
+3. **One ledger, two moments.** The business permit is paid to submit; each
+   clearance applied for adds to a balance settled before release.
+4. **Applying for a clearance after release is allowed** by the data model but
+   is not built into the screen.
+5. **A rejected clearance does not kill the application.** It stays as its own
+   failed item — the same open question as checklist item 80.
