@@ -432,10 +432,25 @@ function LinesStep({
   onChange: (lines: LineDraft[]) => void
 }) {
   const [query, setQuery] = useState('')
-  const otherCode = useMemo(() => codes.find((c) => c.code === OTHER_PSIC_CODE), [codes])
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+
   /*
-   * Search the real trades only; "Other (not listed)" is pinned underneath the
-   * results so it is reachable however the search went.
+   * "Other (not listed)" is deliberately not offered.
+   *
+   * It looked like a kindness and behaved like a hole. Picking it stored the
+   * catch-all PSIC row (code 00000) with a NULL `category`, and 35 of the 36
+   * business-tax rules match on `business_category` — so a line filed under
+   * Other matched none of them and was assessed no business tax at all. It also
+   * came back from Location Insights as unclassifiable, so that applicant got
+   * no nearby-trade figures either.
+   *
+   * Every business has a line; 135 PSIC codes is enough to find it, and the
+   * search is there to find it with. A trade genuinely missing from the list is
+   * a gap in the reference data to fix at the source, not something to let an
+   * applicant type into a free-text box that nothing downstream can read.
+   *
+   * Rows already filed under it still render below — see the Selected list.
    */
   const results = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -448,8 +463,29 @@ function LinesStep({
     }
     return listed
       .filter((c) => c.title.toLowerCase().includes(q) || c.code.includes(q))
-      .slice(0, 12)
+      .slice(0, 25)
   }, [codes, query])
+
+  /*
+   * Closes on a click elsewhere and on Escape. The list used to be permanently
+   * open, so ten trades and a Selected panel pushed the map and everything
+   * under it off the screen — on a step whose whole job is picking a location.
+   */
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(e: PointerEvent) {
+      if (!box.current?.contains(e.target as Node)) setOpen(false)
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
 
   function toggle(code: PsicCode) {
     const exists = lines.find((l) => l.psic_code_id === code.id)
@@ -459,7 +495,8 @@ function LinesStep({
 
   return (
     <div className="space-y-4">
-      <div>
+      {/* relative: the results hang over what follows instead of shoving it down. */}
+      <div ref={box} className="relative">
         <label htmlFor="psic-search" className="block">
           <FieldLabel required>Search your line of business</FieldLabel>
         </label>
@@ -470,80 +507,71 @@ function LinesStep({
           />
           <input
             id="psic-search"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls="psic-results"
+            aria-autocomplete="list"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setOpen(true)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setOpen(true)
+            }}
             placeholder="e.g. retail, food, salon"
             className={`${inputCls} pl-10`}
           />
         </div>
-        <p className="mt-1.5 text-xs text-ink-secondary">
-          Can’t find your trade? Pick “Other (not listed)” at the bottom and type it yourself.
-        </p>
-      </div>
 
-      <ul className="divide-y divide-line overflow-hidden rounded-lg border border-input-border">
-        {results.length === 0 ? (
-          <li className="px-4 py-4 text-sm text-ink-secondary">
-            No matches. Try another word, or pick “Other (not listed)” below.
-          </li>
-        ) : (
-          results.map((code) => {
-            const selected = lines.some((l) => l.psic_code_id === code.id)
-            return (
-              <li key={code.id}>
-                <button
-                  type="button"
-                  onClick={() => toggle(code)}
-                  aria-pressed={selected}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                    selected ? 'bg-input' : 'hover:bg-royal-tint'
-                  }`}
-                >
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
-                      selected ? 'border-royal bg-royal text-white' : 'border-input-border bg-white'
-                    }`}
-                  >
-                    {selected && <CheckIcon size={13} />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-ink">{code.title}</span>
-                    <span className="tnum block text-xs text-ink-secondary">PSIC {code.code}</span>
-                  </span>
-                </button>
+        {open && (
+          <ul
+            id="psic-results"
+            /*
+             * Capped and scrollable. Twenty-five matches inside 18rem is a
+             * dropdown; twenty-five stacked in the page is a page.
+             */
+            className="absolute z-20 mt-1 max-h-72 w-full divide-y divide-line overflow-y-auto rounded-lg border border-input-border bg-white shadow-lg"
+          >
+            {results.length === 0 ? (
+              <li className="px-4 py-4 text-sm text-ink-secondary">
+                No trade matches “{query.trim()}”. Try a plainer word — “food” rather than the dish,
+                “retail” rather than the goods.
               </li>
-            )
-          })
+            ) : (
+              results.map((code) => {
+                const selected = lines.some((l) => l.psic_code_id === code.id)
+                return (
+                  <li key={code.id}>
+                    <button
+                      type="button"
+                      onClick={() => toggle(code)}
+                      aria-pressed={selected}
+                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                        selected ? 'bg-input' : 'hover:bg-royal-tint'
+                      }`}
+                    >
+                      <span
+                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
+                          selected
+                            ? 'border-royal bg-royal text-white'
+                            : 'border-input-border bg-white'
+                        }`}
+                      >
+                        {selected && <CheckIcon size={13} />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-ink">{code.title}</span>
+                        <span className="tnum block text-xs text-ink-secondary">
+                          PSIC {code.code}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                )
+              })
+            )}
+          </ul>
         )}
-        {otherCode && (
-          <li>
-            <button
-              type="button"
-              onClick={() => toggle(otherCode)}
-              aria-pressed={lines.some((l) => l.psic_code_id === otherCode.id)}
-              className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                lines.some((l) => l.psic_code_id === otherCode.id) ? 'bg-input' : 'hover:bg-royal-tint'
-              }`}
-            >
-              <span
-                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
-                  lines.some((l) => l.psic_code_id === otherCode.id)
-                    ? 'border-royal bg-royal text-white'
-                    : 'border-input-border bg-white'
-                }`}
-              >
-                {lines.some((l) => l.psic_code_id === otherCode.id) && <CheckIcon size={13} />}
-              </span>
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-ink">{otherCode.title}</span>
-                <span className="block text-xs text-ink-secondary">
-                  Type your own line of business
-                </span>
-              </span>
-            </button>
-          </li>
-        )}
-      </ul>
+      </div>
 
       {lines.length > 0 && (
         <div className="rounded-lg border border-input-border bg-royal-tint p-4">
@@ -551,8 +579,14 @@ function LinesStep({
           <div className="space-y-3">
             {lines.map((line) => {
               const code = codes.find((c) => c.id === line.psic_code_id)
-              // "Other (not listed)" trades the fixed title for a required
-              // free-text box; everything else keeps the PSIC title.
+              /*
+               * Other is no longer offered, but filings made before it was
+               * withdrawn still carry it — a renewal or a reopened draft can
+               * arrive holding one. Those keep their typed text, shown as the
+               * line's name and no longer editable, because the answer cannot
+               * be improved in place: what it needs is a real PSIC code, which
+               * means removing the row and picking one.
+               */
               const isOther = code?.code === OTHER_PSIC_CODE
               const needsText = isOther && !line.line_of_business.trim()
               // Capital is what the business tax and the capitalization-based
@@ -563,26 +597,15 @@ function LinesStep({
                   <div className="flex items-end gap-3">
                     <div className="min-w-0 flex-1">
                       {isOther ? (
-                        <>
-                          <label className="block">
-                          <FieldLabel required>Your line of business</FieldLabel>
-                          <input
-                            value={line.line_of_business}
-                            onChange={(e) =>
-                              onChange(
-                                lines.map((l) =>
-                                  l.psic_code_id === line.psic_code_id
-                                    ? { ...l, line_of_business: e.target.value }
-                                    : l,
-                                ),
-                              )
-                            }
-                            placeholder="e.g. mobile phone repair"
-                            className={inputCls}
-                            aria-invalid={needsText}
-                          />
-                          </label>
-                        </>
+                        <div>
+                          <p className="truncate text-sm text-ink">
+                            {line.line_of_business.trim() || 'Unclassified line'}
+                          </p>
+                          <p className="mt-0.5 text-xs text-s-red">
+                            Not on the PSIC list, so this line cannot be assessed. Remove it and
+                            search for the closest trade.
+                          </p>
+                        </div>
                       ) : (
                         <p className="truncate text-sm text-ink">{code?.title}</p>
                       )}
@@ -1085,10 +1108,17 @@ export function ApplyWizard() {
            * clearance is a judgment about a use, not about a coordinate.
            */
           if (form.lines.length === 0) missing.push('Line of Business')
+          /*
+           * Any line still filed under "Other" blocks the step, not just an
+           * empty one. Other is no longer offered, but a renewal or a reopened
+           * draft can arrive holding one, and it carries a NULL revenue-code
+           * category — 35 of the 36 business-tax rules match on that category,
+           * so the line would be assessed no business tax at all. Letting it
+           * through would issue a permit that had not been charged for.
+           */
           const otherId = psic.find((c) => c.code === OTHER_PSIC_CODE)?.id
-          const otherLine = form.lines.find((l) => l.psic_code_id === otherId)
-          if (otherLine && !otherLine.line_of_business.trim()) {
-            missing.push('Your line of business (typed in, for “Other”)')
+          if (otherId !== undefined && form.lines.some((l) => l.psic_code_id === otherId)) {
+            missing.push('A real PSIC trade in place of the unclassified line')
           }
           // Capital is what the business tax and the capitalization-based fees
           // are computed from, so a blank one is not a detail.
