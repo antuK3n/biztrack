@@ -43,11 +43,27 @@ test('consent is the first thing asked, before any data is collected', async ({ 
     .getByRole('textbox')
     .evaluateAll((els) => els.map((el) => el.closest('label')?.textContent?.trim() ?? '(unlabelled)'))
 
-  expect(names).toEqual(['Application title'])
+  /*
+   * Matched on the prefix, not the whole string. The label carries a hint
+   * after the field name — "Application title — named automatically, edit it
+   * if you want your own" — which is copy, and pinning copy character for
+   * character makes a test that fails every time someone improves a sentence.
+   * What matters here is that there is exactly one field and it is named.
+   */
+  expect(names).toHaveLength(1)
+  expect(names[0]).toMatch(/^Application title/)
   expect(names, 'a field on the consent step has no label').not.toContain('(unlabelled)')
 
+  /*
+   * Run the personal-data check against the field's NAME, not its help text.
+   * The label reads "Application title — named automatically, …", and the
+   * word "named" in that hint is not a request for anybody's name. Matching
+   * the whole label failed on its own explanation, which is the sort of false
+   * positive that gets a real check deleted rather than fixed.
+   */
   for (const name of names) {
-    expect(name).not.toMatch(/name|address|birth|contact|mobile|email|tin|registration/i)
+    const fieldName = name.split('—')[0].trim()
+    expect(fieldName).not.toMatch(/name|address|birth|contact|mobile|email|tin|registration/i)
   }
 })
 
