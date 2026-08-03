@@ -14,12 +14,15 @@ use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\User;
 use App\Support\Audit;
 use App\Support\Numbering;
+use App\Support\PermitFees;
 use App\Support\Ra11032;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The permit-lifecycle state machine (master plan §6.2). Every transition goes
@@ -115,13 +118,65 @@ class WorkflowService
     public function onPaymentCompleted(Payment $payment): void
     {
         $app = $payment->application;
-        if ($app->status !== ApplicationStatus::PendingPayment) {
+
+        if ($app->status === ApplicationStatus::PendingPayment) {
+            DB::transaction(function () use ($app) {
+                $this->transition($app, ApplicationStatus::UnderReview, 'Payment received. Routed for review.');
+                $this->routeToDepartments($app);
+            });
+
             return;
         }
-        DB::transaction(function () use ($app) {
-            $this->transition($app, ApplicationStatus::UnderReview, 'Payment received. Routed for review.');
-            $this->routeToDepartments($app);
-        });
+
+        // Any later payment is a clearance balance being settled. It may be the
+        // only thing still holding the permit back, so the release is retried
+        // here — see releaseIfSettled().
+        $this->releaseIfSettled($app->fresh());
+    }
+
+    /**
+     * Issue now if a settled balance was the last thing in the way.
+     *
+     * The counterpart to the balance gate in approveAndIssue(). Issuance is
+     * otherwise only ever attempted at the moment a review or an inspection
+     * completes — so a filing whose offices had all signed off, and which was
+     * refused release only because a clearance was applied for afterwards,
+     * would have had no second attempt: every event that could have retried it
+     * had already happened. Paying is then the event, and this is the retry.
+     *
+     * Deliberately silent when the filing is not ready for any other reason. It
+     * re-checks the same two conditions the normal path does rather than
+     * trusting that a payment means everything else is done.
+     */
+    public function releaseIfSettled(?Application $app): void
+    {
+        if ($app === null || $app->status->isTerminal()) {
+            return;
+        }
+        if (PermitFees::hasOutstandingBalance($app)) {
+            return;
+        }
+
+        $app->loadMissing('assignments', 'permitTypes', 'inspections');
+
+        // isNotEmpty: a filing with no assignments at all has not been reviewed,
+        // and `every` on an empty collection answers true.
+        $reviewsDone = $app->assignments->isNotEmpty()
+            && $app->assignments->every(fn ($a) => $a->status === AssignmentStatus::Completed);
+        if (! $reviewsDone) {
+            return;
+        }
+
+        if ($app->permitTypes->contains(fn ($pt) => $pt->requires_inspection)) {
+            $inspectionsPassed = $app->inspections->isNotEmpty()
+                && $app->inspections->every(fn ($i) => $i->status === InspectionStatus::Completed
+                    && $i->result?->progresses());
+            if (! $inspectionsPassed) {
+                return;
+            }
+        }
+
+        $this->approveAndIssue($app);
     }
 
     /** One assignment per department that owns a requested permit type. */
@@ -135,6 +190,65 @@ class WorkflowService
                 ['status' => AssignmentStatus::Pending, 'assigned_at' => now()]
             );
         }
+    }
+
+    /**
+     * Route one clearance to its office the moment it is applied for.
+     *
+     * Spec rule 7: a clearance routes when applied for, not at submission. That
+     * is the whole difference from routeToDepartments() above — same table,
+     * same firstOrCreate, one department instead of the set — so it is an
+     * extension of the existing routing rather than a parallel mechanism. The
+     * firstOrCreate matters: an office already reviewing this filing for
+     * another reason keeps the row and the history on it.
+     */
+    public function routeClearance(Application $app, PermitType $type): ?ApplicationAssignment
+    {
+        if (! $type->issuing_department_id) {
+            return null;
+        }
+
+        return ApplicationAssignment::firstOrCreate(
+            ['application_id' => $app->id, 'department_id' => $type->issuing_department_id],
+            ['status' => AssignmentStatus::Pending, 'assigned_at' => now()]
+        );
+    }
+
+    /**
+     * Withdraw the routing when a clearance is un-applied.
+     *
+     * Only a Pending row, and only when no permit type still on the filing
+     * routes to that office. Both conditions are about not destroying work: an
+     * assignment an officer has picked up, returned or completed is a record of
+     * something that happened, and an office kept on the filing by another
+     * clearance still has a queue item to answer. Anything else and the row
+     * stays — a stale pending assignment is a smaller wrong than a deleted
+     * review.
+     */
+    public function withdrawClearanceRouting(Application $app, PermitType $type): void
+    {
+        if (! $type->issuing_department_id) {
+            return;
+        }
+
+        $app->loadMissing('permitTypes');
+        $stillRouted = $app->permitTypes
+            ->contains(fn (PermitType $pt) => $pt->issuing_department_id === $type->issuing_department_id);
+        if ($stillRouted) {
+            return;
+        }
+
+        $assignment = $app->assignments()
+            ->where('department_id', $type->issuing_department_id)
+            ->where('status', AssignmentStatus::Pending->value)
+            ->first();
+
+        if ($assignment) {
+            Audit::log('assignment.withdrawn', $assignment, ['permit_type' => $type->code]);
+            $assignment->delete();
+        }
+
+        $app->load('assignments');
     }
 
     /** Officer approves their department's review. */
@@ -277,9 +391,34 @@ class WorkflowService
         ]);
     }
 
-    /** Terminal: approve and issue one permit per requested permit type. */
+    /**
+     * Terminal: approve and issue one permit per requested permit type.
+     *
+     * Nothing is released while money is owed (spec rule 6). Each clearance
+     * applied for after the first payment re-assesses into the same
+     * FeeAssessment, so the balance is what makes that accrual real — without
+     * this gate an applicant could apply for all six the moment the business
+     * permit cleared and be issued every one of them without paying for any.
+     *
+     * A ValidationException rather than a bare abort because the caller is an
+     * officer pressing Approve: it surfaces as a 422 next to the action, naming
+     * the amount, instead of a 500 that says the system broke.
+     */
     public function approveAndIssue(Application $app): void
     {
+        $balance = PermitFees::balance($app);
+        if ($balance['balance_due'] > PermitFees::EPSILON) {
+            throw ValidationException::withMessages([
+                'balance_due' => [
+                    'This permit can’t be released yet: '
+                    .PermitFees::peso($balance['balance_due'])
+                    .' of the assessed '
+                    .PermitFees::peso($balance['total_assessed'])
+                    .' is still unpaid. The applicant has to settle the balance for the clearances applied for before any permit is issued.',
+                ],
+            ]);
+        }
+
         DB::transaction(function () use ($app) {
             $app->loadMissing('permitTypes');
             foreach ($app->permitTypes as $pt) {
