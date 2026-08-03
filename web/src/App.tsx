@@ -15,6 +15,7 @@ import { VerifyEmailPage } from './pages/auth/VerifyEmailPage'
 import { ApplicationsPage } from './pages/applicant/ApplicationsPage'
 import { ApplicationDetailPage } from './pages/applicant/ApplicationDetailPage'
 import { ApplyWizard } from './pages/applicant/ApplyWizard'
+import { ClearanceStagePage } from './pages/applicant/ClearanceStagePage'
 import { DraftsPage } from './pages/applicant/DraftsPage'
 import { PaymentsPage } from './pages/applicant/PaymentsPage'
 import { PayPage } from './pages/applicant/PayPage'
@@ -131,6 +132,26 @@ export default function App() {
           <Route path="/applications" element={<ApplicationsPage />} />
           <Route path="/applications/:id" element={<ApplicationDetailPage />} />
           <Route path="/applications/:id/pay" element={<PayPage />} />
+          {/*
+            LGU Clearances gets a route of its own rather than a panel on the
+            status page, for three reasons.
+
+            It is a stage, not a detail: six independent transactions, each with
+            its own office, fee and outcome, and applying for one opens a
+            full-page office form sheet. Mounted inside the status page that
+            sheet would have to fight the status card, the remarks, the history
+            and the message thread for the same screen — the form sheets are the
+            reason the wizard gave them steps of their own in the first place.
+
+            It has an address. An officer chasing a missing sanitary clearance,
+            or the notification that says one was refused, can point at the
+            stage itself. A panel three sections down a page has nowhere to
+            point.
+
+            And Back works. Opening an office form and going back is a browser
+            gesture here, not a piece of local state that a refresh loses.
+          */}
+          <Route path="/applications/:id/clearances" element={<ClearanceStagePage />} />
           <Route path="/drafts" element={<DraftsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/permits" element={<PermitsPage />} />

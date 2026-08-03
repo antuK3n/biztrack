@@ -437,6 +437,38 @@ export function ApplicationDetailPage() {
           </div>
         )}
 
+        {/* ── LGU Clearances · the stage after the first payment ────────
+          *
+          * The stage lives at its own route (see App.tsx); this is how it is
+          * found. It is shown from submission onwards rather than only once it
+          * unlocks, because "visible but locked, with the reason stated" is the
+          * point — an applicant who is told nothing until the stage appears has
+          * no way to know that six more clearances are coming, or what settles
+          * the balance that holds their permit.
+          *
+          * Shown on a rejected or cancelled filing too, because the stage has a
+          * specific sentence for each ("file a new application if you still
+          * need these clearances") and a link that quietly disappears when a
+          * filing fails teaches nothing. Not shown on a draft: there is no
+          * application for an office to act on yet.
+          */}
+        {status !== 'draft' && (
+          <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
+            <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
+            <p className="mt-1 text-sm text-ink-secondary">
+              Sanitary, fire, zoning, environmental, occupancy and market. Each is a separate
+              application to a separate office, with its own fee — and your Business Permit is not
+              released until the balance is cleared.
+            </p>
+            <Link
+              to={`/applications/${app.id}/clearances`}
+              className="mt-3 inline-block text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+            >
+              Open LGU Clearances
+            </Link>
+          </section>
+        )}
+
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (
           <section className="mt-8">
