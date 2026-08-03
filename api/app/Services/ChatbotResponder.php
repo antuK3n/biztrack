@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\FeeRule;
 use App\Models\PermitType;
 use App\Models\User;
+use App\Support\Ra11032;
 use Illuminate\Support\Collection;
 
 /**
@@ -745,8 +746,24 @@ class ChatbotResponder
 
     private function hours(?PermitType $type): string
     {
-        $law = 'Under RA 11032 (Ease of Doing Business Act), the LGU must act on business permit applications within 10 working days, '
-            .'and each application in BizTrack shows its own deadline.';
+        /*
+         * The limit is per complexity tier, not one flat figure: RA 11032 sets
+         * 3 working days for simple transactions, 7 for complex and 20 for
+         * highly technical. That is what Ra11032::TIERS holds and what every
+         * deadline in the system is measured against.
+         *
+         * This sentence used to say "within 10 working days". That number is in
+         * neither the statute nor this codebase, and it is a legal deadline
+         * being quoted to an applicant — the one kind of sentence a chatbot has
+         * no business improvising. Read from the constant so the answer cannot
+         * drift from the rule the deadlines are actually computed with.
+         */
+        $limits = collect(Ra11032::TIERS)
+            ->map(fn (array $t): string => $t['statutory_working_days'].' working days for '.mb_strtolower($t['label']))
+            ->implode(', ');
+
+        $law = "Under RA 11032 (Ease of Doing Business Act) the limit depends on how complex the filing is: {$limits}. "
+            .'Each application in BizTrack shows the deadline for its own tier.';
 
         if ($type) {
             $inspection = $type->requires_inspection
