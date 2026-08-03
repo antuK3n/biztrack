@@ -41,6 +41,25 @@ A restrained strategy: quiet neutral surfaces with the prototype's civic blue fa
 
 **The Red Means Stop Rule.** #bd0000 is reserved for errors, denials, and destructive actions. It never decorates, never labels a category, never appears in charts as a data color.
 
+> **Documented exception — the compliance map (and only the compliance map).**
+> The GIS panel on the admin Analytics Dashboard plots "no valid permit" in red
+> (`--color-s-red` #c11212) and "permit valid today" in green (#125c3b, `--color-green-700`
+> darkened for legibility over map tiles). Requested by the client; granted because it does
+> not actually violate what the rule protects. Red here is not labelling a category — "no
+> valid permit" is the exceptional, act-on-it state an officer opens the panel to find, which
+> is the same job red does in an error. #bd0000 itself stays unique to errors and destructive
+> actions. Nowhere else in the product may red carry a data value; if you are reaching for
+> this precedent for a chart series, the answer is no — see `BREACH` in `AnalyticsPage.tsx`
+> for how statutory breaches are drawn without red.
+>
+> The exception costs extra work under the Never Color Alone rule, and that work is not
+> optional. Red-green is the confusable pair for ~1 in 12 men, and the two map colours
+> measure 1.28:1 against each other in luminance — in greyscale or under deuteranopia they
+> are the same dark blob. So the map's markers differ in **size and fill** first (valid = small
+> hollow ring, no valid permit = larger solid disc) and colour only third, and the legend
+> swatches mirror those shapes rather than just the colours. Contrast is verified against the
+> OpenStreetMap tile palette, never against white — nothing on a map sits on white.
+
 **The Never Color Alone Rule.** Every status (approved, pending, denied, expiring) pairs its color with an icon or text label. WCAG 2.1 AA is the floor, not the target.
 
 ## 3. Typography
