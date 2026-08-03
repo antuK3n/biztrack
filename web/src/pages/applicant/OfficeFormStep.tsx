@@ -303,7 +303,27 @@ function ApplicationDateField({ data }: { data: OfficeFormData }) {
   )
 }
 
-const WATER_SOURCES = ['Level III (Waterworks)', 'Deep Well', 'Bottled / Refill', 'Other']
+/*
+ * The chip option sets live here rather than inline at each ChipRow, and are
+ * exported so anything that needs to name one of these answers can reference
+ * the list instead of retyping a string.
+ *
+ * ChipRow has no way to complain: given a value that is not one of its options
+ * it simply renders nothing as selected. So a typo in a duplicated literal does
+ * not fail loudly — it looks exactly like a required field the applicant never
+ * answered, which is close to the worst way for a mistake of that kind to
+ * present itself.
+ */
+export const WATER_SOURCES = ['Level III (Waterworks)', 'Deep Well', 'Bottled / Refill', 'Other']
+
+export const SANITARY_CLASSIFICATIONS = [
+  'Food Establishment',
+  'Non-Food Establishment',
+  'Personal / Public Service',
+  'Industrial',
+]
+
+export const OCCUPANCY_SCOPES = ['Full', 'Partial']
 
 function SanitaryFields({
   data,
@@ -345,12 +365,7 @@ function SanitaryFields({
         <div>
           <FieldLabel required>Sanitary Classification</FieldLabel>
           <ChipRow
-            options={[
-              'Food Establishment',
-              'Non-Food Establishment',
-              'Personal / Public Service',
-              'Industrial',
-            ]}
+            options={SANITARY_CLASSIFICATIONS}
             value={get(data, 'sanitary_classification')}
             onChange={(v) => set('sanitary_classification', v)}
           />
@@ -526,7 +541,7 @@ function OccupancyFields({
           <div>
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
-              options={['Full', 'Partial']}
+              options={OCCUPANCY_SCOPES}
               value={get(data, 'application_type')}
               onChange={(v) => set('application_type', v)}
             />
