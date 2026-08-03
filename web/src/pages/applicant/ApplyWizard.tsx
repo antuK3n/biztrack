@@ -2537,7 +2537,21 @@ export function ApplyWizard() {
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
-            <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
+            {/*
+              * self-start, because a grid item stretches to its row by default
+              * and this card has nothing to stretch with. Its height is the map
+              * (320px) plus two short captions — 378px — while the address
+              * column beside it is 421px, or 719px once "Rented" opens the
+              * lessor block. Stretching handed the card the difference (43px,
+              * then 341px) as height it had no content for, and because the
+              * card itself is transparent — the white comes from the captions'
+              * own bg-white — the page showed through inside a rounded, shadowed
+              * frame. That empty framed panel is what the client saw under the
+              * map. Sizing the card to its content deletes the frame rather
+              * than filling it; growing the map to match instead would make it
+              * lurch 341px taller the moment somebody ticks "Rented".
+              */}
+            <div className="self-start overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
               <MapPicker
                 latitude={form.latitude}
                 longitude={form.longitude}
