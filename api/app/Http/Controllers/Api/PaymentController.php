@@ -13,6 +13,7 @@ use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\PdfFile;
+use App\Support\PermitFees;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -56,15 +57,43 @@ class PaymentController extends Controller
             'method' => ['required', 'in:gcash,maya,card'],
         ]);
 
-        if ($application->status !== ApplicationStatus::PendingPayment) {
+        /*
+         * Two payments are legitimate now, not one.
+         *
+         * The first settles the business permit and moves the filing into
+         * review. The second settles a balance raised afterwards, because a
+         * clearance applied for in the LGU stage adds its office's fees to the
+         * assessment — and the permit is not released while a balance stands
+         * (WorkflowService::approveAndIssue). Refusing every payment outside
+         * `pending_payment` left that balance unpayable, so the gate could
+         * never be cleared and the permit could never issue: a dead end the
+         * applicant had no way out of.
+         *
+         * A terminal filing is still refused. There is nothing to buy on a
+         * rejected or cancelled application.
+         */
+        $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
+        $balanceDue = PermitFees::balance($application->fresh())['balance_due'];
+        $awaitingFirstPayment = $application->status === ApplicationStatus::PendingPayment;
+
+        if (! $awaitingFirstPayment && $application->status->isTerminal()) {
             throw ValidationException::withMessages([
-                'status' => ['This application is not awaiting payment.'],
+                'status' => ['This application is closed, so there is nothing left to pay.'],
             ]);
         }
 
-        $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
+        if (! $awaitingFirstPayment && $balanceDue <= 0) {
+            throw ValidationException::withMessages([
+                'status' => ['This application has nothing outstanding.'],
+            ]);
+        }
 
-        $payment = $this->gateway->charge($fee, PaymentMethod::from($data['method']));
+        /*
+         * Charge what is owed, never the assessment total. After a clearance is
+         * added the total covers the business permit as well, and billing it
+         * again would take money the applicant has already paid.
+         */
+        $payment = $this->gateway->charge($fee, PaymentMethod::from($data['method']), $balanceDue);
         Audit::log('payment.completed', $payment, ['amount' => (string) $payment->amount]);
 
         $this->workflow->onPaymentCompleted($payment);
@@ -94,7 +123,7 @@ class PaymentController extends Controller
         ]);
     }
 
-    /** dompdf receipt with a diagonal "SIMULATED PAYMENT" watermark. */
+    /** dompdf receipt. The watermark is gone; the header and footer carry the simulated-payment disclosure. */
     public function receipt(Request $request, Payment $payment): Response
     {
         $payment->load(['application.business', 'application.feeAssessment']);

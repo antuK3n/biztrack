@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
+use App\Services\ClearanceService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -24,8 +25,16 @@ use Illuminate\Http\Request;
  */
 class OfficeFormController extends Controller
 {
-    /** Permit types with an applicant-facing form sheet (web OFFICE_FORM_CODES). */
-    private const FORM_PERMIT_CODES = ['SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
+    public function __construct(private ClearanceService $clearances) {}
+
+    /**
+     * Permit types with an applicant-facing form sheet.
+     *
+     * The list moved onto PermitType when the clearance stage was built: it is
+     * a fact about the permit type, and the stage has to answer "does Apply
+     * open a form?" without going through this controller.
+     */
+    private const FORM_PERMIT_CODES = PermitType::OFFICE_FORM_CODES;
 
     /** Issuance dates: recorded by the reviewing office, never by the applicant. */
     private const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued'];
@@ -76,11 +85,14 @@ class OfficeFormController extends Controller
             && ApplicationVisibility::canView($user, $application);
 
         abort_unless($isOwner || $isReviewer, 403, 'This application is not yours.');
+
+        $permitType = PermitType::where('code', $permitTypeCode)->firstOrFail();
+
         if ($isOwner) {
             abort_unless(
-                in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true),
+                $this->ownerMayEdit($application, $permitType),
                 422,
-                'Office forms can only be edited while the application is a draft or returned.'
+                'Office forms can only be edited while the application is a draft or returned, or on a clearance you have applied for after payment.'
             );
         }
 
@@ -107,7 +119,6 @@ class OfficeFormController extends Controller
         // Belt-and-braces size cap (~16KB serialized).
         abort_if(strlen(json_encode($submitted)) > 16384, 422, 'The form payload is too large (max 16KB).');
 
-        $permitType = PermitType::where('code', $permitTypeCode)->firstOrFail();
         abort_unless(
             $application->permitTypes()->where('permit_types.id', $permitType->id)->exists(),
             422,
@@ -142,6 +153,32 @@ class OfficeFormController extends Controller
                 'form_data' => $form->form_data,
             ],
         ]);
+    }
+
+    /**
+     * When the applicant may still write a sheet.
+     *
+     * Two windows now, because the clearances moved out of the wizard
+     * (docs/clearances-after-payment.md). The first is the original one: a
+     * draft or returned filing is still the applicant's to fill in.
+     *
+     * The second exists because "Apply always opens that office's form" (spec
+     * rule 4) and applying now happens *after* payment, when the filing is
+     * under review. Without it, every clearance form sheet would open read-only
+     * the moment it became reachable — the applicant could ask the City Health
+     * Office for a sanitary permit and then have no way to answer its
+     * questions. Scoped to a clearance actually applied for on an open stage,
+     * so it does not reopen the business permit's own answers after filing.
+     */
+    private function ownerMayEdit(Application $application, PermitType $permitType): bool
+    {
+        if (in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)) {
+            return true;
+        }
+
+        return $permitType->isClearance()
+            && $this->clearances->isUnlocked($application)
+            && $this->clearances->isAppliedFor($application->loadMissing('permitTypes'), $permitType);
     }
 
     /**
