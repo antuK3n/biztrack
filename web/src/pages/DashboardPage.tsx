@@ -66,10 +66,12 @@ function OwnerHome() {
 
 /* ── Staff / admin landing ────────────────────────────────────────────── */
 function StaffHome({ permissions }: { permissions: string[] }) {
+  // Absolute /staff paths: this landing only ever renders on the LGU site, and
+  // spelling them out keeps them greppable against the route table in App.tsx.
   const cards: { to: string; icon: IconType; label: string; permission: string }[] = [
-    { to: '/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
-    { to: '/analytics', icon: ChartIcon, label: 'Analytics', permission: 'analytics.view' },
-    { to: '/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
+    { to: '/staff/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
+    { to: '/staff/analytics', icon: ChartIcon, label: 'Analytics', permission: 'analytics.view' },
+    { to: '/staff/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
   ]
   const visible = cards.filter((c) => permissions.includes(c.permission))
 

@@ -6,7 +6,14 @@ import { InfoCircleIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { PasswordInput } from '../../components/ui/PasswordInput'
 import { FieldLabel, PillButton, inputCls } from '../../components/ui/Proto'
-import { SESSION_EXPIRED_KEY, api, loginPathFor, toApiError } from '../../lib/api'
+import {
+  SESSION_EXPIRED_KEY,
+  api,
+  homePathFor,
+  loginPathFor,
+  portalForPath,
+  toApiError,
+} from '../../lib/api'
 import type { Portal } from '../../lib/api'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
@@ -91,8 +98,16 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         portal,
       })
       setSession(data.data.token, data.data.user, portal)
+      /*
+       * Back to where they were headed, but only if it belongs to THIS site.
+       * `from` is set by RequireAuth on the portal being entered, so it
+       * normally does; the check is here because a stale one — a citizen path
+       * carried onto the staff door — would land them on the other site with
+       * this site's session, which reads as being signed out.
+       */
       const from = (location.state as { from?: string } | null)?.from
-      navigate(from ?? '/dashboard', { replace: true })
+      const target = from && portalForPath(from) === portal ? from : homePathFor(portal)
+      navigate(target, { replace: true })
     } catch (error) {
       const apiError = toApiError(error)
       if (apiError.status === 409) {
@@ -163,9 +178,19 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             {wrongPortal && (
               <>
                 {' '}
-                <Link to={loginPathFor(staff ? 'public' : 'staff')} className="font-bold text-royal hover:underline">
+                {/*
+                  An anchor, not a <Link>. The two portals are separate sites
+                  with separate sessions, and a router push would change the
+                  path without remounting — leaving this tab holding the other
+                  site's store while the address bar claims otherwise. A real
+                  navigation makes the destination bootstrap its own session.
+                */}
+                <a
+                  href={loginPathFor(staff ? 'public' : 'staff')}
+                  className="font-bold text-royal hover:underline"
+                >
                   Go there now.
-                </Link>
+                </a>
               </>
             )}
           </Alert>

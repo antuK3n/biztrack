@@ -518,7 +518,7 @@ export function ReviewPage() {
       .then((queue) => {
         if (cancelled) return
         const match = queue.find((a) => a.application.id === assignmentId)
-        if (match) navigate(`/queue/${match.id}`, { replace: true })
+        if (match) navigate(`/staff/queue/${match.id}`, { replace: true })
         else setStrayId('unresolved')
       })
       .catch(() => {
@@ -530,7 +530,7 @@ export function ReviewPage() {
   }, [missing, assignmentId, navigate])
 
   const backLink = (
-    <Link to="/queue" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline">
+    <Link to="/staff/queue" className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline">
       <ArrowLeftIcon size={16} />
       Back to Application Verification
     </Link>
@@ -560,7 +560,7 @@ export function ReviewPage() {
           </p>
           {strayId === 'unresolved' && (
             <Link
-              to="/queue"
+              to="/staff/queue"
               className="mt-4 inline-flex rounded-md bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
             >
               Go to Application Verification
@@ -1368,7 +1368,7 @@ export function ReviewPage() {
           cancelLabel="Home Page"
           confirmLabel="Tracking Page"
           onCancel={() => navigate('/dashboard')}
-          onConfirm={() => navigate('/queue')}
+          onConfirm={() => navigate('/staff/queue')}
         >
           <p className="py-4 text-center text-base">Where would you like to go?</p>
         </ProtoModal>

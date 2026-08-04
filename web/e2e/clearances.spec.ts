@@ -39,7 +39,7 @@ test.use({ storageState: 'e2e/.auth/owner.json' })
  */
 async function makeDraft(page: Page): Promise<number> {
   return page.evaluate(async () => {
-    const token = localStorage.getItem('biztrack.token')
+    const token = localStorage.getItem('biztrack.token.public')
     const headers = {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -92,7 +92,7 @@ async function makeDraft(page: Page): Promise<number> {
  */
 async function makeCompleteDraft(page: Page): Promise<number> {
   return page.evaluate(async () => {
-    const token = localStorage.getItem('biztrack.token')
+    const token = localStorage.getItem('biztrack.token.public')
     const headers = {
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -181,7 +181,7 @@ async function makeCompleteDraft(page: Page): Promise<number> {
 async function applyFor(page: Page, appId: number, code: string): Promise<void> {
   await page.evaluate(
     async ({ appId, code }) => {
-      const token = localStorage.getItem('biztrack.token')
+      const token = localStorage.getItem('biztrack.token.public')
       await fetch(`/api/v1/applications/${appId}/clearances/${code}/apply`, {
         method: 'POST',
         headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
@@ -194,7 +194,7 @@ async function applyFor(page: Page, appId: number, code: string): Promise<void> 
 /** Any application of the tester's whose clearance stage has already shut. */
 async function findShut(page: Page): Promise<number | null> {
   return page.evaluate(async () => {
-    const token = localStorage.getItem('biztrack.token')
+    const token = localStorage.getItem('biztrack.token.public')
     const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
     const res = await fetch('/api/v1/applications?per_page=100', { headers })
     const body = await res.json()
@@ -264,7 +264,7 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
   expect(shown.length, 'the shut stage shows no reason at all').toBeGreaterThan(20)
 
   const fromApi = await page.evaluate(async (id) => {
-    const token = localStorage.getItem('biztrack.token')
+    const token = localStorage.getItem('biztrack.token.public')
     const res = await fetch(`/api/v1/applications/${id}/clearances`, {
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     })
@@ -508,7 +508,7 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
    * had just run, with no second charge behind it.
    */
   const filed = await page.evaluate(async (id) => {
-    const token = localStorage.getItem('biztrack.token')
+    const token = localStorage.getItem('biztrack.token.public')
     const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
     const app = (await (await fetch(`/api/v1/applications/${id}`, { headers })).json()).data
     const fee = (await (await fetch(`/api/v1/applications/${id}/fee`, { headers })).json()).data

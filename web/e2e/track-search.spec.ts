@@ -299,7 +299,7 @@ test.describe('officer queue', () => {
       })
     })
 
-    await page.goto('/queue')
+    await page.goto('/staff/queue')
     await expect(
       page.getByRole('heading', { name: 'Application Verification', level: 1 }),
     ).toBeVisible()
@@ -313,8 +313,8 @@ test.describe('officer queue', () => {
       .getByRole('searchbox', { name: 'Search this queue by tracking ID or business name' })
       .fill('malasiqui')
 
-    await expect(page.locator('a[href^="/queue/"]')).toHaveCount(1)
-    await expect(page.locator('a[href^="/queue/"]')).toContainText('Malasiqui Feeds Trading')
+    await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(1)
+    await expect(page.locator('a[href^="/staff/queue/"]')).toContainText('Malasiqui Feeds Trading')
     // The count is stated against what was loaded, not implied over the queue.
     await expect(status).toHaveText('Showing 1 of the 3 loaded, newest first.')
 
@@ -324,7 +324,7 @@ test.describe('officer queue', () => {
   })
 
   test('Sort reorders the loaded rows', async ({ page }) => {
-    const rows = page.locator('a[href^="/queue/"]')
+    const rows = page.locator('a[href^="/staff/queue/"]')
     await expect(rows).toHaveCount(3)
 
     await page.getByRole('button', { name: /^Sort/ }).click()
@@ -348,7 +348,7 @@ test.describe('officer queue', () => {
     await expect
       .poll(() => requested.at(-1))
       .toContain('application_status=under_review')
-    await expect(page.locator('a[href^="/queue/"]')).toHaveCount(2)
+    await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(2)
   })
 
   test('an empty search result says so and offers a way back', async ({ page }) => {
@@ -359,6 +359,6 @@ test.describe('officer queue', () => {
     await page.getByRole('button', { name: 'Clear search' }).click()
 
     await expect(search).toHaveValue('')
-    await expect(page.locator('a[href^="/queue/"]')).toHaveCount(3)
+    await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(3)
   })
 })
