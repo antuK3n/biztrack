@@ -7,6 +7,7 @@ use App\Enums\ApplicationType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationListResource;
 use App\Http\Resources\ApplicationResource;
+use App\Http\Resources\StatusHistoryResource;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
@@ -51,6 +52,13 @@ class ApplicationController extends Controller
         'inspections.application:id,tracking_id,business_id',
         'inspections.application.business.address.barangay',
         'permits.permitType', 'permits.business', 'permits.application',
+        /*
+         * The transition log. Two constant queries, and it keeps
+         * `status_history` from being a field that is present but empty on the
+         * one endpoint named after the whole record — a reader who trusted that
+         * would conclude a filing had never moved.
+         */
+        'statusHistory.changedBy:id,name',
     ];
 
     /**
@@ -328,15 +336,9 @@ class ApplicationController extends Controller
 
         $rows = $application->statusHistory()->with('changedBy:id,name')->get();
 
-        $data = $rows->map(fn ($row) => [
-            'from_status' => $row->from_status,
-            'to_status' => $row->to_status,
-            'note' => $row->note,
-            'changed_by' => $row->changedBy ? ['name' => $row->changedBy->name] : null,
-            'created_at' => optional($row->created_at)->toISOString(),
+        return response()->json([
+            'data' => StatusHistoryResource::collection($rows),
         ]);
-
-        return response()->json(['data' => $data]);
     }
 
     /**

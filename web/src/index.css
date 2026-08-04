@@ -50,6 +50,15 @@
   --color-s-green-tint: #ddf4e9;
   --color-s-yellow-tint: #fdf6d8;
   --color-s-red-tint: #f9dede;
+  /*
+   * Text weights for the two warm status chips. The raw #f2a33c / #f5c518 are
+   * band and border colours — as text on their own tint they sit near 1.5:1,
+   * which is not a colour choice, it is an unreadable label. These are the
+   * darkened pair that clears WCAG AA (both >6:1 on their tint) so "For
+   * Approval" and "For Inspection" stay legible at 12px badge size.
+   */
+  --color-s-orange-ink: #8a4a06;
+  --color-s-yellow-ink: #6b4e00;
   --color-s-purple: #7a4bd0;
   --color-s-purple-tint: #ece4f9;
 
