@@ -434,7 +434,7 @@ export function ApplicationsPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-4 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             {/*
               * Labelled, not just placeheld: a placeholder disappears the moment
               * the field is used and is not an accessible name, so the field

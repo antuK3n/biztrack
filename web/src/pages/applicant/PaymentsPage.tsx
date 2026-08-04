@@ -226,14 +226,22 @@ export function PaymentsPage() {
             const open = openId === p.id
             return (
               <li key={p.id} className="space-y-3">
-                <div className="flex w-full items-center gap-4 rounded-xl bg-white px-7 py-5 shadow-card">
+                {/*
+                  * Wraps below sm. The reference, the serif amount, the chevron
+                  * and the Receipt button need ~430px between them; forced onto
+                  * one line at 390 the reference column was squeezed to zero
+                  * width, the date broke into four lines, and the amount printed
+                  * over it. Stacked, the row keeps its reading order and every
+                  * edge lines up with the card.
+                  */}
+                <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-white px-7 py-5 shadow-card">
                   <button
                     type="button"
                     onClick={() => toggle(p)}
                     aria-expanded={open}
-                    className="flex min-w-0 flex-1 items-center gap-5 text-left"
+                    className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-x-5 gap-y-2 text-left sm:basis-auto"
                   >
-                    <span className="min-w-0 flex-1">
+                    <span className="min-w-0 flex-1 basis-full sm:basis-auto">
                       <span className="block truncate text-lg font-bold text-ink">
                         Ref No. : <span className="tnum">{p.reference_number}</span>
                       </span>

@@ -50,7 +50,9 @@ function SettingsBar({ label, onClick }: { label: string; onClick: () => void })
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-between rounded-md bg-royal px-8 py-9 text-left shadow-card transition-colors hover:bg-royal-hover"
+      // rounded-2xl to match the identical royal bar on Profile that links here,
+      // and the shadow cards it sits among elsewhere.
+      className="flex w-full items-center justify-between rounded-2xl bg-royal px-8 py-9 text-left shadow-card transition-colors hover:bg-royal-hover"
     >
       <span className="text-xl font-bold text-white">{label}</span>
       <ChevronRightIcon size={30} className="text-white" strokeWidth={2.25} />

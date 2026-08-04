@@ -617,7 +617,7 @@ export function RequestsPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-4 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             {isOfficer && (
               <button
                 type="button"
@@ -666,10 +666,13 @@ export function RequestsPage() {
                   <button
                     type="button"
                     onClick={() => setOpenId(r.id)}
-                    className="flex w-full items-center gap-5 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised"
+                    className="flex w-full items-center gap-3 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised sm:gap-5"
                   >
                     <AvatarCircle />
-                    <span className="w-44 shrink-0">
+                    {/* Fixed at 11rem the sender column plus the avatar, gaps and
+                        trailing chevron came to more than a 390px screen, so the
+                        row's own chevron hung past the card edge. */}
+                    <span className="w-28 shrink-0 sm:w-44">
                       <span className="block truncate text-[15px] font-bold text-ink">
                         {senderName(r)}
                       </span>

@@ -78,7 +78,11 @@ function Rail({ user }: { user: User }) {
                   >
                     <item.icon size={22} className={isActive ? 'text-royal' : 'text-white'} />
                   </span>
-                  <span className="max-w-[72px] text-center text-[10px] leading-tight text-white underline-offset-2 group-hover:underline">
+                  {/* Two lines' worth of box on every item, wrapped or not, so
+                      the icons above them stay on one pitch down the rail.
+                      "Other Requirements" wrapping used to push everything
+                      below it 12px out of step. */}
+                  <span className="min-h-6 max-w-[72px] text-center text-[10px] leading-3 text-white underline-offset-2 group-hover:underline">
                     {item.label}
                   </span>
                 </>
@@ -94,7 +98,7 @@ function Rail({ user }: { user: User }) {
               <span className="flex h-11 w-11 items-center justify-center rounded-xl">
                 <item.icon size={22} className="text-white" />
               </span>
-              <span className="max-w-[72px] text-center text-[10px] leading-tight text-white">{item.label}</span>
+              <span className="min-h-6 max-w-[72px] text-center text-[10px] leading-3 text-white">{item.label}</span>
             </span>
           ),
         )}
@@ -228,13 +232,17 @@ function MobileTabBar({ user }: { user: User }) {
             <NavLink
               to={item.to!}
               className={({ isActive }) =>
-                `flex h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-medium ${
+                `flex h-14 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium ${
                   isActive ? 'text-white' : 'text-white/65'
                 }`
               }
             >
               <item.icon size={21} />
-              {item.label}
+              {/* Same two-line box as the desktop rail. "Payment History" wraps,
+                  and at the inherited 24px line-height that pushed the item past
+                  the bar's 56px and clipped its icon off the top edge while the
+                  other four sat 5px lower. */}
+              <span className="min-h-6 text-center leading-3">{item.label}</span>
             </NavLink>
           </li>
         ))}

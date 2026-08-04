@@ -321,7 +321,14 @@ export function MessagesPage() {
   )
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+    /*
+     * `minmax(0,1fr)` at every width, not just lg. A grid item's automatic
+     * minimum size is its min-content, and a thread title is one nowrap line,
+     * so the single mobile column sized itself to the longest subject — 732px
+     * on a 390px screen. The `truncate` on the titles only ever took effect
+     * once the column was told it may be narrower than they are.
+     */
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
       {list}
       {pane}
     </div>

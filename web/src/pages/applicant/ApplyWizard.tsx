@@ -3845,7 +3845,14 @@ export function ApplyWizard() {
       )}
 
       {/* ── Bottom bar: pill buttons + green progress + Part n of N ────── */}
-      <div className="mt-10 grid items-start gap-6 sm:grid-cols-[minmax(9rem,auto)_1fr_minmax(9rem,auto)]">
+      {/*
+        * Equal `1fr` flanks, so the progress bar is actually centred under the
+        * card. With `auto` maxima the left track grew to fit the "Still needed
+        * on this part…" line and the empty right track stayed at its 9rem
+        * floor — the bar and its "Part n of 7" caption sat 135px right of the
+        * card's centre line, which is exactly where the eye checks alignment.
+        */}
+      <div className="mt-10 grid items-start gap-6 sm:grid-cols-[minmax(9rem,1fr)_minmax(0,28rem)_minmax(9rem,1fr)]">
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-4">
             {/*

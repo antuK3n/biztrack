@@ -321,7 +321,7 @@ export function QueuePage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-4 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             {/*
               * A placeholder is not an accessible name — it vanishes on the
               * first keystroke — so the field carries a real label, hidden
