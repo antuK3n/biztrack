@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ACCOUNTS, DEMO_PASSWORD, mergedStorageState } from './helpers'
+import { ACCOUNTS, DEMO_PASSWORD, mergedStorageState, signIn } from './helpers'
 
 /*
  * Sign-in, driven through the real form.
@@ -145,13 +145,23 @@ test('signing out of one portal leaves the other signed in', async ({ browser })
    * The mirror of the test above. An officer ending their session must not
    * also sign out the owner account in the next tab: different people, as far
    * as this browser is concerned, and the API revokes only the token sent.
+   *
+   * The staff half is a THROWAWAY session, signed in here rather than taken
+   * from admin.json, and that is not fussiness. Signing out revokes the token
+   * server-side — so using the shared admin session would have left every
+   * later spec on `storageState: admin.json` holding a dead token. It did:
+   * this test poisoned all six analytics tests, which passed alone and failed
+   * in a full run. `zoning` is the one seeded account no other spec depends
+   * on, so its session is ours to destroy.
+   *
+   * The citizen half is read from owner.json and never signed out, so that
+   * token stays valid for the specs that share it.
    */
-  const context = await browser.newContext({
-    storageState: mergedStorageState(['owner.json', 'admin.json']),
-  })
+  const context = await browser.newContext({ storageState: mergedStorageState(['owner.json']) })
   const citizen = await context.newPage()
   const staff = await context.newPage()
 
+  await signIn(staff, 'zoning', 'staff')
   await staff.goto('/staff/dashboard')
   await expect(staff).toHaveURL(/\/staff\/dashboard$/, { timeout: 20_000 })
 
