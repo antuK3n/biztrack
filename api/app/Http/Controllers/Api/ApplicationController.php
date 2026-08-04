@@ -161,6 +161,7 @@ class ApplicationController extends Controller
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
+        $this->syncLineCapitalization($app);
 
         Audit::log('application.created', $app);
 
@@ -222,6 +223,7 @@ class ApplicationController extends Controller
         }
         if (array_key_exists('fee_profile', $data)) {
             $application->update(['fee_profile' => $data['fee_profile']]);
+            $this->syncLineCapitalization($application);
         }
         if (isset($data['payment_mode'])) {
             $application->update(['payment_mode' => $data['payment_mode']]);
@@ -259,11 +261,72 @@ class ApplicationController extends Controller
             ]);
         }
 
+        /*
+         * Last chance to get the declared capital onto the business record.
+         *
+         * Every autosave already mirrors it, but submit is the moment the
+         * numbers stop being editable, and a client that only ever sent its fee
+         * profile with the create call would otherwise reach BPLO with the
+         * figure on the application and nothing on the business.
+         */
+        $this->syncLineCapitalization($application);
+
         $application = $this->workflow->submit($application);
 
         return response()->json([
             'data' => new ApplicationResource($application->load($this->fullEager)),
         ]);
+    }
+
+    /**
+     * Copy the capital declared per line on the fee profile onto the business's
+     * own `business_lines` rows.
+     *
+     * Capital used to be asked twice — against each line in Location & Zoning
+     * and again in Business & Tax Profile — and the two answers had different
+     * destinations: the first became `business_lines.capitalization`, the second
+     * fed the calculator. Only one of them was ever assessed, so the register
+     * could hold a figure nobody had been charged on. The question is asked once
+     * now, on the fee profile, and this is what keeps the business record in step
+     * with it rather than a second answer to the same question.
+     *
+     * Absent and null are both "not declared" and leave the stored figure alone:
+     * a renewal is assessed on gross sales and never restates its capital, and a
+     * half-filled draft autosaves many times before it holds one. Only a number
+     * actually sent overwrites.
+     *
+     * Lines match on `psic_code_id`, the same key the wizard restores a draft's
+     * categories by. A profile line without one is matched by position, which is
+     * how `feeProfileToDraft` reads the older saves that predate the key.
+     */
+    private function syncLineCapitalization(Application $application): void
+    {
+        $profile = $application->fee_profile;
+        $profileLines = is_array($profile) && is_array($profile['lines'] ?? null)
+            ? array_values($profile['lines'])
+            : [];
+
+        if ($profileLines === [] || $application->business === null) {
+            return;
+        }
+
+        $businessLines = $application->business->lines()->orderBy('id')->get();
+
+        foreach ($profileLines as $index => $line) {
+            if (! is_array($line) || ! isset($line['capitalization'])) {
+                continue;
+            }
+
+            $row = isset($line['psic_code_id'])
+                ? $businessLines->firstWhere('psic_code_id', (int) $line['psic_code_id'])
+                : ($businessLines[$index] ?? null);
+
+            if ($row === null) {
+                continue;
+            }
+
+            $row->update(['capitalization' => $line['capitalization']]);
+        }
     }
 
     public function resubmit(Request $request, Application $application): JsonResponse

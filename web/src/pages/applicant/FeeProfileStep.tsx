@@ -284,8 +284,10 @@ export function feeProfileIssues(
     if (!cat.category.trim()) {
       issues.push({
         key: `line:${line.id}:category`,
-        label: `Category for ${line.title}`,
-        message: 'Type the closest revenue-code category, for example retailer.',
+        // Named as the field is named, or the "Still needed" line sends the
+        // applicant looking for a "Category" the step no longer calls that.
+        label: `Revenue Code category for ${line.title}`,
+        message: 'Type the closest Revenue Code category, for example retailer.',
       })
     }
     if (isRenewal && !draft.no_gross_sales) {
@@ -590,9 +592,17 @@ function FlagCheckbox({
   )
 }
 
-/** Inline error under a field, in the wizard's voice. */
-function FieldError({ children }: { children: string }) {
-  return <p className="mt-1 text-xs font-medium text-s-red">{children}</p>
+/**
+ * Inline error under a field, in the wizard's voice. `id` is optional because
+ * most callers sit inside a wrapping <label> and are found by proximity; the
+ * ones that point an `aria-describedby` at their error pass one.
+ */
+function FieldError({ children, id }: { children: string; id?: string }) {
+  return (
+    <p id={id} className="mt-1 text-xs font-medium text-s-red">
+      {children}
+    </p>
+  )
 }
 
 /**
@@ -743,7 +753,7 @@ export function FeeProfileStep({
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
       <section>
-        <SectionMarker letter={nextLetter()} label="Business Structure & Classification" />
+        <SectionMarker letter={nextLetter()} label="Business Structure & Tax Classification" />
         <div className="mt-4 space-y-5">
           {derivedStructure ? (
             /*
@@ -817,12 +827,27 @@ export function FeeProfileStep({
             </div>
           )}
 
+          {/*
+            This block used to be headed "Line of Business Classification" and
+            its input labelled bare "Category", which read as the step asking
+            again what Location & Zoning had already been told. Testers filed it
+            alongside the genuinely duplicated capital box. It is not a
+            duplicate: the line of business is the trade, this is the bracket the
+            Revenue Code taxes that trade under, and there are 273 of these
+            against 135 PSIC codes — `psic_codes.category` is empty for all 135,
+            so nothing can derive one from the other. PSIC 56101 "Restaurants and
+            carinderia" alone fans out to carinderia, restaurant, fastfood_chain,
+            cafe_cafeteria and five more, at different rates. Only the words
+            changed here; the field, its value and where it is stored did not.
+          */}
           <div>
-            <FieldLabel required>Line of Business Classification</FieldLabel>
-            <p className="mb-3 text-xs text-ink-secondary">
-              Type the closest revenue-code category for each line (e.g. retailer, carinderia,
-              manufacturer). Not sure? Pick your best match. The reviewing officer verifies the
-              classification during assessment.
+            <FieldLabel required>Tax Classification (Malabon Revenue Code)</FieldLabel>
+            <p id="fee-category-help" className="mb-3 text-xs text-ink-secondary">
+              This is not your line of business again — it is the Revenue Code bracket that trade is
+              taxed under, and one trade can fall under several. A carinderia and a franchised
+              fast-food branch are both food, and are assessed at different rates. Type the closest
+              match (e.g. retailer, carinderia, manufacturer); the reviewing officer verifies it
+              during assessment.
             </p>
             <datalist id="fee-categories">
               {COMMON_CATEGORIES.map((c) => (
@@ -844,8 +869,22 @@ export function FeeProfileStep({
                     <p className="mb-2.5 truncate text-sm font-semibold text-ink">{line.title}</p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
-                        <FieldLabel required>Category</FieldLabel>
+                        {/*
+                          FieldLabel renders a span, so this input had a visible
+                          label attached to nothing and a screen reader announced
+                          the placeholder instead. htmlFor/id fixes that, and it
+                          is an id rather than a wrapping <label> because the
+                          explanation above has to be reachable by
+                          aria-describedby, which needs the input addressable
+                          anyway (WCAG 2.1 AA 1.3.1 / 3.3.2). The error joins the
+                          description rather than the name: it belongs to what
+                          the field is telling you, not to what it is called.
+                        */}
+                        <label htmlFor={`fee-category-${line.id}`} className="block">
+                          <FieldLabel required>Revenue Code category</FieldLabel>
+                        </label>
                         <input
+                          id={`fee-category-${line.id}`}
                           list="fee-categories"
                           value={cat.category}
                           onChange={(e) => setCategory(line.id, { category: e.target.value })}
@@ -853,9 +892,14 @@ export function FeeProfileStep({
                           placeholder="e.g. retailer"
                           className={inputCls}
                           aria-invalid={Boolean(errorFor(`line:${line.id}:category`, cat.category))}
+                          aria-describedby={
+                            errorFor(`line:${line.id}:category`, cat.category)
+                              ? `fee-category-help fee-category-${line.id}-error`
+                              : 'fee-category-help'
+                          }
                         />
                         {errorFor(`line:${line.id}:category`, cat.category) && (
-                          <FieldError>
+                          <FieldError id={`fee-category-${line.id}-error`}>
                             {errorFor(`line:${line.id}:category`, cat.category)}
                           </FieldError>
                         )}
