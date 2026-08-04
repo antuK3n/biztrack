@@ -1236,7 +1236,7 @@ export function AnalyticsPage() {
             />
           </div>
 
-          <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
+          <div className="mt-7 grid gap-x-6 gap-y-7 *:min-w-0 lg:grid-cols-2">
             <section>
               <SectionHeading note={monthWindow} metric="volume">Application Volume</SectionHeading>
               <VolumePanel report={data} />
@@ -1265,7 +1265,7 @@ export function AnalyticsPage() {
             <CompliancePanel report={data} />
           </section>
 
-          <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
+          <div className="mt-7 grid gap-x-6 gap-y-7 *:min-w-0 lg:grid-cols-2">
             <section>
               <SectionHeading note={asOf} metric="expiry">Permits Approaching Expiry</SectionHeading>
               <ExpiryPanel report={data} />

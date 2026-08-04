@@ -307,7 +307,7 @@ export function OwnersPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-4 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             <input
               type="search"
               value={search}
@@ -364,7 +364,10 @@ export function OwnersPage() {
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'change', row })}
-                            className="rounded-full bg-s-red px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                            // Transparent border, not no border: its outlined
+                            // neighbour carries a 1px one, so without this the
+                            // filled button stands 2px shorter than its row.
+                            className="rounded-full border border-transparent bg-s-red px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
                           >
                             Change Status
                           </button>

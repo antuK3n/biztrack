@@ -383,7 +383,7 @@ export function RenewalRiskPage() {
             />
           </div>
 
-          <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-[1.6fr_1fr]">
+          <div className="mt-7 grid gap-x-6 gap-y-7 *:min-w-0 lg:grid-cols-[1.6fr_1fr]">
             <section>
               <SectionHeading metric="at_risk">Businesses at Risk</SectionHeading>
               {data.at_risk.length > 0 ? (

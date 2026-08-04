@@ -702,7 +702,7 @@ export function UsersPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-4 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
             <input
               type="search"
               value={search}
@@ -718,7 +718,9 @@ export function UsersPage() {
             <button
               type="button"
               onClick={() => setModal({ kind: 'create' })}
-              className="rounded-full bg-royal px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+              // Transparent border so it stands exactly as tall as the bordered
+              // search field it shares this header row with.
+              className="rounded-full border border-transparent bg-royal px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
             >
               Add officer
             </button>
@@ -778,7 +780,10 @@ export function UsersPage() {
                         <button
                           type="button"
                           onClick={() => setModal({ kind: 'reassign', user })}
-                          className="rounded-full bg-royal-deep px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                          // Transparent border, not no border: the two outlined
+                          // buttons beside it carry a 1px one, so without this
+                          // the filled button stands 2px shorter than its row.
+                          className="rounded-full border border-transparent bg-royal-deep px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
                         >
                           Reassign
                         </button>
