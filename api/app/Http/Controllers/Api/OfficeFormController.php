@@ -20,7 +20,8 @@ use Illuminate\Http\Request;
  * Two writers share one payload: the applicant answers the questions only they
  * can answer, and the reviewing officer records the issuance dates only the
  * office can know. Anything the system already knows (application type, filing
- * date, which certificate the FSIC is for) is derived here and never asked.
+ * date, which certificate the FSIC is for, the floor area and site tenure the
+ * zoning sheet carries) is derived here and never asked.
  */
 class OfficeFormController extends Controller
 {
@@ -99,12 +100,15 @@ class OfficeFormController extends Controller
             'form_data' => ['present', 'array', 'max:512'], // guard against huge payloads
             // Birthdays can never be in the future (CEC "Birthday of Owner").
             'form_data.owner_birthday' => ['sometimes', 'nullable', 'date', 'before:today'],
+            // A business cannot have started trading tomorrow (ZONING).
+            'form_data.zoning_operating_since' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             // An office cannot have issued a document on a future date.
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.date_issued' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
         ], [
             'form_data.owner_birthday.before' => "The owner's birthday must be a date in the past.",
+            'form_data.zoning_operating_since.before_or_equal' => 'The date operations began cannot be in the future.',
             'form_data.building_permit_date.before_or_equal' => 'The building permit date issued cannot be in the future.',
             'form_data.fsec_date.before_or_equal' => 'The FSEC date issued cannot be in the future.',
             'form_data.date_issued.before_or_equal' => 'The date issued cannot be in the future.',
@@ -187,6 +191,49 @@ class OfficeFormController extends Controller
             'application_date' => ($application->submitted_at ?? now())->toDateString(),
         ];
 
+        if ($permitTypeCode === 'ZONING') {
+            $derived['application_type'] = $existingBusiness
+                ? 'Renewal of Locational Clearance'
+                : 'New Locational Clearance';
+
+            /*
+             * The zoning processing fee is charged per square metre of total
+             * floor area, so CPDO cannot assess the clearance without this
+             * number — and the applicant already gave it on the Business & Tax
+             * Profile, where it is required of every filing carrying the
+             * business permit itself. Asking again on this sheet would be
+             * asking the same question twice and inviting two answers.
+             *
+             * Left absent rather than zeroed when it is genuinely missing: a
+             * blank box the applicant can be sent back to fill is honest, and
+             * "0 sq. m." on a locational clearance is not.
+             */
+            $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
+            if (is_numeric($floorArea)) {
+                $derived['total_floor_area_sqm'] = (string) (0 + $floorArea);
+            }
+
+            /*
+             * What right the applicant holds over the site. The clearance
+             * already requires a Lease Contract or Land Title, so the office is
+             * asking this — and Location & Zoning has already answered it,
+             * including who the lessor is. Naming the lessor here is what makes
+             * the sheet match the document attached to it.
+             *
+             * `business` is nullable (soft-deleted), so the tenure question
+             * genuinely has no answer on such a filing and the field stays
+             * blank rather than claiming the site is owned.
+             */
+            $business = $application->business;
+            if ($business !== null) {
+                $lessor = trim((string) $business->lessor_name);
+                $derived['site_tenure'] = match (true) {
+                    ! $business->is_rented => 'Owned or occupied by the applicant',
+                    $lessor !== '' => 'Leased from '.$lessor,
+                    default => 'Leased',
+                };
+            }
+        }
         if ($permitTypeCode === 'SANITARY') {
             $derived['application_type'] = $existingBusiness ? 'Renewal' : 'New';
         }

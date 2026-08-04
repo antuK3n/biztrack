@@ -230,9 +230,9 @@ function RecommendedActions({ report }: { report: RenewalRiskReport }) {
         </div>
       ))}
       <p className="border-t border-line pt-3 text-xs text-ink-muted">
-        One action per band: {report.thresholds.high} and above needs immediate follow-up,{' '}
-        {report.thresholds.moderate} to {report.thresholds.high - 1} a reminder, below{' '}
-        {report.thresholds.moderate} monitoring only.
+        The action follows from the score alone: {report.thresholds.high} points and above needs
+        immediate follow-up, {report.thresholds.moderate} to {report.thresholds.high - 1} gets a
+        reminder, and anything below {report.thresholds.moderate} is watch only.
       </p>
     </ProtoCard>
   )
@@ -413,10 +413,10 @@ export function RenewalRiskPage() {
             {data.scored_permits.toLocaleString()} permit
             {data.scored_permits === 1 ? '' : 's'}
             <Info metric="scored_permits" /> scored — those expiring on or before{' '}
-            {data.window_end}, plus any that lapsed since {data.window_start}. Revoked and suspended
-            permits are excluded.
+            {data.window_end}, plus any that already lapsed since {data.window_start}. Revoked and
+            suspended permits are left out.
             {data.at_risk.length < data.scored_permits &&
-              ` Showing the ${data.at_risk.length} highest-scoring.`}
+              ` The table above shows the ${data.at_risk.length} with the highest scores.`}
           </p>
         </MetricDefinitions>
       ) : null}
