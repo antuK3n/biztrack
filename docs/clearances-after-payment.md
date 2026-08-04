@@ -1,3 +1,26 @@
+# SUPERSEDED — 4 August 2026
+
+Payment moves to the very end. Everything is submitted first, including the
+clearances, and one Tax Order of Payment covers the lot.
+
+The reason is that this design cost more than it bought. Putting the clearances
+after payment meant an accruing balance, a second payment, a gate holding the
+permit until that balance cleared, and a stage that had to be locked and
+explained before it opened — and each of those grew its own bug. The
+dependency this was all built to escape (documents and fees computed from which
+clearances were picked) does not exist once the clearances are simply chosen
+*before* submission: the wizard's documents describe the business permit alone,
+each clearance carries its own on its sheet, and the assessment runs at submit
+when every choice has already been made.
+
+What survives from below: the clearance stage itself, the Apply/Submit
+semantics, the per-office routing, and the fee gating evidence. What goes: the
+unlock-on-payment rule, the running balance, and the release gate.
+
+The new flow is in `docs/clearances-before-payment.md`.
+
+---
+
 # Restructure: the six LGU clearances move after payment
 
 Decided with the client on 3 August 2026. This supersedes the ordering
