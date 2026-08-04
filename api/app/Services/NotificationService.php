@@ -146,7 +146,10 @@ class NotificationService
             'request',
             'Requirement response received',
             "The applicant responded to “{$request->title}” on {$app->tracking_id}.",
-            "/queue/{$app->id}",
+            // The one notification in this file addressed to an OFFICER rather
+            // than to the applicant, so the one that points into the LGU site.
+            // Everything else here links to a citizen screen at the root.
+            "/staff/queue/{$app->id}",
         );
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }

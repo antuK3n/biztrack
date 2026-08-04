@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { Spinner } from './components/icons'
 import { DashboardPage } from './pages/DashboardPage'
@@ -34,7 +34,7 @@ import { OwnersPage } from './pages/admin/OwnersPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import { loginPathFor } from './lib/api'
+import { activePortal, homePathFor, loginPathFor, portalPath } from './lib/api'
 import { useAuth } from './stores/auth'
 
 function FullPageSpinner() {
@@ -58,17 +58,42 @@ function RequireAuth({ children }: { children: ReactNode }) {
  * officer or admin screen they can't use. Defence in depth, not the defence.
  */
 function RequirePermission({ permission, children }: { permission: string; children: ReactNode }) {
-  const { user } = useAuth()
-  if (!user?.permissions.includes(permission)) return <Navigate to="/dashboard" replace />
+  const { user, portal } = useAuth()
+  if (!user?.permissions.includes(permission)) return <Navigate to={homePathFor(portal)} replace />
   return children
 }
 
-/** Signed-in users skip the auth screens. */
+/** Signed-in users skip the auth screens — of the site they are signed into. */
 function RedirectIfAuthed({ children }: { children: ReactNode }) {
-  const { user, bootstrapped } = useAuth()
+  const { user, portal, bootstrapped } = useAuth()
   if (!bootstrapped) return <FullPageSpinner />
-  if (user) return <Navigate to="/dashboard" replace />
+  if (user) return <Navigate to={homePathFor(portal)} replace />
   return children
+}
+
+/**
+ * Where an unmatched path lands: the sign-in page of whichever site it was on.
+ *
+ * `/staff/nonsense` must not fall through to the citizen login. That would put
+ * an officer at the wrong door — and at one whose session is a different token
+ * entirely, so they would appear to be signed out of an account that is fine.
+ */
+function NotFoundRedirect() {
+  return <Navigate to={loginPathFor(activePortal())} replace />
+}
+
+/**
+ * A path that used to live at the root and is now under /staff.
+ *
+ * Officer notifications already in the database carry the old address —
+ * NotificationService wrote `/queue/{id}` before the split — and testers have
+ * bookmarks. Both keep working. The id is carried across so a notification
+ * still opens the filing it was about rather than dumping the officer on the
+ * queue list to find it again.
+ */
+function MovedToStaff({ path }: { path: string }) {
+  const { id } = useParams()
+  return <Navigate to={portalPath('staff', id ? `${path}/${id}` : path)} replace />
 }
 
 export default function App() {
@@ -119,6 +144,12 @@ export default function App() {
         <Route path="/verify-email" element={<VerifyEmailPage />} />
         {/* Public permit verification — standalone, no auth, no AppShell. */}
         <Route path="/verify/:permit_number" element={<VerifyPage />} />
+
+        {/*
+          ── The citizen site ────────────────────────────────────────────
+          Everything a business owner does, at the root. The officer and
+          admin screens are NOT here; they are their own site below.
+        */}
         <Route
           element={
             <RequireAuth>
@@ -160,10 +191,41 @@ export default function App() {
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          {/* Owners reach this from the "Other Requirements" home card, so it
+              is a citizen route as well as a staff one. */}
           <Route path="/requests" element={<RequestsPage />} />
+        </Route>
+
+        {/*
+          ── The LGU site ────────────────────────────────────────────────
+          Officers and the administrator, on their own paths, with their own
+          session. The prefix is not decoration: `activePortal()` reads it out
+          of the address bar to pick which token to send, which is what lets a
+          staff tab and an owner tab be signed in at once in one browser. See
+          the note in lib/api.ts.
+
+          The screens both sides share — Home, Messages, Notifications,
+          Profile, Settings, Other Requirements — are mounted in both trees
+          rather than being one shared branch. They render per-user anyway, and
+          a single copy would have had to sit outside the prefix, which is the
+          one thing the portal split cannot allow.
+        */}
+        <Route
+          element={
+            <RequireAuth>
+              <AppShell />
+            </RequireAuth>
+          }
+        >
+          <Route path="/staff/dashboard" element={<DashboardPage />} />
+          <Route path="/staff/messages" element={<MessagesPage />} />
+          <Route path="/staff/notifications" element={<NotificationsPage />} />
+          <Route path="/staff/profile" element={<ProfilePage />} />
+          <Route path="/staff/settings" element={<SettingsPage />} />
+          <Route path="/staff/requests" element={<RequestsPage />} />
           {/* Officer */}
           <Route
-            path="/queue"
+            path="/staff/queue"
             element={
               <RequirePermission permission="application.review">
                 <QueuePage />
@@ -171,7 +233,7 @@ export default function App() {
             }
           />
           <Route
-            path="/queue/:id"
+            path="/staff/queue/:id"
             element={
               <RequirePermission permission="application.review">
                 <ReviewPage />
@@ -179,7 +241,7 @@ export default function App() {
             }
           />
           <Route
-            path="/inspections"
+            path="/staff/inspections"
             element={
               <RequirePermission permission="inspection.manage">
                 <InspectionsPage />
@@ -187,7 +249,7 @@ export default function App() {
             }
           />
           <Route
-            path="/inspections/:id"
+            path="/staff/inspections/:id"
             element={
               <RequirePermission permission="inspection.manage">
                 <InspectionDetailPage />
@@ -196,7 +258,7 @@ export default function App() {
           />
           {/* Admin */}
           <Route
-            path="/analytics"
+            path="/staff/analytics"
             element={
               <RequirePermission permission="analytics.view">
                 <AnalyticsPage />
@@ -210,7 +272,7 @@ export default function App() {
             queue, which is why the other office roles still do not hold it.
           */}
           <Route
-            path="/analytics/processing-time"
+            path="/staff/analytics/processing-time"
             element={
               <RequirePermission permission="analytics.view">
                 <ProcessingTimePage />
@@ -218,7 +280,7 @@ export default function App() {
             }
           />
           <Route
-            path="/analytics/business-growth"
+            path="/staff/analytics/business-growth"
             element={
               <RequirePermission permission="analytics.view">
                 <BusinessGrowthPage />
@@ -231,7 +293,7 @@ export default function App() {
             than being visible to every office reviewer.
           */}
           <Route
-            path="/analytics/renewal-risk"
+            path="/staff/analytics/renewal-risk"
             element={
               <RequirePermission permission="analytics.view">
                 <RenewalRiskPage />
@@ -239,7 +301,7 @@ export default function App() {
             }
           />
           <Route
-            path="/admin/users"
+            path="/staff/admin/users"
             element={
               <RequirePermission permission="user.manage">
                 <UsersPage />
@@ -247,7 +309,7 @@ export default function App() {
             }
           />
           <Route
-            path="/admin/owners"
+            path="/staff/admin/owners"
             element={
               <RequirePermission permission="owner.manage_status">
                 <OwnersPage />
@@ -255,7 +317,7 @@ export default function App() {
             }
           />
           <Route
-            path="/admin/audit-logs"
+            path="/staff/admin/audit-logs"
             element={
               <RequirePermission permission="audit.view">
                 <AuditLogsPage />
@@ -263,7 +325,19 @@ export default function App() {
             }
           />
         </Route>
-        <Route path="*" element={<Navigate to="/login" replace />} />
+
+        {/*
+          Where the staff screens used to live. Kept so notifications already
+          sent, and bookmarks already made, still land somewhere useful.
+        */}
+        <Route path="/queue" element={<MovedToStaff path="/queue" />} />
+        <Route path="/queue/:id" element={<MovedToStaff path="/queue" />} />
+        <Route path="/inspections" element={<MovedToStaff path="/inspections" />} />
+        <Route path="/inspections/:id" element={<MovedToStaff path="/inspections" />} />
+        <Route path="/analytics/*" element={<Navigate to="/staff/analytics" replace />} />
+        <Route path="/admin/*" element={<Navigate to="/staff/dashboard" replace />} />
+
+        <Route path="*" element={<NotFoundRedirect />} />
       </Routes>
     </BrowserRouter>
   )

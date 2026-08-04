@@ -13,12 +13,22 @@ import {
   TrackIcon,
   UsersIcon,
 } from '../components/icons'
+import { portalPath } from './api'
+import type { Portal } from './api'
 import type { User } from './types'
 
 export interface NavItem {
   label: string
   icon: ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
-  /** Route path. Absent = the destination isn't built yet (renders as "Soon"). */
+  /**
+   * Route path WITHIN the portal, without the `/staff` prefix. Absent = the
+   * destination isn't built yet (renders as "Soon").
+   *
+   * Portal-relative rather than absolute because the two sites mirror each
+   * other: '/dashboard' is the citizen home and '/staff/dashboard' the
+   * officer's, and writing both out would be two lists to keep in step.
+   * `navItemsFor` applies the prefix.
+   */
   to?: string
   /** Show only when the user holds this permission. Absent = everyone. */
   permission?: string
@@ -40,7 +50,8 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
   { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
-  // Officer / staff
+  // Officer / staff — these resolve under /staff, because only a staff session
+  // holds the permissions that reveal them.
   { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
   { label: 'Inspections', icon: SearchIcon, to: '/inspections', permission: 'inspection.manage', mobile: true },
   { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
@@ -50,12 +61,22 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
-   * only way to /admin/audit-logs was to type it. Transparency is the thing this
+   * only way to it was to type the address. Transparency is the thing this
    * product claims over eBOSS (PRODUCT.md §4), so the trail belongs in the rail.
    */
   { label: 'Audit Logs', icon: AuditIcon, to: '/admin/audit-logs', permission: 'audit.view' },
 ]
 
-export function navItemsFor(user: User): NavItem[] {
-  return NAV_ITEMS.filter((item) => !item.permission || user.permissions.includes(item.permission))
+/**
+ * The rail for one user on one site.
+ *
+ * Permission decides WHICH entries appear, the portal decides WHERE they
+ * point. The two filters are independent on purpose: a citizen never holds
+ * `application.review`, so the officer entries cannot leak onto the public
+ * rail even though both sites are built from this one list.
+ */
+export function navItemsFor(user: User, portal: Portal): NavItem[] {
+  return NAV_ITEMS.filter(
+    (item) => !item.permission || user.permissions.includes(item.permission),
+  ).map((item) => (item.to ? { ...item, to: portalPath(portal, item.to) } : item))
 }

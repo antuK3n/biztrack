@@ -41,10 +41,14 @@ async function saveSession(
     [ACCOUNTS[account], DEMO_PASSWORD, portal] as const,
   )
 
+  /*
+   * Keyed by portal, which is what lets the staff and owner storage states sit
+   * in one browser without either evicting the other — the same property the
+   * product needs for an admin tab and a citizen tab open at once.
+   */
   await page.evaluate(
     ([t, p]) => {
-      localStorage.setItem('biztrack.token', t)
-      localStorage.setItem('biztrack.portal', p)
+      localStorage.setItem(`biztrack.token.${p}`, t)
     },
     [token, portal] as const,
   )

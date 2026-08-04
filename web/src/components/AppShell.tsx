@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+/*
+ * `api` and `toApiError` used to be imported here too. Their only consumer was
+ * the email-verification banner (checklist item 99), which resent the
+ * verification mail; the banner is gone, so the client goes with it.
+ */
+import { loginPathFor, portalPath } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
@@ -26,6 +32,13 @@ export function roleLabel(user: User): string {
 function Rail({ user }: { user: User }) {
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
+  /*
+   * Every destination in this shell stays inside the portal the tab is on.
+   * The rail is shared by both sites, so a bare '/settings' would walk a
+   * signed-in officer out of /staff and onto the citizen site — where their
+   * token does not apply and they would look signed out.
+   */
+  const portal = useAuth((s) => s.portal)
   const [flyout, setFlyout] = useState(false)
   const [confirmOut, setConfirmOut] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -41,7 +54,7 @@ function Rail({ user }: { user: User }) {
 
   async function signOut() {
     await logout()
-    navigate('/login')
+    navigate(loginPathFor(portal))
   }
 
   const initials = `${user.first_name[0] ?? ''}${user.last_name[0] ?? ''}`.toUpperCase()
@@ -49,7 +62,7 @@ function Rail({ user }: { user: User }) {
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-20 flex-col items-center bg-royal py-4 lg:flex">
       <nav aria-label="Main" className="flex flex-1 flex-col items-center gap-1 overflow-y-auto">
-        {navItemsFor(user).map((item) =>
+        {navItemsFor(user, portal).map((item) =>
           item.to ? (
             <NavLink
               key={item.label}
@@ -110,9 +123,9 @@ function Rail({ user }: { user: User }) {
             className="absolute bottom-0 left-16 z-40 w-44 rounded-r-xl bg-royal-deep py-3 shadow-overlay"
           >
             {[
-              { label: 'Settings', to: '/settings' },
+              { label: 'Settings', to: portalPath(portal, '/settings') },
               // Profile reads the account record; Settings edits it.
-              { label: 'Profile', to: '/profile' },
+              { label: 'Profile', to: portalPath(portal, '/profile') },
             ].map((l) => (
               <button
                 key={l.label}
@@ -187,9 +200,10 @@ function LogoutModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
 
 /* Notification bell, fixed top-right on the canvas (p5). */
 function Bell() {
+  const portal = useAuth((s) => s.portal)
   return (
     <NavLink
-      to="/notifications"
+      to={portalPath(portal, '/notifications')}
       title="Notifications"
       className="fixed right-5 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full text-royal hover:bg-white/60"
     >
@@ -199,7 +213,8 @@ function Bell() {
 }
 
 function MobileTabBar({ user }: { user: User }) {
-  const items = navItemsFor(user)
+  const portal = useAuth((s) => s.portal)
+  const items = navItemsFor(user, portal)
     .filter((i) => i.mobile && i.to)
     .slice(0, 5)
   return (

@@ -300,7 +300,7 @@ function ReassignModal({
         <p className="rounded-lg bg-royal-tint px-3.5 py-3 text-xs leading-relaxed text-ink-secondary">
           This is a caseload-level preview. To reassign the officer-in-charge for a
           specific application, open it in{' '}
-          <Link to="/queue" className="font-semibold text-royal underline underline-offset-2">
+          <Link to="/staff/queue" className="font-semibold text-royal underline underline-offset-2">
             Application Review
           </Link>{' '}
           and use “Assign officer”.

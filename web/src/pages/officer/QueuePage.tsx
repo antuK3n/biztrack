@@ -141,7 +141,7 @@ function QueueRow({ item }: { item: Assignment }) {
   return (
     <li>
       <Link
-        to={`/queue/${item.id}`}
+        to={`/staff/queue/${item.id}`}
         className="flex items-stretch overflow-hidden rounded-lg bg-white shadow-card transition-shadow hover:shadow-raised"
       >
         <div className="min-w-0 flex-1 px-6 py-4">

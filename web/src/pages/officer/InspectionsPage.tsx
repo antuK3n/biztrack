@@ -56,7 +56,7 @@ function InspectionRow({ item }: { item: Inspection }) {
   return (
     <li>
       <Link
-        to={`/inspections/${item.id}`}
+        to={`/staff/inspections/${item.id}`}
         className="flex items-stretch overflow-hidden rounded-lg bg-white shadow-card transition-shadow hover:shadow-raised"
       >
         <div className="min-w-0 flex-1 px-6 py-4">
@@ -286,7 +286,7 @@ export function InspectionDetailPage() {
 
   const backLink = (
     <Link
-      to="/inspections"
+      to="/staff/inspections"
       className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-royal hover:underline"
     >
       <ArrowLeftIcon size={16} />

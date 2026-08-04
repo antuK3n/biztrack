@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { ACCOUNTS, DEMO_PASSWORD } from './helpers'
+import { ACCOUNTS, DEMO_PASSWORD, mergedStorageState } from './helpers'
 
 /*
  * Sign-in, driven through the real form.
@@ -87,9 +87,86 @@ test('a business owner is turned away from the staff portal', async ({ page }) =
 })
 
 test('an unauthenticated visitor cannot reach an analytics screen', async ({ page }) => {
-  await page.goto('/analytics/renewal-risk')
-  // Whatever the route does, it must not render the register to a stranger.
-  await expect(page).toHaveURL(/\/login/, { timeout: 20_000 })
+  await page.goto('/staff/analytics/renewal-risk')
+  /*
+   * It must not render the register to a stranger — and it must turn them out
+   * at the STAFF door, not the citizen one. The two sites hold separate
+   * sessions, so bouncing an officer to `/login` would show them a sign-in
+   * whose token has nothing to do with the page they asked for.
+   */
+  await expect(page).toHaveURL(/\/staff\/login/, { timeout: 20_000 })
+})
+
+test('an admin tab and an owner tab are signed in at the same time', async ({ browser }) => {
+  /*
+   * The whole point of splitting the portals into two sites.
+   *
+   * Both sessions previously lived at one localStorage key, which is shared by
+   * every tab on an origin — so signing in as an administrator silently evicted
+   * the business owner, and demonstrating the two sides of this system meant
+   * two browsers or a lot of signing in and out. The token is keyed by portal
+   * now, and which key a tab uses is read from its own address bar.
+   *
+   * ONE context on purpose: separate contexts have separate storage and would
+   * pass this test no matter how the app behaved. The shared storage is the
+   * thing under test.
+   */
+  const context = await browser.newContext({
+    storageState: mergedStorageState(['owner.json', 'admin.json']),
+  })
+  const citizen = await context.newPage()
+  const staff = await context.newPage()
+
+  await citizen.goto('/dashboard')
+
+  // Both sessions are present at once — neither evicted the other.
+  const keys = await citizen.evaluate(() =>
+    Object.keys(localStorage)
+      .filter((k) => k.startsWith('biztrack.token'))
+      .sort(),
+  )
+  expect(keys).toEqual(['biztrack.token.public', 'biztrack.token.staff'])
+
+  await staff.goto('/staff/dashboard')
+
+  // Neither tab was bounced to a sign-in page, and each is on its own site.
+  await expect(citizen).toHaveURL(/\/dashboard$/, { timeout: 20_000 })
+  await expect(staff).toHaveURL(/\/staff\/dashboard$/, { timeout: 20_000 })
+
+  // And each is showing its own user's home, not the other's.
+  await expect(citizen.getByText(/track your businesses with/i)).toBeVisible()
+  await expect(staff.getByRole('heading', { name: /application verification/i })).toBeVisible()
+
+  await context.close()
+})
+
+test('signing out of one portal leaves the other signed in', async ({ browser }) => {
+  /*
+   * The mirror of the test above. An officer ending their session must not
+   * also sign out the owner account in the next tab: different people, as far
+   * as this browser is concerned, and the API revokes only the token sent.
+   */
+  const context = await browser.newContext({
+    storageState: mergedStorageState(['owner.json', 'admin.json']),
+  })
+  const citizen = await context.newPage()
+  const staff = await context.newPage()
+
+  await staff.goto('/staff/dashboard')
+  await expect(staff).toHaveURL(/\/staff\/dashboard$/, { timeout: 20_000 })
+
+  await staff.getByRole('button', { name: /account menu/i }).click()
+  await staff.getByRole('menuitem', { name: /log out/i }).click()
+  // The WARNING modal (p18): "Are you sure you want to log out of this account?"
+  await staff.getByRole('dialog').getByRole('button', { name: /^yes$/i }).click()
+  await expect(staff).toHaveURL(/\/staff\/login/, { timeout: 20_000 })
+
+  // The citizen tab is untouched.
+  await citizen.goto('/dashboard')
+  await expect(citizen).toHaveURL(/\/dashboard$/, { timeout: 20_000 })
+  await expect(citizen.getByText(/track your businesses with/i)).toBeVisible()
+
+  await context.close()
 })
 
 test('the API refuses an analytics request with no token', async ({ page }) => {
