@@ -307,7 +307,20 @@ export function StatusChip({
 export function PageTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (
     <div className="mb-6 border-b-2 border-ink/50 pb-2">
-      <div className="flex items-end justify-between gap-4">
+      {/*
+       * Wraps rather than overflows. The `right` slot carries a search field and
+       * the Sort/Filter pair — together ~410px, more than a phone is wide — and
+       * a nowrap row of that made the whole page 570–670px on a 390px screen.
+       * Every card below then sat left of a rule that ran off the edge, which is
+       * the misalignment a reader actually sees. Dropping the controls onto
+       * their own line costs nothing at desktop, where the row still fits.
+       *
+       * `pr-12` below lg then keeps the row clear of the notification bell,
+       * which is fixed to the top-right of the canvas and would otherwise sit
+       * on top of a title no longer squeezed narrow by the controls beside it.
+       * The rule itself stays full width — only its contents inset.
+       */}
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pr-12 lg:pr-0">
         <h1 className="text-2xl font-bold text-ink">{children}</h1>
         {right}
       </div>
@@ -569,7 +582,10 @@ export function StatusCard({
   const bar =
     tone === 'green' ? 'bg-s-green' : tone === 'yellow' ? 'bg-s-yellow' : tone === 'red' ? 'bg-s-red' : 'bg-s-orange'
   return (
-    <div className="overflow-hidden rounded-md bg-white shadow-card">
+    /* Same corner as ProtoCard. This is the base surface with a bar on top, and
+       at rounded-md it sat directly above 2xl cards of the identical width on
+       the application-status screen, reading as two different card families. */
+    <div className="overflow-hidden rounded-2xl bg-white shadow-card">
       <div className={`h-2.5 ${bar}`} />
       <div className="flex flex-col items-center gap-3 px-8 py-10">{children}</div>
     </div>

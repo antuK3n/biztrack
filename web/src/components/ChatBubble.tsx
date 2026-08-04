@@ -165,7 +165,10 @@ export function ChatBubble() {
           type="button"
           aria-label="Open BizTrack ChatBot"
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-royal shadow-raised transition-transform hover:scale-105"
+          // Clears the mobile tab bar. At bottom-5 the bubble sat squarely on
+          // top of the last tab — a control covering another control, and the
+          // most obvious "these things don't line up" on a phone.
+          className="fixed bottom-20 right-5 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-royal shadow-raised transition-transform hover:scale-105 lg:bottom-5"
         >
           <svg viewBox="0 0 24 24" width={26} height={26} fill="none" aria-hidden="true">
             <path

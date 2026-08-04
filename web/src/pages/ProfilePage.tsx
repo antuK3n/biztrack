@@ -510,7 +510,9 @@ export function ProfilePage() {
 
       <Link
         to="/settings"
-        className="mt-8 flex items-center justify-between gap-4 rounded-md bg-royal px-6 py-5 shadow-card transition-colors hover:bg-royal-hover"
+        // Same corner as the two cards it sits directly under, at the same
+        // width: at rounded-md this bar read as a foreign element on the page.
+        className="mt-8 flex items-center justify-between gap-4 rounded-2xl bg-royal px-6 py-5 shadow-card transition-colors hover:bg-royal-hover"
       >
         <span className="text-base font-bold text-white">Edit your details</span>
         <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />

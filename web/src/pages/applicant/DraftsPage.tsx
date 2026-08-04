@@ -101,7 +101,12 @@ export function DraftsPage() {
               />
             </div>
           ) : (
-            <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <ul
+              // `*:min-w-0`: a grid item's automatic minimum is its min-content,
+              // so one long draft title sized the whole mobile column wider than
+              // the panel it sits in.
+              className="grid gap-6 *:min-w-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            >
               {visible.map((d) => {
                 const Icon = TYPE_ICON[d.application_type] ?? FilePlusIcon
                 // The applicant's own title wins; a draft they never renamed
@@ -122,7 +127,10 @@ export function DraftsPage() {
                       </div>
                       <div className="bg-canvas px-4 py-3">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="truncate text-[15px] font-bold text-ink">{name}</p>
+                          {/* min-w-0 or the flex item refuses to go below the
+                              title's nowrap width and the tile grows past the
+                              panel it sits in, which is what truncate is for. */}
+                          <p className="min-w-0 truncate text-[15px] font-bold text-ink">{name}</p>
                           <PencilIcon size={17} className="shrink-0 text-royal-deep" />
                         </div>
                         {/*
