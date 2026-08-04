@@ -25,7 +25,7 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'under_review',
-    status_label: 'Under review',
+    status_label: 'For Approval',
     business: { id: 1, name: 'Aling Nena Sari-Sari Store' },
     submitted_at: '2026-06-01T00:00:00.000000Z',
     deadline_at: '2026-08-20T00:00:00.000000Z',
@@ -39,7 +39,7 @@ const OWNER_APPS = [
     // The applicant's own name for the filing — the third thing search covers.
     title: 'Second branch renewal',
     status: 'pending_payment',
-    status_label: 'For payment',
+    status_label: 'Pending Payment',
     business: { id: 2, name: 'Bayanihan Hardware' },
     submitted_at: '2026-07-01T00:00:00.000000Z',
     deadline_at: '2026-08-05T00:00:00.000000Z',
@@ -65,7 +65,7 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'for_inspection',
-    status_label: 'For inspection',
+    status_label: 'For Inspection',
     business: { id: 4, name: 'Dagupan Auto Supply' },
     submitted_at: '2026-07-20T00:00:00.000000Z',
     deadline_at: '2026-09-01T00:00:00.000000Z',
@@ -340,7 +340,14 @@ test.describe('officer queue', () => {
 
   test('Filter narrows the queue server-side, not in the browser', async ({ page }) => {
     await page.getByRole('button', { name: /^Filter/ }).click()
-    await page.getByRole('option', { name: 'Under review' }).click()
+    /*
+     * `exact` because the tab and one of its statuses are both called "For
+     * Approval" now, so the listbox holds "All in For Approval" as well as the
+     * status itself. That is the intended wording — the tab is everything not
+     * yet past review, the status is the filings actually sitting with the
+     * offices — and it is only ambiguous to a substring match.
+     */
+    await page.getByRole('option', { name: 'For Approval', exact: true }).click()
 
     // The proof that this is a query change and not a browser-side slice: the
     // page asked the server for the narrowed set. Filtering a page in the

@@ -50,8 +50,26 @@ class ApplicationResource extends JsonResource
             'deadline_at' => optional($this->deadline_at)->toISOString(),
             'decided_at' => optional($this->decided_at)->toISOString(),
             'rejection_reason' => $this->rejection_reason,
+            /*
+             * `requires_inspection` is here because the progression rail on the
+             * review sheet must not draw a stage this filing will never enter.
+             *
+             * WorkflowService::afterReviewProgress() checks exactly this flag
+             * across exactly these rows: if no chosen permit type requires an
+             * inspection, the last office approval goes straight to
+             * approveAndIssue(). Without the flag the browser had no way to know
+             * that, so the honest options were to always show an inspection step
+             * (a lie on roughly half the filings) or never show one (a lie on
+             * the rest). The client's own wording is "for those permits that
+             * actually has inspection" — this is what makes that answerable.
+             */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(fn ($pt) => ['id' => $pt->id, 'code' => $pt->code, 'name' => $pt->name])->values()
+                ? $this->permitTypes->map(fn ($pt) => [
+                    'id' => $pt->id,
+                    'code' => $pt->code,
+                    'name' => $pt->name,
+                    'requires_inspection' => (bool) $pt->requires_inspection,
+                ])->values()
                 : [],
             'documents' => $this->relationLoaded('documents')
                 ? DocumentResource::collection($this->documents)
@@ -80,6 +98,23 @@ class ApplicationResource extends JsonResource
                 : [],
             'permits' => $this->relationLoaded('permits')
                 ? PermitResource::collection($this->permits)
+                : [],
+            /*
+             * What actually happened to this filing, oldest first (the relation
+             * orders by created_at).
+             *
+             * Only when eager-loaded. The officer review sheet wants it and asks
+             * for it; the list and create responses reuse this same resource and
+             * have no use for a filing's whole transition log, so they must not
+             * silently pay for one query per row to carry it.
+             *
+             * An empty array and a not-loaded relation are deliberately the same
+             * answer here. A caller that did not ask has no history to show, and
+             * a filing genuinely has none until it leaves Draft — neither reader
+             * has anything different to do about the two cases.
+             */
+            'status_history' => $this->relationLoaded('statusHistory')
+                ? StatusHistoryResource::collection($this->statusHistory)
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];
