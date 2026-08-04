@@ -76,16 +76,58 @@ That is no longer true, and not because of ordering:
    selected permit type; `FeeCalculator` gates each rule on those types, so the
    clearances chosen are exactly the office lines billed.
 
+## Two things this cost that were not in the original list
+
+Both were found while building it, and both are the opposite of what the
+"what is kept" list below originally said.
+
+**Routing moved back to payment.** The plan was to keep raising an assignment
+at the moment a clearance is applied for. That is wrong once applying happens
+in a draft: `application_assignments.assigned_at` is the start of the office's
+service-time clock, and `ProcessingTimeAnalytics`, `StaffingSimulation` and
+`DashboardAnalytics` all measure `assigned_at → completed_at`. An applicant who
+left a draft open for a week would have added a week to that office's measured
+turnaround. `WorkflowService::routeToDepartments` already raises one assignment
+per department owning a requested permit type and runs when the payment clears,
+by which point every clearance is on the filing — so `routeClearance()` and
+`withdrawClearanceRouting()` were deleted rather than re-pointed.
+
+**Returned filings are not reopened to the six.** A returned filing is editable
+everywhere else (documents, office sheets), but it has already been assessed
+and paid. Letting it gain a chargeable clearance would raise exactly the
+difference this change exists to delete — with no gate left to make it real.
+Draft only, and the locked reason for a returned filing says to message the
+office. Whether BPLO wants a returned filing to be able to add a clearance is
+a question for them, not something to leave a door open for.
+
 ## What is kept
 
 - The clearance cards, and the Apply / Submit semantics: **Apply always opens
   that office's form, Submit always opens the upload box.** Neither toggles.
-- Per-office routing when a clearance is applied for.
+- Per-office routing — one assignment per issuing office — now raised at
+  payment rather than at the moment the card is ticked.
 - The requirement that at least one clearance is decided before the step
   passes — checklist item 76's other half.
 - `PaymentController` charging the outstanding balance rather than the
   assessment total. With one payment those are the same number, and the code is
   correct either way.
+
+## Verified, not assumed
+
+A filing carrying all six clearances, submitted through the wizard and read
+back from `/applications/{id}/fee` (application 3404 on the throwaway stack):
+
+| Office | Lines |
+|---|---|
+| BPLO | application filing fee ₱100, business plates ₱220, sticker ₱55, business tax ₱675 |
+| OBO | certified true copy of Certificate of Use/Occupancy ₱50, other OBO certifications ₱50 |
+| CPDO | locational clearance filing ₱45, land use verification ₱345, processing ₱345 |
+| CHO | sanitary inspection ₱660, garbage fee ₱825 |
+| BFP | Fire Safety Inspection Certificate fee ₱226 |
+| CMO-MARKET | stall rental ₱0 (officer-set) |
+
+**₱3,596.00**, charged once. The filing moved to `under_review`, and a second
+payment was refused with "This application has nothing outstanding."
 
 ## Still open, unchanged by this
 

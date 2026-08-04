@@ -1240,13 +1240,14 @@ export interface OfficeForm {
   form_data: Record<string, unknown>
 }
 
-/* ── LGU Clearances (the stage after the first payment) ───────────────── */
+/* ── LGU Clearances (the last step before Review & Submit) ────────────── */
 
 /*
- * The six supporting clearances, as their own stage rather than a wizard step
- * (docs/clearances-after-payment.md). Each is a separate transaction with a
- * separate office, a separate fee and a separate outcome, which is why it has
- * a state of its own instead of being a tick on the application.
+ * The six supporting clearances (docs/clearances-before-payment.md). Each is a
+ * separate transaction with a separate office, a separate fee and a separate
+ * outcome, which is why it has a state of its own instead of being a tick on
+ * the application — but all six are decided before the filing is submitted,
+ * and they are billed on the same Tax Order of Payment as the business permit.
  */
 export type ClearanceState = 'available' | 'applied' | 'submitted' | 'issued' | 'rejected'
 
@@ -1273,7 +1274,14 @@ export interface Clearance {
     size: number
     download_url?: string
   } | null
-  /** Raised when the clearance is applied for, not when the filing is sent. */
+  /**
+   * The office's review of this clearance, once it has one.
+   *
+   * Null for the whole of the draft: assignments are raised at payment, by
+   * WorkflowService::routeToDepartments, not when the card is ticked. Ticking a
+   * card in a draft used to raise one, which started the office's service-time
+   * clock (`assigned_at`) days before the office could have seen the filing.
+   */
   assignment: { id: number; status: string | null; remarks: string | null } | null
   /**
    * ALREADY FORMATTED — "₱735.00". `PermitFees::peso` puts the sign on
@@ -1282,9 +1290,9 @@ export interface Clearance {
    * a free clearance on the button that spends the applicant's money.
    *
    * Its MEANING depends on `state`, which is easy to miss: when the clearance
-   * is not applied for it is what applying WOULD add; once it is applied for
-   * the server flips the counterfactual, so it is what that clearance IS
-   * costing on the current assessment.
+   * is not applied for it is what applying WOULD add to the Tax Order of
+   * Payment; once it is applied for the server flips the counterfactual, so it
+   * is what that clearance IS costing on the filing as it stands.
    *
    * Null means the number cannot be computed — the market stall rental, which
    * the office sets case by case, or a filing whose business row is gone. Not
@@ -1294,25 +1302,23 @@ export interface Clearance {
 }
 
 /**
- * The money and the gate, alongside the six rows.
+ * The gate, alongside the six rows.
  *
- * `locked_reason` is the sentence the screen shows before the first payment
- * clears. It is shown verbatim and never paraphrased: the condition that opens
- * the stage is the API's to state, and a second sentence written here would
- * drift out of step with it the first time the rule changed.
+ * `locked_reason` is the sentence the screen shows once the filing has been
+ * submitted and the six can no longer be changed. It is shown verbatim and
+ * never paraphrased: the condition that closes the stage is the API's to
+ * state, and a second sentence written here would drift out of step with it
+ * the first time the rule changed.
+ *
+ * There is no money in here. It used to carry `total_assessed`, `total_paid`
+ * and `balance_due`, because a clearance applied for after payment raised a
+ * balance the screen had to show and the permit was withheld until it cleared.
+ * Nothing accrues now — one assessment at submit, one payment — so the figures
+ * would only ever read zero on a stage that is open.
  */
 export interface ClearanceMeta {
   unlocked: boolean
   locked_reason: string | null
-  /*
-   * Plain numbers, not formatted and not decimal strings — `PermitFees::balance`
-   * rounds and returns floats. These DO go through formatMoney(), which is the
-   * opposite of `fee_preview` above, and the difference is worth stating rather
-   * than leaving to be discovered by a "₱0.00" on somebody's screen.
-   */
-  total_assessed: number
-  total_paid: number
-  balance_due: number
 }
 
 /* ── Public verify ────────────────────────────────────────────────────── */

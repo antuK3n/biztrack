@@ -437,34 +437,34 @@ export function ApplicationDetailPage() {
           </div>
         )}
 
-        {/* ── LGU Clearances · the stage after the first payment ────────
+        {/* ── LGU Clearances · what this filing asked for ────────────────
           *
-          * The stage lives at its own route (see App.tsx); this is how it is
-          * found. It is shown from submission onwards rather than only once it
-          * unlocks, because "visible but locked, with the reason stated" is the
-          * point — an applicant who is told nothing until the stage appears has
-          * no way to know that six more clearances are coming, or what settles
-          * the balance that holds their permit.
+          * The clearances are chosen in the wizard now, as the last step
+          * before Review & Submit, so this is no longer a stage still to come:
+          * it is the record of what was decided. The link goes to the same
+          * screen, which states in the API's own words why the six can no
+          * longer be changed.
           *
-          * Shown on a rejected or cancelled filing too, because the stage has a
-          * specific sentence for each ("file a new application if you still
+          * Shown on a rejected or cancelled filing too, because that screen has
+          * a specific sentence for each ("file a new application if you still
           * need these clearances") and a link that quietly disappears when a
-          * filing fails teaches nothing. Not shown on a draft: there is no
-          * application for an office to act on yet.
+          * filing fails teaches nothing. Not shown on a draft: a draft belongs
+          * in the wizard, where the cards are editable and a read-only copy of
+          * them would be the wrong door.
           */}
         {status !== 'draft' && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             <p className="mt-1 text-sm text-ink-secondary">
-              Sanitary, fire, zoning, environmental, occupancy and market. Each is a separate
-              application to a separate office, with its own fee — and your Business Permit is not
-              released until the balance is cleared.
+              Sanitary, fire, zoning, environmental, occupancy and market. Each goes to a separate
+              office with its own fee, and every one you chose is billed on this filing’s Tax Order
+              of Payment.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}
               className="mt-3 inline-block text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
             >
-              Open LGU Clearances
+              See your LGU Clearances
             </Link>
           </section>
         )}

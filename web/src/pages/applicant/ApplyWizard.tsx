@@ -19,10 +19,26 @@ import {
 } from '../../components/ui/Proto'
 import { formatBytes, formatDate } from '../../lib/format'
 import { toApiError } from '../../lib/api'
-import { applications, businesses, documents, reference } from '../../lib/resources'
+import {
+  applications,
+  businesses,
+  clearances,
+  documents,
+  officeForms,
+  reference,
+} from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
+import { ClearanceStage, anyClearanceDecided } from './ClearanceStagePage'
+import {
+  OFFICE_FORM_CODES,
+  OfficeFormSheet,
+  hasOfficeForm,
+  officeFormMissing,
+  type OfficeFormCode,
+  type OfficeFormData,
+} from './OfficeFormStep'
 import {
   LocationInsightsPanel,
   useLocationInsights,
@@ -42,36 +58,52 @@ import type {
   Barangay,
   Business,
   BusinessPayload,
+  Clearance,
   DocumentType,
   OcrSuggestions,
   Permit,
   PsicCode,
 } from '../../lib/types'
 
-type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 'review'
+type BasePhase =
+  | 'privacy'
+  | 'address'
+  | 'business'
+  | 'documents'
+  | 'fees'
+  | 'clearances'
+  | 'review'
 /*
- * ── This wizard is the BUSINESS PERMIT application, and nothing else ──────
+ * ── The order of this wizard, and why the clearances come last ────────────
  *
- * Decided with the client on 3 August 2026 (docs/clearances-after-payment.md).
- * The six supporting clearances used to be step 4 of 8 here, and this comment
- * used to be an explanation of why they could not be moved any later.
+ * Settled with the client on 4 August 2026 (docs/clearances-before-payment.md).
+ * Checklist item 76 asked for the LGU Section "at the last part before
+ * submitting the application", and it is now exactly that: everything is
+ * decided here, and payment is the only thing that happens afterwards.
  *
- * The argument was: the two sections after the cards are COMPUTED from which
- * clearances were picked — `requiredDocs` was the union of the document types
- * on the selected permit types, and the tax profile's questions varied by
- * permit code — so putting the cards after either one would ask the applicant
- * to satisfy a list that did not exist yet. That was true, and it is why item
- * 76 ("place this at the last part before submitting") was recorded as a
- * deviation rather than fixed.
+ * Two earlier arrangements were wrong, in opposite directions, and both are
+ * worth naming so neither comes back.
  *
- * The dependency only existed because the clearances were being treated as
- * part of this filing. They are not. Each is a separate transaction with a
- * separate office, a separate fee and a separate outcome — and each is applied
- * for once the first payment clears, on the LGU Clearances stage
- * (ClearanceStagePage). With them gone the dependency dissolves: the documents
- * and the fees below describe the business permit alone, so nothing here is
- * computed from an answer given later, and item 76 is satisfied in the sense
- * the client meant it.
+ *   The cards sat at step 4 of 8, and the argument for not moving them was
+ *   real: `requiredDocs` was the union of the document types on the selected
+ *   permit types, and the tax profile's questions varied by permit code, so
+ *   both of the sections after the cards were COMPUTED from them. Moving the
+ *   cards later would have asked the applicant to satisfy a list that did not
+ *   exist yet.
+ *
+ *   The fix attempted for that was to move the clearances out of the wizard
+ *   entirely, into a stage that opened after the first payment. It cost an
+ *   accruing balance, a second payment, a gate holding the permit until the
+ *   balance cleared, and a locked stage — four mechanisms, each of which grew
+ *   its own bug.
+ *
+ * The dependency dissolved without either. Documentary Requirements describes
+ * the business permit alone (each clearance's documents live on its own office
+ * sheet) and the tax profile asks the business permit's questions alone, so
+ * nothing between here and Review is computed from which clearances were
+ * picked. The Tax Order of Payment is produced at submit, over exactly the
+ * permit types the applicant finished with, so the clearances chosen on step 6
+ * are billed with everything else on one bill.
  *
  * What survives of the old ordering, and why:
  *
@@ -91,10 +123,15 @@ type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 're
  *   capital per line) lives in Location & Zoning and the separate section is
  *   gone: the fuller control survives, the duplicate does not.
  *
- * Documentary Requirements now precedes the Business & Tax Profile, which is
- * the order the client's diagram gives. Nothing forces it either way any more
- * — that was the whole point of the dependency dissolving — so the two run in
- * the order the paper does.
+ *   The LGU Clearances step comes after everything that describes the
+ *   business, because its office form sheets are filled in *from* those
+ *   answers. When the cards sat second, an applicant picked their clearances
+ *   before the system knew the business name, the address or the trade — so
+ *   every office sheet opened blank and asked for what the applicant had not
+ *   yet been asked.
+ *
+ * Documentary Requirements precedes the Business & Tax Profile, which is the
+ * order the client's diagram gives. Nothing forces it either way.
  */
 const BASE_PHASES: BasePhase[] = [
   'privacy',
@@ -102,6 +139,7 @@ const BASE_PHASES: BasePhase[] = [
   'business',
   'documents',
   'fees',
+  'clearances',
   'review',
 ]
 
@@ -111,7 +149,15 @@ const BASE_LABELS: Record<BasePhase, string> = {
   address: 'Location & Zoning',
   documents: 'Documentary Requirements',
   fees: 'Business & Tax Profile',
+  clearances: 'LGU Clearances',
   review: 'Review & Submit',
+}
+
+const OFFICE_LABELS: Record<OfficeFormCode, string> = {
+  SANITARY: 'Sanitary Permit Form',
+  CEC: 'Environmental Clearance Form',
+  FSIC: 'Fire Safety (FSIC) Form',
+  OCCUPANCY: 'Occupancy Permit Form',
 }
 
 /** Document-type code for the repeatable "Other Requirements" uploads. */
@@ -186,26 +232,28 @@ function withinMalabon(latitude: number, longitude: number): boolean {
   )
 }
 
-/*
- * There is no `StepNode` any more.
- *
- * A step used to be either a base phase or one office form sheet, and the
- * sheets slotted into the middle of the sequence the moment a clearance was
- * ticked — which is why steps needed a stable identity (`stepKey`) separate
- * from their position, and why unticking one had to drag `step` back inside
- * the array. The office sheets belong to the LGU Clearances stage now, so the
- * sequence is exactly BASE_PHASES, in order, always. A phase name IS its key.
+/** A single running step: either a base phase or one office form sheet. */
+type StepNode = { kind: 'base'; phase: BasePhase } | { kind: 'office'; code: OfficeFormCode }
+
+/**
+ * Stable identity for a step. Positions shift the moment a clearance is
+ * applied for or withdrawn — its form sheet slots into the middle of the map —
+ * so anything remembered about a step has to be remembered by name.
+ * Remembering it by index is how a sheet nobody had opened inherited the state
+ * of the one that used to sit at that number.
  */
+function stepKey(n: StepNode): string {
+  return n.kind === 'base' ? n.phase : `office:${n.code}`
+}
 
 /**
  * Document-type code prefix the API gives a clearance the applicant already
  * holds (DocumentController::heldPermitDocumentType).
  *
- * Kept only so a reopened draft can SKIP those attachments. A clearance copy
- * is not a documentary requirement of the business permit and never was —
- * before, the wizard restored them onto the clearance cards; now the cards are
- * a stage of their own, and the wizard's job is simply not to mistake one for
- * an uploaded requirement.
+ * Kept only so a reopened draft can SKIP those attachments in Documentary
+ * Requirements. A clearance copy is not a documentary requirement of the
+ * business permit and never was: it belongs to its card on the LGU Clearances
+ * step, which reads the filing's held copies for itself.
  */
 const HELD_DOC_PREFIX = 'HELD_'
 
@@ -802,14 +850,48 @@ export function ApplyWizard() {
 
   const [step, setStep] = useState(0)
   /*
-   * Sections the applicant has actually opened, by phase name. The map is
+   * Sections the applicant has actually opened, by step key. The map is
    * clickable for these. A TICK is a different question entirely: it means the
    * section is complete, and is computed fresh from the answers every render,
    * so it can never outlive the answers that earned it.
    */
-  const [visited, setVisited] = useState<BasePhase[]>([BASE_PHASES[0]])
-  const markVisited = (key: BasePhase) =>
-    setVisited((v) => (v.includes(key) ? v : [...v, key]))
+  const [visited, setVisited] = useState<string[]>([BASE_PHASES[0]])
+  const markVisited = (key: string) => setVisited((v) => (v.includes(key) ? v : [...v, key]))
+
+  /*
+   * ── The LGU Clearances step's state ───────────────────────────────────
+   *
+   * The six rows live on the server, not in this form. Applying for a
+   * clearance attaches its permit type to the draft through
+   * /clearances/{code}/apply, so it survives a reload and a reopened draft
+   * without the wizard having to carry it — and the fee preview on each card
+   * is priced by the same FeeCalculator that will produce the Tax Order of
+   * Payment. `clearanceRows` is the copy this component reads to decide which
+   * office sheets are steps and whether the step passes.
+   *
+   * `setClearanceRows` is handed to <ClearanceStage> directly rather than
+   * wrapped in an arrow: the stage reloads whenever that callback's identity
+   * changes, and a new arrow on every render would be an infinite fetch.
+   */
+  const [clearanceRows, setClearanceRows] = useState<Clearance[]>([])
+  /* Answers on the per-office sheets, by permit-type code. */
+  const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
+  /*
+   * Parts of the sheets are derived server-side from the permits on the filing
+   * (the FSIC "Certificate Applied For", the sanitary and CEC application
+   * types), so applying for a clearance mid-session leaves those fields blank
+   * until they are refetched. Bumped when a sheet is opened from a card.
+   */
+  const [officeFormsVersion, setOfficeFormsVersion] = useState(0)
+  /*
+   * Apply opens that office's sheet, but the sheet is only a step once the row
+   * says the clearance is applied for — which is a render later, after the
+   * stage has reloaded. `pendingOfficeJump` is the code we are on our way to;
+   * `officeReturn` remembers that we arrived from a card, so the sheet's
+   * forward button goes back to the cards instead of on down the wizard.
+   */
+  const [pendingOfficeJump, setPendingOfficeJump] = useState<OfficeFormCode | null>(null)
+  const [officeReturn, setOfficeReturn] = useState(false)
   const [form, setForm] = useState<FormState>(EMPTY)
   /*
    * The applicant's own name for this filing. Blank is normal and means "call
@@ -1188,19 +1270,94 @@ export function ApplyWizard() {
   const insights = useLocationInsights(insightsQuery)
 
   /*
-   * The step sequence is BASE_PHASES, always, in that order.
+   * The business as every office sheet carries it. The LGU Clearances step
+   * runs after Location & Zoning and Business Information precisely so this is
+   * complete by the time a sheet opens — the sanitary, environmental, fire and
+   * occupancy forms all begin by asking for the same name, address and trade,
+   * and the applicant has answered all three already.
    *
-   * It used to be computed: the office form sheets slotted in behind the LGU
-   * Section that spawned them, so the sequence grew and shrank as clearances
-   * were ticked, `step` had to be dragged back inside the array whenever one
-   * was removed, and every step needed a name-based key because its index was
-   * not stable. All of that machinery existed to serve the clearances, and the
-   * clearances are their own stage now.
+   * A blank reads as "—" rather than an empty box: the sheets are reachable
+   * from the section map, and an empty field looks like something the
+   * applicant forgot to type here.
    */
-  const totalParts = BASE_PHASES.length
-  const stepIndex = Math.min(step, totalParts - 1)
-  const phase: BasePhase = BASE_PHASES[stepIndex]
-  const isLast = stepIndex === totalParts - 1
+  const carriedOverBusiness = useMemo(
+    () => ({
+      name: form.name.trim() || '—',
+      tradeName: form.trade_name.trim(),
+      address:
+        [form.line1.trim(), form.line2.trim(), barangayName].filter(Boolean).join(', ') || '—',
+      // The bracketed colloquial name is the half a shop owner recognises, as
+      // in the zoning sentence. "Other" carries what they typed instead.
+      lineOfBusiness:
+        (declaredLine?.code === OTHER_PSIC_CODE
+          ? form.lines[0]?.line_of_business.trim()
+          : declaredLine?.title) || '—',
+    }),
+    [form.name, form.trade_name, form.line1, form.line2, form.lines, barangayName, declaredLine],
+  )
+
+  /*
+   * Which office sheets this filing needs, in the canonical office order.
+   *
+   * Only the clearances APPLIED FOR. Submitting a copy already held is the
+   * other half of the card and it skips the office's form entirely — that
+   * asymmetry is the whole point of the two buttons, so a sheet for a
+   * clearance the applicant already holds would be a step asking them to apply
+   * for something they told us they have.
+   */
+  const selectedOfficeCodes: OfficeFormCode[] = useMemo(() => {
+    const applied = new Set(
+      clearanceRows
+        .filter((r) => r.state === 'applied' || r.state === 'issued')
+        .map((r) => r.permit_type.code),
+    )
+    return OFFICE_FORM_CODES.filter((c) => applied.has(c))
+  }, [clearanceRows])
+
+  /*
+   * Full step sequence. Each office form sheet slots in directly behind the
+   * LGU Clearances step that spawned it, so applying for a clearance and
+   * filling in its sheet are one movement rather than two halves of the flow
+   * with Review in between.
+   */
+  const sequence: StepNode[] = useMemo(() => {
+    const nodes: StepNode[] = []
+    for (const p of BASE_PHASES) {
+      nodes.push({ kind: 'base', phase: p })
+      if (p === 'clearances') {
+        for (const code of selectedOfficeCodes) nodes.push({ kind: 'office', code })
+      }
+    }
+    return nodes
+  }, [selectedOfficeCodes])
+
+  const totalParts = sequence.length
+  const stepIndex = Math.min(step, sequence.length - 1)
+  const node = sequence[stepIndex]
+  const phase: BasePhase | null = node.kind === 'base' ? node.phase : null
+  const officeCode: OfficeFormCode | null = node.kind === 'office' ? node.code : null
+  const isLast = stepIndex === sequence.length - 1
+
+  /* Withdrawing a clearance removes its sheet: don't leave `step` past the end. */
+  useEffect(() => {
+    setStep((s) => Math.min(s, sequence.length - 1))
+  }, [sequence.length])
+
+  /*
+   * A sheet exists because its clearance was applied for, which is a
+   * deliberate act — so the map offers it straight away rather than only after
+   * the applicant has walked into it once. This is also what makes a reopened
+   * draft's sheets reachable: they are read from the clearance rows, which
+   * arrive after hydration has already marked the base phases.
+   */
+  useEffect(() => {
+    if (selectedOfficeCodes.length === 0) return
+    const keys = selectedOfficeCodes.map((code) => `office:${code}`)
+    setVisited((v) => {
+      const missing = keys.filter((k) => !v.includes(k))
+      return missing.length === 0 ? v : [...v, ...missing]
+    })
+  }, [selectedOfficeCodes])
 
   /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
   useEffect(() => {
@@ -1227,14 +1384,52 @@ export function ApplyWizard() {
   )
 
   /*
+   * What Review & Submit says about the clearances: only the ones decided, and
+   * which way. "Applied for" and "copy on file" are opposite instructions to
+   * the office and cost different amounts, so a list that flattened them into
+   * "six clearances included" would be the last screen before submission
+   * quietly misdescribing the filing.
+   */
+  const clearanceDecisions = useMemo(
+    () =>
+      clearanceRows
+        .filter((r) => r.state !== 'available' || r.held_document !== null)
+        .map((r) => ({
+          code: r.permit_type.code,
+          text:
+            r.held_document !== null
+              ? `${r.permit_type.name} — your copy is on file, nothing charged`
+              : `${r.permit_type.name} — applied for`,
+        })),
+    [clearanceRows],
+  )
+
+  /*
    * Required fields still missing on ANY step. This used to answer only for
    * the step being displayed, which meant the map had no way of knowing
    * whether a section was finished and fell back to "is it behind us?" — the
    * source of every tick that was showing on an empty section.
    */
   const missingFor = useCallback(
-    (p: BasePhase): string[] => {
-      switch (p) {
+    (n: StepNode): string[] => {
+      if (n.kind === 'office') return officeFormMissing(n.code, officeData[n.code] ?? {})
+      switch (n.phase) {
+        /*
+         * Item 76's other half — a clearance must actually be DECIDED here.
+         *
+         * The cards are additive, so an applicant could walk past this section
+         * without touching it and the step would still pass. The client's
+         * point is that walking past it is not a decision: the sanitary, fire,
+         * environmental and occupancy clearances are the substance of the
+         * filing, and a file that reaches BPLO with none of them named is one
+         * the counter has to send back.
+         *
+         * Either half of the card satisfies it — see anyClearanceDecided.
+         */
+        case 'clearances':
+          return anyClearanceDecided(clearanceRows)
+            ? []
+            : ['At least one clearance — Apply for it, or Submit the copy you already hold']
         case 'business': {
           const missing: string[] = []
           if (isReuse && prefillBusinessId === null) {
@@ -1373,6 +1568,10 @@ export function ApplyWizard() {
     },
     [
       form,
+      officeData,
+      // Item 76: the step passes on a clearance being decided, so its tick has
+      // to move when the cards do.
+      clearanceRows,
       requiredDocs,
       uploaded,
       consent,
@@ -1389,7 +1588,7 @@ export function ApplyWizard() {
   )
 
   /** What is still missing on the step being displayed. */
-  const stepMissing: string[] = useMemo(() => missingFor(phase), [missingFor, phase])
+  const stepMissing: string[] = useMemo(() => missingFor(node), [missingFor, node])
 
   /*
    * Which sections are finished, asked of every section rather than inferred
@@ -1398,11 +1597,11 @@ export function ApplyWizard() {
    * everything it reviews is.
    */
   const stepComplete: boolean[] = useMemo(() => {
-    const flags = BASE_PHASES.map((p) => missingFor(p).length === 0)
+    const flags = sequence.map((n) => missingFor(n).length === 0)
     const last = flags.length - 1
     if (last >= 0) flags[last] = flags.slice(0, last).every(Boolean)
     return flags
-  }, [missingFor])
+  }, [missingFor, sequence])
 
   /**
    * True when jumping forward to `index` would step over an unfinished
@@ -1596,14 +1795,13 @@ export function ApplyWizard() {
 
   /**
    * Persist whatever the CURRENT step owns before leaving it, so every Next
-   * (and every map jump) saves: the business fields and the fee profile both
-   * round-trip through the API.
+   * (and every map jump) saves: the business fields, the office sheets and the
+   * fee profile all round-trip through the API.
    *
-   * The permit re-sync branch is gone with the cards. It existed because the
-   * office form sheets 422 with "not part of this application" until the new
-   * permit list has been pushed, and there is no permit list to push any more:
-   * the Mayor's / Business Permit is attached once, on creation, and never
-   * changes while the wizard is open.
+   * The LGU Clearances step has no branch, and that is not an omission. Every
+   * one of its controls writes as it is pressed — applying attaches a permit
+   * type, uploading a held copy stores a document — so there is nothing left
+   * in the browser to flush when the applicant moves on.
    */
   async function persistOnLeave(): Promise<boolean> {
     // Same rule as autosave: a draft we failed to read is a draft we must not
@@ -1614,7 +1812,10 @@ export function ApplyWizard() {
     setSaving(true)
     setSubmitError(null)
     try {
-      if (phase === 'address' || phase === 'business') {
+      if (officeCode) {
+        const id = await ensureDraftRaw()
+        await officeForms.save(id, officeCode, officeData[officeCode] ?? {})
+      } else if (phase === 'address' || phase === 'business') {
         if (applicationId) {
           const bid = businessId ?? prefillBusinessId
           if (bid) await businesses.update(bid, businessPayload())
@@ -1649,9 +1850,59 @@ export function ApplyWizard() {
   async function advance() {
     const ok = await persistOnLeave()
     if (!ok) return
-    const target = Math.min(stepIndex + 1, totalParts - 1)
+    const target = Math.min(stepIndex + 1, sequence.length - 1)
     setStep(target)
-    markVisited(BASE_PHASES[target])
+    markVisited(stepKey(sequence[target]))
+  }
+
+  /** Move to a step we have decided to open, saving the one being left. */
+  async function jumpTo(target: number) {
+    const ok = await persistOnLeave()
+    if (!ok) return
+    setStep(target)
+    markVisited(stepKey(sequence[target]))
+  }
+
+  /**
+   * Finish the Apply → office sheet jump.
+   *
+   * It cannot happen in the click handler: the sheet is only in `sequence`
+   * once the clearance row says it is applied for, which arrives a render
+   * later when the stage reloads. Leaving the cards here also refetches the
+   * sheets, because their derived answers ("Certificate Applied For") are the
+   * server's to compute from the permit list that has only just changed —
+   * arriving before that is what used to leave them blank.
+   */
+  useEffect(() => {
+    if (pendingOfficeJump === null) return
+    const target = sequence.findIndex(
+      (n) => n.kind === 'office' && n.code === pendingOfficeJump,
+    )
+    // Apply-then-withdraw races: the sheet is gone, so there is nowhere to go.
+    if (target === -1) return
+    setPendingOfficeJump(null)
+    setOfficeReturn(true)
+    void jumpTo(target)
+    // jumpTo is recreated every render and would loop; the guard above is what
+    // makes this run once per Apply.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOfficeJump, sequence])
+
+  /*
+   * Leaving the sheet any other way — Back, or a jump from the section map —
+   * ends the round trip too. Otherwise the promise to return to the cards would
+   * outlive the visit that made it and reappear on the next sheet opened.
+   */
+  useEffect(() => {
+    if (!officeCode) setOfficeReturn(false)
+  }, [officeCode])
+
+  /** Back to the clearance cards from a sheet that was opened from them. */
+  async function returnToClearances() {
+    const target = sequence.findIndex((n) => n.kind === 'base' && n.phase === 'clearances')
+    if (target === -1) return
+    setOfficeReturn(false)
+    await jumpTo(target)
   }
 
   async function next() {
@@ -1686,13 +1937,13 @@ export function ApplyWizard() {
   /** Jump to any already-opened section from the map (persisting first). */
   async function goTo(index: number) {
     if (saving || index === stepIndex) return
-    if (!visited.includes(BASE_PHASES[index])) return
+    if (!visited.includes(stepKey(sequence[index]))) return
     // Moving forward re-checks every section being skipped, not just this one.
     if (jumpBlocked(index)) return
     const ok = await persistOnLeave()
     if (!ok) return
     setStep(index)
-    markVisited(BASE_PHASES[index])
+    markVisited(stepKey(sequence[index]))
   }
 
   /*
@@ -1759,9 +2010,19 @@ export function ApplyWizard() {
       if (hadDraft) {
         const bid = businessId ?? prefillBusinessId
         if (bid) await businesses.update(bid, businessPayload())
+        /*
+         * `permit_type_ids` is deliberately NOT sent here.
+         *
+         * ApplicationController::update does `sync()` on whatever it is given,
+         * and this wizard's `form.permit_type_ids` holds the Mayor's /
+         * Business Permit alone. Sending it would detach every clearance the
+         * applicant had just applied for on the LGU Clearances step — a
+         * debounced autosave, a second and a half after they pressed Apply,
+         * silently undoing it. The permit list belongs to the clearance
+         * endpoints now; it is set once, on creation, and only they change it.
+         */
         await applications.update(id, {
           title: title.trim(),
-          permit_type_ids: form.permit_type_ids,
           fee_profile: feeProfile,
           payment_mode: paymentMode,
           // Items 82/84: what is being amended can change while the draft is
@@ -1774,8 +2035,13 @@ export function ApplyWizard() {
       } else {
         await applications.update(id, { fee_profile: feeProfile, payment_mode: paymentMode })
       }
-      // The office-form save loop went with the cards: no sheet is filled in
-      // here any more, so there is nothing of that shape left to push.
+      // Every office sheet the applicant has touched, saved with everything
+      // else. Empty ones are skipped: a sheet nobody has opened has nothing to
+      // say, and writing it would report it as filled in on the card.
+      for (const code of selectedOfficeCodes) {
+        const data = officeData[code]
+        if (data && Object.keys(data).length > 0) await officeForms.save(id, code, data)
+      }
       savedSnapshotRef.current = target
       setDirty(false)
       setSubmitError(null)
@@ -1798,6 +2064,9 @@ export function ApplyWizard() {
       JSON.stringify({
         title,
         form,
+        // Typing on an office sheet is an edit like any other, so it has to
+        // make the draft dirty and be flushed by the same debounce.
+        officeData,
         feeDraft,
         paymentMode,
         applicationType,
@@ -1805,7 +2074,7 @@ export function ApplyWizard() {
         // Items 82/84: ticking a box is an edit, so autosave has to see it.
         amendment,
       }),
-    [title, form, feeDraft, paymentMode, applicationType, priorPermitId, amendment],
+    [title, form, officeData, feeDraft, paymentMode, applicationType, priorPermitId, amendment],
   )
   const syncedRef = useRef(false)
 
@@ -1888,7 +2157,16 @@ export function ApplyWizard() {
       setConsent(false)
     } else if (phase === 'fees') {
       setFeeDraft(EMPTY_FEE_PROFILE)
+    } else if (officeCode) {
+      setOfficeData((d) => ({ ...d, [officeCode]: {} }))
     }
+    /*
+     * The LGU Clearances step deliberately gets no branch. Its "inputs" are
+     * applications to other offices and certificates already uploaded, each of
+     * which has its own named, individually confirmable control on its card —
+     * withdrawing all six behind one "Proceed" is not what "clear the inputs
+     * on this part" means to anybody reading it.
+     */
     setTouched({})
     setShowClear(false)
   }
@@ -2017,18 +2295,18 @@ export function ApplyWizard() {
           return
         }
         /*
-         * A draft carries the Mayor's / Business Permit and nothing else.
+         * `form.permit_type_ids` holds the Mayor's / Business Permit alone,
+         * whatever the draft actually carries.
          *
-         * This used to restore whichever permit types the draft had, which is
-         * right while the clearances are part of the filing and wrong now that
-         * they are not. A draft started before this change can have four
-         * clearances attached server-side; restoring them here would put their
-         * documents back into Documentary Requirements, their questions back
-         * into the tax profile, and their fees back onto a Tax Order of Payment
-         * that is supposed to describe the business permit alone — and the next
-         * autosave would write the lot straight back. Those clearances are not
-         * lost: they belong to the LGU Clearances stage, which reads the
-         * application's permit types for itself.
+         * It is not the wizard's copy of the permit list any more — it is only
+         * what `ensureDraftRaw` posts when it CREATES an application, and the
+         * business permit is the only thing a new draft starts with. The
+         * clearances a reopened draft already has are read straight off the
+         * server by the LGU Clearances step, which is the one place that
+         * changes them. Restoring them into this field would put their
+         * documents back into Documentary Requirements and their questions
+         * back into the tax profile, both of which describe the business
+         * permit alone.
          */
         const pts = refData.permitTypes
         const bizId = pts.find((pt) => pt.code === BUSINESS_PERMIT_CODE)?.id
@@ -2155,6 +2433,67 @@ export function ApplyWizard() {
    * The office-form payloads are loaded by the LGU Clearances stage now, which
    * is where the sheets are filled in. Nothing in this wizard reads them.
    */
+
+  /*
+   * Read the clearance rows as soon as there is a draft, not only when the
+   * step is opened.
+   *
+   * Two things depend on them from anywhere in the wizard: whether the LGU
+   * Clearances step is finished (its tick, and whether a jump to Review is
+   * allowed to step over it) and which office sheets exist. A reopened draft
+   * whose clearances were all chosen last week would otherwise show the step
+   * unticked and refuse to jump past it until the applicant had visited a
+   * section they had already finished. <ClearanceStage> reloads for itself on
+   * mount, so this is a head start rather than the only read.
+   */
+  useEffect(() => {
+    if (!applicationId) return
+    let active = true
+    clearances
+      .list(applicationId)
+      .then((result) => {
+        if (active) setClearanceRows(result.data)
+      })
+      .catch(() => {
+        /* Non-fatal: the step opens and fetches for itself. */
+      })
+    return () => {
+      active = false
+    }
+  }, [applicationId])
+
+  /*
+   * Load any previously-saved office-form payloads once the draft exists, and
+   * again whenever a sheet is opened from a card. Parts of these sheets are
+   * derived server-side from the permits on the filing (the FSIC "Certificate
+   * Applied For", the sanitary and CEC application types), so applying for a
+   * clearance mid-session leaves those fields blank until they are refetched.
+   */
+  useEffect(() => {
+    if (!applicationId) return
+    let active = true
+    officeForms
+      .list(applicationId)
+      .then((forms) => {
+        if (!active || forms.length === 0) return
+        setOfficeData((prev) => {
+          const nextData = { ...prev }
+          for (const f of forms) {
+            // Don't clobber unsaved edits already in the current session.
+            if (!(f.permit_type_code in nextData) && hasOfficeForm(f.permit_type_code)) {
+              nextData[f.permit_type_code] = f.form_data
+            }
+          }
+          return nextData
+        })
+      })
+      .catch(() => {
+        /* Non-fatal: office forms are optional free-form JSON. */
+      })
+    return () => {
+      active = false
+    }
+  }, [applicationId, officeFormsVersion])
 
   /*
    * Item 72 — Business Structure is not a second question.
@@ -2347,17 +2686,18 @@ export function ApplyWizard() {
 
       {/* ── Full section map: every step this application requires ─────── */}
       <ol className="mb-8 flex flex-wrap gap-2" aria-label="Application sections">
-        {BASE_PHASES.map((p, i) => {
-          const label = BASE_LABELS[p]
+        {sequence.map((n, i) => {
+          const key = stepKey(n)
+          const label = n.kind === 'base' ? BASE_LABELS[n.phase] : OFFICE_LABELS[n.code]
           const current = i === stepIndex
-          const opened = visited.includes(p)
+          const opened = visited.includes(key)
           const blocked = jumpBlocked(i)
           // A tick says "this section is finished", not "you have walked past
           // it": it comes from the answers, so clearing a section takes its
           // tick with it and a section skipped over never gets one.
           const done = opened && stepComplete[i]
           return (
-            <li key={p}>
+            <li key={key}>
               <button
                 type="button"
                 onClick={() => void goTo(i)}
@@ -2393,14 +2733,56 @@ export function ApplyWizard() {
         </div>
       )}
 
-      {/*
-        The LGU Section's six clearance cards used to sit here. They are a
-        stage of their own now, reached after the first payment clears
-        (ClearanceStagePage) — see docs/clearances-after-payment.md. The
-        Mayor's / Business Permit is still neither offered nor explained: it is
-        the outcome of this whole application, so it is always attached
-        (permit_type_ids, by the effect above) and BPLO always receives the file.
-      */}
+      {/* ── LGU Clearances (item 76 · the last part before submitting) ─── */}
+      {phase === 'clearances' && (
+        <div>
+          <h1 className="display-serif mb-1 text-2xl text-ink-secondary">LGU Clearances</h1>
+          <div className="mb-6 h-px bg-ink/40" />
+          {/*
+            The Mayor's / Business Permit is neither offered nor explained
+            here: it is the outcome of this whole application, so it is always
+            attached (permit_type_ids, on creation) and BPLO always receives
+            the file. Only the six supporting clearances are a choice.
+
+            The cards themselves are <ClearanceStage>, shared with the
+            standalone /applications/:id/clearances route, so the Apply/Submit
+            semantics cannot drift into two subtly different copies.
+          */}
+          {applicationId === null ? (
+            <p className="text-sm text-ink-secondary">
+              Finish the sections before this one first — your clearances are attached to this
+              application, and it does not exist yet.
+            </p>
+          ) : (
+            <ClearanceStage
+              applicationId={applicationId}
+              business={carriedOverBusiness}
+              onRowsChange={setClearanceRows}
+              /*
+               * Apply opens that office's sheet, and here the sheet is a STEP
+               * of its own sitting immediately behind this one — not a panel
+               * swapped in over the cards. The jump is finished by an effect,
+               * because the sheet only joins the sequence once the reloaded
+               * row says the clearance is applied for.
+               */
+              onOpenOfficeForm={(code) => {
+                setOfficeFormsVersion((v) => v + 1)
+                setPendingOfficeJump(code)
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* ── Per-office application forms (p040-043) ────────────────────── */}
+      {officeCode && (
+        <OfficeFormSheet
+          code={officeCode}
+          data={officeData[officeCode] ?? {}}
+          business={carriedOverBusiness}
+          onChange={(d) => setOfficeData((prev) => ({ ...prev, [officeCode]: d }))}
+        />
+      )}
 
       {/* ── Business information (form sheet, p32) ─────────────────────── */}
       {phase === 'business' && (
@@ -3396,18 +3778,26 @@ export function ApplyWizard() {
               Your Business Permit application is ready to submit
             </p>
             {/*
-              What happens next, said here rather than discovered later. The six
-              LGU clearances used to be summarised on this screen because they
-              were picked three steps back; they are now a stage that opens once
-              the first payment clears, and an applicant who is not told that
-              would reasonably assume this filing was the whole of it.
+              What happens next, said here rather than discovered later, and
+              what this filing already contains. Everything is decided by the
+              time the applicant reaches this screen — payment is the only
+              thing left — so the summary names the clearances rather than
+              promising a stage that opens later.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              Once it is submitted and your first payment clears, the LGU
-              Clearances stage opens — sanitary, fire, zoning, environmental,
-              occupancy and market — and you choose there which ones to apply
-              for.
+              Submitting produces one Tax Order of Payment covering your Business Permit and every
+              clearance below. Nothing else is charged afterwards.
             </p>
+            {clearanceDecisions.length > 0 && (
+              <>
+                <p className="mt-6 text-lg font-medium text-royal">LGU Clearances</p>
+                <ul className="list-none space-y-0.5 p-0 text-sm text-ink-muted">
+                  {clearanceDecisions.map((d) => (
+                    <li key={d.code}>{d.text}</li>
+                  ))}
+                </ul>
+              </>
+            )}
             {priorPermitChoice && (
               <p className="tnum mt-6 text-sm text-ink-secondary">
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
@@ -3435,13 +3825,21 @@ export function ApplyWizard() {
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-4">
             {/*
-              * "Save & back to LGU Section" went with the office sheets. It
-              * existed because a sheet opened from a clearance card had to
-              * finish by returning to the cards rather than carrying on down
-              * the wizard; no step here opens another one any more, so every
-              * step's forward button is simply Next.
+              * A sheet opened from a clearance card finishes by going back to
+              * the cards, not by carrying on down the wizard: the applicant is
+              * mid-way through choosing clearances and has one form's worth of
+              * business here. Only sheets reached that way — `officeReturn` —
+              * change; reaching one from the section map still reads Next.
               */}
-            {!isLast ? (
+            {officeCode && officeReturn ? (
+              <PillButton
+                onClick={() => void returnToClearances()}
+                disabled={saving || stepMissing.length > 0}
+                className="min-w-28"
+              >
+                {saving ? 'Saving…' : 'Save & back to clearances'}
+              </PillButton>
+            ) : !isLast ? (
               <PillButton
                 onClick={() => void next()}
                 disabled={saving || stepMissing.length > 0}
@@ -3494,9 +3892,10 @@ export function ApplyWizard() {
       </div>
 
       {/*
-        The SUBMISSION dialog (p041, item 59) moved to the LGU Clearances stage
-        with the cards that opened it. Nothing in this wizard submits a
-        certificate the applicant already holds.
+        The SUBMISSION dialog (p041, item 59) lives inside <ClearanceStage>,
+        with the Submit button that opens it. It is not repeated here: the
+        upload posts straight to /clearances/{code}/held, so unlike the old
+        wizard there is no file waiting in the browser for a draft to exist.
       */}
 
       {/* ── WARNING · Clear All (p35) ──────────────────────────────────── */}

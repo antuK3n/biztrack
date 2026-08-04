@@ -8,28 +8,28 @@ use App\Models\Application;
 /**
  * What a filing has been assessed, what it has actually paid, and the gap.
  *
- * One ledger, two moments (docs/clearances-after-payment.md §"Decisions taken
- * to keep moving"): the business permit is paid to submit, and every clearance
- * applied for afterwards re-assesses into the same FeeAssessment row. So the
- * assessment is a running total, not a snapshot — and the only honest way to
- * know whether anything is still owed is to subtract what has cleared.
+ * One assessment, one payment (docs/clearances-before-payment.md). Everything
+ * including the six LGU clearances is decided before submission, `assessFees`
+ * runs once at submit over exactly those permit types, and the applicant pays
+ * that figure to move the filing into review.
  *
- * This lives in Support rather than on either service because two callers with
- * opposite jobs need the same number: ClearanceService reports it to the
- * applicant, and WorkflowService refuses to issue a permit while it is
- * positive. Putting it on one of them would have made the other depend on it
- * for a three-line sum.
+ * Three things used to live here and are deliberately gone:
+ *
+ *   `hasClearedPayment()` answered "may the clearance stage open?", which was
+ *   the whole of the after-payment design and is now the wrong question — the
+ *   stage opens while the filing is a draft (ClearanceService::isUnlocked).
+ *
+ *   `hasOutstandingBalance()` and the EPSILON that gave it a centavo's
+ *   tolerance existed for the gate in WorkflowService::approveAndIssue, which
+ *   held the permit until a clearance balance cleared. No balance can appear
+ *   behind a single payment, so the gate went and these went with it.
+ *
+ * What is left is a plain statement of the ledger. PaymentController charges
+ * `balance_due` rather than the assessment total — with one payment they are
+ * the same number, and charging what is owed is correct either way.
  */
 final class PermitFees
 {
-    /**
-     * Peso amounts are compared with a tolerance because both sides are
-     * decimal(14,2) round-tripped through PHP floats: a balance of 0.000000001
-     * is a paid filing, not an outstanding one, and half a centavo is not a
-     * debt any cashier can settle.
-     */
-    public const EPSILON = 0.005;
-
     /** @return array{total_assessed: float, total_paid: float, balance_due: float} */
     public static function balance(Application $application): array
     {
@@ -57,20 +57,6 @@ final class PermitFees
             'total_paid' => round($paid, 2),
             'balance_due' => $due,
         ];
-    }
-
-    /** True when this filing still owes money. */
-    public static function hasOutstandingBalance(Application $application): bool
-    {
-        return self::balance($application)['balance_due'] > self::EPSILON;
-    }
-
-    /** True once any payment on this filing has actually cleared. */
-    public static function hasClearedPayment(Application $application): bool
-    {
-        return $application->payments()
-            ->where('status', PaymentStatus::Completed->value)
-            ->exists();
     }
 
     /** Peso rendering for messages the applicant reads. */
