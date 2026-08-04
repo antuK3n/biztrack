@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { api, toApiError } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { ChatBubble } from './ChatBubble'
-import { BellIcon, CheckIcon, MailIcon } from './icons'
+import { BellIcon } from './icons'
 
 const ROLE_LABELS: Record<string, string> = {
   business_owner: 'Business owner',
@@ -229,53 +228,6 @@ function MobileTabBar({ user }: { user: User }) {
   )
 }
 
-function VerifyEmailBanner({ user }: { user: User }) {
-  const [state, setState] = useState<'idle' | 'sending' | 'sent' | 'failed'>('idle')
-  if (user.email_verified_at) return null
-
-  async function resend() {
-    setState('sending')
-    try {
-      await api.post('/auth/email/resend')
-      setState('sent')
-    } catch (error) {
-      console.error(toApiError(error).message)
-      setState('failed')
-    }
-  }
-
-  return (
-    <div className="mb-6 flex flex-col gap-3 rounded-xl bg-white px-4 py-3.5 text-sm text-ink shadow-card sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-2.5">
-        <MailIcon size={20} className="mt-px shrink-0 text-royal" />
-        <p>
-          <span className="font-semibold">Verify your email.</span> We sent a link to{' '}
-          <span className="font-semibold">{user.email}</span>. Verify it before you submit an
-          application.
-        </p>
-      </div>
-      {state === 'sent' ? (
-        <p className="flex shrink-0 items-center gap-1.5 font-semibold text-s-green">
-          <CheckIcon size={16} /> Sent. Check your inbox
-        </p>
-      ) : (
-        <button
-          type="button"
-          onClick={resend}
-          disabled={state === 'sending'}
-          className="shrink-0 text-left font-semibold text-royal underline underline-offset-2 hover:no-underline disabled:opacity-60 sm:text-right"
-        >
-          {state === 'sending'
-            ? 'Sending…'
-            : state === 'failed'
-              ? "Couldn't send. Try again"
-              : 'Resend verification email'}
-        </button>
-      )}
-    </div>
-  )
-}
-
 export function AppShell() {
   const user = useAuth((s) => s.user)
   if (!user) return null
@@ -288,8 +240,15 @@ export function AppShell() {
       {isOwner && <ChatBubble />}
 
       <main className="min-h-dvh lg:pl-20">
+        {/*
+          * No "verify your email" banner here (tester item 99). It nagged on every
+          * screen and claimed verification was required before submitting, which no
+          * route actually enforces. Verification itself is untouched: the emailed
+          * link still lands on /verify-email, and Profile still prints whether the
+          * address is verified. If it ever becomes a real gate, block the action
+          * that needs it — don't put the nag back on top of every page.
+          */}
         <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16">
-          <VerifyEmailBanner user={user} />
           <Outlet />
         </div>
       </main>

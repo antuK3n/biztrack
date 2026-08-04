@@ -58,6 +58,12 @@ import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../.
  *      nothing, because nothing is being issued. A card that showed them as a
  *      matched pair without saying so would be hiding the only difference that
  *      matters.
+ *
+ *   3. Six cards side by side read as six things you are supposed to do. They
+ *      are not: the step's rule is that ONE of them is decided, and no card is
+ *      individually required. Where a clearance is only for a particular kind
+ *      of premises, the card has to say so on its face — see APPLICABILITY
+ *      below and checklist item 98.
  */
 
 /** The five states the API reports, and how each is worn on the card. */
@@ -67,6 +73,48 @@ const STATE_META: Record<ClearanceState, { label: string; className: string }> =
   submitted: { label: 'Copy on file', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
   issued: { label: 'Issued', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
   rejected: { label: 'Refused', className: 'border-s-red/40 bg-s-red/10 text-s-red' },
+}
+
+/**
+ * Who a clearance is for, where the answer is not "every business".
+ *
+ * Checklist item 98: *"Market clearance should not be required. It is only
+ * required for stall holders."*
+ *
+ * Taken literally, nothing required it, and that was checked before writing
+ * anything. The step passes on `anyClearanceDecided` — ANY ONE of the six, and
+ * never a named one — and no other path singles the Market Clearance out:
+ * `ClearanceService::clearanceTypes` returns every non-BUSINESS permit type
+ * with no per-code rule, submission validates none of them individually, and
+ * the one MARKET-conditional question in the wizard (the stall count on the
+ * Business & Tax Profile step) is gated on a permit-code list every call site
+ * fills with BUSINESS alone, so it never fires. An applicant can reach Review &
+ * Submit having never touched this card.
+ *
+ * So the complaint is about the screen, not the rule. Six cards laid out
+ * identically, each with the same two buttons and the same fee sentence, read
+ * as six obligations — and the Market Clearance is the one of the six that most
+ * businesses genuinely have no business applying for. The card said nothing
+ * about that, and its fee sentence ("Applying adds nothing to your assessment")
+ * made it look like the cheap, harmless one to tick.
+ *
+ * The fix is to say who it is for, not to hide it. Hiding it would decide
+ * `docs/questions-for-malabon.md` A1 — whether the applicant chooses the six or
+ * BPLO determines them from the line of business and the location — by guessing
+ * that the system determines them, and we would be guessing it from data we do
+ * not collect: nothing in the wizard asks whether the premises is a market
+ * stall. An LGU that seeds this permit type wants its office on the screen; a
+ * greengrocer with a shopfront wants to know the card is not addressed to them.
+ * One sentence on the card does both.
+ *
+ * Keyed by code and deliberately sparse. A clearance with no entry is one that
+ * any business may need, which is the honest default and the same way an LGU's
+ * seventh seeded clearance behaves — it renders, with no note, rather than
+ * inheriting a claim nobody made about it.
+ */
+const APPLICABILITY: Record<string, string> = {
+  MARKET:
+    'Only for a business trading from a stall in a public or private market. If your premises is not a market stall, leave this one — nothing in this application asks for it.',
 }
 
 /**
@@ -151,6 +199,15 @@ interface ClearanceStageProps {
  * clearance has been dealt with — so requiring one or the other, rather than
  * Apply specifically, is what stops the rule from forcing an applicant to
  * apply for a certificate already in their hand.
+ *
+ * `.some` and not a set of codes, and that is the whole of item 98's answer.
+ * The rule has never named a clearance and must not learn to: a filing satisfies
+ * it with Zoning alone, and the Market Clearance is only ever one of six ways to
+ * satisfy it, never one of the six things needed. If this ever has to become
+ * "these specific clearances, for this kind of business", that is BPLO deciding
+ * the six rather than the applicant choosing them — A1 in
+ * docs/questions-for-malabon.md, and not a thing to arrive at by tightening this
+ * line.
  */
 export function anyClearanceDecided(rows: Clearance[]): boolean {
   return rows.some((r) => r.state !== 'available' || r.held_document !== null)
@@ -490,6 +547,18 @@ export function ClearanceStage({
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
         You are billed once, after you submit, for the business permit and everything chosen here.
       </p>
+      {/*
+        Item 98, said once at the top and again on the card it is about.
+
+        Six identical cards are read as six obligations, and the tester read
+        them that way — the Market Clearance is for stall holders and was
+        sitting there as an equal of the other five. Nothing forces it (see
+        APPLICABILITY), so what was missing was the sentence saying so.
+      */}
+      <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
+        Choose the ones your business needs — you do not need all six. Where a clearance is only for
+        a particular kind of premises, its card says who it is for.
+      </p>
 
       {/*
         role="status" so the consequence of the last press is announced, not
@@ -508,6 +577,20 @@ export function ClearanceStage({
           const state = STATE_META[row.state] ?? STATE_META.available
           const applied = row.state === 'applied' || row.state === 'issued'
           const held = row.held_document
+          const appliesTo = APPLICABILITY[code]
+          const appliesToId = `clearance-applies-${code}`
+
+          /*
+           * What Apply and Submit are described by, in the order a screen
+           * reader should hear it: why the button cannot be used, then who the
+           * clearance is for. Both are things you need BEFORE pressing, and a
+           * note that only a sighted reader gets is not a note that stops
+           * anyone applying for a market stall they do not have.
+           */
+          const buttonDescribedBy =
+            [unlocked ? null : 'clearances-locked', appliesTo ? appliesToId : null]
+              .filter(Boolean)
+              .join(' ') || undefined
 
           return (
             <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
@@ -523,6 +606,26 @@ export function ClearanceStage({
                 {/* The department relation is nullable server-side. */}
                 {row.permit_type.department?.name ?? 'Issuing office'}
               </p>
+
+              {/*
+                Who the clearance is for, above the fee and well above the
+                buttons — it is the question that decides whether the rest of
+                the card is addressed to this applicant at all.
+
+                Neutral styling, not a warning. Nothing is wrong and nothing is
+                blocked: a stall holder reads it and applies. Dressed in the red
+                the refusal panel uses, it would say the applicant had already
+                made a mistake by looking at the card.
+              */}
+              {appliesTo && (
+                <p
+                  id={appliesToId}
+                  className="mt-3 rounded-md border border-input-border bg-input/60 px-3 py-2 text-xs text-ink-secondary"
+                >
+                  <span className="font-semibold text-ink">Who this is for: </span>
+                  {appliesTo}
+                </p>
+              )}
 
               {/*
                 What each button costs, on the card, before either is pressed.
@@ -621,7 +724,7 @@ export function ClearanceStage({
                   type="button"
                   disabled={busy}
                   aria-disabled={!unlocked}
-                  aria-describedby={unlocked ? undefined : 'clearances-locked'}
+                  aria-describedby={buttonDescribedBy}
                   /*
                    * SUBMIT always opens the upload box. It used to toggle: a
                    * second click on "Submitted ✓" deleted the copy just
@@ -647,7 +750,7 @@ export function ClearanceStage({
                   type="button"
                   disabled={busy}
                   aria-disabled={!unlocked}
-                  aria-describedby={unlocked ? undefined : 'clearances-locked'}
+                  aria-describedby={buttonDescribedBy}
                   /*
                    * APPLY always opens this office's form. It used to toggle,
                    * so the second click quietly un-applied and opened nothing —

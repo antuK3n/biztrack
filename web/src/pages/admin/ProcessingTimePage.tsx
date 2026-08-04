@@ -118,7 +118,7 @@ function ControlChart({ department }: { department: ProcessingTimeDepartment }) 
               const point = item?.payload as ProcessingTimePoint | undefined
               return [
                 `${Number(value).toFixed(2)} days across ${point?.reviews ?? 0} reviews`,
-                point?.status === 'out_of_control' ? 'Outside range' : 'Mean turnaround',
+                point?.status === 'out_of_control' ? 'Outside the usual range' : 'Average turnaround',
               ]
             }}
             labelFormatter={(label) => `Week of ${String(label)}`}
@@ -126,7 +126,7 @@ function ControlChart({ department }: { department: ProcessingTimeDepartment }) 
           <Line
             type="monotone"
             dataKey="mean_days"
-            name="Mean turnaround"
+            name="Average turnaround"
             stroke={ROYAL}
             strokeWidth={2.5}
             dot={<WeekDot />}
@@ -136,15 +136,17 @@ function ControlChart({ department }: { department: ProcessingTimeDepartment }) 
         </LineChart>
       </ResponsiveContainer>
       <p className="mt-3 text-[13px] text-ink-muted">
-        {department.code} &middot; shaded band is the normal operating range &middot; black points mark weeks
-        outside range.
+        {department.code} &middot; each dot is one week&rsquo;s average &middot; the shaded band is
+        this office&rsquo;s usual range &middot; black dots mark the weeks that fell outside it.
       </p>
       <p className="mt-1 text-xs text-ink-muted">
-        Centre line {department.center.toFixed(2)} days, range {department.lcl.toFixed(2)} to{' '}
-        {department.ucl.toFixed(2)} days, fitted on the first {department.calibration_weeks} weeks.{' '}
+        A usual week averages {department.center.toFixed(2)} days, and anything from{' '}
+        {department.lcl.toFixed(2)} to {department.ucl.toFixed(2)} days counts as usual. That range
+        was worked out from this office&rsquo;s first {department.calibration_weeks} weeks and then
+        held still, so later weeks are measured against the same yardstick.{' '}
         {flaggedCount === 0
-          ? 'No week fell outside range.'
-          : `${flaggedCount} week${flaggedCount === 1 ? '' : 's'} outside range.`}
+          ? 'No week fell outside it.'
+          : `${flaggedCount} week${flaggedCount === 1 ? '' : 's'} fell outside it.`}
       </p>
     </ProtoCard>
   )
@@ -178,7 +180,9 @@ function StatusIndicator({ department }: { department: ProcessingTimeDepartment 
         <Info metric="departments.status" />
       </p>
       <p className="mt-2 text-xs text-ink-muted">
-        Week of {weekLabel(department.latest_week)} averaged {department.latest_mean_days.toFixed(2)} days.
+        The week of {weekLabel(department.latest_week)} averaged{' '}
+        {department.latest_mean_days.toFixed(2)} days, which is {outside ? 'outside' : 'inside'} this
+        office&rsquo;s usual range.
       </p>
     </ProtoCard>
   )
@@ -189,7 +193,7 @@ function FlaggedWeeks({ department }: { department: ProcessingTimeDepartment }) 
     return (
       <ProtoCard className="px-5 py-6">
         <p className="text-sm text-ink-secondary">
-          No week in this window fell outside {department.code}&apos;s normal operating range.
+          No week in this window fell outside {department.code}&apos;s usual range.
         </p>
       </ProtoCard>
     )
@@ -239,7 +243,7 @@ function SlowdownDetector({ departments }: { departments: ProcessingTimeDepartme
           <div key={department.code} className="flex items-center gap-4 px-5 py-4">
             <div className="w-28 shrink-0">
               <p className="text-sm font-bold text-ink">{department.code}</p>
-              <p className="text-[11px] text-ink-muted">weighted trend</p>
+              <p className="text-[11px] text-ink-muted">recent trend</p>
             </div>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
               <div
@@ -398,11 +402,12 @@ export function ProcessingTimePage() {
             title="Not enough review history to chart yet"
             description={
               <>
-                Across the last {data.window_weeks} weeks the offices completed{' '}
+                Across the last {data.window_weeks} weeks the offices finished{' '}
                 {data.completed_reviews}
                 <Info metric="completed_reviews" /> reviews, but no single week reached the{' '}
-                {data.min_completions_per_week} completions a control chart needs before its average
-                means anything. The chart appears on its own once review volume gets there.
+                {data.min_completions_per_week} finished reviews needed before a weekly average means
+                anything. The chart appears on its own once enough reviews are being finished each
+                week.
               </>
             }
           />

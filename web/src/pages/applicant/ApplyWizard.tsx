@@ -154,6 +154,7 @@ const BASE_LABELS: Record<BasePhase, string> = {
 }
 
 const OFFICE_LABELS: Record<OfficeFormCode, string> = {
+  ZONING: 'Locational Clearance Form',
   SANITARY: 'Sanitary Permit Form',
   CEC: 'Environmental Clearance Form',
   FSIC: 'Fire Safety (FSIC) Form',
@@ -1425,6 +1426,24 @@ export function ApplyWizard() {
          * the counter has to send back.
          *
          * Either half of the card satisfies it — see anyClearanceDecided.
+         *
+         * ITEM 98 — "Market clearance should not be required. It is only
+         * required for stall holders." It is not required, and never was by
+         * this branch: the test is "at least one of the six", so it is
+         * satisfied by Zoning alone and names no clearance at all. Nothing
+         * elsewhere requires MARKET specifically either — the check is written
+         * up on APPLICABILITY in ClearanceStagePage.
+         *
+         * Which is why the answer to item 98 is on the card and not here. The
+         * complaint was that six identical cards read as six obligations, so
+         * the Market Clearance card now says who it is for; this rule stays as
+         * loose as it was. Do not turn this into a per-business set of required
+         * codes without an answer to A1 in docs/questions-for-malabon.md — that
+         * would be BPLO determining the clearances, which is the open question
+         * the whole chooser is built on top of.
+         *
+         * The sentence below is what the "still needed on this part" summary
+         * reads out, so it opens with the rule and not with a clearance's name.
          */
         case 'clearances':
           return anyClearanceDecided(clearanceRows)
@@ -2743,6 +2762,11 @@ export function ApplyWizard() {
             here: it is the outcome of this whole application, so it is always
             attached (permit_type_ids, on creation) and BPLO always receives
             the file. Only the six supporting clearances are a choice.
+
+            A choice, and individually optional — item 98's "market clearance
+            should not be required" holds for all six. The step asks for one
+            decision, not six, and the cards say which businesses each is
+            addressed to.
 
             The cards themselves are <ClearanceStage>, shared with the
             standalone /applications/:id/clearances route, so the Apply/Submit

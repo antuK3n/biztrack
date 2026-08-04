@@ -126,18 +126,25 @@ it('carries the full contract shape on every row', function () {
     expect($row['permit_type']['department'])->toHaveKeys(['code', 'name']);
     expect($row['permit_type']['department']['code'])->toBe('CHO');
     expect($row['state'])->toBe('available');
-    // SANITARY is one of the four with an applicant-facing sheet; nothing is
-    // saved on it yet.
+    // SANITARY is one of the clearances with an applicant-facing sheet;
+    // nothing is saved on it yet.
     expect($row['has_office_form'])->toBeTrue()
         ->and($row['office_form_complete'])->toBeFalse()
         ->and($row['held_document'])->toBeNull()
         ->and($row['assignment'])->toBeNull()
         ->and($row['fee_preview'])->toBeString();
 
-    // Zoning and market have no form sheet in the prototype.
-    $zoning = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'))
-        ->firstWhere('permit_type.code', 'ZONING');
-    expect($zoning['has_office_form'])->toBeFalse();
+    /*
+     * Zoning gained a sheet with checklist item 101, built from the Revenue
+     * Code's zoning article because CPDO has never sent its paper form
+     * (docs/questions-for-malabon.md E4). Market is now the only one of the six
+     * without a sheet, and for exactly the same reason — no source document to
+     * build one from. Asserted as a pair so that adding the Market sheet later
+     * has to come here and say so.
+     */
+    $rows = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'));
+    expect($rows->firstWhere('permit_type.code', 'ZONING')['has_office_form'])->toBeTrue()
+        ->and($rows->firstWhere('permit_type.code', 'MARKET')['has_office_form'])->toBeFalse();
 });
 
 it('carries no ledger in meta, because a draft owes nothing', function () {

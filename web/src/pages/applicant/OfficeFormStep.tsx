@@ -4,11 +4,11 @@ import { formatDate } from '../../lib/format'
 
 /*
  * Per-office application form sheets (UI prototype Parts 4-7, pages 040-043).
- * One step per selected inspection-office permit type that has a prototype form:
- * SANITARY, CEC, FSIC, OCCUPANCY. Fields are free-form and persisted verbatim
- * as opaque JSON via PUT office-forms/{code}. The auto-generated control numbers
- * (SP-2026-…, CEC-2026-…, FSIC-…) are read-only placeholders per the prototype —
- * the real number is minted server-side on issuance.
+ * One step per selected clearance that has a form sheet: ZONING, SANITARY, CEC,
+ * FSIC, OCCUPANCY. Fields are free-form and persisted verbatim as opaque JSON
+ * via PUT office-forms/{code}. The auto-generated control numbers (SP-2026-…,
+ * CEC-2026-…, FSIC-…) are read-only placeholders per the prototype — the real
+ * number is minted server-side on issuance.
  *
  * The form never asks for anything the system already holds. Whether this is a
  * new or renewal application, the date it was filed, and which certificate the
@@ -16,6 +16,27 @@ import { formatDate } from '../../lib/format'
  * every read and write, and they are shown here read-only so the sheet still
  * carries what the paper form needs. Issuance dates ("Date Issued") belong to
  * the office that issued the document and are filled in during officer review.
+ *
+ * ── One of these five is not like the others ──────────────────────────────
+ *
+ * Four sheets were transcribed from paper: the prototype carries the CHO, CENRO,
+ * BFP and OBO forms with their own field labels and form reference numbers, so
+ * what BizTrack asks is what the counter asks, word for word.
+ *
+ * ZONING has no such source. `docs/questions-for-malabon.md` E4 has asked CPDO
+ * for their locational clearance form since the first round of testing and it
+ * has never arrived; the prototype omits the sheet entirely, which is why
+ * checklist item 101 exists. So the sheet below is built from the only
+ * authoritative CPDO material in the repo — the Revenue Code's zoning article,
+ * transcribed in `docs/revenue-code-extract.md` — plus the documents the ZONING
+ * permit type already requires. Every field carries a marker saying which it is:
+ *
+ *   TRANSCRIBED — the wording comes from the ordinance itself.
+ *   INFERRED    — the office demonstrably needs the answer, but nobody at CPDO
+ *                 has confirmed that they ask for it in these words.
+ *
+ * Nothing here is presented to the applicant as an official CPDO field name.
+ * When the real form arrives, the INFERRED fields are the ones to throw away.
  */
 
 export type OfficeFormData = Record<string, unknown>
@@ -24,7 +45,7 @@ export type OfficeFormData = Record<string, unknown>
  * What the applicant has already told us about the business, as every office
  * sheet needs it printed at the top.
  *
- * The paper versions of these four forms each open by asking for the name, the
+ * The paper versions of these forms each open by asking for the name, the
  * address and the trade — which the applicant has answered three sections
  * earlier. Carrying the answers instead of re-asking is the whole point of
  * filing online, but carrying them silently is worse than re-asking: the
@@ -38,8 +59,15 @@ export interface CarriedOverBusiness {
   lineOfBusiness: string
 }
 
-/** Which permit-type codes have a prototype form, in wizard order. */
-export const OFFICE_FORM_CODES = ['SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'] as const
+/**
+ * Which permit-type codes open a form sheet, in wizard order.
+ *
+ * Deliberately duplicated: `PermitType::OFFICE_FORM_CODES` in the API holds the
+ * same list, because the clearance stage has to answer "does Apply open a
+ * form?" from a database row and this file cannot be imported from PHP. The two
+ * must be changed together or a card offers a sheet that does not exist.
+ */
+export const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'] as const
 export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 
 /** Kicker + h1 + form-ref for each office form sheet (verbatim from prototype). */
@@ -47,6 +75,19 @@ export const OFFICE_FORM_META: Record<
   OfficeFormCode,
   { kicker: string; title: string; ref: string }
 > = {
+  /*
+   * No form reference number, because there is no form. The other four cite the
+   * document they were copied from; inventing a code here would dress a sheet we
+   * assembled ourselves as one CPDO issued. The legal basis is real and is what
+   * the line says instead. The Revenue Code section behind the fee is
+   * deliberately absent — checklist item 18 keeps those citations off applicant
+   * screens (questions-for-malabon A12).
+   */
+  ZONING: {
+    kicker: 'City Planning & Development Office · Office of the Zoning Administrator',
+    title: 'Application for Locational Clearance',
+    ref: 'Malabon Zoning Ordinance · business locational clearance',
+  },
   SANITARY: {
     kicker: 'City Health Office · Sanitation Division',
     title: 'Application for Sanitary Permit to Operate',
@@ -91,6 +132,18 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   const missing: string[] = []
   // Derived answers (type of application, filing date, certificate applied for)
   // are never required here: the API fills them in, so they cannot be missing.
+  if (code === 'ZONING') {
+    // The land use category is the one answer CPDO cannot get from anywhere
+    // else on the filing, and the verification it charges for is a check
+    // against it — so it is the only required field on the sheet.
+    if (!has('zoning_land_use_category')) missing.push('Proposed Land Use')
+    if (
+      has('zoning_operating_since') &&
+      (data.zoning_operating_since as string) > todayISO()
+    ) {
+      missing.push('The date operations began cannot be in the future')
+    }
+  }
   if (code === 'SANITARY') {
     if (!has('sanitary_classification')) missing.push('Sanitary Classification')
   }
@@ -154,18 +207,31 @@ function ChipOption({
   )
 }
 
-/** A row of chip options bound to a single string value. */
+/**
+ * A row of chip options bound to a single string value.
+ *
+ * `label` names the group for a screen reader. The chips announce themselves as
+ * radio buttons, and a radio with no group around it is read as one loose
+ * control — the listener hears "Commercial, radio button" with nothing saying
+ * what is being chosen. Optional only because the four older sheets predate it.
+ */
 function ChipRow({
   options,
   value,
   onChange,
+  label,
 }: {
   options: string[]
   value: string
   onChange: (v: string) => void
+  label?: string
 }) {
   return (
-    <div className="flex flex-wrap gap-2.5">
+    <div
+      className="flex flex-wrap gap-2.5"
+      role={label ? 'radiogroup' : undefined}
+      aria-label={label}
+    >
       {options.map((o) => (
         <ChipOption key={o} label={o} selected={value === o} onClick={() => onChange(o)} />
       ))}
@@ -239,11 +305,11 @@ function DerivedField({
  * group that could not reach it. `readOnly` looks the same and stays
  * announceable.
  *
- * Every value here is a single answer shared by all four sheets, which is why
+ * Every value here is a single answer shared by every sheet, which is why
  * locking it is safe. Anything an individual office asks in its own words — the
- * sanitary classification, the occupancy split, the authorised representative —
- * stays a real question on that sheet, because two forms asking a
- * similar-sounding question are not always asking the same one.
+ * sanitary classification, the occupancy split, the authorised representative,
+ * the proposed land use — stays a real question on that sheet, because two
+ * forms asking a similar-sounding question are not always asking the same one.
  */
 function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
   return (
@@ -324,6 +390,207 @@ export const SANITARY_CLASSIFICATIONS = [
 ]
 
 export const OCCUPANCY_SCOPES = ['Full', 'Partial']
+
+/**
+ * TRANSCRIBED — the land use categories CPDO verifies against, taken from the
+ * Zoning and Land Use Verification Fee schedule in the Revenue Code's zoning
+ * article (`docs/revenue-code-extract.md`, Article D).
+ *
+ * One liberty was taken, and it is worth naming: the verification schedule
+ * prints "Commercial and industrial" as a single line because both are charged
+ * the same. The processing schedule on the facing page lists them separately,
+ * and they are not the same land use — so they are two options here. Commercial
+ * leads because it is what nearly every business permit filing will be.
+ *
+ * The last entry is the ordinance's "Ancillary", whose fee is charged
+ * "according to the category of principal building/structure" — which is why it
+ * is phrased as a relationship to another building rather than a use of its own.
+ */
+export const ZONING_LAND_USE_CATEGORIES = [
+  'Commercial',
+  'Industrial',
+  'Residential',
+  'Social, Educational or Institutional',
+  'Ancillary to a principal building',
+]
+
+/**
+ * INFERRED — nobody at CPDO has confirmed this question, but the office plainly
+ * has to answer it: the ordinance gives an already-operating non-conforming use
+ * a *certificate of non-conformance* rather than a locational clearance, and it
+ * surcharges an operation running without either. A sheet that never asks
+ * whether the business is already trading at the address leaves the zoning
+ * officer to work it out from the filing date, which does not say.
+ */
+export const ZONING_OPERATING_STATUS = [
+  'Not yet operating at this address',
+  'Already operating at this address',
+]
+
+/**
+ * The CPDO locational clearance sheet — the one assembled rather than copied.
+ *
+ * Read the block at the top of this file first: there is no CPDO paper form in
+ * the repo, so each section below says where its questions came from. Two of the
+ * three sections ask the applicant nothing at all, which is the point — the
+ * office needs the answers, and the filing already carries them.
+ */
+function ZoningFields({
+  data,
+  set,
+}: {
+  data: OfficeFormData
+  set: (key: string, value: string) => void
+}) {
+  const alreadyOperating = get(data, 'zoning_operating_status') === ZONING_OPERATING_STATUS[1]
+  const since = get(data, 'zoning_operating_since')
+  const sinceInFuture = since !== '' && since > todayISO()
+
+  return (
+    <div className="space-y-7">
+      <section className="space-y-4">
+        <SectionMarker letter="A" label="Application Details" />
+        <div className="grid gap-5 sm:grid-cols-2">
+          {/* New vs renewal is the application's own type — never re-asked. */}
+          <DerivedField
+            label={
+              <>
+                Type of Application
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'application_type')}
+          />
+          {/*
+           * MCZ is the prefix the register already mints zoning permits under,
+           * so the placeholder shows the shape of the number the applicant will
+           * eventually be given rather than a shape we made up for the box.
+           */}
+          <ControlNoField
+            label={
+              <>
+                Locational Clearance No.
+                <AutoTag />
+              </>
+            }
+            placeholder="MCZ-2026-________"
+          />
+          <ApplicationDateField data={data} />
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <SectionMarker letter="B" label="Site & Proposed Use" />
+        <div>
+          {/*
+           * TRANSCRIBED. This is the whole transaction: the office charges a
+           * land use verification fee, and what it verifies is the use declared
+           * here against the zone the address falls in. It is the only question
+           * on the sheet the filing cannot answer for itself, and the only one
+           * marked required.
+           */}
+          <FieldLabel required>Proposed Land Use</FieldLabel>
+          <ChipRow
+            label="Proposed land use"
+            options={ZONING_LAND_USE_CATEGORIES}
+            value={get(data, 'zoning_land_use_category')}
+            onChange={(v) => set('zoning_land_use_category', v)}
+          />
+          <p className="mt-2 text-xs text-ink-muted">
+            What the premises will be used for. CPDO checks this against the zone your address falls
+            in and makes the final determination during processing.
+          </p>
+        </div>
+        <div className="grid gap-5 sm:grid-cols-2">
+          {/*
+           * TRANSCRIBED as a requirement, derived as an answer: the zoning
+           * processing fee is charged per square metre of total floor area, so
+           * the office cannot assess the clearance without this number. The
+           * applicant gave it two steps ago on the Business & Tax Profile.
+           */}
+          <DerivedField
+            label={
+              <>
+                Total Floor Area (sq. m.)
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'total_floor_area_sqm')}
+            hint="From the floor area you entered on Business & Tax Profile."
+          />
+          {/*
+           * TRANSCRIBED as a requirement — the ZONING clearance already demands
+           * a Lease Contract or Land Title, so the office is asking what right
+           * the applicant holds over the site. Whether the premises are rented,
+           * and from whom, is answered on Location & Zoning.
+           */}
+          <DerivedField
+            label={
+              <>
+                Right Over the Site
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'site_tenure')}
+            hint="Attach the matching land title or lease contract with your documents."
+          />
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <SectionMarker letter="C" label="Status of the Activity" />
+        {/*
+         * INFERRED — see ZONING_OPERATING_STATUS. An establishment already
+         * trading at the address is a different transaction from a proposed
+         * one, and only the applicant knows which this is.
+         */}
+        <div>
+          <FieldLabel>Is the business already operating at this address?</FieldLabel>
+          <ChipRow
+            label="Is the business already operating at this address?"
+            options={ZONING_OPERATING_STATUS}
+            value={get(data, 'zoning_operating_status')}
+            onChange={(v) => set('zoning_operating_status', v)}
+          />
+          <p className="mt-2 text-xs text-ink-muted">
+            Answer honestly. An establishment already trading is assessed differently from one that
+            has not opened, and saying so here is not an admission of anything.
+          </p>
+        </div>
+        {/*
+         * The date only exists for one of the two answers, so it stays closed
+         * until that answer is given rather than sitting there inapplicable.
+         */}
+        {alreadyOperating && (
+          <div className="sm:w-1/2 sm:pr-2.5">
+            <label className="block">
+              <FieldLabel>Operating at this address since</FieldLabel>
+              {/* A business cannot have started trading tomorrow. */}
+              <input
+                type="date"
+                max={todayISO()}
+                value={since}
+                onChange={(e) => set('zoning_operating_since', e.target.value)}
+                className={inputCls}
+                aria-invalid={sinceInFuture}
+                aria-describedby={sinceInFuture ? 'zoning-operating-since-error' : undefined}
+              />
+            </label>
+            {sinceInFuture && (
+              <p
+                id="zoning-operating-since-error"
+                role="alert"
+                className="mt-1 text-xs font-medium text-s-red"
+              >
+                The date operations began must be today or earlier.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
 
 function SanitaryFields({
   data,
@@ -603,6 +870,7 @@ export function OfficeFormSheet({
         {/* First, so the sheet opens by showing what it already knows rather
           * than by asking. */}
         <CarriedOverSection business={business} />
+        {code === 'ZONING' && <ZoningFields data={data} set={set} />}
         {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
         {code === 'CEC' && <CecFields data={data} set={set} />}
         {code === 'FSIC' && <FsicFields data={data} set={set} />}
