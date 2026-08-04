@@ -32,10 +32,10 @@ class PermitType extends Model
 
     /**
      * Display order for the six clearances, as the client's flow lays them out
-     * (docs/clearances-after-payment.md §"The shape"). Codes outside this list
+     * (docs/clearances-before-payment.md §"The flow"). Codes outside this list
      * — an LGU that adds a permit type later — sort after it by id, so a new
      * clearance appears at the end rather than silently vanishing from the
-     * stage.
+     * step.
      */
     public const CLEARANCE_ORDER = ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY', 'MARKET'];
 

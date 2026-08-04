@@ -9,33 +9,38 @@ use App\Models\Department;
 use App\Models\FeeAssessment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
-use App\Services\WorkflowService;
+use App\Services\ClearanceService;
 use App\Support\PermitFees;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\ValidationException;
 
 /*
- * The LGU clearance stage (docs/clearances-after-payment.md).
+ * The LGU clearance stage (docs/clearances-before-payment.md).
  *
- * The six clearances left the apply wizard and became their own stage, opened
- * by the first payment clearing. Each one applied for re-assesses the filing so
- * that office's lines join a running balance, and no permit is released while
- * the balance is positive. Uploading a copy the business already holds is the
- * other route and adds nothing — which is the whole asymmetry these tests are
- * here to pin down.
+ * The six clearances are the last thing decided before Review & Submit, and the
+ * whole filing — business permit and every clearance chosen — is assessed once
+ * at submit and paid for once. So the stage is open exactly while the
+ * application is a draft, and shut from submission onwards.
+ *
+ * These tests used to assert the opposite: the stage opened when the FIRST
+ * payment cleared, each clearance applied for accrued onto a running balance, a
+ * second payment settled it and a gate held the permit until it did. All of
+ * that is gone — see the SUPERSEDED header on
+ * docs/clearances-after-payment.md — and the tests that pinned it down have
+ * been rewritten rather than deleted, because the behaviour they described has
+ * a replacement that still needs pinning down.
  */
 
 /**
- * A filing owned by `owner@biztrack.local`, applying for the business permit
- * only, carried all the way to paid — which is where the clearance stage opens.
+ * A draft owned by `owner@biztrack.local`, asking for the business permit and
+ * nothing else yet — which is where the clearance stage is open.
  *
  * The fee profile is deliberately full. An empty one prices several clearances
  * at zero (no employees means no health certificates, no floor area means no
  * sanitary inspection fee), and a test asserting "the fee went up" against a
  * profile that cannot produce a fee proves nothing.
  */
-function paidClearanceApplication(string $name = 'Clearance Stage Cafe'): Application
+function draftClearanceApplication(string $name = 'Clearance Stage Cafe'): Application
 {
     authAs('owner@biztrack.local');
 
@@ -64,35 +69,25 @@ function paidClearanceApplication(string $name = 'Clearance Stage Cafe'): Applic
         ],
     ])->assertCreated()->json('data.id');
 
-    test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
-    test()->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
-
     return Application::findOrFail($appId);
 }
 
-/** The same filing, stopped before payment: submitted and awaiting the TOP. */
-function unpaidClearanceApplication(): Application
+/** The same filing, submitted: the clearances on it are now fixed. */
+function submittedClearanceApplication(string $name = 'Submitted Stage Store'): Application
 {
-    authAs('owner@biztrack.local');
+    $app = draftClearanceApplication($name);
 
-    $businessId = test()->postJson('/api/v1/businesses', [
-        'name' => 'Locked Stage Store',
-        'registration_type' => 'DTI',
-        'registration_number' => 'DTI-CLR-002',
-        'tin' => '123-456-789-000',
-        'address' => ['line1' => '13 Locked St.', 'barangay_id' => Barangay::first()->id],
-        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 100000]],
-    ])->assertCreated()->json('data.id');
+    test()->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
-    $appId = test()->postJson('/api/v1/applications', [
-        'business_id' => $businessId,
-        'application_type' => 'new',
-        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
-    ])->assertCreated()->json('data.id');
+    return $app->fresh();
+}
 
-    test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+/** Every fee line on a filing's Tax Order of Payment, lower-cased and joined. */
+function topOrderLabels(Application $app): string
+{
+    $fee = FeeAssessment::where('application_id', $app->id)->firstOrFail();
 
-    return Application::findOrFail($appId);
+    return strtolower(implode(' | ', array_column($fee->line_items, 'label')));
 }
 
 beforeEach(function () {
@@ -103,7 +98,7 @@ beforeEach(function () {
 // --- the shape ---------------------------------------------------------------
 
 it('lists the six clearances and never the permit the application is for', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     $rows = $this->getJson("/api/v1/applications/{$app->id}/clearances")
         ->assertOk()->json('data');
@@ -118,7 +113,7 @@ it('lists the six clearances and never the permit the application is for', funct
 });
 
 it('carries the full contract shape on every row', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     $row = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json('data'))
         ->firstWhere('permit_type.code', 'SANITARY');
@@ -145,25 +140,49 @@ it('carries the full contract shape on every row', function () {
     expect($zoning['has_office_form'])->toBeFalse();
 });
 
+it('carries no ledger in meta, because a draft owes nothing', function () {
+    $app = draftClearanceApplication();
+
+    $meta = $this->getJson("/api/v1/applications/{$app->id}/clearances")
+        ->assertOk()->json('meta');
+
+    /*
+     * `total_assessed`, `total_paid` and `balance_due` were here while a
+     * clearance applied for after payment raised a balance. On a draft every
+     * one of them would read zero, and a zero that actually means "not assessed
+     * yet" is a worse answer than no figure at all — it reads as "these are
+     * free".
+     */
+    expect(array_keys($meta))->toBe(['unlocked', 'locked_reason']);
+});
+
 // --- the unlock rule ---------------------------------------------------------
 
-it('keeps the stage locked until the first payment clears, with a reason that says what to do', function () {
-    $app = unpaidClearanceApplication();
+it('opens the stage while the application is still a draft', function () {
+    $app = draftClearanceApplication();
+
+    $meta = $this->getJson("/api/v1/applications/{$app->id}/clearances")
+        ->assertOk()->json('meta');
+
+    expect($meta['unlocked'])->toBeTrue()
+        ->and($meta['locked_reason'])->toBeNull();
+});
+
+it('shuts the stage the moment the filing is submitted, with a reason that says the choice is made', function () {
+    $app = submittedClearanceApplication();
 
     $meta = $this->getJson("/api/v1/applications/{$app->id}/clearances")
         ->assertOk()->json('meta');
 
     expect($meta['unlocked'])->toBeFalse()
         ->and($meta['locked_reason'])->toBeString()
-        // The next action, not the fact of being locked — "locked" is what the
-        // applicant can already see.
-        ->and($meta['locked_reason'])->toContain('Pay your Tax Order of Payment')
-        ->and((float) $meta['total_paid'])->toBe(0.0)
-        ->and($meta['balance_due'])->toBeGreaterThan(0);
+        // Not "pay first". The filing is with the office and the clearances on
+        // it were settled at submission.
+        ->and($meta['locked_reason'])->toContain('decided when you submitted');
 });
 
-it('refuses every write while the stage is locked', function () {
-    $app = unpaidClearanceApplication();
+it('refuses every write once the filing has been submitted', function () {
+    $app = submittedClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
@@ -176,20 +195,8 @@ it('refuses every write while the stage is locked', function () {
         ->and(ApplicationDocument::where('application_id', $app->id)->count())->toBe(0);
 });
 
-it('opens the stage once payment has cleared', function () {
-    $app = paidClearanceApplication();
-
-    $meta = $this->getJson("/api/v1/applications/{$app->id}/clearances")
-        ->assertOk()->json('meta');
-
-    expect($meta['unlocked'])->toBeTrue()
-        ->and($meta['locked_reason'])->toBeNull()
-        ->and((float) $meta['balance_due'])->toBe(0.0)
-        ->and($meta['total_paid'])->toEqual($meta['total_assessed']);
-});
-
-it('locks the stage again on a filing that was rejected', function () {
-    $app = paidClearanceApplication();
+it('keeps the stage shut on a filing that was rejected', function () {
+    $app = submittedClearanceApplication();
 
     authAs('bplo@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Wrong zone.'])->assertOk();
@@ -201,21 +208,41 @@ it('locks the stage again on a filing that was rejected', function () {
         ->and($meta['locked_reason'])->toContain('was not approved');
 });
 
-// --- applying: exactly that office's fee lines -------------------------------
+// --- applying: the clearance joins the one Tax Order of Payment --------------
 
-it('adds exactly that office’s fee lines and nothing else when a clearance is applied for', function () {
-    $app = paidClearanceApplication();
-
-    $before = FeeAssessment::where('application_id', $app->id)->firstOrFail();
-    $labelsBefore = array_column($before->line_items, 'label');
+it('writes no fee assessment when a clearance is applied for on a draft', function () {
+    $app = draftClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
 
-    $after = FeeAssessment::where('application_id', $app->id)->firstOrFail();
-    $labelsAfter = array_column($after->line_items, 'label');
+    /*
+     * There is nothing to bill yet. Assessing here would put a Tax Order of
+     * Payment against a filing nobody has sent, and the accrual that used to
+     * make that necessary is gone: `assessFees` runs once, at submit, over
+     * exactly the permit types the applicant finished with.
+     */
+    expect(FeeAssessment::where('application_id', $app->id)->exists())->toBeFalse()
+        ->and($app->fresh()->permitTypes->pluck('code'))->toContain('ZONING');
+});
 
-    $added = array_values(array_diff($labelsAfter, $labelsBefore));
-    $removed = array_values(array_diff($labelsBefore, $labelsAfter));
+it('puts exactly that office’s fee lines on the Tax Order of Payment and no other office’s', function () {
+    $plain = submittedClearanceApplication('Plain Permit Cafe');
+
+    $withZoning = draftClearanceApplication('Zoned Permit Cafe');
+    $this->postJson("/api/v1/applications/{$withZoning->id}/clearances/ZONING/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$withZoning->id}/submit")->assertOk();
+
+    $before = FeeAssessment::where('application_id', $plain->id)->firstOrFail();
+    $after = FeeAssessment::where('application_id', $withZoning->id)->firstOrFail();
+
+    $added = array_values(array_diff(
+        array_column($after->line_items, 'label'),
+        array_column($before->line_items, 'label')
+    ));
+    $removed = array_values(array_diff(
+        array_column($before->line_items, 'label'),
+        array_column($after->line_items, 'label')
+    ));
 
     // Sec. 3.D.01: filing 45 + land use verification 345 + processing 345.
     // Every added line is the City Planning Office's and no other's.
@@ -223,102 +250,159 @@ it('adds exactly that office’s fee lines and nothing else when a clearance is 
     foreach ($added as $label) {
         expect(strtolower($label))->toContain('locational clearance');
     }
-    // The re-assessment is additive: nothing the business permit was already
-    // charged is disturbed by asking a second office for something.
+    // Choosing a clearance is additive: nothing the business permit is charged
+    // for is disturbed by asking a second office for something.
     expect($removed)->toBe([])
         ->and(round((float) $after->total_amount - (float) $before->total_amount, 2))->toBe(735.0);
 });
 
-it('adds only the applied office’s lines, not every office’s', function () {
-    $app = paidClearanceApplication();
-
+it('bills only the chosen offices, not every office', function () {
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
-    $labels = array_column(FeeAssessment::where('application_id', $app->id)->firstOrFail()->line_items, 'label');
-    $joined = strtolower(implode(' | ', $labels));
+    $labels = topOrderLabels($app);
 
     // The City Health Office's line is there...
-    expect($joined)->toContain('sanitary inspection fee');
+    expect($labels)->toContain('sanitary inspection fee');
     // ...and no other office's clearance-gated line came with it.
-    expect($joined)->not->toContain('locational clearance')
-        ->and($joined)->not->toContain('fire safety inspection certificate fee');
+    expect($labels)->not->toContain('locational clearance')
+        ->and($labels)->not->toContain('fire safety inspection certificate fee');
 });
 
-it('routes the clearance to its own office as an assignment when applied for', function () {
-    $app = paidClearanceApplication();
-    $cho = Department::where('code', 'CHO')->firstOrFail();
+/*
+ * The whole point of the reorder, in one test.
+ *
+ * The client's instruction was that one Tax Order of Payment covers the
+ * business permit AND every clearance chosen. `assessFees` at submit was
+ * expected to already do this, because FeeCalculator gates each rule on the
+ * application's permit types — but "expected to" is not the same as checked,
+ * and this is the check.
+ */
+it('bills the business permit and every clearance chosen on one Tax Order of Payment', function () {
+    $app = draftClearanceApplication('Four Office Cafe');
 
-    expect(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $cho->id)->exists())
-        ->toBeFalse();
+    foreach (['ZONING', 'SANITARY', 'FSIC', 'OCCUPANCY'] as $code) {
+        $this->postJson("/api/v1/applications/{$app->id}/clearances/{$code}/apply")->assertOk();
+    }
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+
+    $labels = topOrderLabels($app);
+
+    expect($labels)
+        ->toContain('locational clearance')                      // CPDO
+        ->toContain('sanitary inspection fee')                   // CHO
+        ->toContain('fire safety inspection certificate fee')    // BFP
+        ->toContain('certificate of use/occupancy');             // OBO
+
+    // And none of the four is on a filing that asked for the business permit
+    // alone — which is what makes the four above the clearances' own lines
+    // rather than something every filing pays.
+    $plain = topOrderLabels(submittedClearanceApplication('One Office Cafe'));
+    expect($plain)
+        ->not->toContain('locational clearance')
+        ->not->toContain('sanitary inspection fee')
+        ->not->toContain('fire safety inspection certificate fee')
+        ->not->toContain('certificate of use/occupancy');
+
+    // And it is payable in one go — the amount charged is the whole assessment.
+    $assessed = (float) FeeAssessment::where('application_id', $app->id)->firstOrFail()->total_amount;
+    $paid = (float) $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])
+        ->assertCreated()->json('data.amount');
+
+    expect($paid)->toBe($assessed)
+        ->and(PermitFees::balance(Application::findOrFail($app->id))['balance_due'])->toBe(0.0);
+});
+
+it('routes every chosen clearance to its own office when the payment clears', function () {
+    $app = draftClearanceApplication();
+    $cho = Department::where('code', 'CHO')->firstOrFail();
 
     $row = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")
         ->assertOk()->json('data');
+
+    /*
+     * Nothing is routed yet, and that is deliberate rather than incidental.
+     * `assigned_at` is the start of the office's service-time clock that
+     * ProcessingTimeAnalytics, StaffingSimulation and DashboardAnalytics all
+     * measure; stamping it while the applicant is still typing would charge CHO
+     * for the days the draft sat open.
+     */
+    expect($row['state'])->toBe('applied')
+        ->and($row['assignment'])->toBeNull()
+        ->and(ApplicationAssignment::where('application_id', $app->id)->exists())->toBeFalse();
+
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     $assignment = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', $cho->id)->first();
 
     expect($assignment)->not->toBeNull()
-        ->and($assignment->status->value)->toBe('pending')
-        ->and($row['assignment']['id'])->toBe($assignment->id)
-        ->and($row['state'])->toBe('applied');
+        ->and($assignment->status->value)->toBe('pending');
+
+    authAs('owner@biztrack.local');
+    $after = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'))
+        ->firstWhere('permit_type.code', 'SANITARY');
+    expect($after['assignment']['id'])->toBe($assignment->id);
 });
 
-it('answers an apply with the new balance', function () {
-    $app = paidClearanceApplication();
-
-    $meta = $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")
-        ->assertOk()->json('meta');
-
-    expect((float) $meta['balance_due'])->toBe(735.0)
-        ->and((float) $meta['total_assessed'] - (float) $meta['total_paid'])->toBe(735.0);
-});
-
-it('previews what applying would add before it is applied for', function () {
-    $app = paidClearanceApplication();
+it('previews what applying will add before it is applied for', function () {
+    $app = draftClearanceApplication();
 
     $preview = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'))
         ->firstWhere('permit_type.code', 'ZONING')['fee_preview'];
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
-    $balance = $this->getJson("/api/v1/applications/{$app->id}/clearances")->json('meta.balance_due');
+    $plain = submittedClearanceApplication('Preview Baseline Cafe');
 
-    // The preview is the promise; the balance is what actually happened.
+    $withZoning = (float) FeeAssessment::where('application_id', $app->id)->firstOrFail()->total_amount;
+    $without = (float) FeeAssessment::where('application_id', $plain->id)->firstOrFail()->total_amount;
+
+    // The preview is the promise; the Tax Order of Payment is what it cost.
     expect($preview)->toBe('₱735.00')
-        ->and((float) $balance)->toBe(735.0);
+        ->and(round($withZoning - $without, 2))->toBe(735.0);
 });
 
 // --- un-applying -------------------------------------------------------------
 
-it('takes the fee and the assignment back off when a clearance is un-applied', function () {
-    $app = paidClearanceApplication();
-    $cpdo = Department::where('code', 'CPDO')->firstOrFail();
+it('takes the clearance and its fee lines back off when it is un-applied', function () {
+    $app = draftClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-    $raised = (float) FeeAssessment::where('application_id', $app->id)->firstOrFail()->total_amount;
-
     $body = $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk()->json();
 
-    $lowered = (float) FeeAssessment::where('application_id', $app->id)->firstOrFail()->total_amount;
-
-    expect($raised - $lowered)->toBe(735.0)
-        ->and((float) $body['meta']['balance_due'])->toBe(0.0)
-        ->and($body['data']['state'])->toBe('available')
+    expect($body['data']['state'])->toBe('available')
         ->and($body['data']['assignment'])->toBeNull()
-        // The office's queue item goes with it: an office asked for nothing has
-        // nothing to review.
-        ->and(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $cpdo->id)->exists())
-        ->toBeFalse();
+        ->and($app->fresh()->permitTypes->pluck('code'))->not->toContain('ZONING');
+
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+
+    // A clearance withdrawn before submission is not billed for.
+    expect(topOrderLabels($app))->not->toContain('locational clearance');
 });
 
+/*
+ * Defence in depth, and it says so.
+ *
+ * `officeHasActed` cannot be reached through the wizard any more: withdrawing
+ * is only possible on a draft, and no office holds an assignment on a draft.
+ * The guard stays because the endpoint is not the only way in and because the
+ * rule it states — an office that has started work has done something a
+ * cancel button must not erase — outlives the flow that made it reachable.
+ */
 it('will not let the applicant withdraw a clearance the office has already acted on', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
 
-    $assignment = ApplicationAssignment::where('application_id', $app->id)
-        ->where('department_id', Department::where('code', 'CHO')->firstOrFail()->id)
-        ->firstOrFail();
-    $assignment->update(['status' => 'in_progress']);
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'CHO')->firstOrFail()->id,
+        'status' => 'in_progress',
+        'assigned_at' => now(),
+    ]);
 
     authAs('owner@biztrack.local');
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")
@@ -327,49 +411,30 @@ it('will not let the applicant withdraw a clearance the office has already acted
     expect($app->fresh()->permitTypes->pluck('code'))->toContain('SANITARY');
 });
 
-it('leaves an office assignment alone when another clearance still routes to it', function () {
-    $app = paidClearanceApplication();
-    $bplo = Department::where('code', 'BPLO')->firstOrFail();
-
-    // BPLO already holds the business permit's own assignment from routing at
-    // payment. Nothing done to a clearance may take that away.
-    expect(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $bplo->id)->exists())
-        ->toBeTrue();
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    expect(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $bplo->id)->exists())
-        ->toBeTrue();
-});
-
 // --- the held copy: no fee ---------------------------------------------------
 
 it('adds no fee and no permit type when a held copy is uploaded', function () {
-    $app = paidClearanceApplication();
-
-    $before = FeeAssessment::where('application_id', $app->id)->firstOrFail();
+    $app = draftClearanceApplication();
 
     $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
         'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
     ])->assertCreated()->json();
 
-    $after = FeeAssessment::where('application_id', $app->id)->firstOrFail();
-
-    expect((float) $after->total_amount)->toBe((float) $before->total_amount)
-        ->and($after->line_items)->toBe($before->line_items)
-        ->and((float) $body['meta']['balance_due'])->toBe(0.0)
-        ->and($body['data']['state'])->toBe('submitted')
+    expect($body['data']['state'])->toBe('submitted')
         ->and($body['data']['held_document']['name'])->toBe('sanitary.pdf')
         ->and($body['data']['held_document']['size'])->toBeGreaterThan(0)
         // No permit type means no form, no assignment and no fee — the whole
         // reason submitting a copy is not the same act as applying.
         ->and($app->fresh()->permitTypes->pluck('code'))->not->toContain('SANITARY')
         ->and($body['data']['assignment'])->toBeNull();
+
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+
+    expect(topOrderLabels($app))->not->toContain('sanitary inspection fee');
 });
 
 it('records the held copy through the same mechanism the wizard uses', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -388,7 +453,7 @@ it('records the held copy through the same mechanism the wizard uses', function 
 });
 
 it('replaces an earlier held copy rather than stacking them', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -406,7 +471,7 @@ it('replaces an earlier held copy rather than stacking them', function () {
 });
 
 it('removes the held copy and its file', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -429,7 +494,7 @@ it('removes the held copy and its file', function () {
 });
 
 it('keeps applying and submitting mutually exclusive', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
@@ -444,67 +509,46 @@ it('keeps applying and submitting mutually exclusive', function () {
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
 });
 
-// --- the balance gates issuance ---------------------------------------------
+// --- issuance is no longer gated on money ------------------------------------
 
-it('refuses to issue a permit while a clearance balance is outstanding', function () {
-    $app = paidClearanceApplication();
-
-    // Apply for zoning after paying: ₱735 accrues and is not settled.
+/*
+ * There were four tests here holding a permit hostage to a balance: two on
+ * `approveAndIssue` throwing, one on the officer getting a 422 at the counter,
+ * and one on the permit being released the moment a second payment cleared.
+ *
+ * All four described a state that can no longer exist. A filing cannot reach
+ * an officer's queue until its one Tax Order of Payment has been settled, and
+ * nothing chargeable can be added to it after that — so a balance at approval
+ * time is not a case to guard against, it is a contradiction. What replaces
+ * them is the test below: a filing with clearances on it, paid for once, is
+ * issued when its offices sign off and nothing asks for money again.
+ */
+it('issues every permit once the offices sign off, with no balance to settle', function () {
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
-    $fresh = Application::findOrFail($app->id);
-
-    expect(fn () => app(WorkflowService::class)->approveAndIssue($fresh))
-        ->toThrow(ValidationException::class);
-
-    expect($fresh->fresh()->permits()->count())->toBe(0)
-        ->and($fresh->fresh()->status)->not->toBe(ApplicationStatus::Approved);
-});
-
-it('names the amount owed when it refuses to issue', function () {
-    $app = paidClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    try {
-        app(WorkflowService::class)->approveAndIssue(Application::findOrFail($app->id));
-        $this->fail('The permit was issued with a balance outstanding.');
-    } catch (ValidationException $e) {
-        $message = implode(' ', $e->errors()['balance_due']);
-        expect($message)->toContain('₱735.00')->and($message)->toContain('can’t be released');
-    }
-});
-
-it('refuses the officer’s approval at the counter while the balance is outstanding', function () {
-    $app = paidClearanceApplication();
-    // Zoning routes to CPDO and accrues ₱735 that is never settled.
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    $assignments = ApplicationAssignment::where('application_id', $app->id)->get();
-
-    // Every office signs off. The last approval is the one that would issue.
-    foreach ($assignments as $i => $assignment) {
-        $email = $assignment->department_id === Department::where('code', 'CPDO')->first()->id
+    foreach (ApplicationAssignment::where('application_id', $app->id)->get() as $assignment) {
+        authAs($assignment->department_id === Department::where('code', 'CPDO')->first()->id
             ? 'zoning@biztrack.local'
-            : 'bplo@biztrack.local';
-        authAs($email);
-
-        $response = $this->postJson("/api/v1/assignments/{$assignment->id}/approve");
-
-        if ($i === $assignments->count() - 1) {
-            // The real officer-facing behaviour: a 422 naming the amount, not a
-            // 500, and not a quietly issued permit.
-            $response->assertStatus(422)->assertJsonValidationErrors('balance_due');
-        } else {
-            $response->assertOk();
-        }
+            : 'bplo@biztrack.local');
+        $this->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     }
 
-    expect(Application::findOrFail($app->id)->permits()->count())->toBe(0);
+    $settled = Application::findOrFail($app->id);
+
+    // Both permits: the business permit and the zoning clearance applied for.
+    expect($settled->permits()->count())->toBe(2)
+        ->and($settled->status)->toBe(ApplicationStatus::Approved)
+        ->and(PermitFees::balance($settled)['balance_due'])->toBe(0.0);
 });
 
-it('releases the permit when the outstanding balance is finally paid', function () {
-    $app = paidClearanceApplication();
+it('reports a clearance as issued once its permit exists', function () {
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     foreach (ApplicationAssignment::where('application_id', $app->id)->get() as $assignment) {
         authAs($assignment->department_id === Department::where('code', 'CPDO')->first()->id
@@ -512,62 +556,6 @@ it('releases the permit when the outstanding balance is finally paid', function 
             : 'bplo@biztrack.local');
         $this->postJson("/api/v1/assignments/{$assignment->id}/approve");
     }
-
-    // Blocked, and every event that could have retried issuance has now been
-    // and gone: the offices have all signed off, so no further approval will
-    // ever fire. Paying is the only remaining event.
-    expect(Application::findOrFail($app->id)->permits()->count())->toBe(0);
-
-    $fresh = Application::findOrFail($app->id);
-    $payment = $fresh->payments()->create([
-        'fee_assessment_id' => $fresh->feeAssessment->id,
-        'reference_number' => 'TEST-CLEARANCE-SETTLED',
-        'amount' => 735.00,
-        'method' => 'gcash',
-        'status' => 'completed',
-        'paid_at' => now(),
-    ]);
-    app(WorkflowService::class)->onPaymentCompleted($payment->fresh());
-
-    $settled = Application::findOrFail($app->id);
-    expect($settled->permits()->count())->toBeGreaterThan(0)
-        ->and($settled->status)->toBe(ApplicationStatus::Approved);
-});
-
-it('issues once the clearance balance is settled', function () {
-    $app = paidClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    // Settle the accrued ₱735 the way the gateway would.
-    $fresh = Application::findOrFail($app->id);
-    $fresh->payments()->create([
-        'fee_assessment_id' => $fresh->feeAssessment->id,
-        'reference_number' => 'TEST-CLEARANCE-BALANCE',
-        'amount' => 735.00,
-        'method' => 'gcash',
-        'status' => 'completed',
-        'paid_at' => now(),
-    ]);
-
-    app(WorkflowService::class)->approveAndIssue($fresh->fresh());
-
-    expect(Application::findOrFail($app->id)->permits()->count())->toBeGreaterThan(0);
-});
-
-it('reports a clearance as issued once its permit exists', function () {
-    $app = paidClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    $fresh = Application::findOrFail($app->id);
-    $fresh->payments()->create([
-        'fee_assessment_id' => $fresh->feeAssessment->id,
-        'reference_number' => 'TEST-CLEARANCE-ISSUED',
-        'amount' => 735.00,
-        'method' => 'gcash',
-        'status' => 'completed',
-        'paid_at' => now(),
-    ]);
-    app(WorkflowService::class)->approveAndIssue($fresh->fresh());
 
     authAs('owner@biztrack.local');
     $row = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json('data'))
@@ -579,7 +567,7 @@ it('reports a clearance as issued once its permit exists', function () {
 // --- authorization -----------------------------------------------------------
 
 it('refuses a stranger the clearance list', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     // A different business owner, holding a perfectly valid session.
     authAs('juan@biztrack.local');
@@ -587,7 +575,7 @@ it('refuses a stranger the clearance list', function () {
 });
 
 it('refuses a stranger every clearance write', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     authAs('juan@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertForbidden();
@@ -603,8 +591,10 @@ it('refuses a stranger every clearance write', function () {
 });
 
 it('refuses an officer the clearance chooser even on a filing its office reviews', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     // The sanitary officer is routed this filing and may read the application
     // itself — but which clearances a business asks for is the applicant's
@@ -616,14 +606,14 @@ it('refuses an officer the clearance chooser even on a filing its office reviews
 // --- guards ------------------------------------------------------------------
 
 it('has no clearance endpoint for the permit the application is for', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/BUSINESS/apply")->assertNotFound();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/NOT_A_CODE/apply")->assertNotFound();
 });
 
 it('survives a filing whose business has been removed from the register', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $app->business->delete();
 
     $body = $this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json();
@@ -633,8 +623,8 @@ it('survives a filing whose business has been removed from the register', functi
         ->and($body['data'][0]['fee_preview'])->toBeNull()
         ->and($body['meta']['unlocked'])->toBeTrue();
 
-    // And both re-assessing writes say so rather than returning a 500 from a
-    // null dereference inside FeeCalculator.
+    // And both writes that need a price say so, rather than letting the
+    // applicant agree to a charge nobody can quote.
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")
         ->assertStatus(422);
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")
@@ -642,11 +632,11 @@ it('survives a filing whose business has been removed from the register', functi
 });
 
 it('still lets a held copy be filed when the business record has gone', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $app->business->delete();
 
-    // Nothing here re-assesses, so nothing here needs a price — the applicant
-    // can still hand in the certificate they hold.
+    // Nothing here needs a price — the applicant can still hand in the
+    // certificate they hold.
     $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
         'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
     ])->assertCreated()->json();
@@ -657,7 +647,7 @@ it('still lets a held copy be filed when the business record has gone', function
 });
 
 it('reports an office form as complete only once the applicant has saved it', function () {
-    $app = paidClearanceApplication();
+    $app = draftClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
 
     $row = fn () => collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'))
@@ -672,52 +662,27 @@ it('reports an office form as complete only once the applicant has saved it', fu
     expect($row()['office_form_complete'])->toBeTrue();
 });
 
-/*
- * The balance has to be payable through the endpoint an applicant actually
- * reaches, not only by writing a Payment row in a test.
- *
- * PaymentController::pay refused anything outside `pending_payment`, so once a
- * clearance raised a balance after the first payment there was no way to settle
- * it — and the permit is held until the balance clears. The applicant was left
- * in a room with no door: a bill they could see, could not pay, and which
- * blocked the thing they were waiting for.
- *
- * The tests above settled it by calling `payments()->create(...)` straight on
- * the model, which is why nothing caught it. This one goes through HTTP.
- */
-it('lets the applicant settle a clearance balance through the payment endpoint', function () {
-    $app = paidClearanceApplication('Balance Payable Cafe');
-
-    $before = PermitFees::balance(Application::findOrFail($app->id));
-    expect($before['balance_due'])->toBe(0.0);
-
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-
-    $raised = PermitFees::balance(Application::findOrFail($app->id));
-    expect($raised['balance_due'])->toBeGreaterThan(0.0);
-
-    authAs('owner@biztrack.local');
-    $response = $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])
-        ->assertCreated();
-
-    /*
-     * The charge is the outstanding balance, never the assessment total. The
-     * total now covers the business permit as well, and billing that again
-     * would take money this applicant has already handed over.
-     */
-    expect((float) $response->json('data.amount'))->toBe($raised['balance_due'])
-        ->and((float) $response->json('data.amount'))->toBeLessThan($raised['total_assessed']);
-
-    $settled = PermitFees::balance(Application::findOrFail($app->id));
-    expect($settled['balance_due'])->toBe(0.0)
-        ->and($settled['total_paid'])->toBe($raised['total_assessed']);
-});
-
 it('refuses a payment when the filing owes nothing', function () {
-    $app = paidClearanceApplication('Nothing Owed Cafe');
+    $app = submittedClearanceApplication('Nothing Owed Cafe');
 
     authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+
     $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])
         ->assertStatus(422)
         ->assertJsonPath('errors.status.0', 'This application has nothing outstanding.');
+});
+
+it('opens the stage for the service, and only for a draft', function () {
+    $service = app(ClearanceService::class);
+    $app = draftClearanceApplication('Service Level Cafe');
+
+    expect($service->isUnlocked($app))->toBeTrue()
+        ->and($service->lockedReason($app))->toBeNull();
+
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+
+    $submitted = $app->fresh();
+    expect($service->isUnlocked($submitted))->toBeFalse()
+        ->and($service->lockedReason($submitted))->toBeString();
 });

@@ -80,58 +80,64 @@ test('the wizard will not advance until consent is given, and says why', async (
   await expect(next).toBeEnabled()
 })
 
-test('the wizard is the business permit alone — no clearances, no office sheets', async ({
-  page,
-}) => {
+test('the LGU clearances are the last part before Review & Submit', async ({ page }) => {
   /*
-   * ── What changed here, and why ────────────────────────────────────────
+   * ── What this test has been through ───────────────────────────────────
    *
-   * This test used to be called "the LGU permits step comes after the business
-   * is described", and it asserted that the permits step EXISTS and sits in a
-   * particular place: `at('business') < at('permits') < at('documentary')` and
-   * `at('permits') < at('tax profile') < at('documentary')`.
+   * It began as "the LGU permits step comes after the business is described",
+   * asserting `business < permits < documentary` and
+   * `permits < tax profile < documentary`. That ordering was forced by a data
+   * dependency: the documents were the union of the document types on the
+   * selected permit types, and the tax profile's questions varied by permit
+   * code, so both had to follow the cards. Checklist item 76 — "place this at
+   * the last part before submitting" — was recorded as a deviation.
    *
-   * Every one of those assertions had to go, because the thing they were
-   * about is gone. The six clearances moved out of the wizard entirely and
-   * became a stage that opens after the first payment
-   * (docs/clearances-after-payment.md, decided 3 August 2026). A test that
-   * still demanded a permits step would now be demanding the bug back.
+   * It then became "the wizard is the business permit alone", when the six
+   * clearances were moved out into a stage that opened after the first payment.
+   * That lasted a day: it cost an accruing balance, a second payment, a gate
+   * holding the permit, and a locked stage.
    *
-   * The old ordering rule was `permits` before `tax profile` before
-   * `documentary`, and it was forced: the documents were the union of the
-   * document types on the selected permit types and the tax questions varied by
-   * permit code, so both had to follow the cards. Note that the last two are
-   * now in the OPPOSITE order — documentary before tax profile. That is not a
-   * cosmetic swap, it is the evidence that the dependency is really gone:
-   * nothing computes either step from a later answer any more, so they run in
-   * the order the client's diagram gives rather than the order the data forced.
-   *
-   * What is asserted instead is the property that actually matters and that a
-   * merge could silently undo: the wizard describes ONE permit.
+   * What it asserts now is item 76 as asked for
+   * (docs/clearances-before-payment.md). The clearances are step 6 of 7, the
+   * last decision before Review & Submit, and everything is paid for once
+   * afterwards. Note that Documentary Requirements still precedes the tax
+   * profile — the reverse of the original forced order, which is the evidence
+   * that the dependency really is gone rather than merely reordered around.
    */
   const map = await page.locator('ol[aria-label="Application sections"] li').allTextContents()
   const joined = map.join(' | ').toLowerCase()
 
-  // Exactly six sections, and no office form sheet among them. The sheets used
-  // to slot into the middle of this map the moment a clearance was ticked.
-  expect(map, `the section map is not the six business-permit phases: ${joined}`).toHaveLength(6)
-  for (const gone of ['permits & certificates', 'sanitary', 'fsic', 'fire safety', 'occupancy form', 'environmental']) {
-    expect(joined, `"${gone}" is still a step in the wizard`).not.toContain(gone)
+  /*
+   * Seven sections on a fresh filing. Office form sheets slot into this map
+   * behind the clearances step, one per clearance applied for, so the count
+   * grows from here — it does not start higher.
+   */
+  expect(map, `the section map is not the seven phases: ${joined}`).toHaveLength(7)
+  // The old catch-all step that bundled the six with the mayor's permit.
+  expect(joined, '"permits & certificates" is back as a step').not.toContain(
+    'permits & certificates',
+  )
+  // No sheet is a step until its clearance has been applied for.
+  for (const sheet of ['sanitary permit form', 'fire safety', 'occupancy permit form']) {
+    expect(joined, `"${sheet}" is a step before any clearance was applied for`).not.toContain(sheet)
   }
 
   const at = (label: string) => joined.indexOf(label)
   expect(at('privacy'), 'privacy consent missing from the step map').toBeGreaterThanOrEqual(0)
 
   // Consent before collection; the business described before the paperwork
-  // that describes it; and the two derived steps last, in the paper's order.
+  // that describes it; the clearances after everything their office sheets are
+  // filled in from; and Review last.
   expect(at('privacy')).toBeLessThan(at('location & zoning'))
   expect(at('location & zoning')).toBeLessThan(at('business information'))
   expect(at('business information')).toBeLessThan(at('documentary'))
   expect(at('documentary')).toBeLessThan(at('tax profile'))
-  expect(at('tax profile')).toBeLessThan(at('review'))
+  expect(at('tax profile')).toBeLessThan(at('lgu clearances'))
+  expect(at('lgu clearances')).toBeLessThan(at('review'))
 
-  // The count is part of the promise: "Part 1 of 8" was the old flow.
-  await expect(page.getByText(/part 1 of 6/i).first()).toBeVisible()
+  // The count is part of the promise: "Part 1 of 8" was the original flow and
+  // "Part 1 of 6" was the day the clearances lived outside the wizard.
+  await expect(page.getByText(/part 1 of 7/i).first()).toBeVisible()
 })
 
 test('line of business is asked once, and the one ask is the searchable picker', async ({

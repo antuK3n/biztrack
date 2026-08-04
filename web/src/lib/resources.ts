@@ -263,26 +263,27 @@ export const applications = {
     unwrap<FeeAssessment>(api.post(`/applications/${id}/fee/adjust`, { line_items, total_amount })),
 }
 
-/* ── LGU Clearances (the stage after the first payment) ────────────────── */
+/* ── LGU Clearances (the last wizard step before Review & Submit) ─────── */
 
 /**
- * The six supporting clearances for one application, and the balance.
+ * The six supporting clearances for one application.
  *
- * Contract: docs/clearances-after-payment.md. Every mutation here resolves to
+ * Contract: docs/clearances-before-payment.md. Every mutation here resolves to
  * the WHOLE list rather than the row it touched, even though the API also
- * returns the row on its own. That is deliberate and it is about money:
- * applying re-runs `FeeCalculator::assess`, and the Fire Code fee is 10% of the
- * mayor's permit plus regulatory fees (RA 9514) — so applying for one clearance
- * can move ANOTHER clearance's `fee_preview` as well as the balance. Patching
- * the single returned row into local state would leave the other five quoting
- * prices the assessment no longer agrees with, and a wrong price on a button
- * that spends the applicant's money is the worst kind of stale.
+ * returns the row on its own. That is deliberate and it is about money: each
+ * card quotes what applying will add to the Tax Order of Payment, computed
+ * through `FeeCalculator::assess`, and the Fire Code fee is 10% of the mayor's
+ * permit plus regulatory fees (RA 9514) — so applying for one clearance can
+ * move ANOTHER clearance's `fee_preview`. Patching the single returned row
+ * into local state would leave the other five quoting prices the assessment no
+ * longer agrees with, and a wrong price on a button that spends the
+ * applicant's money is the worst kind of stale.
  */
 export const clearances = {
-  /** The six rows plus `meta` (the gate, and the running balance). */
+  /** The six rows plus `meta` (whether the stage is still open to change). */
   list: (applicationId: number) =>
     unwrapMeta<Clearance[], ClearanceMeta>(api.get(`/applications/${applicationId}/clearances`)),
-  /** Ask this office to issue the clearance. Re-assesses; the balance moves. */
+  /** Ask this office to issue the clearance. Its fee joins the assessment. */
   apply: async (applicationId: number, code: string) => {
     await api.post(`/applications/${applicationId}/clearances/${code}/apply`)
     return clearances.list(applicationId)

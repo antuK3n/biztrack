@@ -11,14 +11,21 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * The LGU clearance stage — the six supporting clearances, after payment
- * (docs/clearances-after-payment.md §"API contract for the rebuild").
+ * The LGU clearance stage — the six supporting clearances, chosen before the
+ * filing is submitted (docs/clearances-before-payment.md).
  *
  * Two ways to satisfy a clearance and they are not the same act:
- *   apply — attach the permit type, re-assess (that office's fee joins the
- *           running balance), route an assignment to that office.
+ *   apply — attach the permit type. Its office's fee lines then appear on the
+ *           one Tax Order of Payment assessed at submit, and its office is
+ *           routed an assignment when that payment clears.
  *   held  — record the copy the business already holds. No permit type, so no
- *           form, no assignment and no fee. That asymmetry is the point.
+ *           form, no review and no fee. That asymmetry is the point.
+ *
+ * `meta` carries no money. It used to report a running balance, because a
+ * clearance applied for after payment raised one; nothing here is chargeable
+ * before submission and nothing here is open after it, so there is no balance
+ * to report. `fee_preview` on each row still quotes what that clearance will
+ * add to the assessment, which is the number the applicant actually needs.
  *
  * Owner-only, all four writes and the read. An office reviewing a clearance
  * sees it through the assignment it was routed; nobody but the applicant
@@ -28,7 +35,7 @@ class ClearanceController extends Controller
 {
     public function __construct(private ClearanceService $clearances) {}
 
-    /** GET — the six cards plus the stage's lock state and running balance. */
+    /** GET — the six cards plus whether the stage is still open to change. */
     public function index(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
@@ -108,7 +115,7 @@ class ClearanceController extends Controller
      *
      * Deliberately does NOT attach the permit type. Uploading here is the
      * applicant saying "I have this already", and the fee gating means that
-     * escapes the charge — which is spec assumption 2, recorded rather than
+     * escapes the charge — which is an open question, recorded rather than
      * quietly fixed: the Fire Code and sanitary inspection fees stay gated on
      * their clearance even though RA 9514 arguably charges them regardless.
      * Changing what a citizen is billed on our own reading of a statute is
@@ -175,7 +182,7 @@ class ClearanceController extends Controller
         return $type;
     }
 
-    /** The stage is shut until the first payment clears (spec rule 3). */
+    /** The stage is shut the moment the filing is submitted, and after. */
     private function assertUnlocked(Application $application): void
     {
         abort_unless(
@@ -186,14 +193,16 @@ class ClearanceController extends Controller
     }
 
     /**
-     * Anything that re-assesses needs a business to price against.
+     * Choosing a clearance needs a business to price it against.
      *
-     * 139 filings in the register point at a soft-deleted business, and both
-     * FeeCalculator::assess and WorkflowService::assessFees dereference
-     * `business->lines` without a guard. Refusing here with a sentence the
-     * applicant can act on beats a 500 that tells them nothing. Reads are not
-     * gated by this — the stage still renders, it just withholds the prices it
-     * cannot compute.
+     * 139 filings in the register point at a soft-deleted business, and
+     * FeeCalculator::assess dereferences `business->lines` without a guard — so
+     * a card on one of those filings shows a null `fee_preview` rather than a
+     * price. Applying is then agreeing to a charge nobody can quote, and it is
+     * refused with a sentence the applicant can act on. (This guard also used
+     * to be what stopped a 500: apply re-assessed inline. It no longer does —
+     * the assessment happens at submit — so the reason is now the quote, not
+     * the crash.) Reads are not gated by it: the stage still renders.
      */
     private function assertPriceable(Application $application): void
     {
@@ -205,9 +214,8 @@ class ClearanceController extends Controller
     }
 
     /**
-     * Every write answers with the card it changed plus the new balance —
-     * "returns the clearance row + new balance" in the contract. `meta` is the
-     * same shape the index returns so the screen has one parser for both.
+     * Every write answers with the card it changed. `meta` is the same shape
+     * the index returns so the screen has one parser for both.
      */
     private function rowResponse(Application $application, PermitType $type, int $status = 200): JsonResponse
     {

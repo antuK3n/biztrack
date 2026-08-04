@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal } from '../../components/ui/Proto'
-import { businessName, formatBytes, formatMoney } from '../../lib/format'
+import { businessName, formatBytes } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, clearances, officeForms } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -20,23 +20,28 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../../lib/types'
 
 /*
- * ── LGU Clearances · the stage after the first payment ─────────────────────
+ * ── LGU Clearances · the last thing decided before Review & Submit ─────────
  *
- * Decided with the client on 3 August 2026; the reasoning is written up in
- * docs/clearances-after-payment.md and this screen is the half of it the
- * applicant sees.
+ * Settled with the client on 4 August 2026; the reasoning is in
+ * docs/clearances-before-payment.md and this screen is the half the applicant
+ * sees. Checklist item 76 asked for the six "at the last part before submitting
+ * the application", and that is now literally where they are: the wizard's step
+ * 6 of 7, with each chosen clearance's office sheet slotted in behind it.
  *
- * The six clearances used to be step 4 of 8 inside the apply wizard, and the
- * two steps after them were computed from the answer — the required documents
- * were the union of the document types on the selected permit types, and the
- * tax profile's questions varied by permit code. That data dependency is why
- * they could not simply be moved later.
+ * This lived for one day as a stage that opened AFTER the first payment, with a
+ * running balance, a second payment and a gate holding the permit until it
+ * cleared. All of that is deleted. Two things about it are worth remembering
+ * rather than rediscovering:
  *
- * The dependency only existed because the clearances were being treated as part
- * of the same filing. They are not. Each is a separate transaction with a
- * separate office, a separate fee and a separate outcome. Once they are their
- * own stage the dependency dissolves: the wizard's documents and fees describe
- * the business permit alone, and each clearance carries its own.
+ *   The balance block that used to sit above these cards is gone because
+ *   nothing accrues. Every clearance chosen here is billed on the one Tax
+ *   Order of Payment assessed at submit, so a ledger on this screen would only
+ *   ever read zero — and a zero that really means "not assessed yet" reads as
+ *   "these are free".
+ *
+ *   `fee_preview` stays, and matters more than the ledger ever did. It is what
+ *   this clearance will ADD to that Tax Order of Payment, quoted before the
+ *   button is pressed.
  *
  * Two properties of this screen are load-bearing rather than stylistic:
  *
@@ -48,11 +53,11 @@ import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../.
  *      Un-applying and removing an uploaded copy are different intentions and
  *      have their own labelled controls, well away from the two that create.
  *
- *   2. The two buttons have very different financial consequences. Apply adds
- *      that office's fee to a balance the applicant must clear before their
- *      permit is released; Submit costs nothing, because nothing is being
- *      issued. A card that showed them as a matched pair without saying so
- *      would be hiding the only difference that matters.
+ *   2. The two buttons have very different consequences. Apply adds that
+ *      office's fee to what the applicant will be charged; Submit costs
+ *      nothing, because nothing is being issued. A card that showed them as a
+ *      matched pair without saying so would be hiding the only difference that
+ *      matters.
  */
 
 /** The five states the API reports, and how each is worn on the card. */
@@ -83,7 +88,7 @@ const STATE_META: Record<ClearanceState, { label: string; className: string }> =
  * Null is not zero. It is the market stall rental, which the office sets case
  * by case, or a filing whose business record is gone and so cannot be priced.
  */
-function feeSentence(preview: string | null, applied: boolean): string {
+export function feeSentence(preview: string | null, applied: boolean): string {
   if (preview === null) {
     return applied
       ? 'This office sets its fee case by case. It appears on your Tax Order of Payment once assessed.'
@@ -97,9 +102,9 @@ function feeSentence(preview: string | null, applied: boolean): string {
    * with no matching revenue-code rule comes back as the STRING "₱0.00" rather
    * than the null the contract reserves for "the office sets it". The Market
    * Clearance is exactly that case — the spec says its stall rental is
-   * officer-set — and "Applying adds ₱0.00 to your balance" would read as a
-   * promise that it is free. It is not a promise anyone made; it is the
-   * assessment having no rule to price it with.
+   * officer-set — and "Applying adds ₱0.00" would read as a promise that it is
+   * free. It is not a promise anyone made; it is the assessment having no rule
+   * to price it with.
    *
    * So the sentence says what is actually known: the assessment adds nothing.
    * It does not say the clearance is free, and it does not invent a fee.
@@ -110,18 +115,63 @@ function feeSentence(preview: string | null, applied: boolean): string {
       : 'Applying adds nothing to your assessment. If this office charges, it sets that separately.'
   }
   return applied
-    ? `${preview} of your balance is this clearance.`
-    : `Applying adds ${preview} to your balance.`
+    ? `${preview} of your Tax Order of Payment is this clearance.`
+    : `Applying adds ${preview} to your Tax Order of Payment.`
 }
 
-export function ClearanceStagePage() {
-  const { id = '' } = useParams()
-  const appId = Number(id)
+interface ClearanceStageProps {
+  applicationId: number
+  /** The business as every office sheet carries it, for the sheets opened here. */
+  business: CarriedOverBusiness
+  /**
+   * Where Apply sends the applicant when that office has a form sheet.
+   *
+   * Omitted on the standalone route, which renders the sheet inline over the
+   * cards. Supplied by the wizard, where each sheet is a step of its own
+   * slotted in behind this one — so Apply moves the wizard rather than swapping
+   * what this component is drawing.
+   */
+  onOpenOfficeForm?: (code: OfficeFormCode) => void
+  /**
+   * The six rows, every time they change. The wizard needs them: which office
+   * sheets exist as steps, and whether the step passes at all, are both read
+   * off which clearances have been decided.
+   */
+  onRowsChange?: (rows: Clearance[]) => void
+}
 
-  const app = useAsync<Application>(() => applications.get(appId), [appId])
+/**
+ * True when at least one clearance has been decided — checklist item 76's
+ * other half, and the rule that makes this step a decision rather than a
+ * screen to walk past.
+ *
+ * Either half of the card satisfies it. Apply means "issue me one"; Submit
+ * means "I already hold this, here is the copy". They are opposites in what
+ * they ask the office to do and identical in what they tell us — that this
+ * clearance has been dealt with — so requiring one or the other, rather than
+ * Apply specifically, is what stops the rule from forcing an applicant to
+ * apply for a certificate already in their hand.
+ */
+export function anyClearanceDecided(rows: Clearance[]): boolean {
+  return rows.some((r) => r.state !== 'available' || r.held_document !== null)
+}
 
-  /* The six rows and the money. Reloaded whole after every mutation — see the
-   * note on `clearances` in resources.ts for why a single row is not enough. */
+/**
+ * The cards, the lock, and every write behind them.
+ *
+ * Rendered in two places from one definition: the wizard's LGU Clearances step
+ * and the standalone `/applications/:id/clearances` route below. They must not
+ * drift — the Apply/Submit semantics are the kind of thing that grows a second,
+ * subtly different copy the moment there are two of them.
+ */
+export function ClearanceStage({
+  applicationId,
+  business,
+  onOpenOfficeForm,
+  onRowsChange,
+}: ClearanceStageProps) {
+  /* The six rows. Reloaded whole after every mutation — see the note on
+   * `clearances` in resources.ts for why a single row is not enough. */
   const [rows, setRows] = useState<Clearance[] | null>(null)
   const [meta, setMeta] = useState<ClearanceMeta | null>(null)
   const [loading, setLoading] = useState(true)
@@ -132,54 +182,61 @@ export function ClearanceStagePage() {
   const [actionError, setActionError] = useState<string | null>(null)
 
   /*
-   * What just happened to the money, announced rather than only drawn.
+   * What just happened, announced rather than only drawn.
    *
-   * Applying moves the balance. A number that changes silently is invisible to
-   * a screen reader: the applicant hears the button, then nothing, and has no
-   * way to know they have just committed to ₱735 they cannot see. The balance
-   * block below is a role="status" region so the figures themselves are
-   * announced, and this sentence names the change that caused them to move.
+   * Applying commits the applicant to a fee. A card that changes silently is
+   * invisible to a screen reader: they hear the button, then nothing, and have
+   * no way to know they have just added ₱735 to a bill they cannot see.
    */
-  const [balanceNote, setBalanceNote] = useState('')
+  const [note, setNote] = useState('')
 
   /* The card whose SUBMISSION dialog is open. Submit always opens this. */
   const [heldPrompt, setHeldPrompt] = useState<Clearance | null>(null)
   const [heldPromptFile, setHeldPromptFile] = useState<File | null>(null)
   const [heldPromptError, setHeldPromptError] = useState<string | null>(null)
 
-  /* The office form sheet on screen, if any. Apply always opens this. */
+  /* The office form sheet on screen, when this component owns the sheets. */
   const [formCode, setFormCode] = useState<OfficeFormCode | null>(null)
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
+  const publish = useCallback(
+    (next: Clearance[]) => {
+      setRows(next)
+      onRowsChange?.(next)
+    },
+    [onRowsChange],
+  )
+
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
     try {
-      const result = await clearances.list(appId)
-      setRows(result.data)
+      const result = await clearances.list(applicationId)
+      publish(result.data)
       setMeta(result.meta)
     } catch (err) {
       setLoadError(err)
     } finally {
       setLoading(false)
     }
-  }, [appId])
+  }, [applicationId, publish])
 
   useEffect(() => {
     void load()
   }, [load])
 
   /*
-   * Saved office-form payloads. Fetched once the stage opens rather than when a
-   * sheet does, so a sheet reopened from Apply shows what was already answered
-   * instead of an empty form the applicant has demonstrably filled in before.
+   * Saved office-form payloads, only when this component renders the sheets
+   * itself. The wizard fetches its own, because there the sheets are steps it
+   * owns and their answers ride on its autosave.
    */
   useEffect(() => {
+    if (onOpenOfficeForm) return
     let active = true
     officeForms
-      .list(appId)
+      .list(applicationId)
       .then((forms) => {
         if (!active || forms.length === 0) return
         setOfficeData((prev) => {
@@ -200,34 +257,11 @@ export function ClearanceStagePage() {
     return () => {
       active = false
     }
-  }, [appId])
-
-  /*
-   * The business as every office sheet carries it. All four sheets open by
-   * asking for the same name, address and trade, and the applicant answered all
-   * three in the wizard — so the sheet shows what it already knows first.
-   *
-   * `business` can be null: Business soft-deletes and its filings stay, so a
-   * filing can outlive its register row. businessName() names that rather than
-   * dereferencing into a crash.
-   */
-  const carriedOver: CarriedOverBusiness = useMemo(() => {
-    const b = app.data?.business ?? null
-    const line = b?.lines?.[0]
-    return {
-      name: businessName(b),
-      tradeName: b?.trade_name ?? '',
-      address:
-        [b?.address?.line1, b?.address?.line2, b?.address?.barangay?.name]
-          .filter(Boolean)
-          .join(', ') || '—',
-      lineOfBusiness: line?.line_of_business?.trim() || line?.psic_code?.title || '—',
-    }
-  }, [app.data])
+  }, [applicationId, onOpenOfficeForm])
 
   const unlocked = meta?.unlocked ?? false
 
-  /** Run one mutation, refresh everything, and say what it did to the balance. */
+  /** Run one mutation, refresh everything, and say what it did. */
   async function runAction(
     code: string,
     what: string,
@@ -237,9 +271,9 @@ export function ClearanceStagePage() {
     setActionError(null)
     try {
       const result = await action()
-      setRows(result.data)
+      publish(result.data)
       setMeta(result.meta)
-      setBalanceNote(`${what} Balance due is now ${formatMoney(result.meta.balance_due)}.`)
+      setNote(what)
       return true
     } catch (err) {
       setActionError(toApiError(err).message)
@@ -259,8 +293,8 @@ export function ClearanceStagePage() {
    * to get. Withdrawing has its own control on the card.
    *
    * The POST is skipped when the clearance is already applied for: re-posting
-   * would re-run the assessment for a request that has not changed, and on a
-   * screen that adds money to a balance "probably idempotent" is not good
+   * would ask the server to attach what is already attached, and on a screen
+   * that commits the applicant's money "probably idempotent" is not good
    * enough. Reopening the form is the whole of what a second Apply means.
    */
   async function onApply(row: Clearance) {
@@ -272,19 +306,22 @@ export function ClearanceStagePage() {
       const ok = await runAction(
         code,
         `The copy of your ${row.permit_type.name} was removed, because you are applying for one instead.`,
-        () => clearances.removeHeld(appId, code),
+        () => clearances.removeHeld(applicationId, code),
       )
       if (!ok) return
     }
     if (row.state === 'available' || row.state === 'submitted') {
-      const ok = await runAction(code, `Applied for your ${row.permit_type.name}.`, () =>
-        clearances.apply(appId, code),
+      const ok = await runAction(
+        code,
+        `Applied for your ${row.permit_type.name}. Its fee is on the Tax Order of Payment you will be given when you submit.`,
+        () => clearances.apply(applicationId, code),
       )
       if (!ok) return
     }
     if (hasOfficeForm(code)) {
       setFormError(null)
-      setFormCode(code)
+      if (onOpenOfficeForm) onOpenOfficeForm(code)
+      else setFormCode(code)
     }
   }
 
@@ -292,8 +329,8 @@ export function ClearanceStagePage() {
   async function onUnapply(row: Clearance) {
     await runAction(
       row.permit_type.code,
-      `Withdrew your ${row.permit_type.name} application.`,
-      () => clearances.unapply(appId, row.permit_type.code),
+      `Withdrew your ${row.permit_type.name} application. Nothing for it will be charged.`,
+      () => clearances.unapply(applicationId, row.permit_type.code),
     )
   }
 
@@ -302,22 +339,20 @@ export function ClearanceStagePage() {
     await runAction(
       row.permit_type.code,
       `Removed the ${row.permit_type.name} copy you had uploaded.`,
-      () => clearances.removeHeld(appId, row.permit_type.code),
+      () => clearances.removeHeld(applicationId, row.permit_type.code),
     )
   }
 
-  /** Send the copy chosen in the SUBMISSION dialog. Adds nothing to the balance. */
+  /** Send the copy chosen in the SUBMISSION dialog. Costs nothing. */
   async function onSubmitHeld(row: Clearance, file: File) {
     setHeldPrompt(null)
     setBusyCode(row.permit_type.code)
     setActionError(null)
     try {
-      const result = await clearances.submitHeld(appId, row.permit_type.code, file)
-      setRows(result.data)
+      const result = await clearances.submitHeld(applicationId, row.permit_type.code, file)
+      publish(result.data)
       setMeta(result.meta)
-      setBalanceNote(
-        `Your ${row.permit_type.name} copy is on file. Nothing was added — balance due is still ${formatMoney(result.meta.balance_due)}.`,
-      )
+      setNote(`Your ${row.permit_type.name} copy is on file. Nothing was added to your fees.`)
     } catch (err) {
       // Upload failures arrive without a usable message twice over; translate.
       setActionError(uploadErrorMessage(err))
@@ -332,7 +367,7 @@ export function ClearanceStagePage() {
     setFormSaving(true)
     setFormError(null)
     try {
-      await officeForms.save(appId, formCode, officeData[formCode] ?? {})
+      await officeForms.save(applicationId, formCode, officeData[formCode] ?? {})
       setFormCode(null)
       // The sheet being complete is part of the row, so re-read it.
       await load()
@@ -343,42 +378,78 @@ export function ClearanceStagePage() {
     }
   }
 
-  if (app.loading || loading) {
+  if (loading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4">
-        <Skeleton className="h-8 w-72" />
+      <div className="space-y-4">
         <Skeleton className="h-28 w-full rounded-xl" />
         <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     )
   }
-  if (app.error || !app.data) {
-    return <ErrorState error={app.error ?? new Error('Not found')} onRetry={app.reload} />
-  }
   if (loadError || !rows || !meta) {
     return <ErrorState error={loadError ?? new Error('Not found')} onRetry={() => void load()} />
   }
 
-  const application = app.data
   const formMissing = formCode ? officeFormMissing(formCode, officeData[formCode] ?? {}) : []
 
-  return (
-    <div className="mx-auto max-w-5xl pb-4">
-      <div className="mb-6 border-b-2 border-ink/50 pb-2">
-        <h1 className="text-2xl font-bold text-ink">{businessName(application.business)}</h1>
-        <p className="tnum mt-1 text-sm text-ink-secondary">{application.tracking_id}</p>
+  /* The sheet, when this component owns it — it replaces the cards rather than
+   * sitting under them, so the applicant is on one thing at a time. */
+  if (formCode) {
+    return (
+      <div>
+        {formError && (
+          <div className="mb-4">
+            <Alert variant="error" title="This form was not saved">
+              {formError}
+            </Alert>
+          </div>
+        )}
+        <OfficeFormSheet
+          code={formCode}
+          data={officeData[formCode] ?? {}}
+          business={business}
+          onChange={(data) => setOfficeData((d) => ({ ...d, [formCode]: data }))}
+        />
+        <div className="mt-8 flex flex-col gap-2">
+          <div className="flex items-center gap-4">
+            <PillButton
+              onClick={() => void saveForm()}
+              disabled={formSaving || formMissing.length > 0}
+              className="min-w-28"
+            >
+              {formSaving ? 'Saving…' : 'Save & back to clearances'}
+            </PillButton>
+            <button
+              type="button"
+              onClick={() => {
+                setFormCode(null)
+                setFormError(null)
+              }}
+              className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+            >
+              Back without saving
+            </button>
+          </div>
+          {formMissing.length > 0 && (
+            <p className="max-w-md text-xs text-ink-muted">
+              Still needed on this form: {formMissing.join(', ')}
+            </p>
+          )}
+        </div>
       </div>
+    )
+  }
 
-      <h2 className="display-serif mb-1 text-3xl text-ink">LGU Clearances</h2>
-      <div className="mb-6 h-px bg-ink/40" />
-
+  return (
+    <div>
       {/*
         The lock, in the API's own words.
 
-        `locked_reason` is shown verbatim. The condition that opens this stage
-        is the server's to state — it knows what has been paid and what has not
-        — and a sentence written here would be a second, quieter version of the
-        rule that drifted out of step with the real one the first time it moved.
+        `locked_reason` is shown verbatim. The condition that closes this stage
+        is the server's to state — it knows what has been submitted and what has
+        not — and a sentence written here would be a second, quieter version of
+        the rule that drifted out of step with the real one the first time it
+        moved.
       */}
       {!unlocked && (
         <div
@@ -387,7 +458,7 @@ export function ClearanceStagePage() {
         >
           <InfoCircleIcon size={20} className="mt-px shrink-0" />
           <div className="min-w-0">
-            <p className="font-semibold">This stage is not open yet</p>
+            <p className="font-semibold">These can no longer be changed</p>
             {/*
               One copy of the sentence, and it is the one the buttons point at.
               An earlier version repeated it under the cards as the
@@ -396,7 +467,7 @@ export function ClearanceStagePage() {
               user heard it once as a banner and again on every button.
             */}
             <p id="clearances-locked" className="mt-0.5">
-              {meta.locked_reason ?? 'This stage is not open yet.'}
+              {meta.locked_reason ?? 'This stage is no longer open.'}
             </p>
           </div>
         </div>
@@ -410,278 +481,196 @@ export function ClearanceStagePage() {
         </div>
       )}
 
-      {/* ── The running balance ───────────────────────────────────────────
-        *
-        * role="status" so the figures are announced when they move, not only
-        * redrawn. Applying adds a fee, and an applicant who cannot see the
-        * screen would otherwise commit to money that changed in silence.
-        */}
-      <section
-        role="status"
-        aria-label="Balance"
-        className="mb-8 rounded-2xl bg-white px-6 py-5 shadow-card"
-      >
-        <dl className="flex flex-wrap gap-x-12 gap-y-4">
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-wide text-ink-muted">Assessed</dt>
-            <dd className="tnum mt-1 text-xl font-semibold text-ink">
-              {formatMoney(meta.total_assessed)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-wide text-ink-muted">Paid</dt>
-            <dd className="tnum mt-1 text-xl font-semibold text-ink">
-              {formatMoney(meta.total_paid)}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-xs font-bold uppercase tracking-wide text-ink-muted">Balance due</dt>
-            <dd className="tnum mt-1 text-xl font-bold text-royal">
-              {formatMoney(meta.balance_due)}
-            </dd>
-          </div>
-        </dl>
-        {/*
-          Said plainly, because the balance is otherwise decoration. This gate
-          is what makes the accrual real: applying for a clearance is spending
-          money, and the consequence of not settling it is the permit staying
-          unissued.
-        */}
-        <p className="mt-4 text-sm text-ink-secondary">
-          Your Business Permit is not released until this balance is cleared.
-        </p>
-        {balanceNote && <p className="mt-2 text-sm font-medium text-royal">{balanceNote}</p>}
-        {Number(meta.balance_due) > 0 && (
-          <Link
-            to={`/applications/${application.id}/pay`}
-            className="mt-3 inline-block text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
-          >
-            Pay the balance
-          </Link>
-        )}
-      </section>
+      <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
+        <span className="font-semibold text-ink">Apply</span> asks that office to issue the
+        clearance, and its fee joins your Tax Order of Payment. Already hold a valid one?{' '}
+        <span className="font-semibold text-ink">Submit</span> a copy instead — nothing is charged,
+        because nothing is being issued.
+      </p>
+      <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
+        You are billed once, after you submit, for the business permit and everything chosen here.
+      </p>
 
-      {/* ── The office form sheet, when Apply opened one ─────────────────── */}
-      {formCode ? (
-        <div>
-          {formError && (
-            <div className="mb-4">
-              <Alert variant="error" title="This form was not saved">
-                {formError}
-              </Alert>
-            </div>
-          )}
-          <OfficeFormSheet
-            code={formCode}
-            data={officeData[formCode] ?? {}}
-            business={carriedOver}
-            onChange={(data) => setOfficeData((d) => ({ ...d, [formCode]: data }))}
-          />
-          <div className="mt-8 flex flex-col gap-2">
-            <div className="flex items-center gap-4">
-              <PillButton
-                onClick={() => void saveForm()}
-                disabled={formSaving || formMissing.length > 0}
-                className="min-w-28"
-              >
-                {formSaving ? 'Saving…' : 'Save & back to clearances'}
-              </PillButton>
-              <button
-                type="button"
-                onClick={() => {
-                  setFormCode(null)
-                  setFormError(null)
-                }}
-                className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
-              >
-                Back without saving
-              </button>
-            </div>
-            {formMissing.length > 0 && (
-              <p className="max-w-md text-xs text-ink-muted">
-                Still needed on this form: {formMissing.join(', ')}
+      {/*
+        role="status" so the consequence of the last press is announced, not
+        only drawn. Empty until something happens, which is why it is not
+        wrapped in a conditional — a live region added to the page at the moment
+        it gains text is a live region most screen readers never announce.
+      */}
+      <p role="status" className="mb-4 min-h-5 text-sm font-medium text-royal">
+        {note}
+      </p>
+
+      <ul className="grid list-none gap-5 p-0 sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => {
+          const code = row.permit_type.code
+          const busy = busyCode === code
+          const state = STATE_META[row.state] ?? STATE_META.available
+          const applied = row.state === 'applied' || row.state === 'issued'
+          const held = row.held_document
+
+          return (
+            <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-lg font-bold leading-snug text-ink">{row.permit_type.name}</p>
+                <span
+                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${state.className}`}
+                >
+                  {state.label}
+                </span>
+              </div>
+              <p className="display-serif mt-2 text-sm italic text-ink-secondary">
+                {/* The department relation is nullable server-side. */}
+                {row.permit_type.department?.name ?? 'Issuing office'}
               </p>
-            )}
-          </div>
-        </div>
-      ) : (
-        <>
-          <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-            <span className="font-semibold text-ink">Apply</span> asks that office to issue the
-            clearance, and adds its fee to your balance. Already hold a valid one?{' '}
-            <span className="font-semibold text-ink">Submit</span> a copy instead — nothing is
-            charged, because nothing is being issued.
-          </p>
 
-          <ul className="grid list-none gap-5 p-0 sm:grid-cols-2 xl:grid-cols-3">
-            {rows.map((row) => {
-              const code = row.permit_type.code
-              const busy = busyCode === code
-              const state = STATE_META[row.state] ?? STATE_META.available
-              const applied = row.state === 'applied' || row.state === 'issued'
-              const held = row.held_document
+              {/*
+                What each button costs, on the card, before either is pressed.
+                Apply and Submit sit side by side and look alike; one of them
+                spends money and the other does not, and that is not something a
+                card may leave the applicant to find out afterwards on their Tax
+                Order of Payment.
+              */}
+              <p className="mt-3 text-xs text-ink-secondary">
+                {feeSentence(row.fee_preview, applied)}{' '}
+                <span className="text-ink-muted">
+                  Submitting a copy you already hold costs nothing.
+                </span>
+              </p>
 
-              return (
-                <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-lg font-bold leading-snug text-ink">{row.permit_type.name}</p>
-                    <span
-                      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${state.className}`}
-                    >
-                      {state.label}
-                    </span>
-                  </div>
-                  <p className="display-serif mt-2 text-sm italic text-ink-secondary">
-                    {/* The department relation is nullable server-side. */}
-                    {row.permit_type.department?.name ?? 'Issuing office'}
+              {applied && (
+                <div className="mt-3 rounded-md border border-royal/30 bg-royal-tint px-3 py-2">
+                  <p className="text-xs font-bold text-royal">
+                    {row.state === 'issued' ? 'Issued by this office' : 'Applying for this clearance'}
                   </p>
-
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    {row.has_office_form
+                      ? row.office_form_complete
+                        ? 'Its form is filled in. Apply reopens it whenever you need it.'
+                        : 'Its form still needs finishing — Apply opens it.'
+                      : 'No extra form — this office works from your application.'}
+                  </p>
                   {/*
-                    What each button costs, on the card, before either is
-                    pressed. Apply and Submit sit side by side and look alike;
-                    one of them spends money and the other does not, and that
-                    is not something a card may leave the applicant to find out
-                    afterwards on their Tax Order of Payment.
+                    Withdrawing used to be a second click on Apply, which made
+                    one button mean two opposite things. Stated plainly instead,
+                    and kept away from Apply so neither is hit by accident. Not
+                    offered once the office has issued it: there is nothing left
+                    to withdraw. Hidden once the stage is shut, because there is
+                    no longer anything this control can do.
                   */}
-                  <p className="mt-3 text-xs text-ink-secondary">
-                    {feeSentence(row.fee_preview, applied)}{' '}
-                    <span className="text-ink-muted">
-                      Submitting a copy you already hold costs nothing.
-                    </span>
+                  {row.state === 'applied' && unlocked && (
+                    <button
+                      type="button"
+                      onClick={() => void onUnapply(row)}
+                      disabled={busy}
+                      className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                    >
+                      {busy ? 'Working…' : `Don’t apply for the ${row.permit_type.name}`}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {row.state === 'rejected' && (
+                <div className="mt-3 rounded-md border border-s-red/40 bg-s-red/10 px-3 py-2">
+                  <p className="text-xs font-bold text-s-red">This office refused it</p>
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    {row.assignment?.remarks ?? 'No reason was recorded.'}
                   </p>
+                </div>
+              )}
 
-                  {applied && (
-                    <div className="mt-3 rounded-md border border-royal/30 bg-royal-tint px-3 py-2">
-                      <p className="text-xs font-bold text-royal">
-                        {row.state === 'issued' ? 'Issued by this office' : 'Applying for this clearance'}
-                      </p>
-                      <p className="mt-1 text-xs text-ink-secondary">
-                        {row.has_office_form
-                          ? row.office_form_complete
-                            ? 'Its form is filled in. Apply reopens it whenever you need it.'
-                            : 'Its form still needs finishing — Apply opens it.'
-                          : 'No extra form — this office works from your application.'}
-                      </p>
-                      {/*
-                        Withdrawing used to be a second click on Apply, which
-                        made one button mean two opposite things. Stated plainly
-                        instead, and kept away from Apply so neither is hit by
-                        accident. Not offered once the office has issued it:
-                        there is nothing left to withdraw.
-                      */}
-                      {row.state === 'applied' && (
-                        <button
-                          type="button"
-                          onClick={() => void onUnapply(row)}
-                          disabled={busy}
-                          className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
-                        >
-                          {busy ? 'Working…' : `Don’t apply for the ${row.permit_type.name}`}
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {row.state === 'rejected' && (
-                    <div className="mt-3 rounded-md border border-s-red/40 bg-s-red/10 px-3 py-2">
-                      <p className="text-xs font-bold text-s-red">This office refused it</p>
-                      <p className="mt-1 text-xs text-ink-secondary">
-                        {row.assignment?.remarks ?? 'No reason was recorded.'}
-                      </p>
-                    </div>
-                  )}
-
-                  {held && (
-                    <div className="mt-3 rounded-md border border-s-green/40 bg-s-green/10 px-3 py-2">
-                      <p className="flex items-center gap-1.5 text-xs font-bold text-s-green">
-                        <CheckIcon size={13} /> On file, not applied for
-                      </p>
-                      <p className="mt-1 truncate text-xs text-ink-secondary" title={held.name}>
-                        {held.name} · {formatBytes(held.size)}
-                      </p>
-                      {/*
-                        Removing has its own control, as it did in the wizard.
-                        Clicking "Submitted ✓" used to delete the file that had
-                        just been uploaded, with no confirmation and no undo —
-                        destroying something must never be the alternate meaning
-                        of the button that created it.
-                      */}
-                      <button
-                        type="button"
-                        onClick={() => void onRemoveHeld(row)}
-                        disabled={busy}
-                        className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
-                      >
-                        {busy ? 'Removing…' : `Remove the ${row.permit_type.name} copy`}
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="mt-5 flex flex-1 items-end gap-2.5">
-                    {/*
-                      Both buttons stay in the tab order when the stage is
-                      locked. `disabled` drops a control out of the tab order
-                      and most screen readers pass over it, so an applicant
-                      using one would never learn the button exists or why it
-                      does nothing. aria-disabled says so instead, and the
-                      locked reason above is what it points at.
-                    */}
+              {held && (
+                <div className="mt-3 rounded-md border border-s-green/40 bg-s-green/10 px-3 py-2">
+                  <p className="flex items-center gap-1.5 text-xs font-bold text-s-green">
+                    <CheckIcon size={13} /> On file, not applied for
+                  </p>
+                  <p className="mt-1 truncate text-xs text-ink-secondary" title={held.name}>
+                    {held.name} · {formatBytes(held.size)}
+                  </p>
+                  {/*
+                    Removing has its own control, as it did in the wizard.
+                    Clicking "Submitted ✓" used to delete the file that had just
+                    been uploaded, with no confirmation and no undo — destroying
+                    something must never be the alternate meaning of the button
+                    that created it.
+                  */}
+                  {unlocked && (
                     <button
                       type="button"
+                      onClick={() => void onRemoveHeld(row)}
                       disabled={busy}
-                      aria-disabled={!unlocked}
-                      aria-describedby={unlocked ? undefined : 'clearances-locked'}
-                      /*
-                       * SUBMIT always opens the upload box. It used to toggle:
-                       * a second click on "Submitted ✓" deleted the copy just
-                       * uploaded. Removing is the labelled control above.
-                       */
-                      onClick={() => {
-                        if (!unlocked) return
-                        setHeldPromptFile(null)
-                        setHeldPromptError(null)
-                        setHeldPrompt(row)
-                      }}
-                      className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
-                        unlocked
-                          ? held
-                            ? 'border-2 border-royal bg-white text-royal'
-                            : 'border-2 border-royal-deep bg-royal-deep text-white hover:bg-royal'
-                          : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
-                      }`}
+                      className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
                     >
-                      Submit a copy
+                      {busy ? 'Removing…' : `Remove the ${row.permit_type.name} copy`}
                     </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      aria-disabled={!unlocked}
-                      aria-describedby={unlocked ? undefined : 'clearances-locked'}
-                      /*
-                       * APPLY always opens this office's form. It used to
-                       * toggle, so the second click quietly un-applied and
-                       * opened nothing — which is why the button sometimes
-                       * "just highlighted" and sometimes went to the form.
-                       * Withdrawing is the labelled control above.
-                       */
-                      onClick={() => void onApply(row)}
-                      className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
-                        unlocked
-                          ? applied
-                            ? 'border-2 border-royal bg-white text-royal'
-                            : 'border-2 border-royal bg-royal text-white hover:bg-royal-hover'
-                          : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
-                      }`}
-                    >
-                      {busy ? 'Working…' : 'Apply'}
-                    </button>
-                  </div>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      )}
+                  )}
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-1 items-end gap-2.5">
+                {/*
+                  Both buttons stay in the tab order when the stage is shut.
+                  `disabled` drops a control out of the tab order and most
+                  screen readers pass over it, so an applicant using one would
+                  never learn the button exists or why it does nothing.
+                  aria-disabled says so instead, and the locked reason above is
+                  what it points at.
+                */}
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-disabled={!unlocked}
+                  aria-describedby={unlocked ? undefined : 'clearances-locked'}
+                  /*
+                   * SUBMIT always opens the upload box. It used to toggle: a
+                   * second click on "Submitted ✓" deleted the copy just
+                   * uploaded. Removing is the labelled control above.
+                   */
+                  onClick={() => {
+                    if (!unlocked) return
+                    setHeldPromptFile(null)
+                    setHeldPromptError(null)
+                    setHeldPrompt(row)
+                  }}
+                  className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
+                    unlocked
+                      ? held
+                        ? 'border-2 border-royal bg-white text-royal'
+                        : 'border-2 border-royal-deep bg-royal-deep text-white hover:bg-royal'
+                      : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
+                  }`}
+                >
+                  Submit a copy
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-disabled={!unlocked}
+                  aria-describedby={unlocked ? undefined : 'clearances-locked'}
+                  /*
+                   * APPLY always opens this office's form. It used to toggle,
+                   * so the second click quietly un-applied and opened nothing —
+                   * which is why the button sometimes "just highlighted" and
+                   * sometimes went to the form. Withdrawing is the labelled
+                   * control above.
+                   */
+                  onClick={() => void onApply(row)}
+                  className={`flex-1 rounded-sm px-3 py-2 text-sm font-semibold underline underline-offset-2 transition-colors disabled:opacity-60 ${
+                    unlocked
+                      ? applied
+                        ? 'border-2 border-royal bg-white text-royal'
+                        : 'border-2 border-royal bg-royal text-white hover:bg-royal-hover'
+                      : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
+                  }`}
+                >
+                  {busy ? 'Working…' : 'Apply'}
+                </button>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
 
       {/* ── SUBMISSION · a clearance already held ─────────────────────────── */}
       {heldPrompt && (
@@ -743,11 +732,76 @@ export function ClearanceStagePage() {
           )}
           <p className="mt-4 text-xs leading-relaxed text-ink-secondary">
             Submitting a certificate you already hold is not an application: you skip this office’s
-            form, <span className="font-semibold text-ink">nothing is added to your balance</span>,
-            and your copy goes to the reviewers with the rest of your file.
+            form, <span className="font-semibold text-ink">nothing is added to your fees</span>, and
+            your copy goes to the reviewers with the rest of your file.
           </p>
         </ProtoModal>
       )}
+    </div>
+  )
+}
+
+/**
+ * The standalone route, `/applications/:id/clearances`.
+ *
+ * The clearances are a wizard step now, so this is not where they are normally
+ * chosen — it is how a filing that has left the applicant's hands shows what
+ * was chosen, and says in the server's own words why it can no longer change.
+ * It stays writable for a draft, because a draft opened at this address is
+ * genuinely still open and refusing it would be a lie the API does not tell.
+ */
+export function ClearanceStagePage() {
+  const { id = '' } = useParams()
+  const appId = Number(id)
+
+  const app = useAsync<Application>(() => applications.get(appId), [appId])
+
+  if (app.loading) {
+    return (
+      <div className="mx-auto max-w-5xl space-y-4">
+        <Skeleton className="h-8 w-72" />
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+    )
+  }
+  if (app.error || !app.data) {
+    return <ErrorState error={app.error ?? new Error('Not found')} onRetry={app.reload} />
+  }
+
+  const application = app.data
+  /*
+   * The business as every office sheet carries it. All four sheets open by
+   * asking for the same name, address and trade, and the applicant answered all
+   * three in the wizard — so the sheet shows what it already knows first.
+   *
+   * `business` can be null: Business soft-deletes and its filings stay, so a
+   * filing can outlive its register row. businessName() names that rather than
+   * dereferencing into a crash.
+   */
+  const b = application.business ?? null
+  const line = b?.lines?.[0]
+  const carriedOver: CarriedOverBusiness = {
+    name: businessName(b),
+    tradeName: b?.trade_name ?? '',
+    address:
+      [b?.address?.line1, b?.address?.line2, b?.address?.barangay?.name]
+        .filter(Boolean)
+        .join(', ') || '—',
+    lineOfBusiness: line?.line_of_business?.trim() || line?.psic_code?.title || '—',
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl pb-4">
+      <div className="mb-6 border-b-2 border-ink/50 pb-2">
+        <h1 className="text-2xl font-bold text-ink">{businessName(application.business)}</h1>
+        <p className="tnum mt-1 text-sm text-ink-secondary">{application.tracking_id}</p>
+      </div>
+
+      <h2 className="display-serif mb-1 text-3xl text-ink">LGU Clearances</h2>
+      <div className="mb-6 h-px bg-ink/40" />
+
+      <ClearanceStage applicationId={application.id} business={carriedOver} />
     </div>
   )
 }

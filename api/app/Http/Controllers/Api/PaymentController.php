@@ -58,16 +58,20 @@ class PaymentController extends Controller
         ]);
 
         /*
-         * Two payments are legitimate now, not one.
+         * One payment is the flow; a second is still allowed to be possible.
          *
-         * The first settles the business permit and moves the filing into
-         * review. The second settles a balance raised afterwards, because a
-         * clearance applied for in the LGU stage adds its office's fees to the
-         * assessment — and the permit is not released while a balance stands
-         * (WorkflowService::approveAndIssue). Refusing every payment outside
-         * `pending_payment` left that balance unpayable, so the gate could
-         * never be cleared and the permit could never issue: a dead end the
-         * applicant had no way out of.
+         * The Tax Order of Payment now covers the whole filing — business
+         * permit and every clearance chosen — and settling it is what moves the
+         * application into review. That is the only payment an applicant should
+         * ever make (docs/clearances-before-payment.md).
+         *
+         * The endpoint is nonetheless not restricted to `pending_payment`, and
+         * that is deliberate rather than left over. An officer can adjust an
+         * assessment upward after payment (WorkflowService::adjustFee), and the
+         * last time this endpoint refused everything outside `pending_payment`
+         * the result was a balance the applicant could see, could not pay, and
+         * which blocked the permit they were waiting for. Refusing a payment
+         * for money the system says is owed is the failure mode worth avoiding.
          *
          * A terminal filing is still refused. There is nothing to buy on a
          * rejected or cancelled application.
@@ -89,9 +93,10 @@ class PaymentController extends Controller
         }
 
         /*
-         * Charge what is owed, never the assessment total. After a clearance is
-         * added the total covers the business permit as well, and billing it
-         * again would take money the applicant has already paid.
+         * Charge what is owed, never the assessment total. On the ordinary path
+         * these are the same number — nothing has been paid yet, so the balance
+         * IS the total — and where they differ, the total is money some of which
+         * the applicant has already handed over.
          */
         $payment = $this->gateway->charge($fee, PaymentMethod::from($data['method']), $balanceDue);
         Audit::log('payment.completed', $payment, ['amount' => (string) $payment->amount]);
