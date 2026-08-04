@@ -21,10 +21,10 @@ import { infoButtonNames, waitForAnalytics } from './helpers'
  */
 
 const SCREENS = [
-  { path: '/analytics', title: 'Analytics Dashboard' },
-  { path: '/analytics/renewal-risk', title: 'Renewal Risk' },
-  { path: '/analytics/business-growth', title: 'Business Lifecycle Monitoring' },
-  { path: '/analytics/processing-time', title: 'Permit Processing Time Monitoring' },
+  { path: '/staff/analytics', title: 'Analytics Dashboard' },
+  { path: '/staff/analytics/renewal-risk', title: 'Renewal Risk' },
+  { path: '/staff/analytics/business-growth', title: 'Business Lifecycle Monitoring' },
+  { path: '/staff/analytics/processing-time', title: 'Permit Processing Time Monitoring' },
 ] as const
 
 for (const screen of SCREENS) {
@@ -54,7 +54,7 @@ for (const screen of SCREENS) {
 }
 
 test('an info panel opens on click, on keyboard focus, and closes on Escape', async ({ page }) => {
-  await page.goto('/analytics/renewal-risk')
+  await page.goto('/staff/analytics/renewal-risk')
   await waitForAnalytics(page, 'Renewal Risk')
 
   const button = page.locator('button[aria-label^="How "]').first()
@@ -94,7 +94,7 @@ test('an info panel opens on click, on keyboard focus, and closes on Escape', as
 })
 
 test('column headers do not fold the info button into their announced name', async ({ page }) => {
-  await page.goto('/analytics/renewal-risk')
+  await page.goto('/staff/analytics/renewal-risk')
   await waitForAnalytics(page, 'Renewal Risk')
 
   /*
@@ -111,7 +111,7 @@ test('column headers do not fold the info button into their announced name', asy
 })
 
 test('the renewal risk screen never calls its score a probability', async ({ page }) => {
-  await page.goto('/analytics/renewal-risk')
+  await page.goto('/staff/analytics/renewal-risk')
   await waitForAnalytics(page, 'Renewal Risk')
 
   /*
@@ -143,7 +143,7 @@ test('every analytics screen states where its numbers came from', async ({ page 
 })
 
 test('the analytics tabs reach all four screens', async ({ page }) => {
-  await page.goto('/analytics')
+  await page.goto('/staff/analytics')
   await waitForAnalytics(page, 'Analytics Dashboard')
 
   for (const label of ['Renewal Risk', 'Lifecycle', 'Processing Time', 'Overview']) {
@@ -158,7 +158,7 @@ test('the growth screen agrees with its own API about its name', async ({ page }
    * screen titled "Business Growth Analysis" rendered a dataset labelled
    * "Business Lifecycle Monitoring".
    */
-  await page.goto('/analytics/business-growth')
+  await page.goto('/staff/analytics/business-growth')
   await waitForAnalytics(page, 'Business Lifecycle Monitoring')
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Business Lifecycle Monitoring')
 })

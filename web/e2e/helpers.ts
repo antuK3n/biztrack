@@ -1,5 +1,8 @@
 import type { Page } from '@playwright/test'
 import { expect } from '@playwright/test'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 /*
  * Seeded demo accounts. Every one of them has the password below, which is
@@ -47,13 +50,62 @@ export async function signIn(
     [ACCOUNTS[account], DEMO_PASSWORD, portal] as const,
   )
 
+  // Keyed by portal: the two sites hold separate sessions (see lib/api.ts).
   await page.evaluate(
     ([t, p]) => {
-      localStorage.setItem('biztrack.token', t)
-      localStorage.setItem('biztrack.portal', p)
+      localStorage.setItem(`biztrack.token.${p}`, t)
     },
     [token, portal] as const,
   )
+}
+
+interface StorageState {
+  cookies: unknown[]
+  origins: { origin: string; localStorage: { name: string; value: string }[] }[]
+}
+
+const AUTH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '.auth')
+
+/**
+ * Two saved sessions in one browser profile.
+ *
+ * Playwright's `storageState` takes one file, and the point being tested is
+ * that two portals' sessions can share a browser — so they are merged here
+ * rather than logged in again. Logging in twice more would also trip the
+ * sign-in endpoint's 5-attempt lockout, which is a control doing its job.
+ *
+ * The merge is only possible because the tokens are keyed by portal. If the
+ * two files ever collide on a key, this throws rather than silently letting
+ * one win — which is precisely the bug the portal split fixed.
+ */
+export function mergedStorageState(files: string[]): StorageState {
+  const states = files.map(
+    (f) => JSON.parse(fs.readFileSync(path.join(AUTH_DIR, f), 'utf8')) as StorageState,
+  )
+  const byOrigin = new Map<string, Map<string, string>>()
+  for (const state of states) {
+    for (const origin of state.origins ?? []) {
+      const entries = byOrigin.get(origin.origin) ?? new Map<string, string>()
+      for (const { name, value } of origin.localStorage) {
+        const existing = entries.get(name)
+        if (existing !== undefined && existing !== value) {
+          throw new Error(
+            `${files.join(' and ')} both set localStorage "${name}" — the sessions collide, ` +
+              'so they cannot both be open in one browser.',
+          )
+        }
+        entries.set(name, value)
+      }
+      byOrigin.set(origin.origin, entries)
+    }
+  }
+  return {
+    cookies: [],
+    origins: [...byOrigin].map(([origin, entries]) => ({
+      origin,
+      localStorage: [...entries].map(([name, value]) => ({ name, value })),
+    })),
+  }
 }
 
 /**

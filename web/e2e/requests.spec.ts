@@ -67,7 +67,7 @@ test('the request composer survives a filing whose business was removed', async 
     })
   })
 
-  await page.goto('/requests')
+  await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
 
   // The modal has to open at all — this is the assertion that failed.
@@ -87,7 +87,7 @@ test('a removed business is named as removed, not left blank', async ({ page }) 
     })
   })
 
-  await page.goto('/requests')
+  await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
   await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
 
@@ -128,7 +128,7 @@ test('the composer names who the request is going to, readably', async ({ page }
     })
   })
 
-  await page.goto('/requests')
+  await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
   await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
 
