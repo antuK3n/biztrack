@@ -138,12 +138,26 @@ A business that adds a food line in June needs a sanitary permit it did not
 need in January.
 
 **Why it matters.** If yes, that path has to exist on screen. **What we assumed
-meanwhile:** yes, it is allowed — but it is not built.
+meanwhile:** yes, it is allowed — but it is not built. The clearances are now
+chosen inside the application, before it is submitted, so there is currently no
+door at all: a business in that position files again.
+
+## A7b. When an office sends a filing back for revision, may the applicant add a clearance they now realise they need?
+
+A returned filing is otherwise fully editable — documents, office sheets, the
+business details — but it has already been assessed and paid for.
+
+**Why it matters.** Adding a chargeable clearance to a paid filing means a
+second bill, and a second bill is the whole mechanism this design deleted (see
+`docs/clearances-before-payment.md`). **What we assumed meanwhile:** no. The
+six close at submission and stay closed; the returned filing's message says to
+contact the office.
 
 ## A8. Are clearance fees refundable if the applicant withdraws before the office acts?
 
-**Why it matters.** Not modelled at all. If refunds exist, the balance needs to
-be able to go down as well as up.
+**Why it matters.** Not modelled at all. Withdrawing before submission simply
+takes the clearance off the assessment, because nothing has been charged yet —
+so this only arises for a filing already paid, which is A7b.
 
 ## A9. May a business hold a Mayor's Permit with no supporting clearance at all?
 

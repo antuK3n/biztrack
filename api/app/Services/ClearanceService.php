@@ -15,23 +15,29 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
- * The LGU clearance stage (docs/clearances-after-payment.md).
+ * The LGU clearance stage (docs/clearances-before-payment.md).
  *
- * The six clearances used to be step 4 of the apply wizard, which made them
- * look like part of one filing. They are not: each is a separate transaction
- * with a separate office, a separate fee and a separate outcome. Here they are
- * their own stage, opened by the first payment clearing, and each one applied
- * for re-assesses the filing so its office's lines join the running balance.
+ * The six clearances are decided while the application is still being filled
+ * in, and the whole filing — business permit and every clearance chosen — is
+ * paid for once, after submission. So this service answers "which clearances
+ * does this draft ask for", and nothing about money changing hands.
  *
- * The accrual is not a new pricing model. FeeCalculator::assess already gates
- * every rule on the selected permit types, so attaching a clearance and
- * re-running the assessment produces exactly that office's lines and nothing
- * else — verified per code before this was built on, not assumed.
+ * It briefly worked the other way: the stage opened AFTER the first payment,
+ * each clearance applied for re-assessed into a running balance, a second
+ * payment settled it and a gate held the permit until it cleared. All four of
+ * those mechanisms are gone (docs/clearances-after-payment.md carries the
+ * post-mortem). Do not rebuild them — the accrual's only job was to price
+ * choices made after the Tax Order of Payment had already been issued, and no
+ * choice is made after it any more.
+ *
+ * What survives from that design, because it was right either way:
+ * FeeCalculator::assess gates every rule on the selected permit types, so the
+ * clearances attached here are exactly the office lines billed at submit. That
+ * was verified per code rather than assumed, and it is why `assessFees` at
+ * submit needs to know nothing about clearances.
  */
 class ClearanceService
 {
-    public function __construct(private WorkflowService $workflow) {}
-
     /**
      * The six clearances, in the flow's order.
      *
@@ -93,7 +99,14 @@ class ClearanceService
     }
 
     /**
-     * `meta` — whether the stage is open, and the running ledger.
+     * `meta` — whether the stage is still open to being changed.
+     *
+     * It used to carry `total_assessed`, `total_paid` and `balance_due` as
+     * well, because a clearance applied for after payment raised a balance the
+     * screen had to show. There is no such balance now: nothing here is
+     * chargeable until the filing is submitted, and by then this stage is shut.
+     * A ledger on a draft would only ever read zero, and a zero that is really
+     * "not assessed yet" is worse than no figure at all.
      *
      * @return array<string, mixed>
      */
@@ -102,7 +115,6 @@ class ClearanceService
         return [
             'unlocked' => $this->isUnlocked($application),
             'locked_reason' => $this->lockedReason($application),
-            ...PermitFees::balance($application),
         ];
     }
 
@@ -212,19 +224,23 @@ class ClearanceService
     // --- unlocking -----------------------------------------------------------
 
     /**
-     * The stage opens on payment, not on submission (spec rule 3).
+     * The stage is open while the filing is still being written, and only then.
      *
-     * A decided filing is closed to it either way: applying for a clearance on
-     * a rejected or cancelled application would put an assignment on an office
-     * queue for a filing nobody is working.
+     * This asked whether a payment had cleared, which is the inverse of the
+     * rule the client settled on: payment is the LAST thing, so a filing that
+     * has been paid for is a filing whose clearances were decided long ago.
+     *
+     * Draft, and deliberately not Returned — even though the documents and the
+     * office sheets both stay editable while a filing is back with the
+     * applicant. A returned filing has already been assessed and paid; adding a
+     * chargeable clearance to it would raise a difference nobody is asked for
+     * and nothing gates, which is the accrual this change exists to delete.
+     * Whether a returned filing may gain a clearance at all is BPLO's call, and
+     * it is not one to guess at by leaving a door open.
      */
     public function isUnlocked(Application $application): bool
     {
-        if (in_array($application->status, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
-            return false;
-        }
-
-        return PermitFees::hasClearedPayment($application);
+        return $application->status === ApplicationStatus::Draft;
     }
 
     /**
@@ -233,6 +249,11 @@ class ClearanceService
      * Phrased as the next thing to do rather than as the fact of being locked:
      * "Locked" is what the applicant can already see, and a reason that only
      * restates it leaves them looking for the button that opens it.
+     *
+     * There is no sentence for a draft any more, because a draft is when the
+     * stage is open. Everything below is a filing that has left the applicant's
+     * hands, and the honest answer for all of them is the same one: the choice
+     * was made at submission and this is not the place to change it.
      */
     public function lockedReason(Application $application): ?string
     {
@@ -241,26 +262,39 @@ class ClearanceService
         }
 
         return match ($application->status) {
-            ApplicationStatus::Draft => 'Finish and submit this application first — the six LGU clearances open once you have paid the assessed fees for your business permit.',
-            ApplicationStatus::Submitted, ApplicationStatus::PendingPayment => 'Pay your Tax Order of Payment for the business permit. The six LGU clearances open as soon as that first payment clears, and each one you apply for is added to the same balance.',
-            ApplicationStatus::Returned => 'Answer what the office sent back and resubmit, then pay your Tax Order of Payment — the six LGU clearances open once that first payment clears.',
+            ApplicationStatus::Submitted, ApplicationStatus::PendingPayment => 'Your clearances were decided when you submitted this application, and they are on the Tax Order of Payment you are about to settle. They can no longer be changed here — message the BPLO if one of them is wrong.',
+            ApplicationStatus::Returned => 'Answer what the office sent back and resubmit. The clearances on this filing were fixed when it was submitted, so message the office if you now need one you did not ask for.',
             ApplicationStatus::Rejected => 'This application was not approved, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             ApplicationStatus::Cancelled => 'This application was cancelled, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
-            // Under review or later with no payment on record: possible on data
-            // migrated in before the payment step existed. Say what is missing
-            // rather than inventing a step the applicant cannot take.
-            default => 'The six LGU clearances open once a payment on this application has cleared. No payment is recorded against it yet — contact the BPLO if you have already paid.',
+            // Under review, for inspection, approved: the offices are working
+            // the filing as submitted.
+            default => 'This application is with the reviewing offices, so the clearances on it can no longer be changed. Message the BPLO if you need one you did not ask for.',
         };
     }
 
     // --- apply / un-apply ----------------------------------------------------
 
     /**
-     * Apply for a clearance: attach the permit type, re-assess, route it.
+     * Apply for a clearance: attach the permit type to the draft.
      *
-     * All three in one transaction because they are one act. A permit type
-     * attached without its fee is a free clearance; a fee assessed without an
-     * assignment is a charge nobody is working.
+     * That is the whole of it now, and the two things it no longer does are
+     * worth naming so they are not put back.
+     *
+     * It does not re-assess. There is nothing to re-assess against: the Tax
+     * Order of Payment is produced once, by `assessFees` at submit, from
+     * exactly the permit types sitting here. Writing a FeeAssessment row
+     * against a draft would only invent a bill for a filing nobody has sent.
+     * The card's `fee_preview` is computed on the fly (see feePreview below),
+     * so the price is still quoted before the button is pressed.
+     *
+     * It does not route an assignment either. Routing happens at payment, in
+     * WorkflowService::routeToDepartments, which already raises one assignment
+     * per department owning a requested permit type — the clearances included.
+     * Routing at apply time would stamp `assigned_at` the moment a card was
+     * ticked in a draft, and `assigned_at → completed_at` is what
+     * ProcessingTimeAnalytics, StaffingSimulation and DashboardAnalytics all
+     * measure an office's service time with. An applicant who left their draft
+     * open for a week would have added a week to CHO's measured turnaround.
      */
     public function apply(Application $application, PermitType $type): void
     {
@@ -268,15 +302,12 @@ class ClearanceService
             $application->permitTypes()->syncWithoutDetaching([$type->id]);
             $application->load('permitTypes');
 
-            $this->workflow->assessFees($application);
-            $this->workflow->routeClearance($application, $type);
-
             Audit::log('clearance.applied', $application, ['permit_type' => $type->code]);
         });
     }
 
     /**
-     * Un-apply: detach, re-assess back down, and withdraw the routing.
+     * Un-apply: take the permit type back off the draft.
      *
      * The office form's saved answers stay. They are the applicant's own words,
      * re-applying is a plausible next move, and silently discarding a filled
@@ -288,9 +319,6 @@ class ClearanceService
         DB::transaction(function () use ($application, $type) {
             $application->permitTypes()->detach($type->id);
             $application->load('permitTypes');
-
-            $this->workflow->assessFees($application);
-            $this->workflow->withdrawClearanceRouting($application, $type);
 
             Audit::log('clearance.unapplied', $application, ['permit_type' => $type->code]);
         });
@@ -321,10 +349,13 @@ class ClearanceService
      * What applying for this clearance adds (or, once applied, did add).
      *
      * Computed as a difference of two whole assessments rather than by picking
-     * rules apart, for the same reason the accrual itself is a re-assessment:
-     * FeeCalculator's aggregation steps (the sanitary inspection fee is the
-     * highest matching rate, not the sum) mean a clearance's lines are not
-     * separable from the total they land in.
+     * rules apart: FeeCalculator's aggregation steps (the sanitary inspection
+     * fee is the highest matching rate, not the sum) mean a clearance's lines
+     * are not separable from the total they land in.
+     *
+     * Nothing is written by any of this. It is a quote — what this clearance
+     * will add to the one Tax Order of Payment issued at submit — shown before
+     * the applicant commits to it.
      */
     private function feePreview(Application $application, PermitType $type, ?float $baseline): ?string
     {

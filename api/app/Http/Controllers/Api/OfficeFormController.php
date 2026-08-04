@@ -8,7 +8,6 @@ use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
-use App\Services\ClearanceService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -25,8 +24,6 @@ use Illuminate\Http\Request;
  */
 class OfficeFormController extends Controller
 {
-    public function __construct(private ClearanceService $clearances) {}
-
     /**
      * Permit types with an applicant-facing form sheet.
      *
@@ -90,9 +87,9 @@ class OfficeFormController extends Controller
 
         if ($isOwner) {
             abort_unless(
-                $this->ownerMayEdit($application, $permitType),
+                $this->ownerMayEdit($application),
                 422,
-                'Office forms can only be edited while the application is a draft or returned, or on a clearance you have applied for after payment.'
+                'Office forms can only be edited while the application is a draft or has been returned to you.'
             );
         }
 
@@ -156,29 +153,18 @@ class OfficeFormController extends Controller
     }
 
     /**
-     * When the applicant may still write a sheet.
+     * When the applicant may still write a sheet: while the filing is theirs.
      *
-     * Two windows now, because the clearances moved out of the wizard
-     * (docs/clearances-after-payment.md). The first is the original one: a
-     * draft or returned filing is still the applicant's to fill in.
-     *
-     * The second exists because "Apply always opens that office's form" (spec
-     * rule 4) and applying now happens *after* payment, when the filing is
-     * under review. Without it, every clearance form sheet would open read-only
-     * the moment it became reachable — the applicant could ask the City Health
-     * Office for a sanitary permit and then have no way to answer its
-     * questions. Scoped to a clearance actually applied for on an open stage,
-     * so it does not reopen the business permit's own answers after filing.
+     * There was briefly a second window here, for a clearance applied for
+     * after payment — the stage opened when the filing was already under
+     * review, so without it every office sheet would have opened read-only the
+     * moment it became reachable. The clearances are chosen in the wizard now
+     * (docs/clearances-before-payment.md), which is a draft by definition, so
+     * that window collapsed back into this one.
      */
-    private function ownerMayEdit(Application $application, PermitType $permitType): bool
+    private function ownerMayEdit(Application $application): bool
     {
-        if (in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)) {
-            return true;
-        }
-
-        return $permitType->isClearance()
-            && $this->clearances->isUnlocked($application)
-            && $this->clearances->isAppliedFor($application->loadMissing('permitTypes'), $permitType);
+        return in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true);
     }
 
     /**
