@@ -170,8 +170,8 @@ function StatusSummary({ report }: { report: BusinessGrowthReport }) {
       </table>
       <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
         Active holds a permit valid today, Expired has let every permit lapse, Inactive is registered
-        but never permitted, Closed had its registration removed. Derived from permits, not from the
-        moderation status an admin sets.
+        but has never held a permit, Closed had its registration removed. Worked out from permits,
+        not from the status an admin sets on the business record.
       </p>
     </ProtoCard>
   )
@@ -204,7 +204,7 @@ function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
             <p className="text-[11px] text-ink-muted">
               {row.growth_rate === null
                 ? `${row.registrations} new, none before`
-                : `${signed(row.growth_rate)}% vs prior`}
+                : `${signed(row.growth_rate)}% vs last period`}
             </p>
           </div>
           <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
@@ -222,8 +222,8 @@ function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
         </div>
       ))}
       <p className="border-t border-line pt-3 text-xs text-ink-muted">
-        Ranked by the increase in new registrations against the previous period of the same length,
-        not by total size. The figure on the right is that change.
+        Ranked by how much new registrations went up against the period before of the same length,
+        not by how big the barangay is. The figure on the right is that change.
       </p>
     </ProtoCard>
   )
@@ -273,7 +273,7 @@ function ClosureTrend({ report }: { report: BusinessGrowthReport }) {
       <p className="mt-2 text-[13px] text-ink-muted">
         {total === 0
           ? `No business closed its registration in the last ${report.period_months} months.`
-          : `${total} closure${total === 1 ? '' : 's'} over ${report.period_months} months, dated by when the registration was removed — the only closure date the schema records.`}
+          : `${total} closure${total === 1 ? '' : 's'} over ${report.period_months} months, dated by when the registration was removed — the only closure date the system records.`}
       </p>
     </ProtoCard>
   )
@@ -298,7 +298,7 @@ function IndustryBars({ rows }: { rows: IndustryGrowthRow[] }) {
               should not have to infer from a shade of blue.
             */}
             <p className="text-[11px] text-ink-muted">
-              {row.direction} · {signed(row.delta)} vs prior
+              {row.direction} · {signed(row.delta)} vs last period
             </p>
           </div>
           <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
@@ -317,7 +317,8 @@ function IndustryBars({ rows }: { rows: IndustryGrowthRow[] }) {
       ))}
       <p className="border-t border-line pt-3 text-xs text-ink-muted">
         The bar is how many businesses carry that line today; growing or declining is the change in
-        new registrations against the previous period. Grouped by PSIC code.
+        new registrations against the period before. Grouped by PSIC code — the national numbering
+        for industries.
       </p>
     </ProtoCard>
   )
@@ -409,7 +410,7 @@ export function BusinessGrowthPage() {
               hint={
                 survival.survival === null
                   ? 'no business has reached a first renewal yet'
-                  : `still renewing through ${survival.max_cycle} ${survival.max_cycle === 1 ? 'cycle' : 'cycles'}${lastPoint ? ` · ${lastPoint.at_risk} reached it` : ''}`
+                  : `still renewing after ${survival.max_cycle} ${survival.max_cycle === 1 ? 'cycle' : 'cycles'}${lastPoint ? ` · ${lastPoint.at_risk} businesses got that far` : ''}`
               }
               muted={survival.survival === null}
             />
@@ -423,7 +424,7 @@ export function BusinessGrowthPage() {
               value={top ? top.barangay : 'No data'}
               label="Top Growing Barangay"
               metric="top_barangays"
-              hint={top ? `${signed(top.delta)} new registrations vs prior` : undefined}
+              hint={top ? `${signed(top.delta)} new registrations vs last period` : undefined}
               muted={!top}
             />
           </div>
@@ -486,8 +487,8 @@ export function BusinessGrowthPage() {
             <Info metric="registrations" /> new registrations between {data.period_start} and{' '}
             {data.period_end}, against {data.registrations_prior.toLocaleString()} in the{' '}
             {data.period_months} months before that. Cohort survival follows{' '}
-            {survival.businesses.toLocaleString()} businesses across{' '}
-            {survival.renewals_observed.toLocaleString()} observed renewal cycles, of which{' '}
+            {survival.businesses.toLocaleString()} businesses through{' '}
+            {survival.renewals_observed.toLocaleString()} renewal cycles on record, of which{' '}
             {survival.lapses.toLocaleString()} lapsed.
           </p>
 

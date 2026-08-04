@@ -27,8 +27,20 @@ class PermitType extends Model
      * OfficeFormController needs it to decide which sheets exist at all. It
      * used to live privately on that controller, so the only way to ask the
      * question was to go through an HTTP controller.
+     *
+     * This list and `OFFICE_FORM_CODES` in web/src/pages/applicant/
+     * OfficeFormStep.tsx are the same list written twice and must be changed
+     * together: this one decides which sheets the API will accept and which
+     * cards advertise a form, that one decides which sheets can be drawn. A
+     * code in only one of them is either a card promising a screen that does
+     * not exist, or a screen the API refuses to save.
+     *
+     * ZONING joined in August 2026 (checklist item 101). It is the only sheet
+     * not transcribed from a paper form — see the header of OfficeFormStep.tsx
+     * and questions-for-malabon E4. MARKET is still absent, for the same reason
+     * ZONING was: nobody has shown us what the market administrator asks for.
      */
-    public const OFFICE_FORM_CODES = ['SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
+    public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
 
     /**
      * Display order for the six clearances, as the client's flow lays them out

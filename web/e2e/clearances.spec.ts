@@ -426,10 +426,13 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * running balance that used to carry this job is gone with the accrual, so
    * the live region is the sentence naming what the press did.
    *
-   * ZONING has no office sheet, so Apply here does not navigate away from the
-   * cards and the announcement is the only thing to observe.
+   * MARKET is the clearance to press here, because it is the only one of the
+   * six with no office sheet — Apply therefore stays on the cards and the
+   * announcement is the only thing to observe. This used to be ZONING for the
+   * same reason, until checklist item 101 gave zoning a locational clearance
+   * sheet and Apply on it started navigating away.
    */
-  const card = page.locator('ul > li').filter({ hasText: /zoning/i })
+  const card = page.locator('ul > li').filter({ hasText: /market/i })
   await card.getByRole('button', { name: /^apply$/i }).click()
 
   const status = page.getByRole('status').filter({ hasText: /applied for your/i })

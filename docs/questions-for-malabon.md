@@ -44,7 +44,10 @@ system will happily process the filing without it.
 
 **What we assumed meanwhile.** The applicant chooses. The system additionally
 requires at least one clearance before submission, which is our own rule and
-not something anyone at the city asked for.
+not something anyone at the city asked for. No individual clearance is ever
+required — see **A9b**, which is this same question arriving from the other
+direction: the Market Clearance is for stall holders, and to require it of them
+we would first have to be told the premises is a stall.
 
 ## A2. When an office refuses to issue its clearance, what happens to the whole application?
 
@@ -164,6 +167,57 @@ so this only arises for a filing already paid, which is A7b.
 **Why it matters.** We now require at least one, which changed how the system
 behaved before. If a small retailer legitimately needs none, we are blocking a
 valid filing.
+
+## A9b. Is the Market Clearance compulsory for a stall holder — and how would the system know the premises is a stall?
+
+Testing checklist item 98 reads: *"Market clearance should not be required. It
+is only required for stall holders."* The first half is already true — the six
+clearances are individually optional and the step only asks that **one** of them
+is decided — so what we changed was the card, which now says the Market
+Clearance is for a business trading from a stall in a public or private market.
+
+Three things in that sentence are ours, not the city's, and we would rather be
+corrected than keep guessing:
+
+1. **"Only for stall holders" — is that the whole test?** Is it the premises
+   being a stall, or is it the business renting from the city, or trading in a
+   market building at all? Our wording says "a stall in a public or private
+   market"; the tester said "stall holders" and did not say whether a privately
+   owned market counts.
+2. **Is it compulsory for those who do fall under it?** "Only required for stall
+   holders" reads as *required* for them. We do not enforce that, and cannot:
+   nothing in the application asks whether the premises is a market stall, so
+   there is no fact to enforce against. If it is compulsory, we need the
+   question — and then this stops being a card the applicant picks, which is
+   **A1** all over again.
+3. **Nobody is ever asked how many stalls.** The Business & Tax Profile step has
+   a "Number of Stalls" question that only appears when MARKET is among the
+   permit types, and the wizard passes it the business permit alone — so it
+   never appears. The Revenue Code's markets-by-stall-count bracket therefore
+   has no count to work from, which is part of why the Market Clearance's fee
+   preview comes back as ₱0.00 (the other part is A9c below). Whether to ask
+   depends on the answer to 2: a required clearance would ask before the
+   assessment, an optional one after it is chosen.
+
+**What we assumed meanwhile.** Optional, like the other five. The card names who
+it is for and nothing compels it.
+
+## A9c. What does the City Market Administrator actually charge, and is it a permit fee at all?
+
+The 2016 Revenue Code on file contains no public-market stall fee schedule —
+Chapter V covers only city-owned commercial space leases at ₱200/sqm/month — so
+the assessment has no rule to price a Market Clearance with and the line comes
+out at ₱0.00, officer-set.
+
+**Why it matters.** A stall rental is rent, not a permit fee, and it is probably
+collected monthly by a different office on a different cycle from the annual Tax
+Order of Payment this system issues. If so, putting it on the Tax Order of
+Payment at all is wrong, however the number is arrived at.
+
+**What we assumed meanwhile.** The line exists, reads ₱0.00, and an officer sets
+it by fee adjustment. The card says applying "adds nothing to your assessment"
+and that the office sets any charge separately, which is true but is not an
+answer.
 
 ## A10. Which transactions are "simple", "complex" and "highly technical" under RA 11032?
 
@@ -527,6 +581,41 @@ CPDO Zoning / Locational Clearance card.
 **Why it matters.** If that clearance is applied for on its own paper form, we
 should be collecting those fields. See E4.
 
+**What we assumed meanwhile.** Checklist item 101 asked us to build the form
+sheet anyway, so we did — and this is the one sheet in BizTrack that was **not**
+copied from a piece of paper. The other five offices' forms are transcribed;
+this one we assembled from the zoning article of the Revenue Code and from the
+documents the clearance already requires. **Please read the field list below and
+strike out whatever CPDO does not ask for.** We would rather delete than keep.
+
+The sheet shows the business name, trade name, address and line of business
+read-only at the top, as every office sheet does, and then asks:
+
+| Field | Who answers it | Where it came from |
+|---|---|---|
+| Type of Application — *New* / *Renewal of Locational Clearance* | the system | the application's own type |
+| Locational Clearance No. | the system | minted on issuance; blank on the form |
+| Date of Application | the system | the date the filing is submitted |
+| **Proposed Land Use** — Commercial · Industrial · Residential · Social, Educational or Institutional · Ancillary to a principal building | **the applicant** (required) | **transcribed** — the categories in the ordinance's land use verification fee schedule. We split "Commercial and industrial", which the schedule prints as one line, because the processing fee schedule on the facing page lists them separately |
+| Total Floor Area (sq. m.) | the system | **transcribed as a requirement** — the processing fee is charged per square metre of total floor area. Taken from the floor area already collected for the business permit |
+| Right Over the Site — *Owned or occupied by the applicant* / *Leased from [lessor]* | the system | **transcribed as a requirement** — the clearance already demands a Lease Contract or Land Title. Taken from the rental question on Location & Zoning |
+| Is the business already operating at this address? (and since when) | **the applicant** | **inferred — the field we are least sure of.** The ordinance gives an already-operating non-conforming use a *certificate of non-conformance* rather than a locational clearance, and surcharges an operation running without either, so the office has to know. Nobody at CPDO has told us they ask it, or in what words |
+
+Three specific things to confirm, in order of how much is riding on them:
+
+1. **Is "already operating at this address" a question CPDO asks?** If not, we
+   delete it — it is the only field on the sheet with no documentary basis at
+   all.
+2. **Are those five the land use categories CPDO works in?** They are the fee
+   schedule's categories, which is not the same thing as the form's.
+3. **Is there anything the office asks for that is not on this list?** A missing
+   field sends the applicant back to City Hall, which is the failure this whole
+   sheet exists to prevent.
+
+**MARKET still has no sheet**, for exactly the reason ZONING had none until now:
+nobody has shown us what the City Market Administrator asks for. If that office
+has a form, we need it too.
+
 ## C10. Is ₱735 the current charge for a zoning / locational clearance?
 
 We compute it from Revenue Code Sec. 3.D.01 as ₱45 filing + ₱345 land use
@@ -634,7 +723,14 @@ database was built to hold them; nobody has checked them against the sheet.
 ## E4. The zoning / locational clearance application form (CPDO)
 
 **Why it matters.** See C9. If it exists on paper, its fields belong in the
-system.
+system. This is now the most urgent item in section E: we were asked to ship the
+sheet before the form arrived, so BizTrack is currently showing applicants a
+CPDO form that CPDO has never seen. Every field on it is listed in C9 for
+striking out. A blank copy settles it in one visit.
+
+**Also needed, for the same reason:** the Market Clearance application form, if
+the City Market Administrator issues one. It is the last of the six clearances
+with no sheet at all.
 
 ## E5. A blank Mayor's / Business Permit certificate
 

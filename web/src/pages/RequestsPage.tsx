@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { SVGProps } from 'react'
 import { ArrowLeftIcon, ChevronRightIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
@@ -52,6 +52,32 @@ import type {
  * that control is real; this is the TO side, and the honest version of it is a
  * name rather than a choice.
  */
+
+/*
+ * `created_by` and `application` are nullable on the wire and were read
+ * straight through.
+ *
+ * OfficerRequestResource emits `created_by: null` for a request whose officer
+ * has left (User soft-deletes) and `application: null` for one whose filing has
+ * gone (Application soft-deletes). Both are the documented shape, not a fault.
+ * With no error boundary above this route, either one threw on the first field
+ * the screen prints and blanked the whole page rather than one row — the same
+ * failure `business: null` caused in the composer, and the reason
+ * `businessName()` exists. Naming what is missing is also the useful answer:
+ * an officer chasing a stalled requirement needs to know the filing behind it
+ * was removed, which is usually why it stalled.
+ */
+function senderName(request: OfficerRequest): string {
+  return request.created_by?.name ?? 'Officer removed from register'
+}
+
+/** "<business> (<tracking id>)" for the filing a request was raised on. */
+function filingLine(request: OfficerRequest): string {
+  const filing = request.application
+  if (!filing) return 'a filing removed from the register'
+  const name = businessName(filing.business_name ? { name: filing.business_name } : null)
+  return filing.tracking_id ? `${name} (${filing.tracking_id})` : `${name} (draft, not yet filed)`
+}
 
 /* Status chip tone (pending=orange, submitted=royal-ish, fulfilled=green, rejected=red). */
 const STATUS_CHIP: Record<RequestStatus, { tone: ChipTone; label: string }> = {
@@ -186,16 +212,16 @@ function LetterView({
           <div className="flex items-center gap-3">
             <AvatarCircle />
             <div>
-              <span className="block text-lg font-bold text-ink">{request.created_by.name}</span>
+              <span className="block text-lg font-bold text-ink">{senderName(request)}</span>
               {/*
                * The office the composer attributed this to, which is not always
                * the requester's own — the super admin has none and picks one.
                * `created_by.department` is the fallback for rows written before
                * the picker existed.
                */}
-              {(request.from_office?.name ?? request.created_by.department) && (
+              {(request.from_office?.name ?? request.created_by?.department) && (
                 <span className="block text-xs italic text-ink-muted">
-                  {request.from_office?.name ?? request.created_by.department}
+                  {request.from_office?.name ?? request.created_by?.department}
                 </span>
               )}
             </div>
@@ -218,7 +244,7 @@ function LetterView({
         <div className="mt-6 space-y-3 pl-0 text-[15px] leading-relaxed text-ink sm:pl-16">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
             {request.request_type === 'document' ? 'Document request' : 'Message'} · re{' '}
-            {request.application.business_name} ({request.application.tracking_id})
+            {filingLine(request)}
           </p>
           <p className="whitespace-pre-wrap">{request.body}</p>
         </div>
@@ -530,8 +556,36 @@ export function RequestsPage() {
   const user = useAuth((s) => s.user)
   const isOfficer = Boolean(user?.permissions.includes('request.create'))
 
-  const { data, loading, error, reload, setData } = useAsync(() => requests.list(), [])
-  const list = useMemo(() => data ?? [], [data])
+  /*
+   * Paged, and the total is on the screen.
+   *
+   * `/requests` has been bounded at 50 rows a page since the lists were capped,
+   * and this screen asked for one page and rendered it as though it were the
+   * whole feed. BPLO's register holds 124 requests today: 74 of them — every
+   * one older than the fiftieth — had no row, no scroll and no control that
+   * would reach them, and nothing on the page said so. A reader cannot tell
+   * "you have fifty requests" from "we loaded fifty of your requests", which is
+   * why the count is stated rather than implied.
+   */
+  const [page, setPage] = useState(1)
+  const [list, setList] = useState<OfficerRequest[]>([])
+  const { data, loading, error, reload } = useAsync(() => requests.page({ page }), [page])
+
+  // Append rather than replace, so paging in extends the list being read
+  // instead of dropping the reader back at the top. De-duplicated by id: a
+  // retried page would otherwise render its rows twice under duplicate keys.
+  useEffect(() => {
+    if (!data) return
+    setList((prev) => {
+      if (data.meta.current_page === 1) return data.data
+      const seen = new Set(prev.map((r) => r.id))
+      return [...prev, ...data.data.filter((r) => !seen.has(r.id))]
+    })
+  }, [data])
+
+  const total = data?.meta.total ?? 0
+  const hasMore = data ? data.meta.current_page < data.meta.last_page : false
+  const firstLoad = loading && list.length === 0
 
   const [openId, setOpenId] = useState<number | null>(null)
   const [composing, setComposing] = useState(false)
@@ -545,7 +599,7 @@ export function RequestsPage() {
   const open = list.find((r) => r.id === openId) ?? null
 
   function patch(updated: OfficerRequest) {
-    setData((prev) => (prev ?? []).map((r) => (r.id === updated.id ? updated : r)))
+    setList((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
   }
 
   if (open) {
@@ -580,7 +634,7 @@ export function RequestsPage() {
         Other Requirements
       </PageTitle>
 
-      {loading ? (
+      {firstLoad ? (
         <SkeletonList rows={4} />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
@@ -600,53 +654,68 @@ export function RequestsPage() {
           }
         />
       ) : (
-        <ul className="flex flex-col gap-4">
-          {list.map((r) => {
-            const chip = STATUS_CHIP[r.status]
-            return (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => setOpenId(r.id)}
-                  className="flex w-full items-center gap-5 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised"
-                >
-                  <AvatarCircle />
-                  <span className="w-44 shrink-0">
-                    <span className="block truncate text-[15px] font-bold text-ink">
-                      {r.created_by.name}
-                    </span>
-                    {/*
-                     * An officer's list is everything their office has sent, so
-                     * the useful second line is who each one went to. The owner
-                     * is reading their own inbox and already knows.
-                     */}
-                    {isOfficer && (
-                      <span className="block truncate text-xs text-ink-secondary">
-                        To {r.recipient?.name ?? 'the business owner on file'}
+        <>
+          <p className="mb-3 text-sm text-ink-muted">
+            Showing {list.length.toLocaleString()} of {total.toLocaleString()}, newest first.
+          </p>
+          <ul className="flex flex-col gap-4">
+            {list.map((r) => {
+              const chip = STATUS_CHIP[r.status]
+              return (
+                <li key={r.id}>
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(r.id)}
+                    className="flex w-full items-center gap-5 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised"
+                  >
+                    <AvatarCircle />
+                    <span className="w-44 shrink-0">
+                      <span className="block truncate text-[15px] font-bold text-ink">
+                        {senderName(r)}
                       </span>
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
-                    <span className="font-bold">{r.subject} - </span>
-                    {r.body}
-                  </span>
-                  <StatusDot
-                    status={r.status}
-                    label={
-                      r.responses?.length
-                        ? `${chip.label} · ${r.responses.length} ${r.responses.length === 1 ? 'response' : 'responses'}`
-                        : chip.label
-                    }
-                  />
-                  <span className="hidden shrink-0 text-sm italic text-ink-muted sm:inline">
-                    {formatDate(r.created_at)}
-                  </span>
-                  <ChevronRightIcon size={18} className="shrink-0 text-ink-secondary" />
-                </button>
-              </li>
-            )
-          })}
-        </ul>
+                      {/*
+                       * An officer's list is everything their office has sent, so
+                       * the useful second line is who each one went to. The owner
+                       * is reading their own inbox and already knows.
+                       */}
+                      {isOfficer && (
+                        <span className="block truncate text-xs text-ink-secondary">
+                          To {r.recipient?.name ?? 'the business owner on file'}
+                        </span>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
+                      <span className="font-bold">{r.subject} - </span>
+                      {r.body}
+                    </span>
+                    <StatusDot
+                      status={r.status}
+                      label={
+                        r.responses?.length
+                          ? `${chip.label} · ${r.responses.length} ${r.responses.length === 1 ? 'response' : 'responses'}`
+                          : chip.label
+                      }
+                    />
+                    <span className="hidden shrink-0 text-sm italic text-ink-muted sm:inline">
+                      {formatDate(r.created_at)}
+                    </span>
+                    <ChevronRightIcon size={18} className="shrink-0 text-ink-secondary" />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+          {hasMore && (
+            <button
+              type="button"
+              onClick={() => setPage((p) => p + 1)}
+              disabled={loading}
+              className="mt-5 w-full rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas disabled:cursor-wait disabled:text-ink-muted"
+            >
+              {loading ? 'Loading…' : 'Load more'}
+            </button>
+          )}
+        </>
       )}
 
       {composing && (
@@ -654,7 +723,7 @@ export function RequestsPage() {
           apps={apps ?? []}
           onClose={() => setComposing(false)}
           onCreated={(created) => {
-            setData((prev) => [created, ...(prev ?? [])])
+            setList((prev) => [created, ...prev])
             setComposing(false)
           }}
         />

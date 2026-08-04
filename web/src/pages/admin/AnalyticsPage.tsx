@@ -272,7 +272,7 @@ function DecisionsPanel({ report }: { report: DashboardReport }) {
       <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
         {approval_rate === null
           ? 'Nothing filed this month has been decided yet, so there is no approval rate to report.'
-          : `${num(approved)} approved of ${num(decisioned)} decided. Pending filings are excluded from the denominator.`}
+          : `${num(approved)} approved of ${num(decisioned)} decided. Filings still pending are not counted in this rate.`}
       </p>
     </ProtoCard>
   )
@@ -313,8 +313,8 @@ function TierBar({ row }: { row: ProcessingTierRow }) {
         </div>
         <div className="mt-2 h-2.5 rounded-full border border-dashed border-line bg-canvas" />
         <p className="mt-1.5 text-[11px] text-ink-muted">
-          No {row.label.toLowerCase()} application has been decided in this window, so there is no mean
-          to compare against the {target}-working-day limit.
+          No {row.label.toLowerCase()} application has been decided in this window, so there is no
+          average to compare against the {target}-working-day limit.
         </p>
       </div>
     )
@@ -371,7 +371,8 @@ function TierBar({ row }: { row: ProcessingTierRow }) {
         */}
         <span className="text-[11px] text-ink-muted">
           {num(row.within_statutory)} of {num(row.observations)} filings inside the statutory limit (
-          {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)}d calendar
+          {pct(row.within_statutory_rate)}) · {row.mean_calendar_days?.toFixed(1)}d counting every
+          day of the week
         </span>
       </div>
     </div>
@@ -405,9 +406,10 @@ function TierPanel({ report }: { report: DashboardReport }) {
       </div>
       <p className="mt-1 border-t border-line pt-3 text-xs text-ink-muted">
         Republic Act 11032 sets these limits in{' '}
-        <strong className="font-semibold">working days</strong>, so the means and the pass rates are
-        measured in working days too; weekends are excluded and public holidays are not modelled on
-        either side of the comparison. Tier comes from each application&rsquo;s recorded complexity.{' '}
+        <strong className="font-semibold">working days</strong>, so the averages and the pass rates
+        are measured in working days too; weekends are left out, and public holidays are not allowed
+        for on either side of the comparison. Tier comes from each application&rsquo;s recorded
+        complexity.{' '}
         {breaching.length > 0 ? (
           <span className="font-semibold text-ink">
             {breaching.length} of {measured.length} measured{' '}
@@ -522,8 +524,8 @@ function StagePanel({ report }: { report: DashboardReport }) {
           {bottleneck.above_average_days !== null && bottleneck.above_average_days > 0 && (
             <>
               {' '}
-              — {bottleneck.above_average_days.toFixed(1)} days above the{' '}
-              {mean_days?.toFixed(1)}-day all-office average
+              — {bottleneck.above_average_days.toFixed(1)} days slower than the{' '}
+              {mean_days?.toFixed(1)}-day average across all offices
             </>
           )}
           , and handles {bottleneck.share_of_reviews.toFixed(1)}% of the {num(reviews)} reviews
@@ -563,7 +565,7 @@ function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
       <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
         {unavailable
           ? (indicator.unavailable_reason ??
-            `Nothing in the denominator: no ${indicator.denominator_label} in this window.`)
+            `Nothing to count this against: no ${indicator.denominator_label} in this window.`)
           : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${indicator.denominator_label} ${indicator.numerator_label}.`}
       </p>
     </div>
@@ -616,7 +618,8 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <caption className="sr-only">
-            Permits approaching expiry by permit type. The 30, 60 and 90 day windows are cumulative.
+            Permits approaching expiry by permit type. The 30, 60 and 90 day columns overlap, so a
+            permit counted in the 30 day column is counted in the other two as well.
           </caption>
           <thead>
             <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
@@ -666,8 +669,9 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
         </table>
       </div>
       <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
-        The forward windows are cumulative — a permit expiring in 20 days is counted in all three.
-        Expired counts permits already past their validity date and is separate from the three.
+        The three forward windows overlap on purpose — a permit expiring in 20 days is counted in
+        all three. Expired counts permits already past their validity date and is separate from the
+        other three.
       </p>
     </ProtoCard>
   )
@@ -856,9 +860,10 @@ function InspectionsPanel({ report }: { report: DashboardReport }) {
         </table>
       </div>
       <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
-        Pass rate is passed ÷ <strong className="font-semibold">completed</strong>, not ÷ scheduled.
-        Type comes from the inspecting office, because the inspection-type field is not populated on
-        any record. A type with nothing completed shows no rate rather than 0%.
+        Pass rate divides the inspections passed by the ones actually{' '}
+        <strong className="font-semibold">carried out</strong>, not by the ones scheduled. Type comes
+        from the inspecting office, because the inspection-type field is empty on every record. A
+        type with nothing carried out shows no rate rather than 0%.
       </p>
     </ProtoCard>
   )
@@ -885,7 +890,7 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
           <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">
             {a.mean_response_hours === null
               ? 'No applicant message has been answered in this window.'
-              : `Mean over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; median ${a.median_response_hours?.toFixed(1)}h.`}
+              : `Averaged over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; the middle reply took ${a.median_response_hours?.toFixed(1)}h, with half faster and half slower.`}
             {a.threads_awaiting_reply > 0 &&
               ` ${num(a.threads_awaiting_reply)} ${a.threads_awaiting_reply === 1 ? 'thread is' : 'threads are'} still waiting.`}
           </p>
@@ -1288,7 +1293,7 @@ export function AnalyticsPage() {
                 rows={data.top_lines_of_business.rows}
                 nameHeading="Line of business"
                 name={(row) => (row as LineOfBusinessRow).industry}
-                footnote={`Grouped by PSIC code across ${num(data.top_lines_of_business.groups)} lines on record. Shares are of the ${num(data.top_lines_of_business.total)} active businesses with a line of business recorded.`}
+                footnote={`Grouped by PSIC code — the national numbering for industries — across ${num(data.top_lines_of_business.groups)} lines on record. Shares are out of the ${num(data.top_lines_of_business.total)} active businesses that have a line of business recorded.`}
                 empty="No active business has a line of business on record, so there is nothing to rank."
               />
             </section>
