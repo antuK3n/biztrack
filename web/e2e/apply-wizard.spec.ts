@@ -234,8 +234,13 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
 /**
  * Consent, then a complete Location & Zoning step, landing on Business
  * Information (part 3). Everything here is the minimum the step's own gate
- * demands — a trade with capital, a pin inside the city, an address and someone
- * an inspector can reach.
+ * demands — a trade, a pin inside the city, an address and someone an inspector
+ * can reach.
+ *
+ * No capital is typed, and the step still passes its gate. It used to ask for
+ * one per line here and Business & Tax Profile asked for the same figure again;
+ * only the second was ever assessed. The question lives on that step alone now,
+ * so this step demands place and trade and nothing about money.
  */
 async function goToBusinessStep(page: Page) {
   await page.getByRole('checkbox').first().check()
@@ -246,7 +251,6 @@ async function goToBusinessStep(page: Page) {
   await search.click()
   await search.fill('sari-sari')
   await page.locator('#psic-results').getByRole('button').first().click()
-  await page.getByLabel(/capital/i).first().fill('150000')
 
   // Centre of the map is Malabon City Hall, so this pin is always inside.
   const map = page.locator('.leaflet-container')

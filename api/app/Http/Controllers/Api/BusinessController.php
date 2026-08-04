@@ -473,11 +473,34 @@ class BusinessController extends Controller
             'longitude' => $data['address']['longitude'] ?? null,
         ]);
 
+        /*
+         * The declared capital per line, as it stands before this write.
+         *
+         * The lines are replaced wholesale below, so anything the payload does
+         * not restate is destroyed — and the wizard no longer states the
+         * capital, because it is asked once on Business & Tax Profile and
+         * arrives on the application's fee profile instead
+         * (ApplicationController::syncLineCapitalization). Without this, the
+         * autosave that saves the business a moment before the fee profile
+         * would blank the figure the previous autosave had just landed, and the
+         * two would take turns undoing each other for the life of the draft.
+         *
+         * So: a `capitalization` that is absent or null means "unchanged", and
+         * only a number sent explicitly overwrites what is on record. A client
+         * cannot clear the figure by omitting it, which is the right trade —
+         * 785 of 790 rows carry one, and losing it is a far worse failure than
+         * being unable to blank it through this endpoint.
+         */
+        $existingCapital = $business->lines()
+            ->pluck('capitalization', 'psic_code_id');
+
         $business->lines()->delete();
         foreach ($data['lines'] as $line) {
             $row = $business->lines()->make([
                 'psic_code_id' => $line['psic_code_id'],
-                'capitalization' => $line['capitalization'] ?? null,
+                'capitalization' => $line['capitalization']
+                    ?? $existingCapital[$line['psic_code_id']]
+                    ?? null,
             ]);
             // Free text for the "Other (not listed)" PSIC row; not mass
             // assignable on BusinessLine, so set it explicitly.

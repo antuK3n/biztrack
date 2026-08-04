@@ -272,12 +272,19 @@ const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
 }
 
 /*
- * One selected line of business: a PSIC code, optional capitalization, and the
- * free-text trade the applicant types when they pick "Other (not listed)".
+ * One selected line of business: a PSIC code and the free-text trade the
+ * applicant types when they pick "Other (not listed)".
+ *
+ * No capitalization here. It used to be asked twice — once against each line in
+ * this picker and again in Business & Tax Profile — and only the second answer
+ * was ever assessed, so the two drifted the moment anyone edited the first.
+ * Across 400 filed applications not one pair disagreed, which is what one
+ * question asked twice looks like. It is now asked in Business & Tax Profile
+ * alone, beside the two other per-line fee questions (category, gross sales);
+ * `business_lines.capitalization` is filled from there by the API.
  */
 interface LineDraft {
   psic_code_id: number
-  capitalization: string
   line_of_business: string
 }
 
@@ -650,7 +657,7 @@ function LinesStep({
   function toggle(code: PsicCode) {
     const exists = lines.find((l) => l.psic_code_id === code.id)
     if (exists) onChange(lines.filter((l) => l.psic_code_id !== code.id))
-    else onChange([...lines, { psic_code_id: code.id, capitalization: '', line_of_business: '' }])
+    else onChange([...lines, { psic_code_id: code.id, line_of_business: '' }])
   }
 
   return (
@@ -756,12 +763,22 @@ function LinesStep({
                */
               const isOther = code?.code === OTHER_PSIC_CODE
               const needsText = isOther && !line.line_of_business.trim()
-              // Capital is what the business tax and the capitalization-based
-              // fees are computed from, so a blank one is not a detail.
-              const needsCapital = !line.capitalization.trim()
+              /*
+               * A "Capital (₱)" box used to sit here, one per line, and it is
+               * deliberately gone — do not put it back.
+               *
+               * Business & Tax Profile asked the same thing on step 5 and only
+               * that answer ever reached the fee engine, so editing this one
+               * changed nothing and the two silently diverged. Capital is a fee
+               * input: it belongs beside the category and the gross sales it is
+               * assessed with. What is left here is place and trade, which is
+               * what CPDO actually rules on — and this step was already the
+               * heaviest in the wizard, carrying a map, an address, this picker,
+               * the rent details and an emergency contact.
+               */
               return (
                 <div key={line.psic_code_id}>
-                  <div className="flex items-end gap-3">
+                  <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       {isOther ? (
                         <div>
@@ -777,33 +794,10 @@ function LinesStep({
                         <p className="truncate text-sm text-ink">{code?.title}</p>
                       )}
                     </div>
-                    <div className="w-44">
-                      <label className="block">
-                      <FieldLabel required>Capital (₱)</FieldLabel>
-                      <input
-                        inputMode="decimal"
-                        value={line.capitalization}
-                        onChange={(e) =>
-                          onChange(
-                            lines.map((l) =>
-                              l.psic_code_id === line.psic_code_id
-                                ? // Grouped as it is typed (1,000,000); the API
-                                  // gets the plain number back.
-                                  { ...l, capitalization: formatAmountInput(e.target.value) }
-                                : l,
-                            ),
-                          )
-                        }
-                        placeholder="0.00"
-                        className={`${inputCls} tnum`}
-                        aria-invalid={needsCapital}
-                      />
-                      </label>
-                    </div>
                     <button
                       type="button"
                       onClick={() => onChange(lines.filter((l) => l.psic_code_id !== line.psic_code_id))}
-                      className="mb-2 text-sm font-semibold text-s-red underline underline-offset-2"
+                      className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2"
                     >
                       Remove
                     </button>
@@ -811,11 +805,6 @@ function LinesStep({
                   {needsText && (
                     <p className="mt-1 text-xs font-medium text-s-red">
                       Type the line of business you want registered.
-                    </p>
-                  )}
-                  {needsCapital && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
-                      Enter the capital you are putting into this line, in pesos.
                     </p>
                   )}
                 </div>
@@ -1100,9 +1089,14 @@ export function ApplyWizard() {
         emergency_contact_number: b.emergency_contact_number ?? '',
         latitude: b.address.latitude ?? null,
         longitude: b.address.longitude ?? null,
+        /*
+         * `l.capitalization` is deliberately not read. A renewal is assessed on
+         * gross sales, not capital, so this wizard never asks the business's
+         * figure again — and the API preserves the stored one through every
+         * business update that omits it (BusinessController::syncAddressAndLines).
+         */
         lines: b.lines.map((l) => ({
           psic_code_id: l.psic_code.id,
-          capitalization: formatAmountInput(l.capitalization ?? ''),
           // Carry over the free text for an "Other (not listed)" trade, or a
           // renewal would silently blank it and block Next.
           line_of_business: l.line_of_business ?? '',
@@ -1518,11 +1512,13 @@ export function ApplyWizard() {
           if (otherId !== undefined && form.lines.some((l) => l.psic_code_id === otherId)) {
             missing.push('A real PSIC trade in place of the unclassified line')
           }
-          // Capital is what the business tax and the capitalization-based fees
-          // are computed from, so a blank one is not a detail.
-          if (form.lines.some((l) => !l.capitalization.trim())) {
-            missing.push('Capital for every line of business')
-          }
+          /*
+           * "Capital for every line of business" was checked here and no longer
+           * is. The question moved to Business & Tax Profile, where the `fees`
+           * phase below requires it per line for a new filing (feeProfileIssues
+           * → `line:<id>:capitalization`). Blocking on it twice would be the
+           * duplicate wearing a different hat.
+           */
           if (!form.line1.trim()) missing.push('House No. & Street Name')
           if (!form.barangay_id) missing.push('Barangay')
           // CPDO rules on the zoning clearance from where the business actually
@@ -1756,12 +1752,22 @@ export function ApplyWizard() {
         latitude: form.latitude ?? undefined,
         longitude: form.longitude ?? undefined,
       },
-      // The free-text line rides on the same payload; the API stores it on
-      // business_lines.line_of_business (contract addition, hence the cast).
+      /*
+       * The free-text line rides on the same payload; the API stores it on
+       * business_lines.line_of_business (contract addition, hence the cast).
+       *
+       * `capitalization` is not sent, and its absence is load-bearing rather
+       * than an omission. This wizard no longer asks for it here — the applicant
+       * declares it once in Business & Tax Profile — and the API fills
+       * `business_lines.capitalization` from the fee profile instead
+       * (ApplicationController::syncLineCapitalization). Omitting the key tells
+       * syncAddressAndLines to keep whatever is on record, which is what stops
+       * an autosave from wiping the figure between the two writes, and what lets
+       * a renewal (assessed on gross sales, never asked for capital) round-trip
+       * without losing the number it was registered with.
+       */
       lines: form.lines.map((l) => ({
         psic_code_id: l.psic_code_id,
-        // Typed as "1,000,000", stored as 1000000.
-        capitalization: plainAmount(l.capitalization) || undefined,
         line_of_business: l.line_of_business.trim() || undefined,
       })) as BusinessPayload['lines'],
     }
@@ -2376,9 +2382,16 @@ export function ApplyWizard() {
           emergency_contact_number: b.emergency_contact_number ?? '',
           latitude: b.address?.latitude ?? null,
           longitude: b.address?.longitude ?? null,
+          /*
+           * The capital a reopened draft declared is restored from the fee
+           * profile below (`feeProfileToDraft`), which is where it was asked and
+           * where the calculator reads it. Reading `l.capitalization` back into
+           * the form here would resurrect the second copy this step no longer
+           * owns — and the stored one is safe regardless, because a business
+           * update that omits the figure leaves it alone.
+           */
           lines: (b.lines ?? []).map((l) => ({
             psic_code_id: l.psic_code.id,
-            capitalization: formatAmountInput(l.capitalization ?? ''),
             // Free text typed against "Other (not listed)". Restoring it is what
             // stops a reopened draft from making the applicant type it again.
             line_of_business: l.line_of_business ?? '',
@@ -2561,28 +2574,16 @@ export function ApplyWizard() {
   }, [form.registration_type])
 
   /*
-   * Entering the Business & Tax Profile step: seed each line's capitalization
-   * from what was declared against that line in Location & Zoning (once,
-   * without clobbering anything the user already typed here).
+   * There used to be an effect here that copied each line's capitalization
+   * across from Location & Zoning on first entering Business & Tax Profile. It
+   * is gone with the field it copied from. It only ever ran for a line with no
+   * fee-profile row yet, so a later edit on the zoning step never reached the
+   * figure that was actually assessed — the seeding is what made two questions
+   * look like one, and hid that they had drifted apart.
+   *
+   * Nothing replaces it: FeeProfileStep falls back to an empty row for a line it
+   * has not been given one for, and writes a real one on the first keystroke.
    */
-  useEffect(() => {
-    if (phase !== 'fees') return
-    setFeeDraft((d) => {
-      const categories = { ...d.categories }
-      let seeded = false
-      for (const line of form.lines) {
-        if (!categories[line.psic_code_id]) {
-          categories[line.psic_code_id] = {
-            category: '',
-            gross_sales: '',
-            capitalization: line.capitalization ?? '',
-          }
-          seeded = true
-        }
-      }
-      return seeded ? { ...d, categories } : d
-    })
-  }, [phase, form.lines])
 
   /* Success screen after submit (kept). */
   if (tracking) {
