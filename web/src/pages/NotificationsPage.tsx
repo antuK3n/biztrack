@@ -84,13 +84,29 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
       case 'Rejected':
       case 'Cancelled':
         return { tone: 'warning', Glyph: XCircleIcon }
+      /*
+       * Both spellings, deliberately.
+       *
+       * The statuses were renamed to the LGU's vocabulary — "Awaiting payment"
+       * became "Pending Payment", "Under review" became "For Approval" — but a
+       * notification body is a sentence written at the time it was sent, and
+       * thousands of them are already sitting in the database saying the old
+       * words. Matching only the new ones would have quietly greyed out every
+       * notification a live tester had already received, which is exactly the
+       * kind of regression a rename is expected not to cause. Old rows keep
+       * their icon; new rows get the same icon under the new name.
+       */
+      case 'Returned':
       case 'Returned for revision':
         // Waiting on the applicant, not on the office — worth flagging.
         return { tone: 'pending', Glyph: AlertCircleIcon }
+      case 'For Inspection':
       case 'For inspection':
         return { tone: 'pending', Glyph: ClockIcon }
+      case 'Pending Payment':
       case 'Awaiting payment':
         return { tone: 'pending', Glyph: PaymentsIcon }
+      case 'For Approval':
       case 'Under review':
         return { tone: 'pending', Glyph: EyeIcon }
       default:

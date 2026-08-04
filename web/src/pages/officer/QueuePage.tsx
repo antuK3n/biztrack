@@ -192,8 +192,16 @@ export function QueuePage() {
   /** '' means the whole tab; otherwise one status inside it. */
   const [statusFilter, setStatusFilter] = useState('')
 
-  // The filter narrows the tab's status list rather than replacing it, so
-  // "For Approval → Under review" cannot silently show inspection work.
+  /*
+   * The filter narrows the tab's status list rather than replacing it, so
+   * picking a status inside the For Approval tab cannot silently show
+   * inspection work.
+   *
+   * The tab and one of its statuses are now both called "For Approval", and
+   * that is not a collision to fix: the tab is every filing not yet past
+   * review — submitted, awaiting fees, in review, sent back — and the status is
+   * the one of those four that is actually sitting with the offices.
+   */
   const tabStatuses = TAB_STATUSES[tab]
   const activeStatuses: readonly ApplicationStatus[] = statusFilter
     ? [statusFilter as ApplicationStatus]
@@ -231,7 +239,7 @@ export function QueuePage() {
   function selectTab(next: Tab) {
     if (next === tab) return
     setTab(next)
-    // The status filter belongs to the tab it was chosen in — "Under review" is
+    // The status filter belongs to the tab it was chosen in — For Approval is
     // not one of the inspection tab's statuses, and carrying it across would
     // hand the server a status list that matches nothing.
     setStatusFilter('')

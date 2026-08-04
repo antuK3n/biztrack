@@ -167,6 +167,15 @@ class AssignmentController extends Controller
             'application.permits.permitType',
             // PermitResource serialises business and application stubs too.
             'application.permits.business:id,name', 'application.permits.application:id,tracking_id',
+            /*
+             * The progression rail and the "what actually happened" log on the
+             * review sheet. Loaded here rather than fetched by the browser from
+             * /applications/{id}/timeline because this request already carries
+             * the entire filing — two constant queries against one already-open
+             * screen beats a second authenticated round trip that answers a
+             * question this response was always in a position to answer.
+             */
+            'application.statusHistory.changedBy:id,name',
             'complianceChecks',
         ]);
 

@@ -413,6 +413,26 @@ export interface Application extends ApplicationListItem {
   inspections: Inspection[]
   permits: Permit[]
   rejection_reason: string | null
+  /**
+   * The full record knows which permit types will actually be inspected; the
+   * list resource does not send the flag, hence the narrowing override.
+   *
+   * `requires_inspection` is the whole basis of the For Inspection step on the
+   * progression rail. WorkflowService::afterReviewProgress reads the same flag
+   * and, when none of them is set, jumps the last office approval straight to
+   * issuance — so a rail that guessed would draw a stage half these filings
+   * never enter.
+   */
+  permit_types: { id: number; code: string; name: string; requires_inspection: boolean }[]
+  /**
+   * Every recorded transition, oldest first — the same rows and the same shape
+   * as `GET /applications/{id}/timeline`.
+   *
+   * Empty is ambiguous by design on the API side: it means either "this filing
+   * has never moved" or "this endpoint did not load them". Both leave a reader
+   * with nothing to draw, so neither needs its own branch here.
+   */
+  status_history: TimelineEntry[]
 }
 
 export interface TimelineEntry {

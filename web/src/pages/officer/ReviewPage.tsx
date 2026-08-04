@@ -7,6 +7,7 @@ import {
   ClipboardIcon,
   EyeIcon,
 } from '../../components/icons'
+import { ApplicationProgress } from '../../components/ApplicationProgress'
 import { DocumentActions } from '../../components/DocumentActions'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
@@ -880,6 +881,15 @@ export function ReviewPage() {
       {actionError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{actionError}</p>
       )}
+
+      {/*
+       * Above the form, not below it. "Where is this in the process" is the
+       * question the sheet is opened with — the form is what you read once you
+       * have decided this is the filing you meant. It also puts the outstanding
+       * offices in front of a reviewer before they approve, so the one holding
+       * it up is visible rather than discovered afterwards.
+       */}
+      <ApplicationProgress app={app} />
 
       <div className="flex items-start gap-6">
         {/* ── The form sheet ── */}
