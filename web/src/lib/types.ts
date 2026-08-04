@@ -1139,7 +1139,16 @@ export interface OfficerRequest {
   body: string
   status: RequestStatus
   status_label: string
-  created_by: { name: string; department: string | null }
+  /**
+   * Null once the officer who raised it has been removed from the register.
+   *
+   * This was declared non-nullable while OfficerRequestResource has always
+   * emitted null for it, so a guard against it was invisible to the compiler
+   * and a later edit could drop one without a word. Reading `.name` straight
+   * through white-screened the entire page — there is no error boundary above
+   * this route — which is the same class of bug as checklist items 83 and 87.
+   */
+  created_by: { name: string; department: string | null } | null
   /**
    * The office the applicant sees this coming FROM, as picked in the composer.
    * Distinct from `created_by.department`, which is the requester's own office:
@@ -1154,7 +1163,13 @@ export interface OfficerRequest {
    * schema cannot honour. Null when the account has since been removed.
    */
   recipient: { id: number; name: string; kind: 'applicant' } | null
-  application: { id: number; tracking_id: string; business_name: string }
+  /**
+   * The filing this was raised on. Null once that filing is soft-deleted, and
+   * `business_name` null once the BUSINESS is — 139 filings in the register
+   * point at a removed business, so the inner null is the common one. Use
+   * `businessName()` from lib/format rather than rendering it raw.
+   */
+  application: { id: number; tracking_id: string; business_name: string | null } | null
   /** Latest reply, mirrored for older clients; `responses` is the full thread. */
   response_body: string | null
   responses: OfficerRequestResponse[]
