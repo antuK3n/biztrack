@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
@@ -63,6 +63,7 @@ import type {
   DocumentType,
   OcrSuggestions,
   Permit,
+  PrefillResult,
   PsicCode,
 } from '../../lib/types'
 
@@ -1082,6 +1083,401 @@ function LinesStep({
   )
 }
 
+/* ── Item 110 — identify the filing before the wizard opens ─────────────── */
+
+/**
+ * What the entry modal hands back once the applicant has said what they are
+ * filing against. Nothing here is written until Confirm, which is the whole
+ * point of holding it in one object rather than editing the wizard as we go.
+ */
+interface FilingIdentity {
+  businessId: number
+  /**
+   * `null` is a real answer, not an unanswered question — see the escape in
+   * the modal body. A business whose permits were all issued on paper has no
+   * BizTrack permit to point at, and in year one that is the common case.
+   */
+  permitId: number | null
+  amendment: AmendmentState
+  /**
+   * The prefill the modal already fetched for `businessId`. Handed back so
+   * confirming does not GET the same thing a second time.
+   */
+  prefill: PrefillResult
+}
+
+/** "1 Jan 2025 – 31 Dec 2025", or whichever half of it the register holds. */
+function permitValidity(p: Permit): string {
+  if (p.valid_from && p.valid_until) return `${formatDate(p.valid_from)} – ${formatDate(p.valid_until)}`
+  if (p.valid_until) return `Valid until ${formatDate(p.valid_until)}`
+  if (p.valid_from) return `Issued ${formatDate(p.valid_from)}`
+  return 'No validity dates on record'
+}
+
+/**
+ * ITEM 110 — "For the renewal, it should ask first (in modal) the permit ID so
+ * the system will know which specific permit to renew."
+ *
+ * This used to be a block inside Business Information, three steps in: the
+ * applicant met the data-privacy notice, pinned a map, and only then was asked
+ * which permit any of it was about. Two things were wrong with that. The paper
+ * BPLO renewal form prints the permit number in its header — it is the first
+ * thing the counter reads, not the fourteenth field — and a wizard that
+ * prefills itself from a permit it has not been told about is prefilling from a
+ * guess. So the question is asked before the wizard opens, and the answer is
+ * what the wizard opens FROM.
+ *
+ * Every control here edits LOCAL state. The business select does not run the
+ * real prefill (which rewrites the whole form) until Confirm, so Cancel from
+ * the "change my mind" route is genuinely free — nothing the applicant typed
+ * has been overwritten by a business they were only looking at.
+ */
+function IdentifyFilingModal({
+  applicationType,
+  ownedBusinesses,
+  businessesLoading,
+  initial,
+  mode,
+  confirming,
+  confirmError,
+  onCancel,
+  onConfirm,
+}: {
+  applicationType: 'renewal' | 'amendment'
+  ownedBusinesses: Business[]
+  businessesLoading: boolean
+  initial: { businessId: number | null; permitId: number | null; amendment: AmendmentState }
+  /**
+   * `entry` — the wizard has not opened yet, so Cancel leaves. `change` — the
+   * applicant reopened this to correct an answer, so Cancel keeps what they
+   * had and puts them back where they were.
+   */
+  mode: 'entry' | 'change'
+  confirming: boolean
+  confirmError: string | null
+  onCancel: () => void
+  onConfirm: (identity: FilingIdentity) => void
+}) {
+  const verb = applicationType === 'renewal' ? 'renewing' : 'amending'
+  const [businessId, setBusinessId] = useState<number | null>(initial.businessId)
+  const [permitId, setPermitId] = useState<number | null>(initial.permitId)
+  const [amendment, setAmendment] = useState<AmendmentState>(initial.amendment)
+  const [prefill, setPrefill] = useState<PrefillResult | null>(null)
+  const [loadingPermits, setLoadingPermits] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  /*
+   * Whether Confirm has been pressed on an unanswered question. The reason is
+   * always described on the button (aria-describedby, below); this only
+   * decides whether it is also SHOWN, so the dialog does not open scolding
+   * somebody who has not touched anything yet.
+   */
+  const [attempted, setAttempted] = useState(false)
+
+  const businessRef = useRef<HTMLSelectElement | null>(null)
+  const permitsRef = useRef<HTMLUListElement | null>(null)
+  const amendmentRef = useRef<HTMLFieldSetElement | null>(null)
+  const reasonId = useId()
+
+  /*
+   * The chosen business's renewable permits. This is the same GET the wizard's
+   * prefill uses, and the response is kept whole so Confirm can hand it to
+   * `selectBusinessForReuse` instead of asking for it again.
+   */
+  useEffect(() => {
+    if (businessId === null) {
+      setPrefill(null)
+      return
+    }
+    let active = true
+    setLoadingPermits(true)
+    setLoadError(null)
+    businesses
+      .prefill(businessId, applicationType)
+      .then((result) => {
+        if (!active) return
+        setPrefill(result)
+        /*
+         * A permit id from another business must not survive the switch — it
+         * would name a permit this filing has nothing to do with. Keeping it
+         * when the list still contains it is what makes reopening this dialog
+         * to change something else non-destructive.
+         */
+        setPermitId((current) =>
+          current !== null && (result.renewable_permits ?? []).some((p) => p.id === current)
+            ? current
+            : null,
+        )
+      })
+      .catch((err) => {
+        if (active) setLoadError(toApiError(err).message)
+      })
+      .finally(() => {
+        if (active) setLoadingPermits(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [businessId, applicationType])
+
+  const permits = prefill?.renewable_permits ?? []
+  const amendmentChosen =
+    amendment.ownership || amendment.location || amendment.nature || amendment.other.trim() !== ''
+
+  /*
+   * Why Confirm will not get you out of here yet — in the order the questions
+   * are asked, so the sentence always names the topmost thing still blank.
+   *
+   * `permits.length > 0` is the escape the client's year-one applicants live
+   * on: a business with no BizTrack-issued permit cannot name one, so the
+   * requirement does not apply to them and they are not held here.
+   */
+  const blocked: { reason: string; focus: () => void } | null =
+    businessId === null
+      ? {
+          reason: `Choose the business you are ${verb} first.`,
+          focus: () => businessRef.current?.focus(),
+        }
+      : loadingPermits
+        ? { reason: 'Still loading this business’s permits.', focus: () => {} }
+        : applicationType === 'renewal' && permits.length > 0 && permitId === null
+          ? {
+              reason: 'Choose which of these permits you are renewing.',
+              focus: () => permitsRef.current?.querySelector('button')?.focus(),
+            }
+          : applicationType === 'amendment' && !amendmentChosen
+            ? {
+                reason:
+                  'Tick at least one thing you are amending. An amendment that amends nothing is not a filing the BPLO can act on.',
+                focus: () => amendmentRef.current?.querySelector('input')?.focus(),
+              }
+            : null
+
+  function confirm() {
+    // Not `disabled` — see ProtoModal's confirmDescribedBy. A press on a
+    // blocked dialog says why and puts the cursor on the question.
+    if (confirming) return
+    if (blocked) {
+      setAttempted(true)
+      blocked.focus()
+      return
+    }
+    if (businessId === null || !prefill) return
+    onConfirm({ businessId, permitId, amendment, prefill })
+  }
+
+  return (
+    <ProtoModal
+      title={applicationType === 'renewal' ? 'WHICH PERMIT ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'}
+      wide
+      cancelLabel={mode === 'entry' ? 'Not now' : 'Keep what I had'}
+      confirmLabel={confirming ? 'Opening…' : 'Continue'}
+      confirmDescribedBy={blocked ? reasonId : undefined}
+      onCancel={onCancel}
+      onConfirm={confirm}
+    >
+      <p className="text-sm leading-relaxed text-ink-secondary">
+        {applicationType === 'renewal'
+          ? 'A business can hold several permits with different expiry dates, so a renewal has to name the one it is for. We fill the rest of the form in from it.'
+          : 'Say which record you are amending and what about it is changing. We fill the rest of the form in from it.'}
+      </p>
+
+      {/* ── 1. Which business ────────────────────────────────────────────── */}
+      <label className="mt-5 block">
+        <FieldLabel required>Which business are you {verb}?</FieldLabel>
+        <select
+          ref={businessRef}
+          className={inputCls}
+          value={businessId ?? ''}
+          onChange={(e) => setBusinessId(e.target.value ? Number(e.target.value) : null)}
+          // Momentary, not a field held shut by another answer: there is
+          // nothing to choose between until the list has arrived.
+          disabled={businessesLoading}
+        >
+          <option value="">{businessesLoading ? 'Loading your businesses…' : 'Select a business…'}</option>
+          {ownedBusinesses.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      {!businessesLoading && ownedBusinesses.length === 0 && (
+        <p className="mt-2 text-xs text-ink-secondary">
+          You have no registered businesses yet. Start a new application instead.
+        </p>
+      )}
+
+      {/* ── 2. Which permit ──────────────────────────────────────────────── */}
+      {businessId !== null && (
+        <div className="mt-5">
+          <FieldLabel required={applicationType === 'renewal' && permits.length > 0}>
+            Which permit are you {verb}?
+          </FieldLabel>
+          {loadingPermits ? (
+            <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
+          ) : loadError ? (
+            <p role="alert" className="text-xs font-medium text-s-red">
+              {loadError} You can still carry on and upload your paper permit under Documentary
+              Requirements.
+            </p>
+          ) : permits.length === 0 ? (
+            /*
+             * THE ESCAPE. Year one of BizTrack is almost entirely renewals of
+             * permits issued on paper by the old counter process, so "no
+             * permit in the register" is the ordinary case and not an error.
+             * Trapping those applicants behind a list they cannot appear in
+             * would shut the renewal flow to most of the city.
+             */
+            <p className="text-xs text-ink-secondary">
+              This business has no permit issued through BizTrack yet. Carry on, and upload your
+              paper permit under Documentary Requirements.
+            </p>
+          ) : (
+            <ul
+              ref={permitsRef}
+              role="radiogroup"
+              aria-label={`Which permit are you ${verb}?`}
+              className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
+            >
+              {permits.map((p) => {
+                const chosen = permitId === p.id
+                const days = p.days_until_expiry
+                // Never colour alone: the word says expired or not.
+                const state =
+                  days === null
+                    ? null
+                    : days < 0
+                      ? { label: 'Expired', cls: 'text-s-red' }
+                      : days <= 60
+                        ? { label: 'Expires soon', cls: 'text-ink' }
+                        : { label: 'Valid', cls: 'text-ink-secondary' }
+                return (
+                  // Presentational so the radios are the radiogroup's own
+                  // children, not list items wrapping them.
+                  <li key={p.id} role="presentation">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={chosen}
+                      onClick={() => setPermitId(chosen ? null : p.id)}
+                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                        chosen ? 'bg-input' : 'hover:bg-royal-tint'
+                      }`}
+                    >
+                      <span
+                        className={`h-4 w-4 shrink-0 rounded-full border-2 ${
+                          chosen ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {/*
+                       * Number, type and validity dates together, because one
+                       * of them alone does not tell two permits apart: a shop
+                       * renewing late can hold last year's Mayor's Permit and
+                       * this year's, same type, different dates.
+                       */}
+                      <span className="min-w-0 flex-1">
+                        <span className="tnum block text-sm font-semibold text-ink">
+                          {p.permit_number}
+                        </span>
+                        <span className="block text-xs text-ink-secondary">
+                          {p.permit_type?.name ?? 'Permit'} · {permitValidity(p)}
+                        </span>
+                      </span>
+                      {state && (
+                        <span className={`shrink-0 text-xs font-semibold ${state.cls}`}>
+                          {state.label}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/*
+       * ── 3. What is being amended (items 82/84) ───────────────────────────
+       *
+       * Asked here rather than left behind on the business step, because it is
+       * the same decision this dialog exists to make: which record, and what
+       * about it is changing. The paper BPLO form prints "Amendment from:" as a
+       * header block above the business details for exactly that reason, and
+       * the wizard's draft guard already refuses to write an amendment draft
+       * until it is answered — so leaving it three steps in only meant the
+       * applicant met the refusal before they met the question.
+       */}
+      {applicationType === 'amendment' && (
+        <fieldset ref={amendmentRef} className="mt-5 border-0 p-0">
+          <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+            What are you amending?
+            <span className="text-s-red"> *</span>
+          </legend>
+          <p className="mb-2 text-xs text-ink-secondary">
+            Tick everything that is changing. You can choose more than one.
+          </p>
+          <div className="space-y-2">
+            {AMENDMENT_KINDS.map((kind) => (
+              <label
+                key={kind.key}
+                className="flex cursor-pointer items-center gap-3 rounded-lg border border-input-border bg-white px-4 py-2.5 text-sm font-medium text-ink"
+              >
+                <input
+                  type="checkbox"
+                  checked={amendment[kind.key]}
+                  onChange={(e) => setAmendment((a) => ({ ...a, [kind.key]: e.target.checked }))}
+                  className="h-4 w-4 shrink-0 accent-royal"
+                />
+                <span>{kind.label}</span>
+              </label>
+            ))}
+            {/*
+             * "Others (specify)" is one control, not a checkbox with a box
+             * beside it: on the paper you cannot tick Others without writing
+             * the other in, so typing IS ticking and a separate tick could
+             * only ever contradict the text.
+             */}
+            <label className="block rounded-lg border border-input-border bg-white px-4 py-2.5">
+              <span className="mb-1.5 block text-[13px] font-semibold text-ink">
+                Others (specify)
+              </span>
+              <input
+                value={amendment.other}
+                onChange={(e) => setAmendment((a) => ({ ...a, other: e.target.value }))}
+                placeholder="e.g. change of business name"
+                maxLength={255}
+                className={inputCls}
+              />
+            </label>
+          </div>
+        </fieldset>
+      )}
+
+      {/*
+       * Tied to Confirm by aria-describedby, so pressing it — or simply
+       * tabbing onto it — reads out what is still missing. Rendered
+       * unconditionally once `attempted`, rather than as a live `role="alert"`,
+       * so it is a stable description of the button and not a message that
+       * fires again on every keystroke.
+       */}
+      {blocked && (
+        <p
+          id={reasonId}
+          className={`mt-5 text-xs font-medium ${attempted ? 'text-s-red' : 'sr-only'}`}
+        >
+          {blocked.reason}
+        </p>
+      )}
+      {confirmError && (
+        <p role="alert" className="mt-3 text-xs font-medium text-s-red">
+          {confirmError}
+        </p>
+      )}
+    </ProtoModal>
+  )
+}
+
 export function ApplyWizard() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -1299,6 +1695,26 @@ export function ApplyWizard() {
   )
 
   const draftIdParam = searchParams.get('draft')
+  /*
+   * ── Item 110 — the entry dialog ────────────────────────────────────────
+   *
+   * `null` means the wizard is in charge of the screen. `'entry'` means it has
+   * not properly opened yet — the applicant is being asked which permit this
+   * filing is against before anything is prefilled from it. `'change'` means
+   * they came back to correct that answer from the summary on Business
+   * Information, which is the difference Cancel turns on: leaving, versus
+   * putting back what they had.
+   *
+   * Opened straight away for a fresh /apply?type=renewal. NOT for a reopened
+   * draft — that one already answered this, and the hydration effect below
+   * reopens it only in the one case where the saved draft is missing the
+   * answer AND there are permits it could have named.
+   */
+  const [identify, setIdentify] = useState<'entry' | 'change' | null>(
+    isReuse && !draftIdParam ? 'entry' : null,
+  )
+  const [confirmingIdentity, setConfirmingIdentity] = useState(false)
+  const [identifyError, setIdentifyError] = useState<string | null>(null)
   const [hydrating, setHydrating] = useState<boolean>(Boolean(draftIdParam))
   const hydratedRef = useRef(false)
   /*
@@ -1317,8 +1733,23 @@ export function ApplyWizard() {
 
   const touch = (key: string) => setTouched((t) => ({ ...t, [key]: true }))
 
-  /** Renewal/amendment: pull the prior permit + prefill fields for a business. */
-  async function selectBusinessForReuse(selectedId: number | null) {
+  /**
+   * Renewal/amendment: pull the prior permit + prefill fields for a business.
+   *
+   * `preloaded` is the response the entry modal (item 110) already fetched to
+   * build its permit list. Re-requesting it would be a second GET of the same
+   * thing between one click and the next, and the answer it returns is what
+   * the applicant made their choice on — so the choice and the prefill are the
+   * same response, not two reads that could disagree.
+   *
+   * Returns whether the prefill landed. A caller that is about to record which
+   * permit is being renewed must not do so against a business whose prefill
+   * failed: that is a filing pointing at a permit and holding a blank form.
+   */
+  async function selectBusinessForReuse(
+    selectedId: number | null,
+    preloaded?: PrefillResult,
+  ): Promise<boolean> {
     setPrefillBusinessId(selectedId)
     setPriorPermitId(null)
     setPrefillNote(null)
@@ -1326,12 +1757,14 @@ export function ApplyWizard() {
     if (!selectedId) {
       // Keep the permit selection: the section map never changes mid-flow.
       setForm((f) => ({ ...EMPTY, permit_type_ids: f.permit_type_ids }))
-      return
+      return true
     }
     setPrefilling(true)
     setSubmitError(null)
     try {
-      const result = await businesses.prefill(selectedId, applicationType as 'renewal' | 'amendment')
+      const result =
+        preloaded ??
+        (await businesses.prefill(selectedId, applicationType as 'renewal' | 'amendment'))
       const b = result.business
       setForm((f) => ({
         name: b.name,
@@ -1398,9 +1831,11 @@ export function ApplyWizard() {
       } else {
         setPrefillNote('Prefilled from your last application.')
       }
+      return true
     } catch (err) {
       setSubmitError(toApiError(err).message)
       setPrefillBusinessId(null)
+      return false
     } finally {
       setPrefilling(false)
     }
@@ -1413,24 +1848,31 @@ export function ApplyWizard() {
    * would overwrite the applicant's edits with the registry's copy of them, so
    * this takes the permit list from the same response and nothing else.
    */
-  async function loadRenewablePermits(bid: number, type: 'renewal' | 'amendment') {
+  async function loadRenewablePermits(
+    bid: number,
+    type: 'renewal' | 'amendment',
+  ): Promise<Permit[]> {
     setLoadingPermits(true)
     try {
       const result = await businesses.prefill(bid, type)
-      setRenewablePermits(result.renewable_permits ?? [])
+      const list = result.renewable_permits ?? []
+      setRenewablePermits(list)
+      return list
     } catch {
-      // Non-fatal: the picker says it has nothing to offer, and the applicant
+      // Non-fatal: the summary says it has nothing to offer, and the applicant
       // can still carry on and upload the paper permit.
       setRenewablePermits([])
+      return []
     } finally {
       setLoadingPermits(false)
     }
   }
 
   /**
-   * Item 50 — name the permit this filing is for.
+   * Items 50/110 — commit what the entry dialog asked, and open the wizard.
    *
-   * Choosing one used to also tick its clearance in the LGU Section, on the
+   * This is the ONLY writer of `priorPermitId` outside a draft reopen. Naming
+   * the permit used to also tick its clearance in the LGU Section, on the
    * reasoning that renewing a sanitary permit nobody has asked the City Health
    * Office to look at is not a renewal of anything. That reasoning still holds
    * — it just is not this screen's to act on any more. Adding a SANITARY permit
@@ -1439,8 +1881,51 @@ export function ApplyWizard() {
    * exists to separate. The renewal is asked for on the LGU Clearances stage,
    * with its fee stated before it is committed to.
    */
-  function choosePriorPermit(permit: Permit | null) {
-    setPriorPermitId(permit?.id ?? null)
+  async function confirmIdentity(identity: FilingIdentity) {
+    setIdentifyError(null)
+    setConfirmingIdentity(true)
+    try {
+      /*
+       * Only re-prefill when the BUSINESS changed. Reopening the dialog to
+       * correct the permit on a half-filled draft must not pull the registry's
+       * copy of the business back over everything the applicant has since
+       * typed — the permit is the only thing they came back to change.
+       */
+      if (identity.businessId !== prefillBusinessId) {
+        const ok = await selectBusinessForReuse(identity.businessId, identity.prefill)
+        if (!ok) {
+          // Stay open. A filing that names a permit but whose form never
+          // loaded is the one state worse than not having started.
+          setIdentifyError('We could not open that business. Try again, or choose another.')
+          return
+        }
+      }
+      setPriorPermitId(identity.permitId)
+      setAmendment(identity.amendment)
+      setIdentify(null)
+    } finally {
+      setConfirmingIdentity(false)
+    }
+  }
+
+  /**
+   * Item 110 — backing out of the entry dialog.
+   *
+   * From `change` this is free: the dialog held its own copy of the answers
+   * and wrote none of them, so closing it is genuinely "keep what I had".
+   *
+   * From `entry` there is nothing to go back TO — the wizard behind is blank
+   * and unsaved, and leaving the dialog up over an empty form the applicant
+   * cannot use would be a dead end. So it leaves, to wherever they can pick
+   * this up again: drafts if there is a draft, the applications list if not.
+   */
+  function cancelIdentity() {
+    if (identify === 'change') {
+      setIdentifyError(null)
+      setIdentify(null)
+      return
+    }
+    navigate(draftIdParam ? '/drafts' : '/applications')
   }
 
   /** Apply an OCR suggestion into the matching form fields (suggestions only). */
@@ -1656,6 +2141,30 @@ export function ApplyWizard() {
   )
 
   /*
+   * Item 110 — the two lines the Business Information summary prints back.
+   *
+   * The REGISTERED name, not `form.name`: the summary answers "which record is
+   * this filing against", and a renewal that is correcting a misspelt trading
+   * name would otherwise show the correction as the thing it was chosen by.
+   */
+  const reuseBusinessName: string | null = useMemo(() => {
+    if (prefillBusinessId === null) return null
+    return (
+      (ownedBusinesses.data ?? []).find((b) => b.id === prefillBusinessId)?.name ??
+      form.name.trim() ??
+      null
+    )
+  }, [ownedBusinesses.data, prefillBusinessId, form.name])
+
+  const amendmentSummary: string | null = useMemo(() => {
+    const parts = [
+      ...AMENDMENT_KINDS.filter((k) => amendment[k.key]).map((k) => k.label),
+      ...(amendment.other.trim() ? [amendment.other.trim()] : []),
+    ]
+    return parts.length === 0 ? null : parts.join(', ')
+  }, [amendment])
+
+  /*
    * What Review & Submit says about the clearances: only the ones decided, and
    * which way. "Applied for" and "copy on file" are opposite instructions to
    * the office and cost different amounts, so a list that flattened them into
@@ -1722,21 +2231,34 @@ export function ApplyWizard() {
             : ['At least one clearance — Apply for it, or Submit the copy you already hold']
         case 'business': {
           const missing: string[] = []
+          /*
+           * Item 110 — these three are the entry dialog's questions, and the
+           * dialog will not close until they are answered, so reaching this
+           * step with any of them blank should be impossible. They are kept as
+           * the backstop for the one route that could still get here — a draft
+           * saved before the dialog existed — and they name the Change button
+           * rather than a control on this step, because the controls that used
+           * to answer them are no longer on it.
+           */
           if (isReuse && prefillBusinessId === null) {
-            missing.push(applicationType === 'renewal' ? 'The business you are renewing' : 'The business you are amending')
+            missing.push(
+              `The business you are ${applicationType === 'renewal' ? 'renewing' : 'amending'} — press Change above`,
+            )
           }
           // Item 50/85: a business holds several permits with different expiry
           // dates, so "renew this business" names nothing an office can act on.
           if (applicationType === 'renewal' && renewablePermits.length > 0 && priorPermitId === null) {
-            missing.push('Which permit you are renewing')
+            missing.push('Which permit you are renewing — press Change above')
           }
           /*
            * Items 82/84 — an amendment amending nothing is not a filing. The
            * counter would have to send it back to ask the question the form
-           * was supposed to have asked, so it is asked here instead.
+           * was supposed to have asked, so it is asked before the wizard opens.
            */
           if (applicationType === 'amendment' && !amendmentChosen) {
-            missing.push('What is being amended (ownership, location, nature of business, or other)')
+            missing.push(
+              'What is being amended (ownership, location, nature of business, or other) — press Change above',
+            )
           }
           if (!form.name.trim()) missing.push('Business Name')
           /*
@@ -2848,20 +3370,48 @@ export function ApplyWizard() {
          * the truth about it.
          */
         setVisited([...BASE_PHASES])
-        // Item 50: which permit this renewal is for, chosen when the draft was
-        // started and re-choosable now — which is why the list has to be here
-        // too (item 85), or reopening a draft would offer nothing to change it
-        // to and the choice would look like it had been lost.
+        /*
+         * Item 50: which permit this renewal is for, chosen when the draft was
+         * started. The list is loaded too (item 85) so Business Information can
+         * name the permit rather than print its id, and so the entry dialog has
+         * something to offer if it has to reopen.
+         *
+         * ITEM 110 — and this is where "do not ask a reopened draft again"
+         * lives. A draft that already carries a prior_permit_id has answered
+         * the question; putting the dialog in front of it would be the wizard
+         * forgetting, every single time it was reopened, a decision the
+         * applicant made once. The dialog comes back for exactly one case: the
+         * answer is missing AND the business has permits it could have named —
+         * i.e. the draft is in the state that `canCreateDraft` refuses to
+         * save, so it is stuck and nothing on the page would say why.
+         *
+         * Awaited rather than fired and forgotten so the decision is made
+         * before `hydrating` clears and the wizard paints; otherwise the
+         * dialog would flash in over an already-drawn form. Both reads swallow
+         * their own failures, so neither can trip `hydrateFailed`.
+         */
         if (app.application_type !== 'new') {
-          void loadRenewablePermits(b.id, app.application_type)
-          void applications
-            .priorPermit(app.id)
-            .then((r) => {
-              if (active) setPriorPermitId(r.prior_permit_id)
-            })
-            .catch(() => {
-              /* Non-fatal: the picker just opens with nothing chosen. */
-            })
+          const [permitList, prior] = await Promise.all([
+            loadRenewablePermits(b.id, app.application_type),
+            applications
+              .priorPermit(app.id)
+              .then((r) => r.prior_permit_id)
+              .catch(() => null),
+          ])
+          if (!active) return
+          setPriorPermitId(prior)
+          const amendmentAnswered =
+            app.application_type !== 'amendment' ||
+            Boolean(
+              app.amendments &&
+                (app.amendments.ownership ||
+                  app.amendments.location ||
+                  app.amendments.nature ||
+                  (app.amendments.other ?? '').trim() !== ''),
+            )
+          const permitAnswered =
+            app.application_type !== 'renewal' || prior !== null || permitList.length === 0
+          if (!permitAnswered || !amendmentAnswered) setIdentify('entry')
         }
       } catch (err) {
         // Includes anything thrown while unpacking the response, not just the
@@ -3241,191 +3791,112 @@ export function ApplyWizard() {
       {phase === 'business' && (
         <FormSheet meta={typeMeta}>
           <SectionMarker letter="A" label="Business Information & Registration" />
+          {/*
+            * ── ITEM 110 — what this block used to be ────────────────────────
+            *
+            * The business select, the "which permit are you renewing?"
+            * radiogroup and the amendment checkboxes were all HERE, as live
+            * controls on part 3 of the wizard. The client's item is that a
+            * renewal must ask for the permit FIRST, in a modal, so the system
+            * knows which permit it is renewing before it renews anything —
+            * and they were right that asking here was too late: the wizard had
+            * already prefilled itself from a business whose permit it had not
+            * been told, and `canCreateDraft` refused to save a word of it
+            * until the applicant scrolled back up to a question they had been
+            * walked past.
+            *
+            * So the questions moved into <IdentifyFilingModal>, which opens
+            * over the wizard before part 1. What is left here is the ANSWER,
+            * stated plainly, with the way back to change it — this is the only
+            * route to reopen the dialog, so it must not be removed with it.
+            */}
           {isReuse && (
             <div className="mt-4 rounded-lg border border-royal/30 bg-royal-tint px-4 py-4">
-              {/*
-                * FieldLabel renders a span, so this select had no programmatic
-                * label at all: a screen reader announced "combo box" and left
-                * the applicant to guess which of their businesses it wanted.
-                * Wrapping in a real <label> associates the two, the same way
-                * every other field on this sheet does (WCAG 1.3.1 / 3.3.2).
-                *
-                * `readOnly` is not a thing on <select>, so while the list is
-                * loading or a prefill is in flight this stays `disabled` — it
-                * is genuinely momentary, unlike a field held shut by another
-                * answer, and the status text below says which of the two is
-                * happening.
-                */}
-              <label className="block">
-              <FieldLabel required>Which business are you {applicationType === 'renewal' ? 'renewing' : 'amending'}?</FieldLabel>
-              <select
-                className={inputCls}
-                value={prefillBusinessId ?? ''}
-                onChange={(e) => void selectBusinessForReuse(e.target.value ? Number(e.target.value) : null)}
-                disabled={prefilling || ownedBusinesses.loading}
-              >
-                <option value="">
-                  {ownedBusinesses.loading ? 'Loading your businesses…' : 'Select a business…'}
-                </option>
-                {(ownedBusinesses.data ?? []).map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-              </label>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-ink">
+                    {applicationType === 'renewal' ? 'Renewing' : 'Amending'}
+                  </p>
+                  <p className="mt-0.5 truncate text-sm font-bold text-ink">
+                    {reuseBusinessName ?? 'No business chosen yet'}
+                  </p>
+                </div>
+                {/*
+                  * The way back. An applicant who picked the wrong permit —
+                  * two Mayor's Permits a year apart look alike in a hurry —
+                  * would otherwise have to abandon the draft and start again.
+                  * Reopening in `change` mode means Cancel puts back what they
+                  * had, so pressing this to LOOK is free.
+                  */}
+                <PillButton
+                  className="shrink-0 border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
+                  onClick={() => {
+                    setIdentifyError(null)
+                    setIdentify('change')
+                  }}
+                >
+                  Change
+                </PillButton>
+              </div>
+
+              <dl className="mt-3 space-y-1 text-xs">
+                <div className="flex gap-2">
+                  <dt className="shrink-0 font-semibold text-ink-secondary">Permit</dt>
+                  <dd className="min-w-0 text-ink">
+                    {loadingPermits ? (
+                      'Loading this business’s permits…'
+                    ) : priorPermitChoice ? (
+                      <>
+                        <span className="tnum font-semibold">{priorPermitChoice.permit_number}</span>
+                        {' · '}
+                        {priorPermitChoice.permit_type?.name ?? 'Permit'}
+                        {' · '}
+                        {permitValidity(priorPermitChoice)}
+                      </>
+                    ) : (
+                      /*
+                       * THE ESCAPE, restated where the answer lives. A renewal
+                       * of a permit issued on paper is the ordinary case in
+                       * year one, and this is what it looks like once the
+                       * dialog has been answered: no permit named, and the
+                       * instruction that replaces it.
+                       */
+                      'No BizTrack permit named — upload your paper permit under Documentary Requirements.'
+                    )}
+                  </dd>
+                </div>
+                {applicationType === 'amendment' && (
+                  <div className="flex gap-2">
+                    <dt className="shrink-0 font-semibold text-ink-secondary">Amending</dt>
+                    <dd className="min-w-0 text-ink">
+                      {amendmentSummary ?? 'Nothing chosen yet — press Change.'}
+                    </dd>
+                  </div>
+                )}
+              </dl>
+
               {prefilling && <p className="mt-2 text-xs text-ink-secondary">Prefilling…</p>}
+              {/*
+                * The prefill note names `last_permit`, which is the NEWEST
+                * issued permit and is rarely the one about to lapse — so once a
+                * permit has been named above, printing it here put two
+                * different permit numbers two lines apart and left the
+                * applicant to work out which one this filing was against. That
+                * is the exact confusion item 110 exists to remove, so where
+                * there is an answer the note stops competing with it and says
+                * only what it is actually for: the form below was filled in for
+                * you. With no permit named there is no competition, and the
+                * original sentence still earns its place.
+                */}
               {prefillNote && (
-                <p className="mt-2 text-xs font-medium text-royal">{prefillNote}</p>
-              )}
-              {!prefilling && !ownedBusinesses.loading && (ownedBusinesses.data ?? []).length === 0 && (
-                <p className="mt-2 text-xs text-ink-secondary">
-                  You have no registered businesses yet. Start a new application instead.
+                <p className="mt-2 text-xs font-medium text-royal">
+                  {priorPermitChoice ? 'Your registered details are filled in below.' : prefillNote}
                 </p>
               )}
-
-              {/* Item 50 — which permit, not just which business. */}
-              {prefillBusinessId !== null && !prefilling && (
-                <div className="mt-5">
-                  <FieldLabel required={applicationType === 'renewal' && renewablePermits.length > 0}>
-                    Which permit are you {applicationType === 'renewal' ? 'renewing' : 'amending'}?
-                  </FieldLabel>
-                  {loadingPermits ? (
-                    <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
-                  ) : renewablePermits.length === 0 ? (
-                    <p className="text-xs text-ink-secondary">
-                      This business has no permit issued through BizTrack yet. Carry on, and upload
-                      your paper permit under Documentary Requirements.
-                    </p>
-                  ) : (
-                    <ul
-                      role="radiogroup"
-                      aria-label={`Which permit are you ${applicationType === 'renewal' ? 'renewing' : 'amending'}?`}
-                      className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
-                    >
-                      {renewablePermits.map((p) => {
-                        const chosen = priorPermitId === p.id
-                        const days = p.days_until_expiry
-                        // Never colour alone: the word says expired or not.
-                        const state =
-                          days === null
-                            ? null
-                            : days < 0
-                              ? { label: `Expired ${formatDate(p.valid_until)}`, cls: 'text-s-red' }
-                              : days <= 60
-                                ? { label: `Expires soon · ${formatDate(p.valid_until)}`, cls: 'text-ink' }
-                                : { label: `Valid to ${formatDate(p.valid_until)}`, cls: 'text-ink-secondary' }
-                        return (
-                          // Presentational so the radios are the radiogroup's
-                          // own children, not list items wrapping them.
-                          <li key={p.id} role="presentation">
-                            <button
-                              type="button"
-                              role="radio"
-                              aria-checked={chosen}
-                              onClick={() => choosePriorPermit(chosen ? null : p)}
-                              className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
-                                chosen ? 'bg-input' : 'hover:bg-royal-tint'
-                              }`}
-                            >
-                              <span
-                                className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                                  chosen ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                                }`}
-                              />
-                              <span className="min-w-0 flex-1">
-                                <span className="block text-sm font-medium text-ink">
-                                  {p.permit_type?.name ?? 'Permit'}
-                                </span>
-                                <span className="tnum block text-xs text-ink-secondary">
-                                  {p.permit_number}
-                                </span>
-                              </span>
-                              {state && (
-                                <span className={`shrink-0 text-xs font-semibold ${state.cls}`}>
-                                  {state.label}
-                                </span>
-                              )}
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
-                  {priorPermitChoice && (
-                    <p className="mt-2 text-xs text-ink-secondary">
-                      This application {applicationType === 'renewal' ? 'renews' : 'amends'}{' '}
-                      {priorPermitChoice.permit_number}. Its clearance is ticked for you in the LGU
-                      Section; add any others there.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/*
-                * Items 82/84 — the paper form's "Amendment from:" block, which
-                * the wizard has never asked. It sits with the business and
-                * permit selection because it is the same decision: which
-                * record, and what about it is changing.
-                */}
-              {applicationType === 'amendment' && (
-                <fieldset
-                  className="mt-5 border-0 p-0"
-                  // React's onBlur is focusout, so one handler on the group
-                  // covers all four controls: the group is the question, and
-                  // leaving any part of it is having been asked.
-                  onBlur={() => touch('amendment')}
-                >
-                  <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
-                    What are you amending?
-                    <span className="text-s-red"> *</span>
-                  </legend>
-                  <p className="mb-2 text-xs text-ink-secondary">
-                    Tick everything that is changing. You can choose more than one.
-                  </p>
-                  <div className="space-y-2">
-                    {AMENDMENT_KINDS.map((kind) => (
-                      <label
-                        key={kind.key}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-input-border bg-white px-4 py-2.5 text-sm font-medium text-ink"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={amendment[kind.key]}
-                          onChange={(e) =>
-                            setAmendment((a) => ({ ...a, [kind.key]: e.target.checked }))
-                          }
-                          className="h-4 w-4 shrink-0 accent-royal"
-                        />
-                        <span>{kind.label}</span>
-                      </label>
-                    ))}
-                    {/*
-                      * "Others (specify)" is one control, not a checkbox with a
-                      * box beside it: on the paper you cannot tick Others
-                      * without writing the other in, so typing IS ticking and a
-                      * separate tick could only ever contradict the text.
-                      */}
-                    <label className="block rounded-lg border border-input-border bg-white px-4 py-2.5">
-                      <span className="mb-1.5 block text-[13px] font-semibold text-ink">
-                        Others (specify)
-                      </span>
-                      <input
-                        value={amendment.other}
-                        onChange={(e) => setAmendment((a) => ({ ...a, other: e.target.value }))}
-                        placeholder="e.g. change of business name"
-                        maxLength={255}
-                        className={inputCls}
-                      />
-                    </label>
-                  </div>
-                  {touched.amendment && !amendmentChosen && (
-                    <p role="alert" className="mt-2 text-xs font-medium text-s-red">
-                      Choose at least one. An amendment that amends nothing is not a filing the
-                      BPLO can act on.
-                    </p>
-                  )}
-                </fieldset>
+              {priorPermitChoice && (
+                <p className="mt-2 text-xs text-ink-secondary">
+                  Its clearance is ticked for you in the LGU Section; add any others there.
+                </p>
               )}
             </div>
           )}
@@ -4767,6 +5238,36 @@ export function ApplyWizard() {
         >
           <p className="py-4 text-center text-lg">Are you sure you want to submit this application?</p>
         </ProtoModal>
+      )}
+
+      {/*
+        ── ITEM 110 · identify the filing (over the wizard, before part 1) ──
+
+        Last in the tree so it paints over everything, and mounted only while
+        it is being asked — ProtoModal moves focus in on mount and puts it back
+        on unmount, so `identify && (...)` is what makes both happen. Pressing
+        Change on Business Information remounts it, and focus returns to the
+        Change button.
+
+        Escape closes it, because there IS a legitimate way out of this
+        question and it would be wrong to pretend otherwise: on entry it is
+        "not now, I will do this later" and nothing has been written yet; from
+        Change it is "keep what I had" and nothing is written either. A modal
+        with no honest dismissal is the only case where trapping Escape would
+        be right, and this is not that case.
+      */}
+      {identify && isReuse && (
+        <IdentifyFilingModal
+          applicationType={applicationType as 'renewal' | 'amendment'}
+          ownedBusinesses={ownedBusinesses.data ?? []}
+          businessesLoading={ownedBusinesses.loading}
+          initial={{ businessId: prefillBusinessId, permitId: priorPermitId, amendment }}
+          mode={identify}
+          confirming={confirmingIdentity}
+          confirmError={identifyError}
+          onCancel={cancelIdentity}
+          onConfirm={(identity) => void confirmIdentity(identity)}
+        />
       )}
     </div>
   )

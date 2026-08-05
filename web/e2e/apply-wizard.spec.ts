@@ -217,7 +217,9 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
 
   const results = page.locator('#psic-results')
-  const row = results.getByRole('button').first()
+  // Matched on the element, not on a role: the rows carry `role="radio"` now
+  // that a filing declares one trade, so `getByRole('button')` finds nothing.
+  const row = results.locator('button').first()
   const trade = ((await row.textContent()) ?? '').replace(/PSIC\s*\d+$/, '').trim()
   await row.click()
 
@@ -279,13 +281,15 @@ test('every line of business is reachable, and the count is stated', async ({ pa
   const results = page.locator('#psic-results')
 
   // Browsing reaches everything. The shortlist is a head start, and it says so.
-  await expect(results.getByRole('button')).toHaveCount(total)
+  // Matched on the element, not on a role: the rows carry `role="radio"` now
+  // that a filing declares one trade, so `getByRole('button')` finds nothing.
+  await expect(results.locator('button')).toHaveCount(total)
   await expect(results.getByText(/^Most common$/)).toBeVisible()
   await expect(page.getByText(new RegExp(`Showing all ${total} trades`))).toBeVisible()
 
   // Searching shows every match, and states how many that is out of how many.
   await search.fill('sale')
-  const matches = await results.getByRole('button').count()
+  const matches = await results.locator('button').count()
   expect(matches, 'the 25-row cap is back').toBeGreaterThan(25)
   await expect(
     page.getByText(new RegExp(`Showing all ${matches} of ${total} trades matching`)),
@@ -334,6 +338,32 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
 })
 
 /**
+ * Item 110 — answer the identity dialog a renewal or amendment opens with.
+ *
+ * Business 1 is the seeded owner's only business with permits in the register,
+ * and it is also the one with a stored TIN, which is what the reading-back test
+ * below needs. Choosing it by value rather than by index keeps this working
+ * when somebody registers another shop on the test stack.
+ */
+async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
+  const name = type === 'renewal' ? /which permit are you renewing/i : /what are you amending/i
+  const modal = page.getByRole('dialog', { name })
+  await expect(modal).toBeVisible({ timeout: 30_000 })
+
+  await modal.getByLabel(new RegExp(`which business are you ${type === 'renewal' ? 'renewing' : 'amending'}`, 'i')).selectOption({ value: '1' })
+
+  const permits = modal.getByRole('radiogroup', { name: /which permit/i }).getByRole('radio')
+  await expect(permits.first()).toBeVisible({ timeout: 20_000 })
+  await permits.first().click()
+
+  // An amendment must also say what it amends before the dialog will close.
+  if (type === 'amendment') await modal.getByRole('checkbox').first().check()
+
+  await modal.getByRole('button', { name: /continue/i }).click()
+  await expect(modal).toBeHidden({ timeout: 20_000 })
+}
+
+/**
  * Consent, then a complete Location & Zoning step, landing on Business
  * Information (part 3). Everything here is the minimum the step's own gate
  * demands — a trade, a pin inside the city, an address and someone an inspector
@@ -346,10 +376,17 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
  */
 async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
   // `beforeEach` already opened a new filing. A renewal has to be opened as
-  // one from the start, because the type decides whether part 3 offers the
-  // "which business are you renewing?" picker at all.
+  // one from the start, because the type decides whether the wizard asks which
+  // permit this filing is against at all.
   if (type) {
     await page.goto(`/apply?type=${type}`)
+    /*
+     * Item 110 — a renewal or amendment now meets the identity dialog BEFORE
+     * the wizard, so it has to be answered here or nothing below this line is
+     * reachable. Its own cover is in renewal-modal.spec.ts; this is only
+     * getting past it, on the one seeded business that holds permits.
+     */
+    await answerIdentityDialog(page, type)
     await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
   }
   await page.getByRole('checkbox').first().check()
@@ -367,7 +404,9 @@ async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
    * counted, so it appears only once the results below it are the right ones.
    */
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
-  await page.locator('#psic-results').getByRole('button').first().click()
+  // Matched on the element, not on a role: the rows carry `role="radio"` now
+  // that a filing declares one trade, so `getByRole('button')` finds nothing.
+  await page.locator('#psic-results button').first().click()
 
   // Centre of the map is Malabon City Hall, so this pin is always inside.
   const map = page.locator('.leaflet-container')
@@ -667,10 +706,13 @@ test('a TIN already on file reads back into the four boxes', async ({ page }) =>
    * to arrive in four boxes without a migration and without the applicant
    * retyping it. Renewal prefill is the shortest real path to a stored value —
    * the API hands back exactly what a reopened draft would.
+   *
+   * The business used to be picked here, on this step. Item 110 moved that
+   * question into the dialog the wizard now opens with, so by the time we are
+   * on part 3 the prefill has already run — which is the point of the item and
+   * makes this test read the way it always meant to.
    */
   await goToBusinessStep(page, 'renewal')
-
-  await page.getByLabel(/which business are you renewing/i).selectOption({ index: 1 })
 
   const boxes = tinBoxes(page)
   await expect(boxes[0]).toHaveValue(/^\d{3}$/)
