@@ -17,7 +17,7 @@ import {
   type OfficeFormData,
 } from './OfficeFormStep'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
-import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../../lib/types'
+import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
 
 /*
  * ── LGU Clearances · the last thing decided before Review & Submit ─────────
@@ -66,31 +66,21 @@ import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../.
  *      below and checklist item 98.
  */
 
-/**
- * The states the API reports that are worth a chip, and how each is worn.
+/*
+ * The status chip is gone, and with it the STATE_META table that dressed it.
  *
- * `available` is deliberately absent, and its absence is the point. It used to
- * render **"Not requested"**, so a card the applicant had simply not touched
- * yet wore a badge announcing that nothing had happened — and the client's
- * reaction was *"tf does 'not requested' even mean. way too confusing."* Fair
- * on both counts. It reads as a status somebody ELSE assigned: not requested by
- * whom, the LGU or me, and is that the same as refused?
+ * Its history is worth two lines, because both corrections still bind. It first
+ * rendered a chip on every card including untouched ones, reading "Not
+ * requested" — *"tf does 'not requested' even mean. way too confusing."* That
+ * was fixed by showing a chip only once something had happened. What killed the
+ * chip outright was the card it left behind: "Applied for" in a pill three
+ * inches above a button reading "Applied ✓", plus a fee, plus a tinted panel
+ * explaining the button, plus a second button to undo it.
  *
- * Nothing-yet is the default, and a default needs no badge. A chip has to mean
- * "something happened here" — if it is worn by every card on the grid it says
- * nothing at all, and the one card that has genuinely been refused stops
- * standing out. So the chip appears only once there is something to report.
- *
- * Partial rather than Record: `STATE_META[row.state]` is now legitimately
- * undefined for an untouched card, and the type is what makes the render
- * remember that.
+ * The two rules that survive: a default state needs no badge, and the state
+ * belongs on the control that changed it. Refusal is the exception and still
+ * gets its own panel — that one is not a status, it is news.
  */
-const STATE_META: Partial<Record<ClearanceState, { label: string; className: string }>> = {
-  applied: { label: 'Applied for', className: 'border-royal/40 bg-royal-tint text-royal' },
-  submitted: { label: 'Copy on file', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
-  issued: { label: 'Issued', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
-  rejected: { label: 'Refused', className: 'border-s-red/40 bg-s-red/10 text-s-red' },
-}
 
 /**
  * Who a clearance is for, where the answer is not "every business".
@@ -496,14 +486,13 @@ export function ClearanceStage({
     }
   }
 
-  /** Withdraw a request. Its own labelled control — never a second Apply. */
-  async function onUnapply(row: Clearance) {
-    await runAction(
-      row.permit_type.code,
-      `Withdrew your ${row.permit_type.name} application. Nothing for it will be charged.`,
-      () => clearances.unapply(applicationId, row.permit_type.code),
-    )
-  }
+  /*
+   * The withdraw handler that stood here is gone with the control that called
+   * it. `clearances.unapply` in lib/resources.ts is deliberately NOT deleted:
+   * the endpoint is real, it works, and applying still commits money, so an
+   * undo has to exist somewhere. It just does not belong on this card — see
+   * docs/HANDOFF.md §15.2, and do not re-solve it by making Apply a toggle.
+   */
 
   /** Take the uploaded copy back off. Its own labelled control — never Submit. */
   async function onRemoveHeld(row: Clearance) {
@@ -715,7 +704,7 @@ export function ClearanceStage({
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
         Choose the ones your business needs.{' '}
         <span className="font-semibold text-ink">Apply</span> adds that office&rsquo;s fee to your
-        Tax Order of Payment; <span className="font-semibold text-ink">Submit a copy</span> of one
+        Tax Order of Payment; <span className="font-semibold text-ink">Submit</span> a copy of one
         you already hold costs nothing.
       </p>
 
@@ -733,9 +722,6 @@ export function ClearanceStage({
         {visibleRows.map((row) => {
           const code = row.permit_type.code
           const busy = busyCode === code
-          // Undefined for an untouched card, and that is the whole point — see
-          // STATE_META. No badge until something has actually happened.
-          const state = STATE_META[row.state]
           const applied = row.state === 'applied' || row.state === 'issued'
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
@@ -755,16 +741,14 @@ export function ClearanceStage({
 
           return (
             <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
-              <div className="flex items-start justify-between gap-3">
-                <p className="text-lg font-bold leading-snug text-ink">{row.permit_type.name}</p>
-                {state && (
-                  <span
-                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${state.className}`}
-                  >
-                    {state.label}
-                  </span>
-                )}
-              </div>
+              {/*
+                No status badge beside the name. It said "Applied for" three
+                inches above a button that already reads "Applied ✓", so the
+                card asserted the same fact twice in two different vocabularies.
+                The button is the honest place for it: it is the control that
+                changed the state, and it is what the applicant pressed.
+              */}
+              <p className="text-lg font-bold leading-snug text-ink">{row.permit_type.name}</p>
               <p className="display-serif mt-2 text-sm italic text-ink-secondary">
                 {/* The department relation is nullable server-side. */}
                 {row.permit_type.department?.name ?? 'Issuing office'}
@@ -792,15 +776,24 @@ export function ClearanceStage({
               )}
 
               {/*
-                The amount, and nothing wrapped around it.
+                One line, and only for the cards it is true of: pressing Apply
+                adds a section to the form above rather than finishing anything
+                here. That is the single thing about this card a person cannot
+                work out by looking at it.
 
-                The Apply-costs/Submit-does-not rule is identical on all six
-                cards and is stated once above the grid. What belongs here is
-                the part that differs between them, which is the number — the
-                one fact a person needs from this card that they cannot get
-                anywhere else on the screen.
+                The fee used to print here. It went with the rest of the card's
+                furniture on the client's instruction — the grid had grown a
+                status chip, an amount, a tinted panel and three controls per
+                card, and had stopped being scannable. The amount is not lost:
+                every clearance's fee lands on the one Tax Order of Payment at
+                Review & Submit, which is the screen where money is actually
+                being agreed to.
               */}
-              <p className="tnum mt-3 text-sm font-bold text-ink">{feeAmount(row.fee_preview)}</p>
+              {row.has_office_form && (
+                <p className="mt-2 text-xs text-ink-muted">
+                  Adds its own application form section above.
+                </p>
+              )}
 
               {/*
                 ITEM 112 — this panel used to open with its own bold heading,
@@ -811,50 +804,34 @@ export function ClearanceStage({
                 same colour. One line of the panel is now the whole panel, and
                 it is the line that tells the applicant what is left to do.
               */}
-              {applied && (
-                <div className="mt-3 rounded-md border border-royal/30 bg-royal-tint px-3 py-2">
-                  <p className="text-xs text-ink-secondary">
-                    {row.has_office_form
-                      ? row.office_form_complete
-                        ? 'Its form is filled in. Apply reopens it.'
-                        : 'Its form still needs finishing — Apply opens it.'
-                      : 'No extra form for this office.'}
-                  </p>
-                  {/*
-                    Withdrawing used to be a second click on Apply, which made
-                    one button mean two opposite things. Stated plainly instead,
-                    and kept away from Apply so neither is hit by accident. Not
-                    offered once the office has issued it: there is nothing left
-                    to withdraw. Hidden once the stage is shut, because there is
-                    no longer anything this control can do.
+              {/*
+                REMOVED on the client's instruction: the tinted panel that stood
+                here once a clearance was applied for, and the withdraw button
+                inside it.
 
-                    ITEM 107 — "Fix the UI button for the Don't apply. This
-                    should not look like a warning message or something." It was
-                    red underlined text (`text-s-red`), and red is this
-                    product's ERROR colour — the same red the refusal panel
-                    directly below uses to say an office turned the clearance
-                    down. So an ordinary opt-out, on a card where nothing had
-                    gone wrong, was dressed as the one thing on this screen that
-                    means something HAS. It is a plain bordered secondary button
-                    now: visibly a control, visibly not an alarm.
+                It held one sentence explaining what the Apply button does
+                ("Its form still needs finishing — Apply opens it.") and a
+                secondary button named "Don't apply for the <full clearance
+                name>", which wrapped onto two lines on every card. Stacked with
+                the badge and the amount, each card was carrying a status chip, a
+                number, a bordered panel, a sentence about a button, and three
+                controls — six of those on one grid. The client's words on seeing
+                it: "WHAT THE FUCK IS THIS THE OLD ONE IS GOOD ENOUGH."
 
-                    Not shrunk to an icon, and not shortened to "Don't apply".
-                    Six of these cards sit on one grid, so a name that does not
-                    say WHICH clearance it withdraws is six identical buttons to
-                    anyone moving through them by name.
-                  */}
-                  {row.state === 'applied' && unlocked && (
-                    <button
-                      type="button"
-                      onClick={() => void onUnapply(row)}
-                      disabled={busy}
-                      className="mt-2 rounded-sm border border-input-border bg-white px-2.5 py-1.5 text-xs font-semibold text-ink-secondary transition-colors hover:bg-input hover:text-ink disabled:opacity-60"
-                    >
-                      {busy ? 'Working…' : `Don’t apply for the ${row.permit_type.name}`}
-                    </button>
-                  )}
-                </div>
-              )}
+                The reasoning that put the withdraw control here has not been
+                refuted and is worth keeping on the record: applying commits
+                money, so it needs an undo, and that undo must not be a second
+                press of Apply — one button meaning two opposite things is what
+                caused the original bug where a second click silently un-applied
+                and opened nothing. That constraint still holds. What changed is
+                that this screen is no longer where the undo lives.
+
+                So: Apply is now one-way FROM THIS CARD, and it never toggles.
+                If an applicant needs to drop a clearance they have applied for,
+                that has to exist somewhere — it is listed as open work in
+                docs/HANDOFF.md §15.2. Do not solve it by making Apply a toggle
+                again.
+              */}
 
               {row.state === 'rejected' && (
                 <div className="mt-3 rounded-md border border-s-red/40 bg-s-red/10 px-3 py-2">
@@ -865,32 +842,53 @@ export function ClearanceStage({
                 </div>
               )}
 
+              {/*
+                The uploaded copy, as one line rather than the green panel that
+                used to sit here with a heading, a filename and a red Remove
+                link inside it.
+
+                Kept — unlike the badge and the fee — because it is not a
+                restatement of anything: it is the only place the applicant can
+                see WHICH file they attached, and the only way to take it back.
+                Removing must stay its own named control. Clicking "Submitted ✓"
+                used to delete the file that had just been uploaded, with no
+                confirmation and no undo, and destroying something must never be
+                the alternate meaning of the button that created it.
+              */}
               {held && (
-                <div className="mt-3 rounded-md border border-s-green/40 bg-s-green/10 px-3 py-2">
-                  <p className="flex items-center gap-1.5 text-xs font-bold text-s-green">
-                    <CheckIcon size={13} /> On file, not applied for
-                  </p>
-                  <p className="mt-1 truncate text-xs text-ink-secondary" title={held.name}>
-                    {held.name} · {formatBytes(held.size)}
-                  </p>
-                  {/*
-                    Removing has its own control, as it did in the wizard.
-                    Clicking "Submitted ✓" used to delete the file that had just
-                    been uploaded, with no confirmation and no undo — destroying
-                    something must never be the alternate meaning of the button
-                    that created it.
-                  */}
+                /*
+                  Row, not one wrapped line. A long filename must not be allowed
+                  to push Remove off the end of the card: as one truncating
+                  paragraph, a 40-character upload name swallowed the only
+                  control that can take the file back. The name is the part that
+                  truncates (it has a title attribute and the applicant chose
+                  it); the control never shrinks.
+                */
+                <p className="mt-2 flex items-baseline gap-1.5 text-xs text-ink-muted">
+                  <CheckIcon size={12} className="shrink-0 self-center text-s-green" />
+                  <span className="truncate" title={`${held.name} · ${formatBytes(held.size)}`}>
+                    {held.name}
+                  </span>
                   {unlocked && (
                     <button
                       type="button"
                       onClick={() => void onRemoveHeld(row)}
                       disabled={busy}
-                      className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                      /*
+                        Reads "Remove" but is NAMED for its clearance. Six cards
+                        share this grid, so a bare "Remove" is six identical
+                        controls to anyone moving through them by name — while
+                        printing the full clearance name in the button is what
+                        made the old card unreadable. The label carries the
+                        distinction; the card stays quiet.
+                      */
+                      aria-label={`Remove the ${row.permit_type.name} copy`}
+                      className="ml-auto shrink-0 font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-60"
                     >
-                      {busy ? 'Removing…' : `Remove the ${row.permit_type.name} copy`}
+                      {busy ? 'Removing…' : 'Remove'}
                     </button>
                   )}
-                </div>
+                </p>
               )}
 
               <div className="mt-5 flex flex-1 items-end gap-2.5">
@@ -907,6 +905,19 @@ export function ClearanceStage({
                   disabled={busy}
                   aria-disabled={!unlocked}
                   aria-describedby={buttonDescribedBy}
+                  /*
+                   * Named for its clearance, shown as one word. Six cards share
+                   * this grid and the visible labels are identical across all
+                   * of them, so without this a screen-reader user tabbing the
+                   * grid hears "Submit" six times with nothing to tell them
+                   * apart. Long-standing checklist item; the fix belongs in the
+                   * accessible name, not on the face of the card.
+                   */
+                  aria-label={
+                    held
+                      ? `Replace the ${row.permit_type.name} copy you submitted`
+                      : `Submit a copy of the ${row.permit_type.name}`
+                  }
                   /*
                    * SUBMIT always opens the upload box. It used to toggle: a
                    * second click on "Submitted ✓" deleted the copy just
@@ -926,13 +937,25 @@ export function ClearanceStage({
                       : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
                   }`}
                 >
-                  Submit a copy
+                  {/*
+                    The state lives on the button now that the status chip is
+                    gone. "Submitted ✓" is a label, not a second action — the
+                    press still opens the upload box, and removing is the named
+                    control above.
+                  */}
+                  {held ? 'Submitted ✓' : 'Submit'}
                 </button>
                 <button
                   type="button"
                   disabled={busy}
                   aria-disabled={!unlocked}
                   aria-describedby={buttonDescribedBy}
+                  /* Named for its clearance — see the Submit button above. */
+                  aria-label={
+                    applied
+                      ? `Applied for the ${row.permit_type.name} — open its form`
+                      : `Apply for the ${row.permit_type.name}`
+                  }
                   /*
                    * APPLY always opens this office's form. It used to toggle,
                    * so the second click quietly un-applied and opened nothing —
@@ -949,7 +972,7 @@ export function ClearanceStage({
                       : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
                   }`}
                 >
-                  {busy ? 'Working…' : 'Apply'}
+                  {busy ? 'Working…' : applied ? 'Applied ✓' : 'Apply'}
                 </button>
               </div>
             </li>

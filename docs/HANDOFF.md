@@ -1095,7 +1095,8 @@ Trivial, but it cost a debugging round. Name script variables `BASE`, not `URL`.
 
 | Item | Detail |
 |---|---|
-| **Six identical "Apply" buttons** | The clearance grid renders six buttons whose accessible name is just `Apply`. Needs per-clearance names (`Apply for the Sanitary Permit`, …). Both an a11y defect and a test-fragility source. |
+| ~~Six identical "Apply" buttons~~ | **FIXED.** Every control on the clearance grid now carries an `aria-label` naming its clearance (`Apply for the Sanitary Permit / Health Certificate`, `Submit a copy of the …`, `Remove the … copy`) while the visible label stays one word. Asserted in `clearances.spec.ts` — *"applying is reported on the button…"*. |
+| **No way to withdraw a clearance** | The "Don't apply for the …" control was removed from the card when the client rejected the cluttered design (§20). Applying still commits money, so an undo has to exist — the API endpoint `clearances.unapply` is intact and working, it simply has no UI. **Do not solve this by making Apply a toggle again**; that was the original bug. |
 | **`auth.spec.ts` flake** | *"signing out of one portal leaves the other signed in"* fails in a full run, passes in isolation. Order-dependent pollution; `f0b0084` fixed one cause but not all. |
 | **`OfficeSignatoryController` is unrouted** | Controller exists, no route points at it. `office_signatories` has 2 rows, both CENRO. So signatories cannot be edited by an admin today — and §9.2 says they must never be hard-coded. This is a real gap. |
 | **`stall_count` never populated** | The Market sheet collects a stall count that never reaches the fee engine. Tied to open question A9b. |
@@ -1291,6 +1292,64 @@ So you do not redo it:
 - Analytics definitions — 27 of them, with the probability-wording ban enforced by test.
 - Gateway vs server error messages now distinguishable.
 - 593 Pest tests, 69 Playwright tests, `tsc -b` clean.
+
+---
+
+---
+
+## 20. The clearance card, stripped back
+
+Added after the client saw the finished grid and said: **"WHAT THE FUCK IS THIS THE OLD
+ONE IS GOOD ENOUGH."** Worth its own section because the instinct that produced the bad
+version is a recurring one.
+
+### 20.1 What it had become
+
+Each of six cards on one grid carried: a status chip ("Applied for"), the office name, an
+applicability line, a fee, a tinted panel containing a sentence explaining what the Apply
+button does, a secondary button reading "Don't apply for the &lt;full clearance name&gt;"
+that wrapped onto two lines, and then two more buttons. Five pieces of furniture, six
+times over.
+
+**Every single piece had been added for a defensible reason**, mostly in response to an
+earlier complaint. That is exactly how it happened. No individual addition looked like
+too much; the accumulation was unreadable.
+
+### 20.2 What it is now
+
+Name, office, one line, two buttons — matching `permits-step.png`, the old screenshot in
+the repo root. State reads off the button: `Apply` → `Applied ✓`, `Submit` → `Submitted ✓`.
+
+Removed: the status chip and `STATE_META`, the fee line, the tinted panel, the withdraw
+button, and the local `onUnapply` handler.
+
+Kept, and each for a stated reason:
+
+- **The refusal panel.** Not a status — news. An office turning a clearance down is the
+  one thing on this screen that must stand out.
+- **The applicability line** (Market only). The client asked for it two days earlier.
+- **The uploaded-copy line.** The only place to see which file was attached, and the only
+  way to take it back. Reduced from a green panel to one row — filename truncates, the
+  Remove control never shrinks.
+- **Non-toggling buttons.** The original bug was Apply meaning two opposite things; a
+  second press silently un-applied and opened nothing.
+
+### 20.3 The rule that came out of it
+
+**State belongs on the control that changed it, not in a badge beside it.** A chip reading
+"Applied for" three inches above a button reading "Applied ✓" is the same fact in two
+vocabularies.
+
+And the accessibility fix that made the strip-back possible: **put the distinction in the
+accessible name, not on the face of the card.** Six visible "Apply" buttons are fine when
+each is `aria-label`'d for its clearance. Printing the full clearance name inside every
+button is what made the card unreadable in the first place.
+
+### 20.4 What this cost
+
+There is now **no way to withdraw a clearance from the UI** (§15.2). That is a real
+regression, accepted knowingly by the client when choosing between three options. The
+endpoint still exists. It needs a home.
 
 ---
 
