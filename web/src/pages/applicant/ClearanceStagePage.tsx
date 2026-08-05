@@ -66,9 +66,26 @@ import type { Application, Clearance, ClearanceMeta, ClearanceState } from '../.
  *      below and checklist item 98.
  */
 
-/** The five states the API reports, and how each is worn on the card. */
-const STATE_META: Record<ClearanceState, { label: string; className: string }> = {
-  available: { label: 'Not requested', className: 'border-input-border bg-white text-ink-muted' },
+/**
+ * The states the API reports that are worth a chip, and how each is worn.
+ *
+ * `available` is deliberately absent, and its absence is the point. It used to
+ * render **"Not requested"**, so a card the applicant had simply not touched
+ * yet wore a badge announcing that nothing had happened — and the client's
+ * reaction was *"tf does 'not requested' even mean. way too confusing."* Fair
+ * on both counts. It reads as a status somebody ELSE assigned: not requested by
+ * whom, the LGU or me, and is that the same as refused?
+ *
+ * Nothing-yet is the default, and a default needs no badge. A chip has to mean
+ * "something happened here" — if it is worn by every card on the grid it says
+ * nothing at all, and the one card that has genuinely been refused stops
+ * standing out. So the chip appears only once there is something to report.
+ *
+ * Partial rather than Record: `STATE_META[row.state]` is now legitimately
+ * undefined for an untouched card, and the type is what makes the render
+ * remember that.
+ */
+const STATE_META: Partial<Record<ClearanceState, { label: string; className: string }>> = {
   applied: { label: 'Applied for', className: 'border-royal/40 bg-royal-tint text-royal' },
   submitted: { label: 'Copy on file', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
   issued: { label: 'Issued', className: 'border-s-green/40 bg-s-green/10 text-s-green' },
@@ -113,58 +130,128 @@ const STATE_META: Record<ClearanceState, { label: string; className: string }> =
  * inheriting a claim nobody made about it.
  */
 const APPLICABILITY: Record<string, string> = {
-  MARKET:
-    'Only for a business trading from a stall in a public or private market. If your premises is not a market stall, leave this one — nothing in this application asks for it.',
+  /*
+   * One line, down from three sentences. The second and third ("If your
+   * premises is not a market stall, leave this one — nothing in this
+   * application asks for it") were telling the applicant how to read the
+   * screen, which the screen now does for itself: the card is not on the grid
+   * unless the filing says it belongs there, so anyone reading this went
+   * looking for it and does not need talking out of it.
+   */
+  MARKET: 'For a business trading from a stall in a public or private market.',
 }
 
 /**
- * What this clearance costs, in a sentence.
+ * The revenue-code categories that say, in the applicant's own declaration,
+ * that this filing is about a market.
  *
- * Two traps here, both about money.
+ * Not a list invented for this screen: every one of them is a `conditions.
+ * business_category` value on a seeded FeeRule whose `basis` is `stall_count`
+ * — garbage Schedule J's public-market rows, the privately-owned market
+ * bracket, and the fish broker market bracket. So the same declaration that
+ * decides whether the applicant is charged per stall decides whether they are
+ * shown the stall clearance. Two screens disagreeing about who is a market
+ * business would be worse than either answer.
+ *
+ * `fish_broker_market` is here and was not in the original three. It belongs
+ * for the same reason the other three do — `permit.fish_broker_market_by_stalls`
+ * is priced per stall off the same basis — and leaving it out would hide the
+ * card from an operator the fee engine is already billing by the stall.
+ */
+export const MARKET_CATEGORIES = [
+  'public_market_100_plus_stalls',
+  'public_market_under_100_stalls',
+  'private_market',
+  'fish_broker_market',
+]
+
+/**
+ * Whether the filing's own answers say the Market Clearance card belongs on
+ * this applicant's screen — checklist item 98.
+ *
+ * *"Market clearance should not be required. It is only required for stall
+ * holders."* An earlier pass answered that with a sentence on the card saying
+ * who it was for, which was true and was not enough: the card was still one of
+ * six laid out identically for every applicant in the city, and the great
+ * majority of them have nothing to do with a public market. The client has
+ * since asked for it to be derived rather than shown to everyone, and rather
+ * than asked of everyone as a yes/no.
+ *
+ * The signal is available in time. The category and the stall count are both
+ * declared on Business & Tax Profile, step 5, and the clearances are step 6.
+ *
+ * ── The reason this reveals and never restricts ────────────────────────────
+ *
+ * These categories describe a market OPERATOR, not a market STALL HOLDER. A
+ * fishmonger renting one stall inside the Malabon Central Market is not a
+ * "privately-owned public market" and will not have declared themselves one;
+ * the operator of that market is. So a pure derivation shows the card to the
+ * landlord and hides it from the tenant — which is precisely inverted from the
+ * population the client named.
+ *
+ * That is why this function only ever ADDS the card, and why the stage keeps a
+ * plain control for revealing it by hand. A derivation that is wrong about a
+ * minority and can be overridden in one click costs that minority one click. A
+ * derivation that is wrong and cannot be overridden costs them the clearance.
+ *
+ * Whether "stall holder" is even the right population — whether the operator
+ * needs it too, or instead — is a question for BPLO and the City Market
+ * Administrator, not one to settle by choosing a filter. See
+ * docs/questions-for-malabon.md A13.
+ */
+export function marketClearanceApplies(
+  categories: readonly string[],
+  stallCount: number | string | null | undefined,
+): boolean {
+  if (categories.some((c) => MARKET_CATEGORIES.includes(c.trim()))) return true
+  // A stall count typed at all is a claim about stalls. Number('') is 0, not
+  // NaN, so the empty string falls through to false rather than to a truthy
+  // "they answered something".
+  const stalls = typeof stallCount === 'string' ? Number(stallCount.trim()) : stallCount
+  return typeof stalls === 'number' && Number.isFinite(stalls) && stalls > 0
+}
+
+/**
+ * What this clearance costs. The number, and as little around it as possible.
+ *
+ * *"There's an absurd amount of text here."* This used to return a full
+ * sentence, in six variants — one for each combination of priced/free/unpriced
+ * and applied/not — and it was printed on every card. Six cards each carrying
+ * two sentences of identical fee rules is the wall the client was looking at.
+ * The RULE (Apply costs, Submit does not) is now stated once above the grid,
+ * where it belongs, because it is the same on all six. What is left here is the
+ * one thing that actually differs between the cards, which is the amount.
+ *
+ * The variants collapsed too. The sentences distinguished "what applying would
+ * add" from "what this is costing you" because `fee_preview` flips meaning once
+ * the clearance is applied for — the server compares against the filing without
+ * it either way. A bare amount is true under both readings: ₱735.00 is what
+ * this clearance costs, before or after the button.
+ *
+ * Two traps survive the shortening, and both are about money.
  *
  * `fee_preview` arrives ALREADY FORMATTED — "₱735.00" — because
- * `PermitFees::peso` puts the sign on server-side. It is interpolated, never
- * passed through formatMoney(): Number("₱735.00") is NaN, and formatMoney
- * answers "₱0.00" for that. A card quoting a free sanitary clearance next to a
- * button that charges ₱660 for one is the worst thing this screen could do.
+ * `PermitFees::peso` puts the sign on server-side. It is passed through, never
+ * given to formatMoney(): Number("₱735.00") is NaN, and formatMoney answers
+ * "₱0.00" for that. A card quoting a free sanitary clearance next to a button
+ * that charges ₱660 for one is the worst thing this screen could do.
  *
- * And its meaning flips with the state. The server compares against the filing
- * WITHOUT the clearance once it has been applied for, so the same field is
- * "what applying would add" beforehand and "what this is costing you"
- * afterwards. One sentence for both would be wrong half the time.
+ * And null is not zero. Null is the office setting its fee case by case; zero
+ * is `PermitFees::peso(max(0, $delta))` finding no revenue-code rule to price
+ * the clearance with. "₱0.00" would read as a promise that it is free, which is
+ * a promise nobody made — so it is not printed as a number at all.
  *
- * Null is not zero. It is the market stall rental, which the office sets case
- * by case, or a filing whose business record is gone and so cannot be priced.
+ * "No fee assessed" and not "No fee to pay" for exactly that reason, and the
+ * distinction is worth the extra syllable: the first says this assessment
+ * carries no line for the clearance, which is what we know. The second tells
+ * the applicant the clearance is free, which we do not know and which the
+ * Market Clearance's officer-set stall rental is a standing example of being
+ * wrong about.
  */
-export function feeSentence(preview: string | null, applied: boolean): string {
-  if (preview === null) {
-    return applied
-      ? 'This office sets its fee case by case. It appears on your Tax Order of Payment once assessed.'
-      : 'Applying adds a fee this office sets case by case. It is quoted on your Tax Order of Payment before you pay it.'
-  }
-  /*
-   * A zero preview is not the same claim as a priced one, and it must not be
-   * dressed as one.
-   *
-   * `feePreview` returns `PermitFees::peso(max(0, $delta))`, so a clearance
-   * with no matching revenue-code rule comes back as the STRING "₱0.00" rather
-   * than the null the contract reserves for "the office sets it". The Market
-   * Clearance is exactly that case — the spec says its stall rental is
-   * officer-set — and "Applying adds ₱0.00" would read as a promise that it is
-   * free. It is not a promise anyone made; it is the assessment having no rule
-   * to price it with.
-   *
-   * So the sentence says what is actually known: the assessment adds nothing.
-   * It does not say the clearance is free, and it does not invent a fee.
-   */
-  if (Number(preview.replace(/[^0-9.]/g, '')) === 0) {
-    return applied
-      ? 'The assessment carries no fee for this clearance.'
-      : 'Applying adds nothing to your assessment. If this office charges, it sets that separately.'
-  }
-  return applied
-    ? `${preview} of your Tax Order of Payment is this clearance.`
-    : `Applying adds ${preview} to your Tax Order of Payment.`
+export function feeAmount(preview: string | null): string {
+  if (preview === null) return 'Fee set by this office'
+  if (Number(preview.replace(/[^0-9.]/g, '')) === 0) return 'No fee assessed'
+  return `Fee ${preview}`
 }
 
 interface ClearanceStageProps {
@@ -186,6 +273,22 @@ interface ClearanceStageProps {
    * off which clearances have been decided.
    */
   onRowsChange?: (rows: Clearance[]) => void
+  /**
+   * Whether the filing's own answers say this applicant is a market business —
+   * `marketClearanceApplies()` above, item 98.
+   *
+   * Passed in rather than fetched because the two callers hold the declaration
+   * in different shapes and at different freshnesses: the standalone route has
+   * the SAVED `fee_profile` off the application, while the wizard has the
+   * profile the applicant is still typing, one step back. Reading the saved
+   * copy inside the wizard would miss a category entered thirty seconds ago and
+   * not yet autosaved, which is exactly when it matters.
+   *
+   * Defaults to false — hidden — because that is the answer for almost every
+   * business in the city, and a card shown by default is a card the applicant
+   * has to work out is not addressed to them.
+   */
+  marketApplies?: boolean
 }
 
 /**
@@ -226,6 +329,7 @@ export function ClearanceStage({
   business,
   onOpenOfficeForm,
   onRowsChange,
+  marketApplies = false,
 }: ClearanceStageProps) {
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
@@ -251,6 +355,18 @@ export function ClearanceStage({
   const [heldPrompt, setHeldPrompt] = useState<Clearance | null>(null)
   const [heldPromptFile, setHeldPromptFile] = useState<File | null>(null)
   const [heldPromptError, setHeldPromptError] = useState<string | null>(null)
+
+  /*
+   * The applicant said, by hand, that they trade from a market stall.
+   *
+   * Item 98's escape hatch. The derivation reads a category that describes
+   * market operators, and the client's stall holder is the operator's TENANT —
+   * so the one group named in the complaint is the group most likely to be
+   * missed. This is the click that fixes it, and it is deliberately one-way:
+   * nothing hides the card again, because the only thing that could ask for it
+   * back is a second press of a control that has by then done its job.
+   */
+  const [marketRevealed, setMarketRevealed] = useState(false)
 
   /* The office form sheet on screen, when this component owns the sheets. */
   const [formCode, setFormCode] = useState<OfficeFormCode | null>(null)
@@ -370,7 +486,7 @@ export function ClearanceStage({
     if (row.state === 'available' || row.state === 'submitted') {
       const ok = await runAction(
         code,
-        `Applied for your ${row.permit_type.name}. Its fee is on the Tax Order of Payment you will be given when you submit.`,
+        `Applied for your ${row.permit_type.name}. Its fee joins your Tax Order of Payment.`,
         () => clearances.apply(applicationId, code),
       )
       if (!ok) return
@@ -448,6 +564,32 @@ export function ClearanceStage({
   }
 
   const formMissing = formCode ? officeFormMissing(formCode, officeData[formCode] ?? {}) : []
+
+  /*
+   * ITEM 98 — which cards this applicant actually sees.
+   *
+   * Five of the six are for any business and are always here. The Market
+   * Clearance is not: it is for a stall in a public or private market, and
+   * showing it to the greengrocer with a shopfront is what made six cards read
+   * as six obligations in the first place.
+   *
+   * Three things put it back on screen, and the third is the one that must not
+   * be forgotten. A clearance ALREADY DECIDED stays visible whatever the
+   * derivation says — a reopened draft whose category was since edited, or
+   * whose reveal was clicked in a previous session, would otherwise lose a
+   * choice the applicant had already made, silently, with the fee still on the
+   * assessment. Hiding a decision is not the same as not offering it.
+   *
+   * `.filter` and not a separate render branch: the card, its buttons and its
+   * whole state machine are one definition, and a second copy for the one
+   * clearance that is conditional is how the two would drift apart.
+   */
+  const marketDecided = rows.some(
+    (r) =>
+      r.permit_type.code === 'MARKET' && (r.state !== 'available' || r.held_document !== null),
+  )
+  const marketShown = marketApplies || marketRevealed || marketDecided
+  const visibleRows = rows.filter((r) => r.permit_type.code !== 'MARKET' || marketShown)
 
   /* The sheet, when this component owns it — it replaces the cards rather than
    * sitting under them, so the applicant is on one thing at a time. */
@@ -538,26 +680,30 @@ export function ClearanceStage({
         </div>
       )}
 
-      <p className="mb-2 max-w-3xl text-sm text-ink-secondary">
-        <span className="font-semibold text-ink">Apply</span> asks that office to issue the
-        clearance, and its fee joins your Tax Order of Payment. Already hold a valid one?{' '}
-        <span className="font-semibold text-ink">Submit</span> a copy instead — nothing is charged,
-        because nothing is being issued.
-      </p>
-      <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        You are billed once, after you submit, for the business permit and everything chosen here.
-      </p>
       {/*
-        Item 98, said once at the top and again on the card it is about.
+        The whole rule, once, above the grid.
+        *"There's an absurd amount of text here."*
 
-        Six identical cards are read as six obligations, and the tester read
-        them that way — the Market Clearance is for stall holders and was
-        sitting there as an equal of the other five. Nothing forces it (see
-        APPLICABILITY), so what was missing was the sentence saying so.
+        Three paragraphs stood here and two more sentences were repeated on
+        every card, which is what made this screen a wall: the Apply/Submit rule
+        is identical for all six clearances, so printing it six times added no
+        information and buried the one thing that does differ — the amount.
+
+        What is left is the asymmetry, and only the asymmetry. Apply spends
+        money and Submit does not; it is the only thing on this screen a person
+        can get materially wrong, so it is the one thing said in full. The
+        sentences that went: "you are billed once after you submit" (true, and
+        already the subject of the Review & Submit step that follows), and
+        "where a clearance is only for a particular kind of premises, its card
+        says who it is for" (which was an instruction for reading the screen
+        rather than anything about the applicant's business — and is moot now
+        that item 98 keeps the one such card off the grid entirely).
       */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Choose the ones your business needs — you do not need all six. Where a clearance is only for
-        a particular kind of premises, its card says who it is for.
+        Choose the ones your business needs.{' '}
+        <span className="font-semibold text-ink">Apply</span> adds that office&rsquo;s fee to your
+        Tax Order of Payment; <span className="font-semibold text-ink">Submit a copy</span> of one
+        you already hold costs nothing.
       </p>
 
       {/*
@@ -570,11 +716,13 @@ export function ClearanceStage({
         {note}
       </p>
 
-      <ul className="grid list-none gap-5 p-0 sm:grid-cols-2 xl:grid-cols-3">
-        {rows.map((row) => {
+      <ul id="clearance-cards" className="grid list-none gap-5 p-0 sm:grid-cols-2 xl:grid-cols-3">
+        {visibleRows.map((row) => {
           const code = row.permit_type.code
           const busy = busyCode === code
-          const state = STATE_META[row.state] ?? STATE_META.available
+          // Undefined for an untouched card, and that is the whole point — see
+          // STATE_META. No badge until something has actually happened.
+          const state = STATE_META[row.state]
           const applied = row.state === 'applied' || row.state === 'issued'
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
@@ -596,11 +744,13 @@ export function ClearanceStage({
             <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
               <div className="flex items-start justify-between gap-3">
                 <p className="text-lg font-bold leading-snug text-ink">{row.permit_type.name}</p>
-                <span
-                  className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${state.className}`}
-                >
-                  {state.label}
-                </span>
+                {state && (
+                  <span
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${state.className}`}
+                  >
+                    {state.label}
+                  </span>
+                )}
               </div>
               <p className="display-serif mt-2 text-sm italic text-ink-secondary">
                 {/* The department relation is nullable server-side. */}
@@ -608,50 +758,54 @@ export function ClearanceStage({
               </p>
 
               {/*
-                Who the clearance is for, above the fee and well above the
-                buttons — it is the question that decides whether the rest of
-                the card is addressed to this applicant at all.
+                Who the clearance is for. One line, in the same voice as the
+                rest of the card.
 
-                Neutral styling, not a warning. Nothing is wrong and nothing is
-                blocked: a stall holder reads it and applies. Dressed in the red
-                the refusal panel uses, it would say the applicant had already
-                made a mistake by looking at the card.
+                It was a bordered, tinted panel with a bold "Who this is for:"
+                label and three sentences inside it — the heaviest thing on the
+                grid, sitting on the card that is meant to be the least
+                prominent. The reasoning behind it survives; the treatment does
+                not. It is also seen by far fewer people now: item 98 keeps this
+                card off the grid unless the filing says it belongs there, so
+                whoever reads this line went looking for it.
+
+                Still not styled as a warning. Nothing is wrong and nothing is
+                blocked — a stall holder reads it and applies.
               */}
               {appliesTo && (
-                <p
-                  id={appliesToId}
-                  className="mt-3 rounded-md border border-input-border bg-input/60 px-3 py-2 text-xs text-ink-secondary"
-                >
-                  <span className="font-semibold text-ink">Who this is for: </span>
+                <p id={appliesToId} className="mt-2 text-xs text-ink-muted">
                   {appliesTo}
                 </p>
               )}
 
               {/*
-                What each button costs, on the card, before either is pressed.
-                Apply and Submit sit side by side and look alike; one of them
-                spends money and the other does not, and that is not something a
-                card may leave the applicant to find out afterwards on their Tax
-                Order of Payment.
-              */}
-              <p className="mt-3 text-xs text-ink-secondary">
-                {feeSentence(row.fee_preview, applied)}{' '}
-                <span className="text-ink-muted">
-                  Submitting a copy you already hold costs nothing.
-                </span>
-              </p>
+                The amount, and nothing wrapped around it.
 
+                The Apply-costs/Submit-does-not rule is identical on all six
+                cards and is stated once above the grid. What belongs here is
+                the part that differs between them, which is the number — the
+                one fact a person needs from this card that they cannot get
+                anywhere else on the screen.
+              */}
+              <p className="tnum mt-3 text-sm font-bold text-ink">{feeAmount(row.fee_preview)}</p>
+
+              {/*
+                ITEM 112 — this panel used to open with its own bold heading,
+                "Applying for this clearance" / "Issued by this office", above
+                the line about the form. That heading said nothing the card was
+                not already saying: the status chip beside the clearance's name
+                reads "Applied for" or "Issued", two inches above and in the
+                same colour. One line of the panel is now the whole panel, and
+                it is the line that tells the applicant what is left to do.
+              */}
               {applied && (
                 <div className="mt-3 rounded-md border border-royal/30 bg-royal-tint px-3 py-2">
-                  <p className="text-xs font-bold text-royal">
-                    {row.state === 'issued' ? 'Issued by this office' : 'Applying for this clearance'}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-secondary">
+                  <p className="text-xs text-ink-secondary">
                     {row.has_office_form
                       ? row.office_form_complete
-                        ? 'Its form is filled in. Apply reopens it whenever you need it.'
+                        ? 'Its form is filled in. Apply reopens it.'
                         : 'Its form still needs finishing — Apply opens it.'
-                      : 'No extra form — this office works from your application.'}
+                      : 'No extra form for this office.'}
                   </p>
                   {/*
                     Withdrawing used to be a second click on Apply, which made
@@ -660,13 +814,28 @@ export function ClearanceStage({
                     offered once the office has issued it: there is nothing left
                     to withdraw. Hidden once the stage is shut, because there is
                     no longer anything this control can do.
+
+                    ITEM 107 — "Fix the UI button for the Don't apply. This
+                    should not look like a warning message or something." It was
+                    red underlined text (`text-s-red`), and red is this
+                    product's ERROR colour — the same red the refusal panel
+                    directly below uses to say an office turned the clearance
+                    down. So an ordinary opt-out, on a card where nothing had
+                    gone wrong, was dressed as the one thing on this screen that
+                    means something HAS. It is a plain bordered secondary button
+                    now: visibly a control, visibly not an alarm.
+
+                    Not shrunk to an icon, and not shortened to "Don't apply".
+                    Six of these cards sit on one grid, so a name that does not
+                    say WHICH clearance it withdraws is six identical buttons to
+                    anyone moving through them by name.
                   */}
                   {row.state === 'applied' && unlocked && (
                     <button
                       type="button"
                       onClick={() => void onUnapply(row)}
                       disabled={busy}
-                      className="mt-1 text-xs font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                      className="mt-2 rounded-sm border border-input-border bg-white px-2.5 py-1.5 text-xs font-semibold text-ink-secondary transition-colors hover:bg-input hover:text-ink disabled:opacity-60"
                     >
                       {busy ? 'Working…' : `Don’t apply for the ${row.permit_type.name}`}
                     </button>
@@ -774,6 +943,46 @@ export function ClearanceStage({
           )
         })}
       </ul>
+
+      {/*
+        ITEM 98 — the way back to a card the derivation did not offer.
+
+        The declaration this stage filters on names market OPERATORS, and the
+        client's "stall holders" are their tenants. So the applicant this
+        control exists for is not an edge case rounded off the end of the
+        derivation — it is, quite possibly, most of the people who need this
+        clearance. It has to be findable.
+
+        It also has to stay quiet. The client's instruction was to derive rather
+        than ask everyone a yes/no, and a prominent question above the cards
+        would be exactly the yes/no they ruled out, asked of every applicant in
+        the city. So it is one line of ordinary text below the grid, phrased as
+        the question a stall holder is already asking when they get here and
+        cannot find their office.
+
+        The reveal is announced through the same live region as Apply and
+        Submit. A card appearing silently at the end of a list is a change a
+        screen reader has no reason to look for, and the applicant pressed a
+        button precisely because they could not find that card.
+      */}
+      {!marketShown && (
+        <p className="mt-5 max-w-3xl text-sm text-ink-secondary">
+          Trading from a stall inside a public or private market?{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setMarketRevealed(true)
+              setNote(
+                'The Market Clearance has been added to the clearances above. Apply for it, or submit a copy you already hold.',
+              )
+            }}
+            className="font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+          >
+            Show the Market Clearance
+          </button>
+          .
+        </p>
+      )}
 
       {/* ── SUBMISSION · a clearance already held ─────────────────────────── */}
       {heldPrompt && (
@@ -904,7 +1113,20 @@ export function ClearanceStagePage() {
       <h2 className="display-serif mb-1 text-3xl text-ink">LGU Clearances</h2>
       <div className="mb-6 h-px bg-ink/40" />
 
-      <ClearanceStage applicationId={application.id} business={carriedOver} />
+      {/*
+        Item 98's derivation, from the SAVED profile — which is the right one
+        here. This route is how a filing that has left the applicant's hands
+        shows what was chosen, so the declaration on record is the declaration
+        that matters. The wizard passes the one being typed instead.
+      */}
+      <ClearanceStage
+        applicationId={application.id}
+        business={carriedOver}
+        marketApplies={marketClearanceApplies(
+          (application.fee_profile?.lines ?? []).map((l) => l.category),
+          application.fee_profile?.stall_count,
+        )}
+      />
     </div>
   )
 }

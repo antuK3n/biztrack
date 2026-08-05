@@ -190,6 +190,108 @@ test('line of business is asked once, and the one ask is the searchable picker',
   await expect(results).toBeHidden()
 })
 
+test('choosing a line of business is confirmed where it can be seen', async ({ page }) => {
+  /*
+   * Item 104a. "The selected line of business does not reflect after choosing."
+   *
+   * The state was never the problem — the row's checkbox ticked and the
+   * "Selected (N)" panel updated. That panel sits directly BELOW the results,
+   * which are absolutely positioned and up to 16rem tall, so the dropdown was
+   * lying on top of the only confirmation the applicant could read.
+   * `elementFromPoint` over the panel's heading returned a result row.
+   *
+   * The assertion is therefore not "the panel exists" — it did before — but
+   * "the confirmation is on top, naming the trade, at the moment of the click".
+   * A test that only checked for text would have passed against the bug.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const search = page.getByLabel(/search your line of business/i)
+  await search.click()
+  await search.fill('sari-sari')
+  // The footer names the query it counted, so waiting on it is waiting for the
+  // rows below to be the search's rows rather than the full list still on
+  // screen from the moment before.
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+
+  const results = page.locator('#psic-results')
+  const row = results.getByRole('button').first()
+  const trade = ((await row.textContent()) ?? '').replace(/PSIC\s*\d+$/, '').trim()
+  await row.click()
+
+  // Named, not just counted: two rows in this list differ only by the words in
+  // their brackets, so "Selected (1)" alone does not confirm the right one.
+  const confirmation = page.getByText(/^Selected \(1\):/)
+  await expect(confirmation).toBeVisible()
+  await expect(confirmation).toContainText(trade)
+
+  // The dropdown is still open — this is a multi-select — so nothing may be
+  // covering the confirmation. Hit-testing is the whole point of the test.
+  const box = await confirmation.boundingBox()
+  expect(box).not.toBeNull()
+  const onTop = await page.evaluate((b) => {
+    const el = document.elementFromPoint(b!.x + 8, b!.y + b!.height / 2)
+    return el?.textContent?.trim() ?? null
+  }, box)
+  expect(onTop, 'something is covering the selection confirmation').toContain('Selected (1)')
+
+  // And the same fact for somebody who cannot see it at all.
+  const announced = page.locator('[aria-live="polite"]', { hasText: /^Selected 1:/ })
+  await expect(announced).toHaveCount(1)
+})
+
+test('every line of business is reachable, and the count is stated', async ({ page }) => {
+  /*
+   * Item 104b — "all lines of business in the choices should appear".
+   *
+   * Two caps used to hide most of the register: an empty box showed the
+   * eight-code shortlist and stopped, and a query was sliced to 25 without
+   * saying so. "sale" matches 48 titles, so 23 real trades vanished and an
+   * applicant whose trade was among them concluded it was not on the list.
+   *
+   * The numbers below are deliberately relative to the reference data rather
+   * than hard-coded to 135: seeding another PSIC code must not fail this test,
+   * but capping the list again must.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const total = await page.evaluate(async () => {
+    const res = await fetch('/api/v1/reference/psic-codes', {
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('biztrack.token.public')}`,
+      },
+    })
+    const body = await res.json()
+    // '00000' is the catch-all row and is excluded from the picker on purpose:
+    // it carries a NULL revenue-code category, and 35 of the 36 business-tax
+    // rules match on that category.
+    return (body.data as { code: string }[]).filter((c) => c.code !== '00000').length
+  })
+  expect(total).toBeGreaterThan(100)
+
+  const search = page.getByLabel(/search your line of business/i)
+  await search.click()
+  const results = page.locator('#psic-results')
+
+  // Browsing reaches everything. The shortlist is a head start, and it says so.
+  await expect(results.getByRole('button')).toHaveCount(total)
+  await expect(results.getByText(/^Most common$/)).toBeVisible()
+  await expect(page.getByText(new RegExp(`Showing all ${total} trades`))).toBeVisible()
+
+  // Searching shows every match, and states how many that is out of how many.
+  await search.fill('sale')
+  const matches = await results.getByRole('button').count()
+  expect(matches, 'the 25-row cap is back').toBeGreaterThan(25)
+  await expect(
+    page.getByText(new RegExp(`Showing all ${matches} of ${total} trades matching`)),
+  ).toBeVisible()
+})
+
 test('a pin outside Malabon is refused, and says only what was checked', async ({ page }) => {
   /*
    * Item 86. There are no zone polygons and no water layer here, so the only
@@ -242,7 +344,14 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
  * only the second was ever assessed. The question lives on that step alone now,
  * so this step demands place and trade and nothing about money.
  */
-async function goToBusinessStep(page: Page) {
+async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
+  // `beforeEach` already opened a new filing. A renewal has to be opened as
+  // one from the start, because the type decides whether part 3 offers the
+  // "which business are you renewing?" picker at all.
+  if (type) {
+    await page.goto(`/apply?type=${type}`)
+    await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+  }
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
@@ -250,6 +359,14 @@ async function goToBusinessStep(page: Page) {
   const search = page.getByLabel(/search your line of business/i)
   await search.click()
   await search.fill('sari-sari')
+  /*
+   * Wait for the list to be the SEARCH's list before clicking a row in it.
+   * Opening the picker now renders all 135 trades — item 104b, the shortlist
+   * was hiding the other 127 — and the row a bare `.first()` resolves to is
+   * detached the instant the query narrows it. The footer names the query it
+   * counted, so it appears only once the results below it are the right ones.
+   */
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
   await page.locator('#psic-results').getByRole('button').first().click()
 
   // Centre of the map is Malabon City Hall, so this pin is always inside.
@@ -441,4 +558,174 @@ test('every input carries a real accessible name', async ({ page }) => {
     )
 
   expect(unnamed, `inputs with no accessible name: ${JSON.stringify(unnamed)}`).toEqual([])
+})
+
+/* ── Item 105 · the TIN, entered as four boxes ─────────────────────────────
+ *
+ * The tests below are about the two ways a split input goes wrong. Neither is
+ * hypothetical: both were reachable in the first draft of this control.
+ */
+
+/** The four boxes, in printed order. */
+function tinBoxes(page: Page) {
+  const group = page.getByRole('group', { name: /tax identification/i })
+
+  return [0, 1, 2, 3].map((i) => group.getByRole('textbox').nth(i))
+}
+
+test('the TIN is four boxes of three, and typing walks across them', async ({ page }) => {
+  await goToBusinessStep(page)
+
+  const boxes = tinBoxes(page)
+  for (const box of boxes) {
+    await expect(box).toHaveAttribute('maxlength', '3')
+    // A soft keyboard that opens on letters for a field that only takes digits
+    // is a barrier, not a preference.
+    await expect(box).toHaveAttribute('inputmode', 'numeric')
+  }
+
+  /*
+   * Typed straight through, with no Tab. Auto-advance is what makes four boxes
+   * bearable — and it is also what broke: an early version deferred the caret
+   * to a requestAnimationFrame, which lost the race against fast typing and
+   * produced 123-645-789-000. The right digits in the wrong order is the one
+   * outcome a TIN must never have, and it is invisible to a length check, so
+   * the assertion is per box.
+   */
+  await boxes[0].click()
+  await page.keyboard.type('123456789000')
+  await expect(boxes[0]).toHaveValue('123')
+  await expect(boxes[1]).toHaveValue('456')
+  await expect(boxes[2]).toHaveValue('789')
+  await expect(boxes[3]).toHaveValue('000')
+
+  /*
+   * Backspace in an empty box steps back. Without it the applicant who mistypes
+   * the third digit is auto-advanced into an empty box where Backspace does
+   * nothing, and the box they want is behind them, reachable only by mouse.
+   */
+  await boxes[3].fill('')
+  await boxes[3].focus()
+  await page.keyboard.press('Backspace')
+  await expect(boxes[2]).toBeFocused()
+  // And it moved rather than also deleting: one keypress, one visible effect.
+  await expect(boxes[2]).toHaveValue('789')
+})
+
+test('a TIN pasted into the first box spreads across all four', async ({ page, context }) => {
+  /*
+   * The single most common failure of split inputs, and the likeliest to be hit
+   * here: a TIN is a number people copy off an email or a BIR certificate, not
+   * one they retype. `maxLength={3}` truncates a paste to fit the box, so
+   * without an explicit onPaste handler "123-456-789-000" dropped into the
+   * first box becomes "123" and nine digits are gone without a word.
+   */
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await goToBusinessStep(page)
+
+  const boxes = tinBoxes(page)
+
+  // Written the way it is printed, dashes and all.
+  await page.evaluate(() => navigator.clipboard.writeText('987-654-321-111'))
+  await boxes[0].click()
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(boxes[0]).toHaveValue('987')
+  await expect(boxes[1]).toHaveValue('654')
+  await expect(boxes[2]).toHaveValue('321')
+  await expect(boxes[3]).toHaveValue('111')
+
+  // And written as twelve bare digits, which is how it arrives from a
+  // spreadsheet or another system's export.
+  for (const box of boxes) await box.fill('')
+  await page.evaluate(() => navigator.clipboard.writeText('123456789000'))
+  await boxes[0].click()
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(boxes[0]).toHaveValue('123')
+  await expect(boxes[1]).toHaveValue('456')
+  await expect(boxes[2]).toHaveValue('789')
+  await expect(boxes[3]).toHaveValue('000')
+
+  /*
+   * A nine-digit TIN with no branch code is not a malformed one — seven
+   * businesses in the register are filed under exactly that shape — so the last
+   * box may be left empty and the value must still be accepted.
+   */
+  for (const box of boxes) await box.fill('')
+  await page.evaluate(() => navigator.clipboard.writeText('111-111-111'))
+  await boxes[0].click()
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(boxes[2]).toHaveValue('111')
+  await expect(boxes[3]).toHaveValue('')
+  await page.getByLabel(/^business name/i).click()
+  await expect(page.locator('#tin-error')).toHaveCount(0)
+})
+
+test('a TIN already on file reads back into the four boxes', async ({ page }) => {
+  /*
+   * The other half of "the wire format does not change": a filing made before
+   * this control existed holds "123-456-789-000" in businesses.tin, and it has
+   * to arrive in four boxes without a migration and without the applicant
+   * retyping it. Renewal prefill is the shortest real path to a stored value —
+   * the API hands back exactly what a reopened draft would.
+   */
+  await goToBusinessStep(page, 'renewal')
+
+  await page.getByLabel(/which business are you renewing/i).selectOption({ index: 1 })
+
+  const boxes = tinBoxes(page)
+  await expect(boxes[0]).toHaveValue(/^\d{3}$/)
+  await expect(boxes[1]).toHaveValue(/^\d{3}$/)
+  await expect(boxes[2]).toHaveValue(/^\d{3}$/)
+  // The branch code is optional in the register, so it is asserted as "digits
+  // or nothing" rather than pinned — but never as a fragment of the nine.
+  await expect(boxes[3]).toHaveValue(/^\d*$/)
+
+  // A value that arrived correctly does not complain about itself.
+  await page.getByLabel(/^business name/i).click()
+  await expect(page.locator('#tin-error')).toHaveCount(0)
+})
+
+test('the four TIN boxes are one named question, not four nameless ones', async ({ page }) => {
+  /*
+   * Four unlabelled boxes are the classic screen-reader failure of this
+   * pattern: "edit text, edit text, edit text, edit text", with no statement
+   * anywhere that they add up to a TIN. WCAG 2.1 AA, 1.3.1 and 3.3.2.
+   */
+  await goToBusinessStep(page)
+
+  const group = page.getByRole('group', { name: /tax identification number/i })
+  await expect(group).toHaveCount(1)
+
+  // Each box says which digits of the printed number it holds, so somebody
+  // reading their certificate aloud knows where they are.
+  const names = await group
+    .getByRole('textbox')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('aria-label')))
+  expect(names).toEqual([
+    'TIN, first three digits',
+    'TIN, second three digits',
+    'TIN, third three digits',
+    'TIN branch code, three digits',
+  ])
+
+  /*
+   * The error is described on the GROUP, not on each box, so it is heard once
+   * on entering the question instead of four times on the way across it.
+   */
+  const boxes = tinBoxes(page)
+  await boxes[0].click()
+  await page.keyboard.type('12')
+  // Nothing yet: a format error on the first digit paints the whole group red
+  // for the eleven digits it takes to reach a right answer.
+  await expect(page.locator('#tin-error')).toHaveCount(0)
+
+  await page.getByLabel(/^business name/i).click()
+  await expect(page.locator('#tin-error')).toBeVisible()
+
+  const describedBy = await group.getAttribute('aria-describedby')
+  expect(describedBy, 'the TIN error is not described on the group').toContain('tin-error')
+  const perBox = await group
+    .getByRole('textbox')
+    .evaluateAll((els) => els.filter((el) => el.getAttribute('aria-describedby')).length)
+  expect(perBox, 'the error is described on each box, so it is read four times').toBe(0)
 })

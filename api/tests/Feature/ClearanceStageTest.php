@@ -135,20 +135,24 @@ it('carries the full contract shape on every row', function () {
         ->and($row['fee_preview'])->toBeString();
 
     /*
-     * Zoning has a sheet; Market does not, and the difference is which paper
-     * the city has given us.
+     * All six open a form now, and Market was the last to.
      *
-     * The zoning sheet was first built from the Revenue Code's zoning article
-     * because CPDO had never sent its form. The form has since arrived —
-     * MCG-CPDD-FO-003 v1.2 — and the sheet was rebuilt against it, which
-     * deleted the fields that guess had invented. Market is the last of the six
-     * with no source document at all, so it is the last with no sheet.
-     * Asserted as a pair so that adding the Market sheet later has to come here
-     * and say so.
+     * This assertion used to be a PAIR — zoning true, market false — recording
+     * that the difference between the two was which paper the city had given
+     * us. Zoning was settled when CPDD sent MCG-CPDD-FO-003 v1.2 and its sheet
+     * was rebuilt against the real form. Market was settled the other way:
+     * checklist item 109 says the city has no paper version and asks for one to
+     * be created, so its sheet is written rather than transcribed (see the
+     * header of web OfficeFormStep.tsx for the three questions and why each is
+     * there).
+     *
+     * Asserted over the whole set rather than over two named codes, because the
+     * claim is no longer about a pair. Every clearance the register seeds opens
+     * a sheet, so a seventh one added without one has to come here and say so.
      */
     $rows = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'));
-    expect($rows->firstWhere('permit_type.code', 'ZONING')['has_office_form'])->toBeTrue()
-        ->and($rows->firstWhere('permit_type.code', 'MARKET')['has_office_form'])->toBeFalse();
+    expect($rows->pluck('has_office_form')->all())->each->toBeTrue()
+        ->and($rows->firstWhere('permit_type.code', 'MARKET')['has_office_form'])->toBeTrue();
 });
 
 it('carries no ledger in meta, because a draft owes nothing', function () {

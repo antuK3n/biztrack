@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\AssignmentStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\AssignmentResource;
@@ -45,7 +46,10 @@ class AssignmentController extends Controller
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'status' => ['sometimes', 'string', 'max:40'],
+            // Repeatable or comma-separated, like application_status below:
+            // ?status=pending,in_progress,returned. It was a single value until
+            // checklist item 111 needed "everything except completed".
+            'status' => ['sometimes'],
             // Repeatable or comma-separated: ?application_status=submitted,under_review
             'application_status' => ['sometimes'],
             'per_page' => ['sometimes', 'integer'],
@@ -60,8 +64,9 @@ class AssignmentController extends Controller
 
         $this->scopeToDepartment($request, $query);
 
-        if ($status = $request->query('status')) {
-            $query->where('status', $status);
+        $assignmentStatuses = $this->assignmentStatuses($request);
+        if ($assignmentStatuses !== []) {
+            $query->whereIn('status', $assignmentStatuses);
         }
 
         $applicationStatuses = $this->applicationStatuses($request);
@@ -99,7 +104,47 @@ class AssignmentController extends Controller
      */
     private function applicationStatuses(Request $request): array
     {
-        $raw = $request->query('application_status');
+        return $this->statusList(
+            $request->query('application_status'),
+            array_map(fn (ApplicationStatus $s) => $s->value, ApplicationStatus::cases()),
+        );
+    }
+
+    /**
+     * The `status` filter — the ASSIGNMENT's own status, not the application's.
+     *
+     * Checklist item 111, "after approving an application it still shows
+     * approval". WorkflowService::approveAssignment marks this office's
+     * assignment `completed` but deliberately leaves the application in
+     * `under_review` until every office has signed off (see afterReviewProgress).
+     * That is correct — the filing genuinely is still under review by the others
+     * — but the queue filtered on the application's status alone, so the office
+     * that had just approved was shown the same row again and asked to approve
+     * work it had already done. The screen was reporting the filing's state where
+     * the officer was asking about their own.
+     *
+     * @return list<string>
+     */
+    private function assignmentStatuses(Request $request): array
+    {
+        return $this->statusList(
+            $request->query('status'),
+            array_map(fn (AssignmentStatus $s) => $s->value, AssignmentStatus::cases()),
+        );
+    }
+
+    /**
+     * Parse a repeatable/comma-separated status filter down to known values.
+     *
+     * Unknown values are dropped rather than 422'd: the queue tabs send a fixed
+     * list of statuses, and one of them going stale after a rename should narrow
+     * the queue, not break the screen.
+     *
+     * @param  list<string>  $valid
+     * @return list<string>
+     */
+    private function statusList(mixed $raw, array $valid): array
+    {
         if ($raw === null || $raw === '') {
             return [];
         }
@@ -112,7 +157,6 @@ class AssignmentController extends Controller
             fn ($v) => is_scalar($v) ? trim((string) $v) : '',
             $values,
         );
-        $valid = array_map(fn (ApplicationStatus $s) => $s->value, ApplicationStatus::cases());
 
         return array_values(array_intersect(array_filter($values), $valid));
     }
@@ -125,8 +169,20 @@ class AssignmentController extends Controller
      */
     private function statusCounts(Request $request): array
     {
+        /*
+         * The same assignment-status filter the list uses (item 111). A tab
+         * badge counting rows the list then refuses to show is its own bug: the
+         * office that has approved everything would read "For Approval 12" over
+         * an empty queue and reasonably conclude the screen was broken.
+         */
+        $assignmentStatuses = $this->assignmentStatuses($request);
+
         $counts = ApplicationAssignment::query()
             ->tap(fn ($q) => $this->scopeToDepartment($request, $q))
+            ->when(
+                $assignmentStatuses !== [],
+                fn ($q) => $q->whereIn('application_assignments.status', $assignmentStatuses),
+            )
             ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
             ->whereNull('applications.deleted_at')
             ->groupBy('applications.status')
