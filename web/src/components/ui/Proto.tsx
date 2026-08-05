@@ -108,6 +108,7 @@ export function ProtoModal({
   onCancel,
   onConfirm,
   confirmDisabled,
+  confirmDescribedBy,
   wide,
 }: {
   title: string
@@ -118,6 +119,19 @@ export function ProtoModal({
   onCancel: () => void
   onConfirm?: () => void
   confirmDisabled?: boolean
+  /*
+   * The id of a line in the body that says why Confirm will not get you out of
+   * here yet.
+   *
+   * For a dialog that asks a question the applicant MUST answer, `disabled` is
+   * the wrong tool: a disabled button is skipped by the tab order, so the one
+   * control that would explain the situation is the one a screen-reader user
+   * never reaches, and a sighted user gets a greyed button with no stated
+   * reason (WCAG 3.3.1/3.3.3 — identify the error and suggest the fix). So the
+   * button stays reachable and pressable, and points at the sentence naming
+   * what is still missing.
+   */
+  confirmDescribedBy?: string
   wide?: boolean
 }) {
   const headerBg = tone === 'red' ? 'bg-s-red' : tone === 'green' ? 'bg-s-green' : 'bg-royal'
@@ -171,6 +185,7 @@ export function ProtoModal({
               type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
+              aria-describedby={confirmDescribedBy}
               className={`${confirmBg} py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95 disabled:opacity-60`}
             >
               {confirmLabel}
