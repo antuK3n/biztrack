@@ -201,8 +201,6 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
-        Route::get('analytics/processing-time', [AnalyticsController::class, 'processingTime']);
-        Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
         Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
         /*
@@ -227,6 +225,19 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::post('analytics/refresh', [AnalyticsController::class, 'refresh'])
             ->middleware('throttle:4,1');
+    });
+
+    /*
+     * Permit Processing Time Monitoring — spec §6, "(Super Admin)".
+     *
+     * Its own permission, and the only analytics screen the super admin holds.
+     * This one measures the DEPARTMENTS, BPLO among them, so it sits with the
+     * office doing the oversight rather than the office being overseen. See the
+     * note on the admin role in RbacSeeder.
+     */
+    Route::middleware('permission:analytics.processing_time')->group(function () {
+        Route::get('analytics/processing-time', [AnalyticsController::class, 'processingTime']);
+        Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         /*
          * No staffing-simulation route. App\Support\Des is a complete, tested
          * port of r/R/des.R, but docs/r-integration-spec.md puts the discrete-

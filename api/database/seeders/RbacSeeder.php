@@ -112,7 +112,30 @@ class RbacSeeder extends Seeder
                     'application.review', 'application.reject',
                     'fee.adjust', 'inspection.manage', 'permit.view_all', 'permit.issue',
                     'request.create', 'message.participate', 'compliance.view',
-                    'analytics.view', 'zoning.evaluate', 'user.manage',
+                    /*
+                     * The super admin holds `analytics.processing_time` and NOT
+                     * `analytics.view`, which reads like a mistake and is not.
+                     *
+                     * "R INTEGRATION DRAFTS" assigns each analytics feature an
+                     * owner in its own heading: §1 Analytics Dashboard (Admin -
+                     * BPLO), §2 Renewal Risk Prediction (Admin - BPLO), §4
+                     * Business Growth Analysis (Admin - BPLO), and §6 Permit
+                     * Processing Time Monitoring (Super Admin). Three screens
+                     * belong to BPLO and exactly one to the super admin, and the
+                     * client confirmed it in those words: "BPLO side should only
+                     * have the 3 dashboards (Processing Time should not exist
+                     * here) — Super admin side should only have Processing Time
+                     * dashboard."
+                     *
+                     * That is a real separation of duties rather than a display
+                     * preference. The three BPLO screens are operational: they
+                     * count filings, rank businesses by renewal risk and drive
+                     * follow-up. Processing Time is oversight — it watches the
+                     * DEPARTMENTS, including BPLO itself, for genuine slowdowns.
+                     * Handing the office being measured the same view as the
+                     * office measuring it is what this split avoids.
+                     */
+                    'analytics.processing_time', 'zoning.evaluate', 'user.manage',
                     'owner.manage_status', 'oic.assign', 'reference.manage', 'audit.view',
                 ],
             ],

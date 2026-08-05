@@ -1,59 +1,77 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
+import {
+  GrowthBarangayBars,
+  GrowthClosureTrend,
+  GrowthIndustryTrend,
+  GrowthRenewalCurve,
+  GrowthStatusDonut,
+} from '../../components/charts/GrowthCharts'
+import { GROWTH_DOWN, GROWTH_FLAT, GROWTH_UP } from '../../components/charts/GrowthChartFrame'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type {
-  BarangayGrowthRow,
-  BusinessGrowthReport,
-  IndustryGrowthRow,
-} from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { GenerateReportButton } from './GenerateReportButton'
 
 /*
- * Business Lifecycle Monitoring — docs/r-integration-spec.md §4.
+ * Business Growth Analysis — docs/r-integration-spec.md §4, "(Admin - BPLO)".
  *
- * Naming follows mockup 122; formulas follow the client's paper. The spec sets
- * that split explicitly — "Mockup is newer, follow it for naming, follow the
- * paper for formulas" — and the rest of the stack already honours it:
- * BusinessGrowthAnalytics, AnalyticsDatasets and the payload types all call this
- * Business Lifecycle Monitoring. This file and the tab strip had reversed it on
- * the grounds that the paper is what gets presented, which left one screen
- * disagreeing with its own API about what it is called.
+ * ── On the name ─────────────────────────────────────────────────────────────
  *
- * The paper's names, for anyone reading it alongside: "Business Growth Analysis"
- * for the screen and "Business Renewal Performance" for the cohort KPI.
+ * This screen used to be titled "Business Lifecycle Monitoring", and the
+ * comment that sat here defended it: mockup 122 retitles the screen, the mockup
+ * was newer than the paper, so the mockup won on naming. That reasoning is now
+ * superseded on both counts. The R INTEGRATION DRAFTS spec is newer than the
+ * mockup and heads §4 "Business Growth Analysis", and the client asked for the
+ * rename directly — "Proper follow terms (e.g. 'Lifecycle' should be 'Business
+ * Growth Analysis')". A direct instruction plus the newest spec beats an
+ * inference drawn from file dates, so the spec's term is what ships.
  *
- * Everything is computed server-side (App\Support\BusinessGrowthAnalytics, or R's
- * POST /growth/lifecycle) and rendered as given. Where a figure genuinely cannot
- * be derived — a growth rate against an empty prior period, survival for a cohort
- * that has not reached its first renewal — the server sends null and this page
- * says so rather than printing a number nobody can defend.
+ * The same rename applies inside the screen: the cohort KPI is the spec's
+ * "Business Renewal Performance", not "Cohort Survival Rate".
  *
- * THE PANEL THAT NEEDS READING CAREFULLY is cohort survival. It is a Kaplan-Meier
- * estimate over renewal cycles, not a single-period ratio, and it is descriptive
- * rather than predictive. The curve carries its at-risk count at every cycle
- * because a late cycle can rest on very few businesses, and a percentage over a
- * hundred businesses should not look like one over six hundred.
+ * KNOWN DISAGREEMENT, deliberately left alone here: the API still labels this
+ * dataset "Business Lifecycle Monitoring" (App\Support\AnalyticsDatasets, and
+ * the PDF template and the cohort_survival.survival definition with it). Those
+ * are server-side strings and renaming them is a separate change against api/;
+ * until that lands, the screen's title and its dataset label disagree, which is
+ * the tradeoff the client's instruction buys.
+ *
+ * ── What is drawn, and why each chart is the chart it is ────────────────────
+ *
+ * The spec names a visualisation per report and the client asked that they be
+ * followed exactly. Growth rate is a summary card with a direction indicator;
+ * barangays are horizontal bars; the status split is a donut; renewal
+ * performance and closures are lines; industry growth is one line per industry
+ * with a colour-coded legend. The components live in components/charts and
+ * every one of them also renders its numbers as a hidden table, because
+ * recharts emits an SVG a screen reader cannot read.
+ *
+ * ── On the prose ────────────────────────────────────────────────────────────
+ *
+ * There used to be a footnote under every panel restating what the panel meant.
+ * The client's note was blunt — the explanations are "way too long" — but also
+ * said the info popovers are worth keeping. So the footnotes are gone and the
+ * <Info> buttons stay: same explanations, server-authored, one click away
+ * instead of permanently occupying the screen.
+ *
+ * The one paragraph that survives is the survival methodology, and it survives
+ * because the server ships it attached to the number. A Kaplan-Meier estimate
+ * that censors businesses still inside their current permit reads, to anyone
+ * who has not been told, as a plain pass rate — far more certain than it is.
+ * It sits directly under the curve it qualifies rather than in the popover.
+ *
+ * Everything is computed server-side (App\Support\BusinessGrowthAnalytics, or
+ * R's POST /growth/lifecycle) and rendered as given. Where a figure genuinely
+ * cannot be derived — a growth rate against an empty prior period, renewal
+ * performance for a cohort that has not reached its first renewal — the server
+ * sends null and this page says so rather than printing a number nobody can
+ * defend.
  */
-
-const ROYAL = '#3242ca'
-const GRID = '#c5cfe0'
-const MUTED_BAR = '#9fb6dd'
-const AXIS_TICK = { fontSize: 12, fill: '#5b6472' } as const
 
 const PERIOD_OPTIONS = [
   { value: '3', label: 'Last 3 months' },
@@ -67,272 +85,141 @@ function signed(value: number): string {
   return `${value >= 0 ? '+' : ''}${value}`
 }
 
-function pct(value: number | null): string {
-  return value === null ? '—' : `${value.toFixed(1)}%`
-}
-
 /** "2026-03" reads as "Mar 26" on the closure-trend axis. */
 function monthLabel(month: string): string {
   const [year, m] = month.split('-').map(Number)
   return new Date(year, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: '2-digit' })
 }
 
-function Headline({
+/** "2025-08-03" reads as "Aug 2025" on the industry axis. */
+function monthYear(date: string): string {
+  const [year, m] = date.split('-').map(Number)
+  return new Date(year, m - 1, 1).toLocaleDateString('en-PH', { month: 'short', year: 'numeric' })
+}
+
+/**
+ * The spec's summary card: the percentage, with an upward or downward indicator.
+ *
+ * ── Why a decline is not drawn in the error red ─────────────────────────────
+ *
+ * DESIGN.md's Red Means Stop rule reserves #bd0000 for errors and destructive
+ * actions, and a register that shrank is neither. It is a finding — arguably
+ * the single most useful finding on the screen — and painting it the same
+ * colour as a failed upload tells a BPLO officer that something has gone wrong
+ * with the system rather than with the city's business count. So down is amber,
+ * up is the darkened green DESIGN.md already sanctions, and both clear 4.5:1 on
+ * white because the colour carries text and not just a swatch.
+ *
+ * The arrow is aria-hidden and the direction is spelled out in words beside it:
+ * Never Color Alone, and an arrow glyph is no better than a colour to a screen
+ * reader.
+ */
+function DirectionIndicator({ value }: { value: number }) {
+  const rising = value > 0
+  const flat = value === 0
+  const color = flat ? GROWTH_FLAT : rising ? GROWTH_UP : GROWTH_DOWN
+
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold"
+      style={{ color, borderColor: color }}
+    >
+      <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden="true">
+        {flat ? (
+          <rect x="0" y="4" width="10" height="2" fill={color} />
+        ) : (
+          <path d={rising ? 'M5 0 L10 9 H0 Z' : 'M5 10 L0 1 H10 Z'} fill={color} />
+        )}
+      </svg>
+      {flat ? 'no change' : rising ? 'up' : 'down'}
+    </span>
+  )
+}
+
+function SummaryCard({
   value,
   label,
   hint,
-  muted,
   metric,
+  muted,
+  indicator,
 }: {
   value: string
   label: string
   hint?: string
-  muted?: boolean
   metric?: string
+  muted?: boolean
+  indicator?: ReactNode
 }) {
   return (
-    <ProtoCard className="px-4 py-7 text-center">
-      <p
-        className={`tnum font-bold leading-tight ${
-          muted ? 'text-[15px] text-ink-secondary' : 'text-[30px] leading-none text-royal'
-        }`}
-      >
-        {value}
-      </p>
-      <p className="mt-2.5 text-[13px] text-ink-muted">
+    <ProtoCard className="px-4 py-4">
+      <p className="text-[12px] leading-snug text-ink-muted">
         {label}
         {metric && <Info metric={metric} />}
       </p>
-      {hint && <p className="mt-1 text-[11px] leading-snug text-ink-muted">{hint}</p>}
+      <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span
+          className={`tnum font-bold leading-none ${
+            muted ? 'text-[15px] text-ink-secondary' : 'text-[26px] text-royal'
+          }`}
+        >
+          {value}
+        </span>
+        {indicator}
+      </p>
+      {hint && <p className="mt-1.5 text-[11px] leading-snug text-ink-muted">{hint}</p>}
     </ProtoCard>
   )
 }
 
-function SectionHeading({
-  children,
-  note,
-  metric,
-}: {
-  children: ReactNode
-  note?: string
-  metric?: string
-}) {
+function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
   return (
-    <div className="mb-2.5">
-      {/*
-        The info button is a sibling of the h2, not a child of it. Nested, its
-        label folds into the heading's accessible name, so anyone navigating
-        this page by heading hears the button on every section.
-      */}
-      <div className="flex items-center">
-        <h2 className="text-xl text-ink">{children}</h2>
-        {metric && <Info metric={metric} />}
-      </div>
-      {note && <p className="mt-0.5 text-[11px] text-ink-muted">{note}</p>}
+    // The info button is a sibling of the h2, not a child of it. Nested, its
+    // label folds into the heading's accessible name, so anyone navigating this
+    // page by heading hears the button on every section.
+    <div className="mb-2 flex items-center">
+      <h2 className="text-[15px] font-bold text-ink">{children}</h2>
+      {metric && <Info metric={metric} />}
     </div>
   )
 }
 
-/* ── Business Lifecycle Status ─────────────────────────────────────────── */
-
-function StatusSummary({ report }: { report: BusinessGrowthReport }) {
+/** Card, heading and info button in one, so the four panels stay identical. */
+function Panel({
+  title,
+  metric,
+  className = '',
+  children,
+}: {
+  title: string
+  metric?: string
+  className?: string
+  children: ReactNode
+}) {
   return (
-    <ProtoCard className="overflow-hidden">
-      <table className="w-full text-left">
-        <thead>
-          <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
-            <th scope="col" className="px-5 py-2.5 font-semibold">
-              Status
-            </th>
-            <th scope="col" className="px-5 py-2.5 text-right font-semibold">
-              Count
-            </th>
-            <th scope="col" className="px-5 py-2.5 text-right font-semibold">
-              Share
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {report.status_summary.map((row) => (
-            <tr key={row.status} className="border-b border-line/60 last:border-0">
-              <th scope="row" className="px-5 py-2.5 text-[15px] font-semibold text-ink">
-                {row.label}
-              </th>
-              <td className="tnum px-5 py-2.5 text-right text-[15px] text-ink">
-                {row.count.toLocaleString()}
-              </td>
-              <td className="tnum px-5 py-2.5 text-right text-[15px] text-ink-secondary">
-                {pct(row.share)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="border-t border-line px-5 py-3 text-xs text-ink-muted">
-        Active holds a permit valid today, Expired has let every permit lapse, Inactive is registered
-        but has never held a permit, Closed had its registration removed. Worked out from permits,
-        not from the status an admin sets on the business record.
-      </p>
-    </ProtoCard>
+    // The card stretches to the row rather than sitting at its natural height.
+    // Two panels side by side rarely hold the same amount — the renewal curve
+    // carries a methodology paragraph the closure trend does not — and without
+    // this the shorter one leaves a band of empty canvas under it, which is
+    // exactly the "large space" the client asked us to take out.
+    <section className={`flex flex-col ${className}`}>
+      <SectionHeading metric={metric}>{title}</SectionHeading>
+      <ProtoCard className="flex flex-1 flex-col justify-center px-4 py-3.5">{children}</ProtoCard>
+    </section>
   )
 }
 
-/* ── Cohort Survival ───────────────────────────────────────────────────── */
-
-/**
- * The Kaplan-Meier curve, plus per-cohort figures.
- *
- * `at_risk` is shown at every cycle on purpose. Survival through a third renewal
- * can rest on a hundred businesses when the first rests on four hundred, and a
- * reader who cannot see that has no way to judge how much weight the last point
- * carries.
- */
-
-/* ── Top Growing Barangays ─────────────────────────────────────────────── */
-
-function BarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
-  // Scaled by the biggest INCREASE, because that is what the panel ranks. Scaling
-  // by volume would put the longest bar on a barangay that did not grow.
-  const peak = Math.max(1, ...rows.map((row) => Math.abs(row.delta)))
-
-  return (
-    <ProtoCard className="space-y-3.5 px-5 py-5">
-      {rows.map((row, i) => (
-        <div key={row.barangay} className="flex items-center gap-4">
-          <div className="w-28 shrink-0">
-            <p className="truncate text-[13px] font-bold text-ink">{row.barangay}</p>
-            <p className="text-[11px] text-ink-muted">
-              {row.growth_rate === null
-                ? `${row.registrations} new, none before`
-                : `${signed(row.growth_rate)}% vs last period`}
-            </p>
-          </div>
-          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(3, (Math.abs(row.delta) / peak) * 100)}%`,
-                backgroundColor: i === 0 && row.delta > 0 ? ROYAL : MUTED_BAR,
-              }}
-            />
-          </div>
-          <p className="tnum w-12 shrink-0 text-right text-[13px] font-semibold text-ink">
-            {signed(row.delta)}
-          </p>
-        </div>
-      ))}
-      <p className="border-t border-line pt-3 text-xs text-ink-muted">
-        Ranked by how much new registrations went up against the period before of the same length,
-        not by how big the barangay is. The figure on the right is that change.
-      </p>
-    </ProtoCard>
-  )
+function Unavailable({ children }: { children: ReactNode }) {
+  return <p className="px-1 py-8 text-center text-[13px] text-ink-secondary">{children}</p>
 }
-
-/* ── Business Closure Trend ────────────────────────────────────────────── */
-
-function ClosureTrend({ report }: { report: BusinessGrowthReport }) {
-  const data = report.closure_trend.map((row) => ({ ...row, label: monthLabel(row.month) }))
-  const total = report.closure_trend.reduce((sum, row) => sum + row.closures, 0)
-
-  return (
-    <ProtoCard className="p-5">
-      <ResponsiveContainer width="100%" height={200}>
-        <LineChart data={data} margin={{ top: 8, right: 12, left: -14, bottom: 4 }}>
-          <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            dataKey="label"
-            tick={AXIS_TICK}
-            tickLine={false}
-            axisLine={{ stroke: GRID }}
-            minTickGap={14}
-          />
-          <YAxis
-            tick={AXIS_TICK}
-            tickLine={false}
-            axisLine={false}
-            allowDecimals={false}
-            width={34}
-          />
-          <Tooltip
-            formatter={(value) => [`${Number(value)} closed`, 'Businesses']}
-            labelFormatter={(label) => String(label)}
-          />
-          <Line
-            type="monotone"
-            dataKey="closures"
-            name="Closures"
-            stroke={ROYAL}
-            strokeWidth={2.5}
-            dot={{ r: 3.5, fill: ROYAL }}
-            activeDot={{ r: 5 }}
-            isAnimationActive={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
-      <p className="mt-2 text-[13px] text-ink-muted">
-        {total === 0
-          ? `No business closed its registration in the last ${report.period_months} months.`
-          : `${total} closure${total === 1 ? '' : 's'} over ${report.period_months} months, dated by when the registration was removed — the only closure date the system records.`}
-      </p>
-    </ProtoCard>
-  )
-}
-
-/* ── Business Industry Growth Trend ────────────────────────────────────── */
-
-function IndustryBars({ rows }: { rows: IndustryGrowthRow[] }) {
-  const peak = Math.max(1, ...rows.map((row) => row.count))
-
-  return (
-    <ProtoCard className="space-y-3.5 px-5 py-5">
-      {rows.map((row) => (
-        <div key={row.psic_code} className="flex items-center gap-4">
-          <div className="w-36 shrink-0">
-            <p className="truncate text-[13px] font-bold text-ink" title={row.industry}>
-              {row.industry}
-            </p>
-            {/*
-              The direction is a word, never only a bar tone: DESIGN.md's Never
-              Color Alone rule, and "declining" is the kind of finding a reader
-              should not have to infer from a shade of blue.
-            */}
-            <p className="text-[11px] text-ink-muted">
-              {row.direction} · {signed(row.delta)} vs last period
-            </p>
-          </div>
-          <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-canvas">
-            <div
-              className="h-full rounded-full"
-              style={{
-                width: `${Math.max(3, (row.count / peak) * 100)}%`,
-                backgroundColor: row.direction === 'declining' ? MUTED_BAR : ROYAL,
-              }}
-            />
-          </div>
-          <p className="tnum w-12 shrink-0 text-right text-[13px] font-semibold text-ink">
-            {row.count}
-          </p>
-        </div>
-      ))}
-      <p className="border-t border-line pt-3 text-xs text-ink-muted">
-        The bar is how many businesses carry that line today; growing or declining is the change in
-        new registrations against the period before. Grouped by PSIC code — the national numbering
-        for industries.
-      </p>
-    </ProtoCard>
-  )
-}
-
-/* ── page ──────────────────────────────────────────────────────────────── */
 
 function LoadingState() {
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <SkeletonCards count={4} />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-52 w-full rounded-2xl" />
+          <Skeleton key={i} className="h-48 w-full rounded-2xl" />
         ))}
       </div>
     </div>
@@ -353,9 +240,8 @@ export function BusinessGrowthPage() {
   const meta = result?.meta
 
   const top = data?.top_barangays[0]
-  const survival = data?.cohort_survival
-  const period = data ? `${data.period_start} to ${data.period_end}` : ''
-  const lastPoint = survival?.points[survival.points.length - 1]
+  const renewal = data?.cohort_survival
+  const lastPoint = renewal?.points[renewal.points.length - 1]
 
   return (
     <div>
@@ -374,7 +260,7 @@ export function BusinessGrowthPage() {
           </span>
         }
       >
-        Business Lifecycle Monitoring
+        Business Growth Analysis
       </PageTitle>
 
       <AnalyticsTabs />
@@ -385,126 +271,128 @@ export function BusinessGrowthPage() {
         <LoadingState />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
-      ) : data && survival ? (
+      ) : data && renewal ? (
         <MetricDefinitions value={meta?.definitions}>
-          <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
-            <Headline
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <SummaryCard
               value={data.growth_rate === null ? 'No prior period' : `${signed(data.growth_rate)}%`}
               label="Business Growth Rate"
               metric="growth_rate"
+              muted={data.growth_rate === null}
+              indicator={
+                data.growth_rate === null ? undefined : (
+                  <DirectionIndicator value={data.growth_rate} />
+                )
+              }
               hint={
                 data.growth_rate === null
-                  ? 'nothing registered in the period before this one to compare against'
+                  ? 'nothing registered in the period before to compare against'
                   : `${data.registrations} new vs ${data.registrations_prior} before`
               }
-              muted={data.growth_rate === null}
             />
-            <Headline
+            <SummaryCard
               value={
-                survival.survival === null
-                  ? 'No renewal reached'
-                  : `${survival.survival.toFixed(0)}%`
+                renewal.survival === null ? 'No renewal reached' : `${renewal.survival.toFixed(0)}%`
               }
-              label="Cohort Survival Rate"
+              label="Business Renewal Performance"
               metric="cohort_survival.survival"
+              muted={renewal.survival === null}
               hint={
-                survival.survival === null
+                renewal.survival === null
                   ? 'no business has reached a first renewal yet'
-                  : `still renewing after ${survival.max_cycle} ${survival.max_cycle === 1 ? 'cycle' : 'cycles'}${lastPoint ? ` · ${lastPoint.at_risk} businesses got that far` : ''}`
+                  : `after ${renewal.max_cycle} renewal ${renewal.max_cycle === 1 ? 'period' : 'periods'}${lastPoint ? ` · ${lastPoint.at_risk} businesses got that far` : ''}`
               }
-              muted={survival.survival === null}
             />
-            <Headline
+            <SummaryCard
               value={data.closures.toLocaleString()}
               label="Closures (Period)"
               metric="closures"
-              hint={period}
+              hint={`${data.period_start} to ${data.period_end}`}
             />
-            <Headline
+            <SummaryCard
               value={top ? top.barangay : 'No data'}
               label="Top Growing Barangay"
               metric="top_barangays"
-              hint={top ? `${signed(top.delta)} new registrations vs last period` : undefined}
               muted={!top}
+              hint={top ? `${signed(top.delta)} new registrations vs last period` : undefined}
             />
           </div>
 
-          <div className="mt-7 grid gap-x-6 gap-y-7 lg:grid-cols-2">
-            <section>
-              <SectionHeading note="As of today" metric="status_summary">
-                Business Status Summary
-              </SectionHeading>
-              <StatusSummary report={data} />
-            </section>
+          <div className="mt-4 grid gap-x-4 gap-y-4 lg:grid-cols-2">
+            <Panel title="Business Status Summary" metric="status_summary">
+              {data.status_summary.length > 0 ? (
+                <GrowthStatusDonut rows={data.status_summary} />
+              ) : (
+                <Unavailable>No business is on the register yet.</Unavailable>
+              )}
+            </Panel>
 
-            <section>
-              <SectionHeading
-                note={`${period}, against the ${data.period_months} months before`}
-                metric="top_barangays"
-              >
-                Top Growing Barangays
-              </SectionHeading>
+            <Panel title="Top Growing Barangays" metric="top_barangays">
               {data.top_barangays.length > 0 ? (
-                <BarangayBars rows={data.top_barangays} />
+                <GrowthBarangayBars rows={data.top_barangays} />
               ) : (
-                <ProtoCard className="px-5 py-6">
-                  <p className="text-sm text-ink-secondary">
-                    No business registered a barangay address in this period, so there is nothing to
-                    rank.
-                  </p>
-                </ProtoCard>
+                <Unavailable>
+                  No business registered a barangay address in this period, so there is nothing to
+                  rank.
+                </Unavailable>
               )}
-            </section>
+            </Panel>
 
-            <section>
-              <SectionHeading note={period} metric="closure_trend">
-                Business Closure Trend
-              </SectionHeading>
-              <ClosureTrend report={data} />
-            </section>
+            <Panel title="Business Renewal Performance" metric="cohort_survival">
+              {renewal.points.length > 0 ? (
+                <>
+                  <GrowthRenewalCurve points={renewal.points} />
+                  {/*
+                    Verbatim from the server and not optional — see the note at
+                    the top of this file. It is the one long sentence left on
+                    the screen, and it is here because the number above it is
+                    misread without it.
+                  */}
+                  <p className="mt-2 border-t border-line pt-2 text-[11px] leading-snug text-ink-muted">
+                    {renewal.methodology}
+                  </p>
+                </>
+              ) : (
+                <Unavailable>
+                  No business has reached a first renewal yet, so there is no compliance rate to
+                  follow.
+                </Unavailable>
+              )}
+            </Panel>
 
-            <section>
-              <SectionHeading
-                note={`${period}, against the ${data.period_months} months before`}
-                metric="industry_growth"
-              >
-                Business Industry Growth Trend
-              </SectionHeading>
+            <Panel title="Business Closure Trend" metric="closure_trend">
+              {data.closure_trend.length > 0 ? (
+                <GrowthClosureTrend
+                  data={data.closure_trend.map((row) => ({
+                    ...row,
+                    label: monthLabel(row.month),
+                  }))}
+                />
+              ) : (
+                <Unavailable>
+                  No closure is on record for this period, so there is no trend to plot.
+                </Unavailable>
+              )}
+            </Panel>
+
+            <Panel
+              title="Business Industry Growth Trend"
+              metric="industry_growth"
+              className="lg:col-span-2"
+            >
               {data.industry_growth.length > 0 ? (
-                <IndustryBars rows={data.industry_growth} />
+                <GrowthIndustryTrend
+                  rows={data.industry_growth}
+                  priorLabel={`${monthYear(data.prior_period_start)} – ${monthYear(data.period_start)}`}
+                  currentLabel={`${monthYear(data.period_start)} – ${monthYear(data.period_end)}`}
+                />
               ) : (
-                <ProtoCard className="px-5 py-6">
-                  <p className="text-sm text-ink-secondary">
-                    No line of business is on record yet, so there is nothing to rank.
-                  </p>
-                </ProtoCard>
+                <Unavailable>
+                  No line of business is on record yet, so there is nothing to plot.
+                </Unavailable>
               )}
-            </section>
+            </Panel>
           </div>
-
-          <p className="mt-6 text-xs text-ink-muted">
-            {data.registrations.toLocaleString()}
-            <Info metric="registrations" /> new registrations between {data.period_start} and{' '}
-            {data.period_end}, against {data.registrations_prior.toLocaleString()} in the{' '}
-            {data.period_months} months before that. Cohort survival follows{' '}
-            {survival.businesses.toLocaleString()} businesses through{' '}
-            {survival.renewals_observed.toLocaleString()} renewal cycles on record, of which{' '}
-            {survival.lapses.toLocaleString()} lapsed.
-          </p>
-
-          {/*
-            Verbatim from the server, and not optional. The renewal figure is a
-            Kaplan-Meier estimate over the cycles this cohort actually reached,
-            with businesses still inside their current permit set aside rather
-            than counted as failures — a reader who takes it for a plain
-            pass rate will read it as far more certain than it is. The server
-            ships the sentence with the number for that reason, so it sits on
-            the screen rather than only in the info panel.
-          */}
-          <p className="mt-2 text-xs leading-relaxed text-ink-muted">
-            {survival.methodology}
-            <Info metric="cohort_survival" />
-          </p>
         </MetricDefinitions>
       ) : null}
     </div>

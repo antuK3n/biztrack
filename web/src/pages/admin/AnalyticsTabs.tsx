@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../../stores/auth'
 
 /*
  * The admin analytics screens share one rail entry, so they need a way to reach
@@ -27,21 +28,68 @@ import { NavLink } from 'react-router-dom'
  *
  * A link from inside the staff site must address the staff site directly.
  */
+
+/*
+ * Each tab carries the permission its route demands (see App.tsx), because the
+ * four screens are no longer one audience.
+ *
+ * `analytics.view` is BPLO's and covers three screens; `analytics.processing_time`
+ * is the super admin's and covers one. The two are disjoint — neither role holds
+ * both — so a strip that renders all four hands every reader at least one tab
+ * that RequirePermission will bounce them off. That is a link to a dead end
+ * dressed up as navigation, and it is exactly what the client meant by
+ * "Processing Time should not exist here".
+ *
+ * The permission is duplicated from App.tsx rather than derived from it. If a
+ * route's guard is ever changed without changing the matching line here, the tab
+ * goes back to being a dead end and nothing will fail — e2e/analytics.spec.ts is
+ * what catches that.
+ */
 const TABS = [
-  { to: '/staff/analytics', label: 'Overview', end: true },
-  { to: '/staff/analytics/renewal-risk', label: 'Renewal Risk', end: false },
-  // The paper's §4 is "Business Growth Analysis"; mockup 122 retitles it
-  // "Business Lifecycle Monitoring" and the mockup is newer, so it wins on
-  // naming (docs/r-integration-spec.md §4). Shortened here only because a tab
-  // strip has no room for the full title.
-  { to: '/staff/analytics/business-growth', label: 'Lifecycle', end: false },
-  { to: '/staff/analytics/processing-time', label: 'Processing Time', end: false },
+  { to: '/staff/analytics', label: 'Overview', end: true, permission: 'analytics.view' },
+  {
+    to: '/staff/analytics/renewal-risk',
+    label: 'Renewal Risk',
+    end: false,
+    permission: 'analytics.view',
+  },
+  /*
+   * Was labelled "Lifecycle" — a shortening of mockup 122's "Business Lifecycle
+   * Monitoring", which won on naming over the paper's §4 because it was newer.
+   * The client asked for the spec's own term back, so the tab now reads
+   * "Business Growth Analysis". The route is unchanged, and the page heading
+   * still renders the dataset's own name; only this label moved.
+   */
+  {
+    to: '/staff/analytics/business-growth',
+    label: 'Business Growth Analysis',
+    end: false,
+    permission: 'analytics.view',
+  },
+  {
+    to: '/staff/analytics/processing-time',
+    label: 'Processing Time',
+    end: false,
+    permission: 'analytics.processing_time',
+  },
 ]
 
 export function AnalyticsTabs() {
+  const permissions = useAuth((s) => s.user?.permissions)
+
+  const tabs = TABS.filter((tab) => permissions?.includes(tab.permission))
+
+  /*
+   * A tab strip offering one tab is a control with nothing to control: the
+   * super admin's only analytics screen is the one they are already on, and a
+   * lone highlighted pill above it reads as a promise of somewhere else to go.
+   * Zero is the same story while the session is still bootstrapping.
+   */
+  if (tabs.length < 2) return null
+
   return (
     <nav aria-label="Analytics sections" className="mb-5 flex flex-wrap gap-2">
-      {TABS.map((tab) => (
+      {tabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
