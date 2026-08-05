@@ -8,7 +8,6 @@ import { toApiError } from '../../lib/api'
 import { formatDate } from '../../lib/format'
 import { permits } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import { Logo } from '../../components/Logo'
 import type { Permit } from '../../lib/types'
 
 /*
@@ -178,8 +177,35 @@ export function PermitDetailPage() {
           <div className="border-2 border-ink/80 px-5 py-6 sm:px-8">
             <header className="flex items-start justify-between gap-4">
               <div>
-                <Logo height={24} />
-                <p className="mt-2 text-base font-bold uppercase tracking-wide text-ink">City of Malabon</p>
+                {/*
+                  Item 95. The BizTrack logo used to sit here, and it had no
+                  business on a permit: the document is issued by the city, not
+                  by the software that printed it. A vendor mark on a government
+                  certificate is the kind of thing that makes a real one look
+                  fake and a fake one look plausible.
+                  The downloaded PDF never carried it — only this on-screen
+                  view did, so the two disagreed about whose document it was.
+
+                  The Malabon seal belongs in this slot. We do not have the
+                  artwork: nothing in the repo carries it, and the paper forms
+                  it might have been lifted from are photographs that never
+                  reached the repository. So the space is held and labelled
+                  rather than filled with something invented — an approximated
+                  civic seal would be worse than none. Drop a file in and
+                  render it here.
+                */}
+                <div
+                  aria-hidden="true"
+                  className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-line-strong text-[8px] uppercase leading-tight tracking-wide text-ink-muted"
+                >
+                  City
+                  <br />
+                  seal
+                </div>
+                <p className="mt-2 text-base font-bold uppercase tracking-wide text-ink">
+                  Republic of the Philippines
+                </p>
+                <p className="text-base font-bold uppercase tracking-wide text-ink">City of Malabon</p>
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-secondary">
                   {cert?.department_name ?? 'Business Permits and Licensing Office'}
                 </p>
