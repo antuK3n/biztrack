@@ -1,13 +1,16 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
+use App\Models\MessageAttachment;
 use App\Models\Payment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 
 /*
  * Tester checklist item 56 — "no they cant see what theyre not included in."
@@ -312,4 +315,266 @@ it('does not turn a business the officer may not see into a 500', function () {
     test()->withHeaders(authAs('market@biztrack.local'))
         ->getJson("/api/v1/businesses/{$orphanBusiness->id}")
         ->assertForbidden();
+});
+
+/*
+ * ── Checklist item 111 ───────────────────────────────────────────────────────
+ *
+ * Item 56 (above) drew the boundary between FILINGS: an office reads the
+ * applications it was routed and no others. Every case above proves that with
+ * two separate applications, one per office, and all of them passed while the
+ * leak the client reported was still wide open.
+ *
+ * The reason is the shape of a real filing. WorkflowService::routeToDepartments
+ * creates one assignment per office that issues a requested permit type, so an
+ * ordinary six-clearance application is routed to six offices at once and all
+ * six are legitimately "part of" it. Everything hung off that application —
+ * requirement requests, message turns, office form sheets — was then shared
+ * between them, and each office read the other five's work. Against the tester
+ * register the sanitary officer's requirements list came back 37 rows from BPLO,
+ * 21 from the fire office and 10 from planning against 32 of its own.
+ *
+ * So these cases all use ONE application routed to TWO offices. That is the
+ * arrangement item 56's cases could not produce and the one the client actually
+ * has.
+ */
+
+/** One filing routed to both the City Health Office and the fire office. */
+function sharedFiling(string $name): array
+{
+    return fileRoutedApplication($name, ['BUSINESS', 'SANITARY', 'FSIC']);
+}
+
+it('hides another office’s requirement on a filing both offices share', function () {
+    $app = sharedFiling('Item111 Requests Cafe');
+
+    $theirs = test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/requests", [
+            'request_type' => 'document', 'title' => 'Fire safety plan',
+        ])->assertCreated()->json('data.id');
+
+    $mine = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/requests", [
+            'request_type' => 'document', 'title' => 'Water potability result',
+        ])->assertCreated()->json('data.id');
+
+    $seen = collect(
+        test()->withHeaders(authAs('sanitary@biztrack.local'))
+            ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data')
+    )->pluck('id');
+
+    // Both offices are on this filing, so this is the case item 56 could not reach.
+    expect($seen)->toContain($mine)
+        ->and($seen)->not->toContain($theirs);
+});
+
+it('will not let one office close another office’s requirement on a shared filing', function () {
+    $app = sharedFiling('Item111 Close Cafe');
+
+    $theirs = test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/requests", [
+            'request_type' => 'document', 'title' => 'Fire safety plan',
+        ])->assertCreated()->json('data.id');
+
+    // Sanitary may READ this filing — it is routed to them — and still may not
+    // decide whether the fire office's requirement was met.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$theirs}/close", ['outcome' => 'fulfilled'])
+        ->assertForbidden();
+
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/requests/{$theirs}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+});
+
+it('shows an office only its own form sheet on a filing both offices share', function () {
+    $app = sharedFiling('Item111 Forms Cafe');
+
+    $codes = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson("/api/v1/applications/{$app['id']}/office-forms")->assertOk()->json('data')
+    )->pluck('permit_type_code');
+
+    // The client's example: a CHO officer must not read the FSIC sheet.
+    expect($codes('sanitary@biztrack.local'))->toContain('SANITARY')
+        ->and($codes('sanitary@biztrack.local'))->not->toContain('FSIC');
+    expect($codes('fire@biztrack.local'))->toContain('FSIC')
+        ->and($codes('fire@biztrack.local'))->not->toContain('SANITARY');
+
+    // The applicant wrote every one of these sheets and keeps all of them.
+    expect($codes('owner@biztrack.local'))->toContain('SANITARY')->toContain('FSIC');
+});
+
+it('will not let an office record an issuance date on another office’s sheet', function () {
+    $app = sharedFiling('Item111 Form Write Cafe');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app['id']}/office-forms/FSIC", [
+            'form_data' => ['date_issued' => '2026-01-05'],
+        ])->assertForbidden();
+
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app['id']}/office-forms/FSIC", [
+            'form_data' => ['date_issued' => '2026-01-05'],
+        ])->assertOk();
+});
+
+it('hides another office’s message turn but keeps the applicant’s', function () {
+    $app = sharedFiling('Item111 Messages Cafe');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Applicant speaking'])
+        ->assertCreated();
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
+        ->assertCreated();
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Health office speaking'])
+        ->assertCreated();
+
+    $bodies = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data')
+    )->pluck('body');
+
+    $sanitary = $bodies('sanitary@biztrack.local');
+    expect($sanitary)->toContain('Applicant speaking')
+        ->and($sanitary)->toContain('Health office speaking')
+        ->and($sanitary)->not->toContain('Fire office speaking');
+
+    // Cuts both ways, and the applicant still reads the whole conversation.
+    expect($bodies('fire@biztrack.local'))->not->toContain('Health office speaking');
+    expect($bodies('owner@biztrack.local'))
+        ->toContain('Fire office speaking')->toContain('Health office speaking');
+});
+
+it('does not quote another office’s message in the inbox preview', function () {
+    $app = sharedFiling('Item111 Inbox Cafe');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Applicant speaking'])
+        ->assertCreated();
+    // The newest turn overall belongs to the office that must stay hidden, so an
+    // unscoped preview would put it straight on the other office's inbox row.
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
+        ->assertCreated();
+
+    $row = collect(
+        test()->withHeaders(authAs('sanitary@biztrack.local'))
+            ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data')
+    )->firstWhere('application_id', $app['id']);
+
+    expect($row)->not->toBeNull()
+        ->and($row['last_message']['body'])->toBe('Applicant speaking')
+        // The counter is part of the leak: it must count only readable turns.
+        ->and($row['messages_count'])->toBe(1);
+});
+
+it('refuses an attachment hanging off another office’s message', function () {
+    $app = sharedFiling('Item111 Attachment Cafe');
+
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Fire office speaking',
+            'attachment' => UploadedFile::fake()->create('fire.pdf', 8, 'application/pdf'),
+        ])->assertCreated();
+
+    $attachmentId = MessageAttachment::query()->latest('id')->value('id');
+
+    // Hiding the message but still serving its file would leave the leak open
+    // behind a guessable id.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->get("/api/v1/message-attachments/{$attachmentId}/download")
+        ->assertForbidden();
+
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->get("/api/v1/message-attachments/{$attachmentId}/download")
+        ->assertOk();
+});
+
+it('drops a filing out of an office’s approval queue once that office has approved', function () {
+    $app = sharedFiling('Item111 Queue Cafe');
+
+    $openIds = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson('/api/v1/assignments?status=pending,in_progress,returned'
+                .'&application_status=submitted,pending_payment,under_review,returned&per_page=200')
+            ->assertOk()->json('data')
+    )->pluck('application.id');
+
+    expect($openIds('sanitary@biztrack.local'))->toContain($app['id']);
+
+    $assignmentId = ApplicationAssignment::where('application_id', $app['id'])
+        ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
+        ->value('id');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'Cleared.'])
+        ->assertOk();
+
+    /*
+     * The application is still under_review — the fire office has not signed off
+     * — which is exactly the condition that made the old queue redisplay the row.
+     * The office that approved is done; the office that has not is not.
+     */
+    expect(Application::find($app['id'])->status->value)->toBe('under_review');
+    expect($openIds('sanitary@biztrack.local'))->not->toContain($app['id']);
+    expect($openIds('fire@biztrack.local'))->toContain($app['id']);
+});
+
+it('keeps the whole shared filing readable for BPLO — deliberately', function () {
+    /*
+     * The wide view is a workflow requirement, not an oversight: BPLO issues the
+     * mayor's permit only once every other office has cleared its part, so it has
+     * to be able to see what each of them asked for and said. If this case ever
+     * fails, the scoping has been pushed one office too far.
+     */
+    $app = sharedFiling('Item111 BPLO Cafe');
+
+    $theirs = test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/requests", [
+            'request_type' => 'document', 'title' => 'Fire safety plan',
+        ])->assertCreated()->json('data.id');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Applicant speaking'])
+        ->assertCreated();
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
+        ->assertCreated();
+
+    $bplo = authAs('bplo@biztrack.local');
+
+    expect(collect(test()->withHeaders($bplo)->getJson('/api/v1/requests?per_page=200')
+        ->assertOk()->json('data'))->pluck('id'))->toContain($theirs);
+
+    expect(collect(test()->withHeaders($bplo)
+        ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data'))
+        ->pluck('body'))->toContain('Fire office speaking');
+
+    expect(collect(test()->withHeaders($bplo)
+        ->getJson("/api/v1/applications/{$app['id']}/office-forms")->assertOk()->json('data'))
+        ->pluck('permit_type_code'))->toContain('SANITARY')->toContain('FSIC');
+});
+
+it('does not list an inbox row whose only turns belong to another office', function () {
+    $app = sharedFiling('Item111 Silhouette Cafe');
+
+    // Only the fire office has spoken. Sanitary can read the filing, so an
+    // unscoped inbox would hand it a row with no messages in it — the leak
+    // reduced to a silhouette: who spoke, and when, without the words.
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
+        ->assertCreated();
+
+    $rowFor = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data')
+    )->firstWhere('application_id', $app['id']);
+
+    expect($rowFor('sanitary@biztrack.local'))->toBeNull()
+        ->and($rowFor('fire@biztrack.local'))->not->toBeNull()
+        // BPLO coordinates and keeps the whole register, deliberately.
+        ->and($rowFor('bplo@biztrack.local'))->not->toBeNull();
 });

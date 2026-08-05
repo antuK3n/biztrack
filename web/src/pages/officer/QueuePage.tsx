@@ -47,6 +47,27 @@ const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   inspection: INSPECTION_STATUSES,
 }
 
+/**
+ * This office's own assignment states that still want a decision (item 111).
+ *
+ * "After approving an application it still shows approval." The application's
+ * status is not this office's status: a filing is routed to every office that
+ * issues one of its clearances, and it stays `under_review` until ALL of them
+ * have signed off (WorkflowService::afterReviewProgress). So an office that
+ * approved its part this morning was still shown the row under For Approval,
+ * because the filing really was still under review — by somebody else.
+ *
+ * Filtering on the assignment instead answers the question the tab is actually
+ * asking, which is "what is waiting on ME". `completed` is the one state left
+ * out. `returned` stays in: the office sent it back and the filing comes to it
+ * again when the applicant answers, so it is still that office's open work.
+ *
+ * Only the approval tab uses this. For Inspection is deliberately unfiltered —
+ * it is largely completed review work by definition, and an inspector needs the
+ * approved filings to still be there.
+ */
+const OPEN_ASSIGNMENT_STATUSES = 'pending,in_progress,returned'
+
 /** Pre-payment statuses show the orange block; everything else is paid. */
 const PENDING_PAYMENT_STATUSES = ['submitted', 'pending_payment']
 
@@ -207,11 +228,21 @@ export function QueuePage() {
     ? [statusFilter as ApplicationStatus]
     : tabStatuses
   const statuses = activeStatuses.join(',')
+  // See OPEN_ASSIGNMENT_STATUSES: the approval tab asks what is waiting on THIS
+  // office, so a filing this office has already signed off drops out of it even
+  // while the other offices keep the application itself under review.
+  const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
   const perPage = isDeep(search, sort) ? DEEP_PAGE_SIZE : PAGE_SIZE
 
   const { data, loading, error, reload } = useAsync(
-    () => assignments.page({ application_status: statuses, page, per_page: perPage }),
-    [statuses, page, perPage],
+    () =>
+      assignments.page({
+        application_status: statuses,
+        ...(assignmentStatuses ? { status: assignmentStatuses } : {}),
+        page,
+        per_page: perPage,
+      }),
+    [statuses, assignmentStatuses, page, perPage],
   )
 
   // Paging in extends the list being read; a new tab starts its own list. Merged
