@@ -74,7 +74,9 @@ class ApplicationController extends Controller
     public function index(Request $request): JsonResponse
     {
         $request->validate([
-            'status' => ['sometimes', 'string', 'max:40'],
+            // Comma-separated, so `max:40` no longer fits a whole stage. 120 is
+            // the same ceiling `q` carries and holds every status name at once.
+            'status' => ['sometimes', 'string', 'max:120'],
             'type' => ['sometimes', 'string', 'max:40'],
             'q' => ['sometimes', 'nullable', 'string', 'max:120'],
             'per_page' => ['sometimes', 'integer'],
@@ -93,8 +95,30 @@ class ApplicationController extends Controller
         // nothing if the list still leaked the row (checklist item 56).
         ApplicationVisibility::scope($query, $request->user());
 
+        /*
+         * `status` takes a list, not just one value: ?status=submitted,pending_payment
+         *
+         * The officer queue's Pending Payment tab asks for a whole *stage* of the
+         * flow, and a stage is more than one status. It has to arrive as one
+         * request because `meta.total` is what the screen prints beside the rows:
+         * two requests would have to be added up in the browser, and a total
+         * assembled from pages is the exact failure the two existing tabs were
+         * built to avoid (see AssignmentController::index).
+         *
+         * Unknown values are deliberately NOT dropped here, which is where this
+         * parts company with AssignmentController's identical-looking filter.
+         * That feed is already narrowed to one office, so widening it on a typo
+         * costs a few extra rows; this one is every filing in the city. A
+         * misspelt status must keep returning nothing — the way `where()` always
+         * did — because the failure mode of the alternative is handing back the
+         * whole register, and that is a leak wearing a filter's clothes.
+         */
         if ($status = $request->query('status')) {
-            $query->where('status', $status);
+            $wanted = array_values(array_filter(
+                array_map('trim', explode(',', (string) $status)),
+                fn (string $s) => $s !== '',
+            ));
+            $query->whereIn('status', $wanted);
         }
         if ($type = $request->query('type')) {
             $query->where('application_type', $type);

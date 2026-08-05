@@ -125,26 +125,59 @@ interface Chip {
 
 /**
  * Per-permit chip (prototype p49). Derived from the assignment of the permit
- * type's issuing department:
+ * type's issuing department, in this order:
  *  - app-level rejected → all red "Rejected"
- *  - assignment completed (or app approved/issued) → green "Approved"
  *  - assignment returned → red "Returned"
- *  - app for_inspection AND the type requires inspection → yellow "For Inspection"
+ *  - app for_inspection → yellow "For Inspection", on every row
+ *  - assignment completed (or app approved/issued) → green "Approved"
  *  - otherwise → orange "For Approval"
  * Falls back to the coarse app-status chip when the full application (with
  * assignments + the permit type's department) isn't available yet.
+ *
+ * It no longer takes the PermitType. It used to, only to read
+ * `requires_inspection` — and consulting that was the bug: see the
+ * for_inspection branch below. Nothing else here varies by permit type, so the
+ * parameter went with the test that needed it rather than being left as an
+ * unused hint that this function still cares.
  */
-function permitChip(
-  appStatus: ApplicationStatus,
-  permitType: PermitType | undefined,
-  assignmentStatus: string | undefined,
-): Chip {
+function permitChip(appStatus: ApplicationStatus, assignmentStatus: string | undefined): Chip {
   if (appStatus === 'rejected') return { tone: 'red', label: 'Rejected' }
+  if (assignmentStatus === 'returned') return { tone: 'red', label: 'Returned' }
+
+  /*
+   * While the filing is for_inspection, EVERY row reads "For Inspection" —
+   * including the permits that need no inspection of their own.
+   *
+   * Two bugs met here, and the second is the subtle one.
+   *
+   * First: the completed-assignment test used to run before this one, and a
+   * completed assignment is EXACTLY what puts a filing into for_inspection.
+   * afterReviewProgress() fires the moment every assignment reaches Completed
+   * and only then schedules the visits, so the instant the paperwork cleared
+   * the whole list went green. Order fixed — this now runs first.
+   *
+   * Second, and the reason `requires_inspection` is no longer consulted: only
+   * SANITARY and FSIC carry that flag. Gating on it left Mayor's Permit,
+   * Occupancy, CEC, Market and Zoning still falling through to "Approved"
+   * while the building had not been visited. The client saw the list flip from
+   * six yellow rows to seven green ones a few seconds after it loaded and
+   * asked what the mistake was; that was it.
+   *
+   * "Approved" on this screen has to mean the permit is granted, and NO permit
+   * is granted until the filing clears inspection — approveAndIssue() is what
+   * writes them, and it does not run until every visit has passed. A zoning
+   * clearance whose office signed off is genuinely finished with its office,
+   * and still not issued: a failed fire inspection takes the whole filing down
+   * with it. Saying "Approved" there tells an applicant they hold a permit
+   * that does not exist, and invites them to stop preparing for the visit.
+   *
+   * So the stage the FILING is at outranks the state of any one office's
+   * review. The per-office detail is still on the application's own page.
+   */
+  if (appStatus === 'for_inspection') return { tone: 'yellow', label: 'For Inspection' }
+
   if (assignmentStatus === 'completed' || appStatus === 'approved' || appStatus === 'issued')
     return { tone: 'green', label: 'Approved' }
-  if (assignmentStatus === 'returned') return { tone: 'red', label: 'Returned' }
-  if (appStatus === 'for_inspection' && permitType?.requires_inspection)
-    return { tone: 'yellow', label: 'For Inspection' }
   return { tone: 'orange', label: 'For Approval' }
 }
 
@@ -297,7 +330,7 @@ function ApplicationRow({
               // Once detail loads, derive per-permit chip from the issuing
               // department's assignment; otherwise fall back to app status.
               const chip = detail
-                ? permitChip(app.status, permitTypesByCode.get(pt.code), assignmentStatusFor(pt.code))
+                ? permitChip(app.status, assignmentStatusFor(pt.code))
                 : fallbackChip(app.status)
               return (
                 <li

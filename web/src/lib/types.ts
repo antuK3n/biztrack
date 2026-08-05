@@ -416,6 +416,38 @@ export interface Assignment {
 
 export type InspectionResult = 'passed' | 'failed' | 'conditional'
 
+/**
+ * A filing's particulars exactly as the applicant submitted them.
+ *
+ * Named after the permit certificate's field set
+ * (PermitController::certificateData) rather than after this screen, because
+ * these are the same facts about the same business and the certificate got
+ * there first. If a name here stops matching one there, one of the two is
+ * wrong — that is the point of sharing the vocabulary.
+ *
+ * Every string is nullable and means it: `Business` and `User` soft-delete, so
+ * a live inspection can point at a business that is no longer in the register,
+ * and a blank on this sheet has to read as "not on file" rather than as a bug.
+ */
+export interface InspectionParticulars {
+  application_type: ApplicationType | null
+  business_name: string | null
+  trade_name: string | null
+  registration_number: string | null
+  tin: string | null
+  owner_name: string | null
+  /** The street line. `address_line2` carries the house / building number. */
+  address: string | null
+  address_line2: string | null
+  barangay: string | null
+  city: string | null
+  province: string | null
+  postal_code: string | null
+  /** Every declared line joined with ", " — a business may hold more than one. */
+  line_of_business: string | null
+  permit_types: { code: string; name: string }[]
+}
+
 export interface Inspection {
   id: number
   status: string
@@ -425,6 +457,21 @@ export interface Inspection {
   scheduled_at: string | null
   conducted_at: string | null
   findings: string | null
+  /**
+   * May a fresh visit be booked off the back of this one?
+   *
+   * Three-valued on purpose. `null` is NOT "no" — it means the response was
+   * never asked to load the filing, so the API could not work the answer out
+   * (InspectionResource is nested in every ApplicationResource without it, and
+   * computing this per row would cost a query per row). Screens must read null
+   * as "unknown" and fall back to what they can see, never as a refusal.
+   *
+   * A screen cannot derive this for itself: whether a LATER visit has already
+   * superseded this one is nowhere in the payload, and guessing locally is what
+   * left the button showing on a superseded failure the API then refused
+   * with a 422.
+   */
+  can_reinspect: boolean | null
   /**
    * Null when the inspecting office is not loaded on the response.
    *
@@ -465,6 +512,17 @@ export interface Inspection {
       longitude: number | null
     } | null
   } | null
+  /**
+   * What the applicant actually filed, when the response went and looked.
+   *
+   * Null on the list, and null on the conduct/reschedule replies, because only
+   * `GET /inspections/{id}` eager-loads the owner, the address and the declared
+   * lines. Null therefore means "this response did not carry them", never "the
+   * applicant left the form blank" — a detail screen that re-renders off a
+   * conduct reply must hold on to the block it already has rather than treat
+   * the missing key as an empty filing.
+   */
+  particulars: InspectionParticulars | null
 }
 
 export interface Permit {
