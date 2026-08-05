@@ -20,8 +20,9 @@ use Illuminate\Http\Request;
  * Two writers share one payload: the applicant answers the questions only they
  * can answer, and the reviewing officer records the issuance dates only the
  * office can know. Anything the system already knows (application type, filing
- * date, which certificate the FSIC is for, the floor area and site tenure the
- * zoning sheet carries) is derived here and never asked.
+ * date, which certificate the FSIC is for, and the floor area, storey count,
+ * site tenure and authorised representative the zoning sheet carries) is
+ * derived here and never asked.
  */
 class OfficeFormController extends Controller
 {
@@ -100,15 +101,12 @@ class OfficeFormController extends Controller
             'form_data' => ['present', 'array', 'max:512'], // guard against huge payloads
             // Birthdays can never be in the future (CEC "Birthday of Owner").
             'form_data.owner_birthday' => ['sometimes', 'nullable', 'date', 'before:today'],
-            // A business cannot have started trading tomorrow (ZONING).
-            'form_data.zoning_operating_since' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             // An office cannot have issued a document on a future date.
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.date_issued' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
         ], [
             'form_data.owner_birthday.before' => "The owner's birthday must be a date in the past.",
-            'form_data.zoning_operating_since.before_or_equal' => 'The date operations began cannot be in the future.',
             'form_data.building_permit_date.before_or_equal' => 'The building permit date issued cannot be in the future.',
             'form_data.fsec_date.before_or_equal' => 'The FSEC date issued cannot be in the future.',
             'form_data.date_issued.before_or_equal' => 'The date issued cannot be in the future.',
@@ -192,17 +190,19 @@ class OfficeFormController extends Controller
         ];
 
         if ($permitTypeCode === 'ZONING') {
+            // VII. Nature of Application — New Business or Renewal.
             $derived['application_type'] = $existingBusiness
                 ? 'Renewal of Locational Clearance'
                 : 'New Locational Clearance';
 
             /*
-             * The zoning processing fee is charged per square metre of total
-             * floor area, so CPDO cannot assess the clearance without this
-             * number — and the applicant already gave it on the Business & Tax
-             * Profile, where it is required of every filing carrying the
-             * business permit itself. Asking again on this sheet would be
-             * asking the same question twice and inviting two answers.
+             * VIII.A. Floor Area to be/being Utilized. The zoning processing
+             * fee is charged per square metre of total floor area, so CPDD
+             * cannot assess the clearance without this number — and the
+             * applicant already gave it on the Business & Tax Profile, where it
+             * is required of every filing carrying the business permit itself.
+             * Asking again on this sheet would be asking the same question
+             * twice and inviting two answers.
              *
              * Left absent rather than zeroed when it is genuinely missing: a
              * blank box the applicant can be sent back to fill is honest, and
@@ -213,12 +213,21 @@ class OfficeFormController extends Controller
                 $derived['total_floor_area_sqm'] = (string) (0 + $floorArea);
             }
 
+            // VIII.B. No. of Storey of Building — the same answer from the same
+            // profile, cast to an int because a building has whole storeys and
+            // "2.0" on a planning form invites a question nobody meant to ask.
+            $storeys = $application->fee_profile['storeys'] ?? null;
+            if (is_numeric($storeys)) {
+                $derived['building_storeys'] = (string) (int) $storeys;
+            }
+
             /*
-             * What right the applicant holds over the site. The clearance
-             * already requires a Lease Contract or Land Title, so the office is
-             * asking this — and Location & Zoning has already answered it,
-             * including who the lessor is. Naming the lessor here is what makes
-             * the sheet match the document attached to it.
+             * VIII.C and VIII.D. Name and address of the lessor, which the form
+             * asks only of a lessee. Location & Zoning has already answered
+             * whether the premises are rented and from whom, and the clearance
+             * already requires the matching Lease Contract or Land Title, so
+             * one line stands in for both boxes and makes the sheet match the
+             * document attached to it.
              *
              * `business` is nullable (soft-deleted), so the tenure question
              * genuinely has no answer on such a filing and the field stays
@@ -232,6 +241,26 @@ class OfficeFormController extends Controller
                     $lessor !== '' => 'Leased from '.$lessor,
                     default => 'Leased',
                 };
+            }
+
+            /*
+             * IX. Authorized Representative. One answer about the applicant,
+             * not about an office, and the BFP sheet has always asked it — so
+             * when that sheet is part of the filing it keeps the question and
+             * this one carries the answer read-only. When it is not, nobody has
+             * asked, and the zoning sheet takes the input itself.
+             *
+             * The marker is what tells the sheet which of those it is; the
+             * value is derived even when blank, so clearing the name on the BFP
+             * sheet clears it here too. That does mean applying for FSIC after
+             * typing a name here replaces it with the (empty) BFP answer. Two
+             * visible fields that disagree would be worse than losing an
+             * optional name at the moment a second sheet takes the question
+             * over.
+             */
+            if ($application->permitTypes()->where('code', 'FSIC')->exists()) {
+                $derived['authorized_representative_source'] = 'FSIC';
+                $derived['authorized_representative'] = $this->fsicRepresentative($application);
             }
         }
         if ($permitTypeCode === 'SANITARY') {
@@ -252,6 +281,23 @@ class OfficeFormController extends Controller
         // real applicant decision, not the new/renewal the system already knows.
 
         return $derived + $formData;
+    }
+
+    /**
+     * The authorised representative as answered on the BFP sheet, or ''.
+     *
+     * Its own query rather than a preloaded relation because withDerived() runs
+     * for one sheet at a time and is reached from both index() and upsert(); a
+     * sheet asking for another sheet's answer is the exception, not the rule,
+     * and it only happens for ZONING.
+     */
+    private function fsicRepresentative(Application $application): string
+    {
+        $form = ApplicationOfficeForm::where('application_id', $application->id)
+            ->whereHas('permitType', fn ($query) => $query->where('code', 'FSIC'))
+            ->first();
+
+        return trim((string) ($form?->form_data['authorized_representative'] ?? ''));
     }
 
     /** Owner, an office routed this filing, or BPLO/admin (checklist item 56). */

@@ -45,12 +45,25 @@ interface ReviewBusiness {
     line2?: string | null
     city?: string | null
     province?: string | null
+    postal_code?: string | null
+    telephone?: string | null
+    website?: string | null
     barangay?: { name?: string } | null
   } | null
+  /* BPLO items B6, A13-A15 and B8/B7. Optional throughout: every business filed
+   * before the wizard asked these carries null, and a sole proprietorship
+   * carries null for the president block by design. */
+  economic_organization?: string | null
+  economic_organization_others?: string | null
+  president_officer_name?: string | null
+  citizenship?: string | null
+  capital_participation_filipino?: string | null
+  has_tax_incentives?: boolean | null
   lines?: {
     id: number
     psic_code: { code: string; title: string } | null
     capitalization: string | null
+    products_services?: string | null
   }[]
 }
 
@@ -399,6 +412,14 @@ function feeProfileFacts(profile: FeeProfile): { label: string; value: string }[
   put('Construction Cost', money(profile.construction_cost))
   put('Floor Area', profile.floor_area_sqm == null ? null : `${profile.floor_area_sqm} sqm`)
   put('Employees', count(profile.employees))
+  /*
+   * The male/female split, printed beside the total it divides (BPLO item B2 on
+   * the new form, B3 on the renewal, and CENRO's own MALE/FEMALE box). `count`
+   * keeps a declared zero — "0 female employees" is an answer, and `put` would
+   * drop the string "0" as falsy if this were formatted any other way.
+   */
+  put('Employees (Male)', count(profile.male_employees))
+  put('Employees (Female)', count(profile.female_employees))
   put('Storeys', count(profile.storeys))
   put('Doors', count(profile.doors))
   put('Rooms', count(profile.rooms))
@@ -965,6 +986,81 @@ export function ReviewPage() {
                 <Field label="Business Name" value={business.name ?? ''} />
               </div>
               <Field label="Trade Name / Franchise" value={business.trade_name ?? ''} />
+              {/*
+                * Items A6 and A9. Both had columns and no input until the paper
+                * forms were transcribed, so on filings made before that they
+                * read "—" — which is the truth: nobody was asked.
+                */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Telephone (Landline)" value={business.address?.telephone ?? ''} />
+                <Field label="Website Address" value={business.address?.website ?? ''} />
+              </div>
+              {/*
+                * Items A13-A15. Rendered for every filing, blank for a sole
+                * proprietorship — where the wizard does not ask, because the
+                * proprietor IS the officer in charge and is already named as the
+                * applicant. An officer reading a blank here should read it as
+                * "not applicable to this structure", which is why the three sit
+                * together under one sub-heading rather than scattered.
+                */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field
+                  label="President / Officer in Charge"
+                  value={business.president_officer_name ?? ''}
+                />
+                <Field label="Citizenship" value={business.citizenship ?? ''} />
+                <Field
+                  label="Capital Participation (% Filipino)"
+                  value={
+                    business.capital_participation_filipino == null
+                      ? ''
+                      : `${business.capital_participation_filipino}%`
+                  }
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Item B6. */}
+                <Field
+                  label="Economic Organization"
+                  value={
+                    business.economic_organization
+                      ? business.economic_organization === 'others'
+                        ? `Others — ${business.economic_organization_others || 'unspecified'}`
+                        : humanizeKey(business.economic_organization)
+                      : ''
+                  }
+                />
+                {/*
+                  * Item B8 (new form) / B7 (renewal).
+                  *
+                  * KNOWN LIMIT, and it is worth stating rather than papering
+                  * over: `businesses.has_tax_incentives` is `boolean default
+                  * false` and NOT NULL, so a business registered before the
+                  * wizard asked this question reads "No" here — not because the
+                  * applicant declared no incentives, but because nobody put the
+                  * question. Making the column nullable would not fix it either:
+                  * the rows already on disk are `false`, and every row written
+                  * from now on is a real answer. So there is nothing to migrate,
+                  * only something to know. If an officer is about to act on a
+                  * "No" from an older filing, ask through Messages — the same
+                  * remedy the Amendment From block above prescribes for the same
+                  * class of gap.
+                  *
+                  * The null branch is kept for the case the resource omits the
+                  * field entirely (a business that has been removed from the
+                  * register renders an empty ReviewBusiness).
+                  */}
+                <Field
+                  label="Tax Incentives from a Government Entity"
+                  value={
+                    business.has_tax_incentives == null
+                      ? ''
+                      : business.has_tax_incentives
+                        ? 'Yes — certificate required'
+                        : 'No'
+                  }
+                />
+              </div>
             </div>
 
             <SubHeading>Main Office Address</SubHeading>
@@ -974,6 +1070,7 @@ export function ReviewPage() {
               <Field label="Barangay" value={address?.barangay?.name ?? ''} />
               <Field label="City / Municipality" value={address?.city ?? 'Malabon City'} />
               <Field label="Province" value={address?.province ?? 'Metro Manila'} />
+              <Field label="Postal Code" value={address?.postal_code ?? ''} />
             </div>
           </section>
 
@@ -990,6 +1087,20 @@ export function ReviewPage() {
                       className="sm:col-span-2"
                     />
                     <Field label="Capitalization" value={line.capitalization ?? ''} />
+                    {/*
+                      * Products / Services — the paper's own second column of
+                      * this table, on both BPLO forms and on CENRO's CEC
+                      * application. Kept inside the per-line row because that is
+                      * where it belongs: the trade above names what this line
+                      * IS, this names what it handles, and CENRO reviews the
+                      * second. Spans the row so a long list of goods is readable
+                      * rather than crushed into a third of the width.
+                      */}
+                    <Field
+                      label="Products / Services"
+                      value={line.products_services ?? ''}
+                      className="sm:col-span-3"
+                    />
                   </div>
                 ))}
               </div>

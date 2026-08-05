@@ -559,6 +559,24 @@ class ApplicationController extends Controller
             }
         };
 
+        /*
+         * The male/female split has to be arithmetically possible against the
+         * headcount it divides. Reads both halves off the request rather than
+         * the one value it was handed, so the sum is what is checked.
+         */
+        $splitFitsTotal = function (string $attribute, mixed $value, callable $fail) use ($request) {
+            $total = $request->input('fee_profile.employees');
+            if (! is_numeric($total)) {
+                return;
+            }
+            $male = $request->input('fee_profile.male_employees');
+            $female = $request->input('fee_profile.female_employees');
+            $declared = (is_numeric($male) ? (int) $male : 0) + (is_numeric($female) ? (int) $female : 0);
+            if ($declared > (int) $total) {
+                $fail('Male and female employees together can’t be more than your total number of employees.');
+            }
+        };
+
         return [
             'fee_profile' => ['sometimes', 'nullable', 'array', $boundedProfile],
             'fee_profile.lines' => ['sometimes', 'array', 'max:200'],
@@ -582,6 +600,32 @@ class ApplicationController extends Controller
                     }
                 },
             ],
+            /*
+             * BPLO item B2 (new form) / B3 (renewal), and CENRO's "MALE:
+             * FEMALE:" box — the split inside the headcount above.
+             *
+             * It lives on the fee profile rather than on the business record
+             * because the total it divides lives here, and because all three
+             * papers print the split and the total as ONE item in one box. The
+             * `businesses.male_employees` / `female_employees` columns exist, but
+             * so do `businesses.total_employees` and `employees_within_lgu`, and
+             * nothing in this application has ever written any of the four. The
+             * cross-check below is the concrete reason not to separate them: it
+             * can only be made while all three numbers are in the same request.
+             *
+             * "Cannot exceed the total", not "must equal it". Drafts autosave
+             * half-typed, so an equality rule would 422 an applicant who has
+             * entered the male count and not yet reached the female one — and
+             * that failed save is silent, because it happens on a debounce
+             * nobody asked for. What this does catch is the contradiction an
+             * officer would otherwise have to reconcile at the counter.
+             */
+            'fee_profile.male_employees' => [...$count, $splitFitsTotal],
+            // Attached to BOTH halves, not just the second. A closure rule only
+            // runs for an attribute the request actually carries, so hanging the
+            // check on `female_employees` alone would let a lone male count of
+            // 10 against a total of 5 through untested.
+            'fee_profile.female_employees' => [...$count, $splitFitsTotal],
             'fee_profile.tax_incentive_grantor' => ['nullable', 'string', 'max:120'],
             'fee_profile.storeys' => ['nullable', 'integer', 'min:0', 'max:200'],
             'fee_profile.doors' => $count,
