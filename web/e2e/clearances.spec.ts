@@ -220,14 +220,25 @@ test('a draft can still choose its clearances, and the cards say what each costs
   })
 
   /*
-   * Five, not six. Item 98: the Market Clearance is derived from the filing's
-   * own declaration rather than shown to everyone, and this draft declares no
-   * market category and no stalls — so its card is not addressed to this
-   * applicant and is not on their screen. The test below reveals it.
+   * Six, including Market.
+   *
+   * It was five: item 98 derived the Market card from the filing's own
+   * declaration and hid it otherwise. That was reversed on the client's
+   * instruction, and the reason is worth keeping — the three revenue-code
+   * categories it keyed on describe the operator who RUNS a market, not the
+   * trader renting one stall inside it. So the card was hidden from precisely
+   * the people it exists for, who then had no way to discover it.
+   *
+   * Shown to everyone, labelled with who it is for, and optional. What is
+   * asserted is that it carries that label, since a sixth card with no
+   * explanation is just a sixth thing to work out.
    */
   const cards = page.locator('ul > li').filter({ hasText: /apply/i })
-  await expect(cards).toHaveCount(5)
-  await expect(cards.filter({ hasText: /market/i })).toHaveCount(0)
+  await expect(cards).toHaveCount(6)
+  const market = cards.filter({ hasText: /market clearance/i })
+  await expect(market).toHaveCount(1)
+  await expect(market).toContainText(/optional/i)
+  await expect(market).toContainText(/stall in a public or private market/i)
 
   // Nothing is locked, so no reason is shown: before submission there is
   // nothing to explain.
@@ -476,21 +487,23 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
   await expect(status).toContainText(/tax order of payment/i)
 })
 
-test('the Market Clearance is derived, not offered to everyone — and stays reachable', async ({
-  page,
-}) => {
+test('the Market Clearance is offered to everyone, and says who it is for', async ({ page }) => {
   /*
    * ITEM 98 — *"Market clearance should not be required. It is only required
-   * for stall holders."* The client asked for it to be derived rather than put
-   * to every applicant as a yes/no.
+   * for stall holders."*
    *
-   * This draft declares no market category and no stalls, so the card is not
-   * drawn. That half is easy to get right and easy to get wrong in the
-   * dangerous direction, which is what the second half of this test is for: the
-   * declaration the derivation reads (`private_market` and friends) describes
-   * market OPERATORS, and the stall holder the client named is the operator's
-   * tenant. If the reveal ever stops working, the one group item 98 is about is
-   * the group that loses the clearance.
+   * First built as a derivation: the card was hidden unless the filing's
+   * declared revenue-code category or stall count implied market trade. The
+   * client reversed it after seeing it, and was right to. The categories the
+   * derivation read — public_market_100_plus_stalls,
+   * public_market_under_100_stalls, private_market — describe the operator who
+   * RUNS a market. The stall holder the client named is that operator's tenant
+   * and carries none of them. So the card was hidden from exactly the people it
+   * exists for, who had no way to find out it existed.
+   *
+   * The rule now is show-and-label, not hide-and-derive. What this guards is
+   * that the label survives: a sixth card with nothing saying who it is for is
+   * a sixth thing every applicant has to work out is not addressed to them.
    */
   await page.goto('/dashboard')
   const appId = await makeDraft(page)
@@ -501,17 +514,22 @@ test('the Market Clearance is derived, not offered to everyone — and stays rea
   })
 
   const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
-  await expect(marketCard).toHaveCount(0)
-
-  // Quiet, but findable, and a real button rather than a styled span.
-  await page.getByRole('button', { name: /show the market clearance/i }).click()
-
   await expect(marketCard).toHaveCount(1)
-  // The reveal is announced, not only drawn: a card appearing at the end of a
-  // list is a change nobody using a screen reader has any reason to look for.
-  await expect(page.getByRole('status').filter({ hasText: /market clearance/i })).toBeVisible()
-  // And the way in is gone, because it has nothing left to do.
-  await expect(page.getByRole('button', { name: /show the market clearance/i })).toHaveCount(0)
+
+  // Optional, and who it is for — both on the card's face, not in a tooltip.
+  await expect(marketCard).toContainText(/optional/i)
+  await expect(marketCard).toContainText(/stall in a public or private market/i)
+
+  /*
+   * And it is tied to the buttons, so the two words that decide whether this
+   * card is yours are heard BEFORE Apply or Submit, not after. A note only a
+   * sighted reader gets is not a note that stops anyone applying for a market
+   * stall they do not have.
+   */
+  const apply = marketCard.getByRole('button', { name: /^apply$/i })
+  const describedBy = await apply.getAttribute('aria-describedby')
+  expect(describedBy, 'the Apply button names nothing that says who the card is for').toBeTruthy()
+  await expect(page.locator(`#${describedBy!.split(' ').at(-1)}`)).toContainText(/stall/i)
 })
 
 test('the Market Clearance opens a sheet, and asks which stall it is clearing', async ({ page }) => {
@@ -534,8 +552,7 @@ test('the Market Clearance opens a sheet, and asks which stall it is clearing', 
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
     timeout: 30_000,
   })
-  await page.getByRole('button', { name: /show the market clearance/i }).click()
-
+  // No reveal step any more — the card is on the grid with the other five.
   const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
   await marketCard.getByRole('button', { name: /^apply$/i }).click()
 
@@ -653,8 +670,10 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
 
   // Five: the Market Clearance is derived (item 98) and this draft declares no
   // market category, so its card is not addressed to this applicant.
+  // Six, Market included — it is shown to everyone and labelled optional
+  // rather than derived and hidden. See the item 98 test above for why.
   const cards = page.locator('ul > li').filter({ hasText: /apply/i })
-  await expect(cards).toHaveCount(5, { timeout: 30_000 })
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
 
   /*
    * Until a clearance is decided the step does not pass — item 76's other
