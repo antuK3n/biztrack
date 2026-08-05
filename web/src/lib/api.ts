@@ -135,8 +135,30 @@ api.interceptors.response.use(undefined, (error) => {
 export function toApiError(error: unknown): ApiError {
   if (axios.isAxiosError(error) && error.response) {
     const data = error.response.data as Partial<ApiError> | undefined
+    const status = error.response.status
+    /*
+     * A reply carrying a status but no `message` did not come from Laravel.
+     * The API answers every error with the envelope, so when `message` is
+     * missing what arrived was somebody else's error page — the tunnel, proxy
+     * or load balancer in front of the API returning 502/503/504 because the
+     * backend was restarting or the hop between them dropped.
+     *
+     * That distinction is the whole point of this branch. "Something went
+     * wrong on our end" sent a reader hunting for an application bug on a
+     * screen whose every endpoint was answering 200, because the failure was
+     * one layer out and the copy could not say so. A gateway status is also
+     * the one kind of failure where "try again" is genuinely good advice, so
+     * it is worth telling people apart from a real server fault.
+     */
+    if (typeof data?.message !== 'string' && status >= 502 && status <= 504) {
+      return {
+        status,
+        message: 'BizTrack did not answer that request. This is usually brief — please try again.',
+        errors: {},
+      }
+    }
     return {
-      status: error.response.status,
+      status,
       message: data?.message ?? 'Something went wrong on our end. Please try again.',
       errors: data?.errors ?? {},
     }
