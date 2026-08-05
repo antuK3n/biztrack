@@ -347,6 +347,39 @@ We invented all of them: applications are `BIZ-2026-00001`, permits are
 permit number in a set format, ours will collide with the city's records and
 every printout will carry the wrong reference.
 
+## A22. Is there a Semi-Annual mode of payment, and if so what is it?
+
+The renewal form (**MCG-BPLO-FO-002 v2.0**) prints three payment modes at the
+foot of page 1 — **Annually · Semi-Annually · Quarterly**. BizTrack offers two,
+Annually and Quarterly, and cites Malabon Revenue Code Sec. 2N for the
+quarterly option. Either the form is ahead of the ordinance we transcribed, or
+our reading of Sec. 2N is incomplete.
+
+Three things we would like settled:
+
+1. **Does the city actually accept a semi-annual payment today?** A tick box on
+   a form is not proof that the cashier will take the money.
+2. **If it does, under what authority?** We could not find a semi-annual
+   instalment in the Revenue Code text we worked from. If it is in an amending
+   ordinance, that is also the answer to **A14**.
+3. **When would the two instalments fall due?** Quarterly is "within the first
+   twenty days of January, April, July and October" and we say so on screen. A
+   semi-annual option needs the same two dates before it can be offered, or the
+   applicant is choosing a schedule nobody has told them.
+
+**Why it matters.** It is a due date, not a label. The mode of payment decides
+when the business tax falls due and therefore when a surcharge starts running,
+so offering a third option we cannot date would put applicants on a schedule
+the system cannot then hold them to — and the surcharge is the applicant's
+money.
+
+**What we assumed meanwhile.** Nothing has changed. `payment_mode` is still the
+two values the ordinance we can read supports, and the wizard still offers
+Annually and Quarterly only. We would rather offer two modes we can date than
+three we cannot. If the answer is that Semi-Annually is real, this is a small
+change — one option, one pair of dates, one line of help text — and we will
+make it.
+
 ---
 
 # B. For MISD — systems, data, hosting, accounts
@@ -573,48 +606,100 @@ irregular city necessarily includes slivers of Navotas, Caloocan and
 Valenzuela, so an address just outside the city can be accepted. The applicant
 is never told the boundary was verified, because it was not.
 
-## C9. Is the Zoning / Locational Clearance the right card, with the right name, and does it have its own form?
+## C9. Is the Zoning / Locational Clearance the right card, with the right name, and does it have its own form? — ANSWERED
 
-Checklist item 5 replaced the Mayor's Permit card in the LGU section with a
-CPDO Zoning / Locational Clearance card.
+**Answered by the form itself.** CPDD supplied a blank copy of *Application for
+Locational Clearance (Business Activities)* — Document ID **MCG-CPDD-FO-003**,
+Version **1.2**, Effectivity **01-09-2026**, page 1 of 1. It is issued by the
+**City Planning and Development Department**, which is CPDD on the letterhead
+and CPDO in our register.
 
-**Why it matters.** If that clearance is applied for on its own paper form, we
-should be collecting those fields. See E4.
+So yes: the clearance is applied for on its own paper form, the card belongs in
+the LGU section, and "Zoning / Locational Clearance" is the right name for it.
 
-**What we assumed meanwhile.** Checklist item 101 asked us to build the form
-sheet anyway, so we did — and this is the one sheet in BizTrack that was **not**
-copied from a piece of paper. The other five offices' forms are transcribed;
-this one we assembled from the zoning article of the Revenue Code and from the
-documents the clearance already requires. **Please read the field list below and
-strike out whatever CPDO does not ask for.** We would rather delete than keep.
+**What changed in BizTrack.** The sheet was rebuilt field-for-field against the
+paper. Two of the questions we had been asking are gone, because CPDD does not
+ask them:
 
-The sheet shows the business name, trade name, address and line of business
-read-only at the top, as every office sheet does, and then asks:
+- **Proposed Land Use** (Commercial · Industrial · Residential · Social,
+  Educational or Institutional · Ancillary) — deleted. Those were the fee
+  schedule's categories, not the form's. It was also the only *required* field
+  on the sheet, so the sheet now requires nothing, which is what the paper does.
+  CPDD asks **V. Activity (please specify)** and **VIII.E Type of Industrial
+  Project** instead, and we already hold the first.
+- **Is the business already operating at this address? / Operating since** —
+  deleted. This was the field we flagged as the one we were least sure of, and
+  the answer is that it does not exist. It is gone from the screen and from the
+  API's validation.
 
-| Field | Who answers it | Where it came from |
-|---|---|---|
-| Type of Application — *New* / *Renewal of Locational Clearance* | the system | the application's own type |
-| Locational Clearance No. | the system | minted on issuance; blank on the form |
-| Date of Application | the system | the date the filing is submitted |
-| **Proposed Land Use** — Commercial · Industrial · Residential · Social, Educational or Institutional · Ancillary to a principal building | **the applicant** (required) | **transcribed** — the categories in the ordinance's land use verification fee schedule. We split "Commercial and industrial", which the schedule prints as one line, because the processing fee schedule on the facing page lists them separately |
-| Total Floor Area (sq. m.) | the system | **transcribed as a requirement** — the processing fee is charged per square metre of total floor area. Taken from the floor area already collected for the business permit |
-| Right Over the Site — *Owned or occupied by the applicant* / *Leased from [lessor]* | the system | **transcribed as a requirement** — the clearance already demands a Lease Contract or Land Title. Taken from the rental question on Location & Zoning |
-| Is the business already operating at this address? (and since when) | **the applicant** | **inferred — the field we are least sure of.** The ordinance gives an already-operating non-conforming use a *certificate of non-conformance* rather than a locational clearance, and surcharges an operation running without either, so the office has to know. Nobody at CPDO has told us they ask it, or in what words |
+Two questions were added, because the form asks them and we did not hold them:
+**VIII. Project Description** (free text) and **VIII.E Type of Industrial
+Project**.
 
-Three specific things to confirm, in order of how much is riding on them:
+Everything else the form asks, the filing already answers, and the sheet carries
+it read-only rather than asking twice:
 
-1. **Is "already operating at this address" a question CPDO asks?** If not, we
-   delete it — it is the only field on the sheet with no documentary basis at
-   all.
-2. **Are those five the land use categories CPDO works in?** They are the fee
-   schedule's categories, which is not the same thing as the form's.
-3. **Is there anything the office asks for that is not on this list?** A missing
-   field sends the applicant back to City Hall, which is the failure this whole
-   sheet exists to prevent.
+| On the form | Who answers it in BizTrack |
+|---|---|
+| I. Name of Proprietor / President / General Manager, Contact No., Email Add. | the system — the signed-in account |
+| **II. Home Address** | **nobody — see the gap below** |
+| III. Name of Firm, Contact No. | the system — the business record |
+| IV. Address of Firm · VI. Location / Address of Project | the system — the business address |
+| V. Activity (please specify) | the system — the line(s) of business (PSIC code and description) |
+| VII. Nature of Application — New Business / Renewal | the system — the application's own type |
+| VIII. Project Description | **the applicant** (new) |
+| VIII.A Floor Area to be / being utilized | the system — Business & Tax Profile |
+| VIII.B No. of Storey of Building | the system — Business & Tax Profile |
+| VIII.C / D Name and Address of Lessor (if lessee) | the system — the rental answer on Location & Zoning |
+| VIII.E Type of Industrial Project | **the applicant** (new) |
+| IX. Authorized Representative | **the applicant**, but asked once — on the Fire Safety (FSIC) sheet when that clearance is part of the filing, and on this sheet when it is not |
+| Application No. / Date / Time (top right) | the system — filled on receipt |
 
-**MARKET still has no sheet**, for exactly the reason ZONING had none until now:
-nobody has shown us what the City Market Administrator asks for. If that office
-has a form, we need it too.
+**The one field we cannot fill: II. Home Address.** The form asks the
+proprietor's home address, and BizTrack records no such thing anywhere — not on
+the account, not on the business. We have deliberately **not** invented a box
+for it on the zoning sheet, because it is an answer about the person and it
+would then be asked again by the next form that wants it. It belongs on the
+account. Flagged here so it is not mistaken for an oversight.
+
+### What the form does not settle
+
+1. **The Sketch of the Location.** Section between IX and X asks for a
+   hand-drawn map "including street names and nearby recognizable landmarks",
+   filling roughly a third of the page. BizTrack has a map pin, and a pin is a
+   coordinate, not a sketch — it does not carry street names or landmarks and it
+   is not what CPDD is looking at. Doing this properly means either an **image
+   upload** (the applicant draws it, photographs it, attaches it) or a **drawing
+   canvas** in the browser. **Would CPDD accept a generated map extract with the
+   pin and surrounding street names on it instead of a drawing?** If yes, we can
+   produce that from what we already hold. If no, we need to know which of the
+   two we should build. **Nothing is built for this today.**
+2. **"MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION."** Section X, the
+   applicant declaration, is sworn before a notary — Doc. No., Page No., Book
+   No., Series of. BizTrack's flow has no notarisation step at all: an
+   application is filled in, submitted and paid for without ever leaving the
+   browser. **How is this meant to work online?** The options we can see are (a)
+   the applicant notarises a printed copy and uploads the scan as a document,
+   (b) the city accepts an electronic declaration for the online channel, or (c)
+   notarisation happens at the counter when the applicant collects the
+   clearance. This is a policy answer, not a build decision, and we are not
+   guessing at it. **Nothing is built for this today.**
+3. **Is VIII.E one choice or two?** The form prints five tick boxes in three
+   columns — POLLUTIVE above NON-POLLUTIVE, HAZARDOUS above NON-HAZARDOUS, then
+   OTHER — which reads as two independent judgements rather than one choice of
+   five. A project could plainly be both pollutive and hazardous. We ask it as a
+   single choice. **May an applicant tick more than one?**
+4. **Does the form's checklist of requirements match ours?** The paper lists:
+   TCT, Tax Declaration and Real Property Tax Clearance *if the property is
+   owned*; Contract of Lease and Consent from the Lot Owner *if it is rented*;
+   DTI / SEC Articles; an Authorization Letter for representatives; and the
+   completed form. BizTrack attaches a different list to the zoning clearance.
+   **Consent from the Lot Owner in particular is a document we do not ask for at
+   all.** This overlaps E9; answering it there answers it here.
+
+**MARKET still has no sheet**, for exactly the reason ZONING had none until the
+form arrived: nobody has shown us what the City Market Administrator asks for.
+If that office has a form, we need it too — see E4.
 
 ## C10. Is ₱735 the current charge for a zoning / locational clearance?
 
@@ -720,17 +805,25 @@ database was built to hold them; nobody has checked them against the sheet.
 
 **Why it matters.** See A20. We have never seen it.
 
-## E4. The zoning / locational clearance application form (CPDO)
+## E4. The zoning / locational clearance application form (CPDD) — ANSWERED
 
-**Why it matters.** See C9. If it exists on paper, its fields belong in the
-system. This is now the most urgent item in section E: we were asked to ship the
-sheet before the form arrived, so BizTrack is currently showing applicants a
-CPDO form that CPDO has never seen. Every field on it is listed in C9 for
-striking out. A blank copy settles it in one visit.
+**Received.** *Application for Locational Clearance (Business Activities)*,
+Document ID **MCG-CPDD-FO-003**, Version **1.2**, Effectivity **01-09-2026**.
+This was the most urgent item in section E — BizTrack was showing applicants a
+zoning sheet assembled from the Revenue Code, containing fields CPDD had never
+seen. The sheet has been rebuilt against the paper; **C9** lists what was
+deleted, what was added, and the four things the form still leaves open (the
+sketch of the location, the notarisation requirement, whether the industrial
+project type is one choice or two, and the checklist of requirements).
 
-**Also needed, for the same reason:** the Market Clearance application form, if
-the City Market Administrator issues one. It is the last of the six clearances
-with no sheet at all.
+**One thing on this form is worth flagging to whoever holds the master copy:**
+it is marked a controlled document, Version 1.2, and says obsolete copies must
+be returned on revision. If CPDD reissues it, BizTrack's sheet goes stale
+silently. **Who should tell us when the version number changes?**
+
+**Still needed, for the same reason E4 existed:** the **Market Clearance**
+application form, if the City Market Administrator issues one. It is now the
+last of the six clearances with no sheet at all.
 
 ## E5. A blank Mayor's / Business Permit certificate
 

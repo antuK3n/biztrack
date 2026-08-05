@@ -90,6 +90,18 @@ export interface Address {
   longitude: number | null
   /** Public verify payload surfaces city. */
   city?: string
+  /**
+   * BPLO form item A5. Not asked: every location this system will license is
+   * inside Malabon (the map pin is bounds-checked against MALABON_BOUNDS), and
+   * Malabon has exactly one postal code — 1470. A question with one possible
+   * answer is not a question. The API defaults it the same way the schema
+   * already defaults `city` and `province`.
+   */
+  postal_code?: string | null
+  /** BPLO form item A6, the landline. Blank for most sole proprietors. */
+  telephone?: string | null
+  /** BPLO form item A9. */
+  website?: string | null
 }
 
 export interface BusinessLine {
@@ -98,8 +110,28 @@ export interface BusinessLine {
   capitalization: string | null
   /** Free text, set when the applicant picked "Other (not listed)". */
   line_of_business: string | null
+  /**
+   * BPLO items (the Line of Business table's second column, on both the new and
+   * the renewal form) and CENRO's own Products/Services column. Per LINE, not
+   * per business: a shop that both retails and repairs sells different things
+   * under each, and the PSIC title names the trade, never the goods.
+   */
   products_services: string | null
 }
+
+/**
+ * BPLO form item B6, "Economic Organization". Structural rather than
+ * descriptive: it is the answer that says whether the main-office address and
+ * the business-location address are the same place, which is why the paper asks
+ * for both addresses and we currently hold only one.
+ */
+export type EconomicOrganization =
+  | 'single_establishment'
+  | 'branch'
+  | 'establishment_and_main_office'
+  | 'main_office_only'
+  | 'ancillary_unit'
+  | 'others'
 
 export interface Business {
   id: number
@@ -123,6 +155,31 @@ export interface Business {
    * `is_active`. When the backend adds it, the blacklist modal (p006) reads it.
    */
   status?: BusinessStatus
+  /** BPLO item B6. Null on every business filed before the wizard asked it. */
+  economic_organization?: EconomicOrganization | null
+  /** The "Others ____" blank; only meaningful with `economic_organization: 'others'`. */
+  economic_organization_others?: string | null
+  /**
+   * BPLO items A13/A14/A15, and null for a sole proprietorship on purpose —
+   * see the gate in ApplyWizard. Item A14 reads "Citizenship (of President/OIC)"
+   * on the paper, so all three hang off the same person; where there is no
+   * president there is nobody for them to describe.
+   */
+  president_officer_name?: string | null
+  citizenship?: string | null
+  capital_participation_filipino?: string | null
+  /**
+   * BPLO item B8 (new form) / B7 (renewal form): "Do you have tax incentives
+   * from any Government Entity?".
+   *
+   * NOT the same fact as the `is_bmbe` / `is_cooperative` fee-profile flags.
+   * Those two name specific statutory exemptions the calculator acts on; this
+   * is the general declaration, which can be true for a PEZA registrant, a
+   * Board of Investments pioneer, or a dozen other grants that change nothing
+   * in the Revenue Code. Reading either one off the other would be wrong in
+   * both directions.
+   */
+  has_tax_incentives?: boolean
   address: Address
   lines: BusinessLine[]
 }
@@ -140,14 +197,24 @@ export interface BusinessPayload {
   monthly_rental?: string
   emergency_contact_name?: string
   emergency_contact_number?: string
+  economic_organization?: EconomicOrganization | null
+  economic_organization_others?: string | null
+  president_officer_name?: string | null
+  citizenship?: string | null
+  capital_participation_filipino?: string | null
+  has_tax_incentives?: boolean
   address: {
     line1: string
     line2?: string
     barangay_id: number
     latitude?: number
     longitude?: number
+    /** Omitted by the wizard; the API fills Malabon's 1470. See Address above. */
+    postal_code?: string
+    telephone?: string
+    website?: string
   }
-  lines: { psic_code_id: number; capitalization?: string }[]
+  lines: { psic_code_id: number; capitalization?: string; products_services?: string }[]
 }
 
 /* ── Applications ─────────────────────────────────────────────────────── */
@@ -267,6 +334,26 @@ export interface FeeProfile {
   employees?: number
   /** How many of those live in Malabon (unified form). */
   employees_in_lgu?: number
+  /**
+   * BPLO item B2 (new form) / B3 (renewal), and CENRO's "TOTAL NO. OF
+   * EMPLOYEES — MALE: FEMALE:" box. Both papers print the split and the total
+   * as ONE item in ONE box, and it is modelled that way here rather than on the
+   * business record.
+   *
+   * `businesses.male_employees` / `female_employees` exist and are dead — but so
+   * are `businesses.total_employees` and `businesses.employees_within_lgu`,
+   * which nothing in the API, the seeders, the factories or the tests has ever
+   * written. The live home for headcount is this object. Splitting one paper
+   * item across two stores would put the sub-counts on the business and the
+   * total on the application, and then no validator could hold them against each
+   * other: "male + female can't exceed your total" is only checkable while the
+   * three numbers are in the same request. The split also belongs to a moment
+   * rather than to the register — a shop's headcount is redeclared at every
+   * renewal, and the business record would carry the first year's figure
+   * forever.
+   */
+  male_employees?: number
+  female_employees?: number
   storeys?: number
   doors?: number
   rooms?: number

@@ -24,7 +24,12 @@ export interface FeeProfileDraft {
   /** Keyed by psic_code_id of the line of business declared in Location & Zoning. */
   categories: Record<number, FeeCategoryDraft>
   floor_area_sqm: string
+  /** BPLO items A? / FSIC / OBO occupancy / CPDD locational all ask it. */
+  storeys: string
   employees: string
+  /** BPLO B2 (new) / B3 (renewal) and CENRO: the split inside `employees`. */
+  male_employees: string
+  female_employees: string
   employees_in_lgu: string
   delivery_vehicles_motorized: string
   delivery_vehicles_other: string
@@ -39,7 +44,10 @@ export const EMPTY_FEE_PROFILE: FeeProfileDraft = {
   business_structure: '',
   categories: {},
   floor_area_sqm: '',
+  storeys: '',
   employees: '',
+  male_employees: '',
+  female_employees: '',
   employees_in_lgu: '',
   delivery_vehicles_motorized: '',
   delivery_vehicles_other: '',
@@ -179,6 +187,13 @@ function toInt(raw: string): number | undefined {
 export const MAX_PESOS = 10_000_000_000
 export const MAX_COUNT = 100_000
 const MAX_FLOOR_AREA = 1_000_000
+/*
+ * Matches the API's own ceiling on `fee_profile.storeys` exactly. The two rules
+ * have to agree or the wizard lets through a number the save then rejects, and
+ * the applicant is told "something went wrong" by an autosave they never asked
+ * for. 200 is far above anything in Malabon and still a number, not a typo.
+ */
+const MAX_STOREYS = 200
 
 /**
  * "1000000" → "1,000,000"; keeps at most two decimals, drops everything else.
@@ -334,6 +349,26 @@ export function feeProfileIssues(
         maxMessage: 'Enter the floor area in square metres, not square centimetres.',
       }),
     )
+    /*
+     * Optional, and deliberately so. Four offices ask for it on paper — BPLO,
+     * FSIC, the OBO occupancy sheet and the CPDD locational sheet — but the
+     * Revenue Code only charges by it for real-estate lessors (three rules,
+     * `unit_key: "storeys"`), and none of the paper forms marks any field
+     * required. Making every sari-sari store answer it to get past this step
+     * would be our rule, not the city's.
+     */
+    push(
+      numericIssue({
+        key: 'storeys',
+        label: 'Number of Storeys',
+        value: draft.storeys,
+        required: false,
+        blankMessage: '',
+        integer: true,
+        max: MAX_STOREYS,
+        maxMessage: 'Enter the number of storeys in the building, not its floor area.',
+      }),
+    )
     push(
       numericIssue({
         key: 'employees',
@@ -346,6 +381,23 @@ export function feeProfileIssues(
         maxMessage: 'Enter a headcount below 100,000.',
       }),
     )
+    for (const [key, label] of [
+      ['male_employees', 'Male Employees'],
+      ['female_employees', 'Female Employees'],
+    ] as const) {
+      push(
+        numericIssue({
+          key,
+          label,
+          value: draft[key],
+          required: false,
+          blankMessage: '',
+          integer: true,
+          max: MAX_COUNT,
+          maxMessage: 'Enter a headcount below 100,000.',
+        }),
+      )
+    }
     push(
       numericIssue({
         key: 'employees_in_lgu',
@@ -366,6 +418,33 @@ export function feeProfileIssues(
         label: 'Employees Residing in Malabon',
         message: 'This can’t be more than your total number of employees.',
       })
+    }
+    /*
+     * The split has to be arithmetically possible against the total, on the
+     * same pattern as Employees Residing in Malabon above.
+     *
+     * The rule is "cannot EXCEED", not "must equal", and the looseness is the
+     * point: this step autosaves half-typed, so a sum-must-equal-total rule
+     * would light up the moment somebody types the male count and before they
+     * have reached the female box — an error for having not finished typing.
+     * What it does catch is the real contradiction, 3 male + 4 female against a
+     * total of 5, which is a number the officer would otherwise have to
+     * reconcile at the counter. Reported against both boxes so the applicant can
+     * fix whichever one is wrong.
+     */
+    const male = toInt(draft.male_employees)
+    const female = toInt(draft.female_employees)
+    if (total !== undefined && (male !== undefined || female !== undefined)) {
+      const declared = (male ?? 0) + (female ?? 0)
+      if (declared > total) {
+        for (const key of ['male_employees', 'female_employees'] as const) {
+          issues.push({
+            key,
+            label: key === 'male_employees' ? 'Male Employees' : 'Female Employees',
+            message: `Male and female together come to ${declared}, which is more than your total of ${total}.`,
+          })
+        }
+      }
     }
     for (const [key, label] of [
       ['delivery_vehicles_motorized', 'Motorized Delivery Vehicles'],
@@ -483,7 +562,10 @@ export function buildFeeProfile(
     ...(has('BUSINESS')
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
+          storeys: toInt(draft.storeys),
           employees: toInt(draft.employees),
+          male_employees: toInt(draft.male_employees),
+          female_employees: toInt(draft.female_employees),
           employees_in_lgu: toInt(draft.employees_in_lgu),
           delivery_vehicles_motorized: toInt(draft.delivery_vehicles_motorized),
           delivery_vehicles_other: toInt(draft.delivery_vehicles_other),
@@ -530,7 +612,10 @@ export function feeProfileToDraft(
     business_structure: profile.business_structure ?? '',
     categories,
     floor_area_sqm: str(profile.floor_area_sqm),
+    storeys: str(profile.storeys),
     employees: str(profile.employees),
+    male_employees: str(profile.male_employees),
+    female_employees: str(profile.female_employees),
     employees_in_lgu: str(profile.employees_in_lgu),
     delivery_vehicles_motorized: str(profile.delivery_vehicles_motorized),
     delivery_vehicles_other: str(profile.delivery_vehicles_other),
@@ -1028,6 +1113,23 @@ export function FeeProfileStep({
               error={errorFor('floor_area_sqm', value.floor_area_sqm)}
               placeholder="e.g. 45"
             />
+            {/*
+              Beside Floor Area because it is the same kind of fact and the same
+              four offices want both: BPLO, the Fire Safety (FSIC) sheet, the
+              OBO occupancy sheet and the CPDD locational sheet each ask how many
+              storeys the building has, and until now not one screen asked the
+              applicant. The officer's review sheet has been printing a
+              permanently blank "Storeys" row all along.
+            */}
+            <NumberField
+              label="Number of Storeys"
+              kind="count"
+              value={value.storeys}
+              onChange={(next) => set('storeys', next)}
+              onBlur={() => touch('storeys')}
+              error={errorFor('storeys', value.storeys)}
+              placeholder="e.g. 1"
+            />
             <NumberField
               label="Number of Employees"
               required
@@ -1047,6 +1149,38 @@ export function FeeProfileStep({
               onBlur={() => touch('employees_in_lgu')}
               error={errorFor('employees_in_lgu', value.employees_in_lgu)}
               placeholder="e.g. 2"
+            />
+            {/*
+              The male/female breakdown of the total above — BPLO item B2 on the
+              new form, B3 on the renewal, and the "MALE: FEMALE:" box on
+              CENRO's CEC application. Both counts are optional, so this is a
+              note rather than an error: the number that blocks the step is the
+              total, and the split only has to be possible against it.
+
+              Spans the grid so it reads as one sentence about the pair below it
+              rather than as a caption on the left-hand box.
+            */}
+            <p className="-mb-1 text-xs text-ink-secondary sm:col-span-2">
+              The city also asks how that total divides. Together these can’t come to more than
+              your total above.
+            </p>
+            <NumberField
+              label="Male Employees"
+              kind="count"
+              value={value.male_employees}
+              onChange={(next) => set('male_employees', next)}
+              onBlur={() => touch('male_employees')}
+              error={errorFor('male_employees', value.male_employees)}
+              placeholder="e.g. 2"
+            />
+            <NumberField
+              label="Female Employees"
+              kind="count"
+              value={value.female_employees}
+              onChange={(next) => set('female_employees', next)}
+              onBlur={() => touch('female_employees')}
+              error={errorFor('female_employees', value.female_employees)}
+              placeholder="e.g. 1"
             />
             <NumberField
               label="Motorized Delivery Vehicles"

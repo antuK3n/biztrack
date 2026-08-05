@@ -135,12 +135,16 @@ it('carries the full contract shape on every row', function () {
         ->and($row['fee_preview'])->toBeString();
 
     /*
-     * Zoning gained a sheet with checklist item 101, built from the Revenue
-     * Code's zoning article because CPDO has never sent its paper form
-     * (docs/questions-for-malabon.md E4). Market is now the only one of the six
-     * without a sheet, and for exactly the same reason — no source document to
-     * build one from. Asserted as a pair so that adding the Market sheet later
-     * has to come here and say so.
+     * Zoning has a sheet; Market does not, and the difference is which paper
+     * the city has given us.
+     *
+     * The zoning sheet was first built from the Revenue Code's zoning article
+     * because CPDO had never sent its form. The form has since arrived —
+     * MCG-CPDD-FO-003 v1.2 — and the sheet was rebuilt against it, which
+     * deleted the fields that guess had invented. Market is the last of the six
+     * with no source document at all, so it is the last with no sheet.
+     * Asserted as a pair so that adding the Market sheet later has to come here
+     * and say so.
      */
     $rows = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->json('data'));
     expect($rows->firstWhere('permit_type.code', 'ZONING')['has_office_form'])->toBeTrue()

@@ -35,10 +35,12 @@ class PermitType extends Model
      * code in only one of them is either a card promising a screen that does
      * not exist, or a screen the API refuses to save.
      *
-     * ZONING joined in August 2026 (checklist item 101). It is the only sheet
-     * not transcribed from a paper form — see the header of OfficeFormStep.tsx
-     * and questions-for-malabon E4. MARKET is still absent, for the same reason
-     * ZONING was: nobody has shown us what the market administrator asks for.
+     * ZONING joined in August 2026 (checklist item 101), at first as the one
+     * sheet not transcribed from a paper form; CPDD's MCG-CPDD-FO-003 v1.2
+     * arrived shortly after and the sheet was rebuilt against it (see the
+     * header of OfficeFormStep.tsx and questions-for-malabon E4/C9). MARKET is
+     * still absent, for the reason ZONING used to be: nobody has shown us what
+     * the City Market Administrator asks for.
      */
     public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
 

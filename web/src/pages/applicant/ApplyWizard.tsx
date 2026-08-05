@@ -286,6 +286,15 @@ const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
 interface LineDraft {
   psic_code_id: number
   line_of_business: string
+  /*
+   * What this line actually sells or does. The PSIC title names the TRADE
+   * ("Retail sale in non-specialised stores"); this names the goods, and both
+   * BPLO forms and CENRO's CEC application print it as its own column of the
+   * line-of-business table. Per line rather than per business for the reason the
+   * paper puts it in that table: a shop that both retails and repairs sells
+   * different things under each of its two lines.
+   */
+  products_services: string
 }
 
 interface FormState {
@@ -294,6 +303,9 @@ interface FormState {
   registration_type: string
   registration_number: string
   tin: string
+  /* BPLO items A6 and A9 — the main office's landline and website. */
+  telephone: string
+  website: string
   line1: string
   line2: string
   barangay_id: string
@@ -309,6 +321,15 @@ interface FormState {
   monthly_rental: string
   emergency_contact_name: string
   emergency_contact_number: string
+  /* BPLO item B6 — see ECONOMIC_ORGANIZATIONS below for why it matters. */
+  economic_organization: string
+  economic_organization_others: string
+  /* BPLO items A13/A14/A15, asked only of the structures that have a president. */
+  president_officer_name: string
+  citizenship: string
+  capital_participation_filipino: string
+  /* BPLO item B8 (new form) / B7 (renewal). */
+  has_tax_incentives: boolean
 }
 
 const EMPTY: FormState = {
@@ -317,6 +338,8 @@ const EMPTY: FormState = {
   registration_type: '',
   registration_number: '',
   tin: '',
+  telephone: '',
+  website: '',
   line1: '',
   line2: '',
   barangay_id: '',
@@ -327,6 +350,12 @@ const EMPTY: FormState = {
   monthly_rental: '',
   emergency_contact_name: '',
   emergency_contact_number: '',
+  economic_organization: '',
+  economic_organization_others: '',
+  president_officer_name: '',
+  citizenship: '',
+  capital_participation_filipino: '',
+  has_tax_incentives: false,
   latitude: null,
   longitude: null,
   lines: [],
@@ -364,6 +393,102 @@ const AMENDMENT_KINDS: { key: 'ownership' | 'location' | 'nature'; label: string
   { key: 'location', label: 'Location' },
   { key: 'nature', label: 'Nature of Business' },
 ]
+
+/* ── Economic Organization (BPLO item B6) ───────────────────────────────── */
+
+/**
+ * The six answers the paper prints, in its own order.
+ *
+ * This is NOT the Form of Organization / Type of Registration question wearing a
+ * second hat — that one asks what the business IS in law (sole proprietorship,
+ * partnership, corporation, cooperative), and this asks what this PREMISES is to
+ * the business. A corporation can file for a branch; a sole proprietor can file
+ * for a single establishment that is also their main office.
+ *
+ * It is the structurally interesting one of the fields added here, because it is
+ * the answer that says whether the two addresses the paper asks for are the same
+ * place. The BPLO form has a Main Office Address (item A5) AND a Business
+ * Location Address (item B5); BizTrack holds exactly one address per business
+ * and prints it under "Main Office Address" on the officer's sheet. For a Single
+ * Establishment that is correct and the duplication on paper is redundancy. For
+ * a Branch or an Ancillary Unit it is wrong, and this field is what will
+ * eventually tell us so — which is why it is worth collecting before the second
+ * address exists to hang off it.
+ */
+const ECONOMIC_ORGANIZATIONS: { value: string; label: string; hint: string }[] = [
+  {
+    value: 'single_establishment',
+    label: 'Single Establishment',
+    hint: 'One place of business, and it is this one.',
+  },
+  {
+    value: 'branch',
+    label: 'Branch',
+    hint: 'A branch of a business whose main office is somewhere else.',
+  },
+  {
+    value: 'establishment_and_main_office',
+    label: 'Establishment and Main Office',
+    hint: 'You trade here and this is also your head office.',
+  },
+  {
+    value: 'main_office_only',
+    label: 'Main Office only',
+    hint: 'Head office here; the trading happens elsewhere.',
+  },
+  {
+    value: 'ancillary_unit',
+    label: 'Ancillary Unit',
+    hint: 'A warehouse, depot or similar that supports the business but does not sell.',
+  },
+  { value: 'others', label: 'Others', hint: 'None of the five above — say what it is.' },
+]
+
+/**
+ * Whether items A13-A15 (President/OIC, their citizenship, and the Filipino
+ * share of the capital) are asked at all.
+ *
+ * The paper routes item 11 (Sole Proprietorship) and item 12
+ * (Corporation/Partnership/Cooperative) both onward to item 13, so on paper
+ * everybody answers it. We do not, and the reason is the redundancy rule the
+ * client set: for a sole proprietorship the account holder IS the proprietor and
+ * IS the officer in charge, so item 13 asks a question the registration already
+ * answered. Item 14 settles it — the paper labels it "Citizenship (of
+ * President/OIC)", so all three fields describe one person, and where there is
+ * no separate president there is nobody for them to be about.
+ *
+ * A blank structure returns false: nothing is asked until the applicant has said
+ * which of the four they are, on the same reasoning as the registration-number
+ * field directly above these.
+ */
+function hasPresidentOrOfficer(registrationType: string): boolean {
+  return ['partnership', 'corporation', 'cooperative'].includes(registrationType)
+}
+
+/**
+ * A saved capital participation, as the applicant would have typed it.
+ *
+ * The column is `decimal(5,2)` and cast to match, so "100" is stored and comes
+ * back as "100.00". Re-hydrating that verbatim would show somebody a number they
+ * did not type every time they reopened a draft, and would do it again on every
+ * renewal. Only a meaningless trailing zero pair is dropped: 60.50 keeps its
+ * decimals because those are the applicant's own precision.
+ */
+function percentToInput(raw: string | null | undefined): string {
+  const trimmed = (raw ?? '').trim()
+
+  return trimmed.endsWith('.00') ? trimmed.slice(0, -3) : trimmed
+}
+
+/** 0-100 with up to two decimals, or blank. Percentages are not money. */
+function percentValid(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return true
+  if (!/^\d{1,3}(\.\d{1,2})?$/.test(trimmed)) return false
+  const n = Number(trimmed)
+
+  return Number.isFinite(n) && n >= 0 && n <= 100
+}
 
 /* ── Type of registration, and the agency it decides (item 94) ──────────── */
 
@@ -513,6 +638,20 @@ function phoneValid(raw: string): boolean {
 const PHONE_ERROR =
   'Enter a Philippine mobile or landline number, like 09171234567 or 8123 4567.'
 
+/**
+ * BPLO item A9. Loose on purpose: it accepts what somebody would type into a
+ * browser, with or without a scheme and with or without www. What it refuses is
+ * a sentence or an email address, which is the mistake this field actually
+ * attracts — the point is to catch a wrong KIND of answer, not to police a URL.
+ */
+function websiteValid(raw: string): boolean {
+  const trimmed = raw.trim()
+  if (!trimmed) return true
+  if (trimmed.includes('@') || /\s/.test(trimmed)) return false
+
+  return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(trimmed)
+}
+
 /** Strip the display separators before an amount goes to the API. */
 function plainAmount(raw: string): string {
   return raw.replace(/,/g, '').trim()
@@ -657,7 +796,7 @@ function LinesStep({
   function toggle(code: PsicCode) {
     const exists = lines.find((l) => l.psic_code_id === code.id)
     if (exists) onChange(lines.filter((l) => l.psic_code_id !== code.id))
-    else onChange([...lines, { psic_code_id: code.id, line_of_business: '' }])
+    else onChange([...lines, { psic_code_id: code.id, line_of_business: '', products_services: '' }])
   }
 
   return (
@@ -806,6 +945,50 @@ function LinesStep({
                     <p className="mt-1 text-xs font-medium text-s-red">
                       Type the line of business you want registered.
                     </p>
+                  )}
+                  {/*
+                    * Products / Services — the second column of the paper's
+                    * line-of-business table, on both BPLO forms and on CENRO's
+                    * CEC application, and never asked by this wizard.
+                    *
+                    * It sits under the line it belongs to rather than in a
+                    * business-wide box because that is the only place it can be
+                    * right: the column is per row on all three forms. The PSIC
+                    * title says what trade this is, and CENRO reviews what is
+                    * actually handled — "Retail sale in non-specialised stores"
+                    * does not distinguish a sari-sari store from one selling
+                    * paint thinner.
+                    *
+                    * Not offered on an unclassified "Other" row: that row's only
+                    * remedy is removal, and inviting more typing into it would
+                    * be asking for work that is about to be thrown away.
+                    *
+                    * Optional. No paper form marks it required, and a wrapping
+                    * <label> gives it a real accessible name that includes the
+                    * trade, so a screen-reader user with four lines selected
+                    * hears which one they are describing.
+                    */}
+                  {!isOther && (
+                    <label className="mt-2 block">
+                      <span className="mb-1 block text-xs font-semibold text-ink-secondary">
+                        Products / Services for {code?.title ?? 'this line'}
+                      </span>
+                      <input
+                        value={line.products_services}
+                        onChange={(e) =>
+                          onChange(
+                            lines.map((l) =>
+                              l.psic_code_id === line.psic_code_id
+                                ? { ...l, products_services: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        placeholder="e.g. canned goods, rice, soft drinks"
+                        maxLength={1000}
+                        className={inputCls}
+                      />
+                    </label>
                   )}
                 </div>
               )
@@ -1077,6 +1260,8 @@ export function ApplyWizard() {
         registration_type: normalizeRegistrationType(b.registration_type),
         registration_number: b.registration_number ?? '',
         tin: b.tin ?? '',
+        telephone: b.address.telephone ?? '',
+        website: b.address.website ?? '',
         line1: b.address.line1 ?? '',
         line2: b.address.line2 ?? '',
         barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
@@ -1087,6 +1272,12 @@ export function ApplyWizard() {
         monthly_rental: formatAmountInput(b.monthly_rental ?? ''),
         emergency_contact_name: b.emergency_contact_name ?? '',
         emergency_contact_number: b.emergency_contact_number ?? '',
+        economic_organization: b.economic_organization ?? '',
+        economic_organization_others: b.economic_organization_others ?? '',
+        president_officer_name: b.president_officer_name ?? '',
+        citizenship: b.citizenship ?? '',
+        capital_participation_filipino: percentToInput(b.capital_participation_filipino),
+        has_tax_incentives: b.has_tax_incentives ?? false,
         latitude: b.address.latitude ?? null,
         longitude: b.address.longitude ?? null,
         /*
@@ -1100,6 +1291,10 @@ export function ApplyWizard() {
           // Carry over the free text for an "Other (not listed)" trade, or a
           // renewal would silently blank it and block Next.
           line_of_business: l.line_of_business ?? '',
+          // Same reasoning: what the line sells rarely changes between years, so
+          // a renewal starts from what is on record instead of blank. Dropping
+          // it here would also let the next autosave write the blank back.
+          products_services: l.products_services ?? '',
         })),
         /*
          * The prefill's `suggested_permit_type_ids` is ignored. It suggests
@@ -1487,6 +1682,32 @@ export function ApplyWizard() {
           }
           if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
           else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
+          /*
+           * The fields transcribed from the paper BPLO form are all optional —
+           * none of the three paper forms marks any field required, and every
+           * asterisk in this wizard is our own judgement. So nothing below is
+           * listed for being blank; they are listed only when what is in them
+           * cannot be stored, on the same pattern as the emergency contact
+           * number on the Location & Zoning step.
+           */
+          if (form.telephone.trim() && !phoneValid(form.telephone)) {
+            missing.push('A valid Telephone (Landline)')
+          }
+          if (form.website.trim() && !websiteValid(form.website)) {
+            missing.push('A valid Website Address')
+          }
+          if (!percentValid(form.capital_participation_filipino)) {
+            missing.push('A Capital Participation between 0 and 100 percent')
+          }
+          /*
+           * The one exception, and it is conditional rather than new: on the
+           * paper, "Others ____" is a blank you cannot tick without filling in.
+           * Ticking it here and leaving the blank empty records less than
+           * choosing nothing at all would have.
+           */
+          if (form.economic_organization === 'others' && !form.economic_organization_others.trim()) {
+            missing.push('What “Others” means for your Economic Organization')
+          }
           return missing
         }
         case 'address': {
@@ -1645,6 +1866,12 @@ export function ApplyWizard() {
   const registrationAgency = agencyFor(form.registration_type)
   const registrationAgencyInfo = registrationAgency ? REGISTRATION_AGENCIES[registrationAgency] : null
   const registrationNumberLabel = registrationAgencyInfo?.label ?? 'Registration Number'
+  /*
+   * Whether to put BPLO items A13-A15 at all. Gated on the Type of Registration
+   * chosen a few fields above — see hasPresidentOrOfficer for why a sole
+   * proprietor is not asked to name their own president.
+   */
+  const presidentAsked = hasPresidentOrOfficer(form.registration_type)
 
   /**
    * Item 94 — choosing a structure, and what that does to the number already
@@ -1697,6 +1924,26 @@ export function ApplyWizard() {
       : touched.tin
         ? 'Enter your Tax Identification Number.'
         : '',
+    /*
+     * Both optional, so neither can complain about being empty — only about
+     * being wrong. `phoneValid` already accepts a landline with or without its
+     * area code, which is what item A6 asks for, so there is no second phone
+     * rule to keep in step with the first.
+     */
+    telephone: form.telephone.trim() && !phoneValid(form.telephone) ? PHONE_ERROR : '',
+    website:
+      form.website.trim() && !websiteValid(form.website)
+        ? 'Enter your website as it is typed into a browser, like malabon.gov.ph or https://malabon.gov.ph.'
+        : '',
+    capital_participation_filipino: !percentValid(form.capital_participation_filipino)
+      ? 'Enter the Filipino share as a percentage between 0 and 100, like 100 or 60.'
+      : '',
+    economic_organization_others:
+      touched.economic_organization_others &&
+      form.economic_organization === 'others' &&
+      !form.economic_organization_others.trim()
+        ? 'Say what kind of establishment this is, or choose one of the five above.'
+        : '',
     line1: touched.line1 && !form.line1.trim() ? 'Enter your street address.' : '',
     barangay_id: touched.barangay_id && !form.barangay_id ? 'Choose your barangay.' : '',
     lessor_name:
@@ -1745,12 +1992,51 @@ export function ApplyWizard() {
       monthly_rental: form.is_rented ? plainAmount(form.monthly_rental) || undefined : undefined,
       emergency_contact_name: form.emergency_contact_name.trim() || undefined,
       emergency_contact_number: form.emergency_contact_number.trim() || undefined,
+      /*
+       * Held as a plain string in FormState (it is the value of a radiogroup,
+       * and "" is "nothing chosen"), narrowed here at the one boundary where the
+       * contract cares. Only values from ECONOMIC_ORGANIZATIONS can reach it —
+       * the radios are the sole writer — and the API bands it again against
+       * Business::ECONOMIC_ORGANIZATIONS regardless.
+       */
+      economic_organization:
+        (form.economic_organization as BusinessPayload['economic_organization']) || undefined,
+      // Only meaningful against "Others"; sending it with any of the other five
+      // would leave a stale specify-blank attached to an answer that has one.
+      economic_organization_others:
+        form.economic_organization === 'others'
+          ? form.economic_organization_others.trim() || undefined
+          : undefined,
+      /*
+       * Items A13-A15 ride on the payload only for the structures that have a
+       * president. A sole proprietor who typed one before switching their Type
+       * of Registration keeps it on screen for the rest of the session, but it
+       * is not sent — the API reads an omitted key as null, so the record does
+       * not end up asserting that a one-person shop has an officer in charge.
+       */
+      president_officer_name: presidentAsked
+        ? form.president_officer_name.trim() || undefined
+        : undefined,
+      citizenship: presidentAsked ? form.citizenship.trim() || undefined : undefined,
+      capital_participation_filipino: presidentAsked
+        ? form.capital_participation_filipino.trim() || undefined
+        : undefined,
+      has_tax_incentives: form.has_tax_incentives,
       address: {
         line1: form.line1.trim(),
         line2: form.line2.trim() || undefined,
         barangay_id: Number(form.barangay_id),
         latitude: form.latitude ?? undefined,
         longitude: form.longitude ?? undefined,
+        /*
+         * `postal_code` is deliberately absent. Malabon is one postal code —
+         * 1470 — and the map pin is already refused if it falls outside the
+         * city, so the answer is known before the question could be put. The
+         * API fills it, the same way the schema already defaults `city` and
+         * `province`.
+         */
+        telephone: form.telephone.trim() || undefined,
+        website: form.website.trim() || undefined,
       },
       /*
        * The free-text line rides on the same payload; the API stores it on
@@ -1769,6 +2055,10 @@ export function ApplyWizard() {
       lines: form.lines.map((l) => ({
         psic_code_id: l.psic_code_id,
         line_of_business: l.line_of_business.trim() || undefined,
+        // `business_lines.products_services` was already validated and stored by
+        // BusinessController::syncAddressAndLines and already serialised by
+        // BusinessResource — the wizard was the only part that never asked.
+        products_services: l.products_services.trim() || undefined,
       })) as BusinessPayload['lines'],
     }
   }
@@ -2140,7 +2430,27 @@ export function ApplyWizard() {
   /** "Clear All" (p35) — clears the inputs for the current part only. */
   function clearCurrentPart() {
     if (phase === 'business') {
-      setForm((f) => ({ ...f, name: '', trade_name: '', registration_type: '', registration_number: '', tin: '' }))
+      setForm((f) => ({
+        ...f,
+        name: '',
+        trade_name: '',
+        registration_type: '',
+        registration_number: '',
+        tin: '',
+        // Everything transcribed from the paper's section A and items B6/B8 is
+        // an input of THIS part, so "clear the inputs on this part" has to take
+        // it. Leaving any of them standing would clear the fields around an
+        // answer and leave the answer behind — the bug the privacy branch below
+        // documents, arriving from the other direction.
+        telephone: '',
+        website: '',
+        economic_organization: '',
+        economic_organization_others: '',
+        president_officer_name: '',
+        citizenship: '',
+        capital_participation_filipino: '',
+        has_tax_incentives: false,
+      }))
       if (isReuse) {
         setPrefillBusinessId(null)
         setPriorPermitId(null)
@@ -2370,6 +2680,8 @@ export function ApplyWizard() {
           registration_type: normalizeRegistrationType(b.registration_type),
           registration_number: b.registration_number ?? '',
           tin: b.tin ?? '',
+          telephone: b.address?.telephone ?? '',
+          website: b.address?.website ?? '',
           line1: b.address?.line1 ?? '',
           line2: b.address?.line2 ?? '',
           barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
@@ -2380,6 +2692,17 @@ export function ApplyWizard() {
           monthly_rental: formatAmountInput(b.monthly_rental ?? ''),
           emergency_contact_name: b.emergency_contact_name ?? '',
           emergency_contact_number: b.emergency_contact_number ?? '',
+          /*
+           * Every field added from the paper forms has to come back, or the
+           * next autosave writes the blank over the answer — a field that does
+           * not round-trip is worse than one that was never asked.
+           */
+          economic_organization: b.economic_organization ?? '',
+          economic_organization_others: b.economic_organization_others ?? '',
+          president_officer_name: b.president_officer_name ?? '',
+          citizenship: b.citizenship ?? '',
+          capital_participation_filipino: percentToInput(b.capital_participation_filipino),
+          has_tax_incentives: b.has_tax_incentives ?? false,
           latitude: b.address?.latitude ?? null,
           longitude: b.address?.longitude ?? null,
           /*
@@ -2395,6 +2718,7 @@ export function ApplyWizard() {
             // Free text typed against "Other (not listed)". Restoring it is what
             // stops a reopened draft from making the applicant type it again.
             line_of_business: l.line_of_business ?? '',
+            products_services: l.products_services ?? '',
           })),
           permit_type_ids: ids,
         })
@@ -3171,6 +3495,301 @@ export function ApplyWizard() {
                 className={inputCls}
               />
               </label>
+            </div>
+
+            {/*
+              * ── Items A6 and A9 — the main office's landline and website ──
+              *
+              * Both columns (`business_addresses.telephone`, `.website`) have
+              * existed since the schema was aligned to the paper and neither has
+              * ever been written, because no screen asked. They sit here rather
+              * than on Location & Zoning because the paper groups them with the
+              * MAIN OFFICE address in section A, and because that step is about
+              * where the premises is, not how to ring it.
+              *
+              * Item A5's Postal Code is not here, and its absence is the point:
+              * Malabon is 1470, the map pin is already refused outside the city,
+              * and a question with one possible answer is not worth a field. The
+              * API fills it — see businessPayload above.
+              *
+              * Neither is required. A sari-sari store has no landline and no
+              * website, and no paper form marks either with an asterisk.
+              */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block">
+                <FieldLabel>Telephone (Landline)</FieldLabel>
+                <input
+                  inputMode="tel"
+                  value={form.telephone}
+                  onChange={(e) => update('telephone', e.target.value)}
+                  onBlur={() => touch('telephone')}
+                  placeholder="e.g. 8281 4999"
+                  className={inputCls}
+                  aria-invalid={Boolean(fieldErrors.telephone)}
+                  aria-describedby={fieldErrors.telephone ? 'telephone-error' : undefined}
+                />
+                </label>
+                {fieldErrors.telephone && (
+                  <p id="telephone-error" role="alert" className="mt-1 text-xs font-medium text-s-red">
+                    {fieldErrors.telephone}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block">
+                <FieldLabel>Website Address</FieldLabel>
+                <input
+                  inputMode="url"
+                  value={form.website}
+                  onChange={(e) => update('website', e.target.value)}
+                  onBlur={() => touch('website')}
+                  placeholder="e.g. alingnenas.com.ph"
+                  className={inputCls}
+                  aria-invalid={Boolean(fieldErrors.website)}
+                  aria-describedby={fieldErrors.website ? 'website-error' : undefined}
+                />
+                </label>
+                {fieldErrors.website && (
+                  <p id="website-error" role="alert" className="mt-1 text-xs font-medium text-s-red">
+                    {fieldErrors.website}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/*
+              * ── Items A13, A14, A15 — and only for the three structures that
+              * have somebody to be about ────────────────────────────────────
+              *
+              * See hasPresidentOrOfficer. A sole proprietor IS the proprietor
+              * and IS the officer in charge, and the account already knows their
+              * name, so asking them to name their own president is the
+              * duplicate-question failure the client called out — item A14 is
+              * even labelled "Citizenship (of President/OIC)" on the paper,
+              * which settles whose citizenship all three describe.
+              *
+              * The block appears and disappears with the Type of Registration
+              * chosen above it. `aria-live` is on the surrounding region so a
+              * screen-reader user who picks Corporation is told that three more
+              * questions just arrived, rather than discovering them by tabbing.
+              */}
+            <div aria-live="polite">
+              {presidentAsked && (
+                <div className="space-y-4 rounded-xl border border-line p-4">
+                  <p className="text-xs text-ink-secondary">
+                    Because you are registered as a{' '}
+                    {REGISTRATION_TYPES.find((rt) => rt.value === form.registration_type)?.label.toLowerCase() ??
+                      'partnership, corporation or cooperative'}
+                    , the city also asks who runs it. A sole proprietor is not asked these.
+                  </p>
+                  <div>
+                    <label className="block">
+                    <FieldLabel>Name of President / Officer in Charge</FieldLabel>
+                    <input
+                      value={form.president_officer_name}
+                      onChange={(e) => update('president_officer_name', e.target.value)}
+                      placeholder="e.g. Maria Clara Santos"
+                      maxLength={255}
+                      className={inputCls}
+                    />
+                    </label>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="block">
+                      <FieldLabel>Citizenship</FieldLabel>
+                      <input
+                        value={form.citizenship}
+                        onChange={(e) => update('citizenship', e.target.value)}
+                        placeholder="e.g. Filipino"
+                        maxLength={100}
+                        className={inputCls}
+                      />
+                      </label>
+                      <p className="mt-1 text-xs text-ink-muted">
+                        Of the president or officer in charge named above.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block">
+                      <FieldLabel>Capital Participation (% Filipino)</FieldLabel>
+                      <input
+                        inputMode="decimal"
+                        value={form.capital_participation_filipino}
+                        onChange={(e) => update('capital_participation_filipino', e.target.value)}
+                        onBlur={() => touch('capital_participation_filipino')}
+                        placeholder="e.g. 100"
+                        className={`${inputCls} tnum`}
+                        aria-invalid={Boolean(fieldErrors.capital_participation_filipino)}
+                        aria-describedby={
+                          fieldErrors.capital_participation_filipino
+                            ? 'capital-participation-error'
+                            : undefined
+                        }
+                      />
+                      </label>
+                      {fieldErrors.capital_participation_filipino && (
+                        <p
+                          id="capital-participation-error"
+                          role="alert"
+                          className="mt-1 text-xs font-medium text-s-red"
+                        >
+                          {fieldErrors.capital_participation_filipino}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/*
+              * ── Item B6 — Economic Organization ───────────────────────────
+              *
+              * Six mutually exclusive answers, so a real radiogroup with an
+              * accessible name, matching the Type of Registration picker above
+              * and the "which permit are you renewing" list. `aria-pressed`
+              * toggles would announce six independent switches and never say
+              * that picking one unpicks another.
+              *
+              * See ECONOMIC_ORGANIZATIONS for why this is not the Type of
+              * Registration question again: that one asks what the BUSINESS is,
+              * this asks what this PREMISES is to it.
+              */}
+            <div>
+              <FieldLabel>Economic Organization</FieldLabel>
+              <p className="mb-2 text-xs text-ink-secondary">
+                What this place of business is to your business — not how your business is
+                registered, which you answered above.
+              </p>
+              <div
+                role="radiogroup"
+                aria-label="Economic Organization"
+                className="grid gap-2.5 sm:grid-cols-2"
+              >
+                {ECONOMIC_ORGANIZATIONS.map((eo) => {
+                  const selected = form.economic_organization === eo.value
+                  return (
+                    <button
+                      key={eo.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => update('economic_organization', selected ? '' : eo.value)}
+                      className={`flex items-start gap-2.5 rounded-md border px-4 py-2.5 text-left transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-medium text-ink">{eo.label}</span>
+                        <span className="block text-xs text-ink-secondary">{eo.hint}</span>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              {/*
+                * On the paper this is "Others ____" — a blank you cannot tick
+                * without filling in. So it opens with the choice and is listed
+                * in "Still needed on this part" while it is empty: recording
+                * "Others" with no other named says less than choosing nothing.
+                */}
+              {form.economic_organization === 'others' && (
+                <div className="mt-3">
+                  <label className="block">
+                  <FieldLabel required>Others — what kind of establishment is it?</FieldLabel>
+                  <input
+                    value={form.economic_organization_others}
+                    onChange={(e) => update('economic_organization_others', e.target.value)}
+                    onBlur={() => touch('economic_organization_others')}
+                    placeholder="e.g. mobile stall operated from a vehicle"
+                    maxLength={255}
+                    className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.economic_organization_others)}
+                    aria-describedby={
+                      fieldErrors.economic_organization_others
+                        ? 'economic-organization-others-error'
+                        : undefined
+                    }
+                  />
+                  </label>
+                  {fieldErrors.economic_organization_others && (
+                    <p
+                      id="economic-organization-others-error"
+                      role="alert"
+                      className="mt-1 text-xs font-medium text-s-red"
+                    >
+                      {fieldErrors.economic_organization_others}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/*
+              * ── Item B8 (new form) / B7 (renewal) — tax incentives ────────
+              *
+              * A general Yes/No, and deliberately NOT read off the `is_bmbe` or
+              * `is_cooperative` flags on the Business & Tax Profile. Those two
+              * name particular statutory exemptions the fee calculator acts on;
+              * this asks whether ANY government entity has granted an incentive,
+              * which is true of a PEZA registrant or a Board of Investments
+              * pioneer whose Revenue Code assessment is unchanged. Neither
+              * answer can be derived from the other in either direction.
+              *
+              * Two radios rather than a lone checkbox, because "No" is a real
+              * answer the officer needs to see given, not an unticked box that
+              * could equally mean the applicant skipped the question.
+              */}
+            <div>
+              <FieldLabel>Do you have tax incentives from any Government Entity?</FieldLabel>
+              <div
+                role="radiogroup"
+                aria-label="Do you have tax incentives from any Government Entity?"
+                className="flex flex-wrap gap-2"
+              >
+                {[
+                  { value: false, label: 'No' },
+                  { value: true, label: 'Yes' },
+                ].map((opt) => {
+                  const selected = form.has_tax_incentives === opt.value
+                  return (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => update('has_tax_incentives', opt.value)}
+                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`h-3.5 w-3.5 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+              {form.has_tax_incentives && (
+                <p className="mt-2 text-xs text-ink-secondary">
+                  The city asks for a copy of the certificate. Attach it under Other Requirements in
+                  Documentary Requirements.
+                </p>
+              )}
             </div>
           </div>
         </FormSheet>

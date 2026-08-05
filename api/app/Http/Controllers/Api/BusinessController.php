@@ -30,6 +30,16 @@ class BusinessController extends Controller
      */
     private const ORGANIZATION_FORMS = Business::ORGANIZATION_FORMS;
 
+    /**
+     * Malabon City's only postal code, used as the default for BPLO item A5.
+     *
+     * Named rather than inlined so that the day BizTrack licenses a second LGU,
+     * the one place this assumption lives is findable. It is an assumption:
+     * correct for every filing this system can currently accept, because the
+     * wizard will not save a map pin outside the city.
+     */
+    private const MALABON_POSTAL_CODE = '1470';
+
     private array $eager = ['address.barangay', 'lines.psicCode'];
 
     /**
@@ -79,6 +89,7 @@ class BusinessController extends Controller
                 'monthly_rental' => $data['monthly_rental'] ?? null,
                 'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
                 'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
+                ...self::paperFormFields($data),
                 'ban' => Numbering::ban(),
                 'is_active' => true,
             ]);
@@ -124,6 +135,7 @@ class BusinessController extends Controller
                 'monthly_rental' => $data['monthly_rental'] ?? null,
                 'emergency_contact_name' => $data['emergency_contact_name'] ?? null,
                 'emergency_contact_number' => $data['emergency_contact_number'] ?? null,
+                ...self::paperFormFields($data),
             ]);
             $this->syncAddressAndLines($business, $data);
         });
@@ -242,6 +254,41 @@ class BusinessController extends Controller
         return Business::normalizeRegistrationType(is_string($registrationType) ? $registrationType : null);
     }
 
+    /**
+     * The BPLO paper-form answers that hang off the business record.
+     *
+     * Written on both create and update, from a payload that is allowed to omit
+     * any of them — an omitted key means null here, which is the honest reading
+     * for every one of these. In particular the wizard omits
+     * `president_officer_name`, `citizenship` and `capital_participation_filipino`
+     * for a sole proprietorship, because on the paper those three describe the
+     * President/OIC (item A14 says so outright) and a sole proprietorship has
+     * none. Nulling them rather than preserving them is deliberate: a business
+     * that files as a corporation and later corrects itself to a sole
+     * proprietorship must not keep asserting it has an officer in charge.
+     *
+     * `economic_organization_others` is cleared unless "others" was chosen, so
+     * a specify-blank cannot outlive the answer it belonged to.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private static function paperFormFields(array $data): array
+    {
+        $economic = $data['economic_organization'] ?? null;
+
+        return [
+            'economic_organization' => $economic,
+            'economic_organization_others' => $economic === 'others'
+                ? ($data['economic_organization_others'] ?? null)
+                : null,
+            'president_officer_name' => $data['president_officer_name'] ?? null,
+            'citizenship' => $data['citizenship'] ?? null,
+            'capital_participation_filipino' => $data['capital_participation_filipino'] ?? null,
+            'has_tax_incentives' => (bool) ($data['has_tax_incentives'] ?? false),
+        ];
+    }
+
     private function validateBusiness(Request $request): array
     {
         /*
@@ -339,6 +386,20 @@ class BusinessController extends Controller
             'address.barangay_id' => ['required', 'exists:barangays,id'],
             'address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
+            /*
+             * BPLO items A5, A6 and A9. All three columns have existed since the
+             * schema was aligned to the paper form and none was ever written,
+             * because nothing asked for them.
+             *
+             * `postal_code` is accepted but the wizard never sends it: Malabon is
+             * 1470 and the map pin is already refused outside the city, so
+             * syncAddressAndLines defaults it rather than asking a question with
+             * one possible answer. The rule stays so an importer or a future
+             * out-of-city case has somewhere to put a real one.
+             */
+            'address.postal_code' => ['nullable', 'string', 'max:20'],
+            'address.telephone' => ['nullable', 'string', 'max:40'],
+            'address.website' => ['nullable', 'string', 'max:255'],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.psic_code_id' => ['required', 'exists:psic_codes,id'],
             'lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
@@ -358,6 +419,29 @@ class BusinessController extends Controller
             'monthly_rental' => ['nullable', 'required_if:is_rented,true', 'numeric', 'min:0'],
             'emergency_contact_name' => ['nullable', 'string', 'max:255'],
             'emergency_contact_number' => ['nullable', 'string', 'max:40'],
+            /*
+             * BPLO item B6. Banded to the six the paper prints, so a caller
+             * cannot invent a seventh economic organization the officer's sheet
+             * would then have to render as a raw slug.
+             */
+            'economic_organization' => ['nullable', 'string', Rule::in(Business::ECONOMIC_ORGANIZATIONS)],
+            'economic_organization_others' => ['nullable', 'string', 'max:255'],
+            /*
+             * BPLO items A13, A14, A15. Optional at this layer even though the
+             * wizard only offers them to a partnership, corporation or
+             * cooperative: the gate is a question of what to ASK, and the browser
+             * is not the only way into this endpoint. A sole proprietorship that
+             * genuinely wants to name an officer in charge is not refused here,
+             * it is simply never asked.
+             */
+            'president_officer_name' => ['nullable', 'string', 'max:255'],
+            'citizenship' => ['nullable', 'string', 'max:100'],
+            // A percentage, not an amount: decimal(5,2) holds 0.00 to 100.00.
+            'capital_participation_filipino' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            // BPLO item B8 (new form) / B7 (renewal). Not derivable from the
+            // `is_bmbe` / `is_cooperative` fee-profile flags — see the Business
+            // model — so it is asked and stored on its own.
+            'has_tax_incentives' => ['sometimes', 'boolean'],
         ], [
             'lessor_name.required_if' => "Enter the lessor's name, or set the premises to owner-occupied.",
             'lessor_address.required_if' => "Enter the lessor's address, or set the premises to owner-occupied.",
@@ -465,13 +549,44 @@ class BusinessController extends Controller
 
     private function syncAddressAndLines(Business $business, array $data): void
     {
-        $business->address()->updateOrCreate([], [
+        $address = $business->address()->updateOrCreate([], [
             'line1' => $data['address']['line1'],
             'line2' => $data['address']['line2'] ?? null,
             'barangay_id' => $data['address']['barangay_id'],
             'latitude' => $data['address']['latitude'] ?? null,
             'longitude' => $data['address']['longitude'] ?? null,
+            /*
+             * BPLO item A5's Postal Code, defaulted rather than asked.
+             *
+             * Every location this system will license is inside Malabon — the
+             * wizard refuses a map pin outside the city bounds before it will
+             * save one — and Malabon has exactly one postal code. So the answer
+             * is known before the question could be put, and the column is
+             * filled the same way the schema already fills `city` and
+             * `province`. A caller that sends a real one wins; nothing here
+             * overwrites an answer with the default.
+             */
+            'postal_code' => $data['address']['postal_code'] ?? $business->address?->postal_code ?? self::MALABON_POSTAL_CODE,
         ]);
+
+        /*
+         * Items A6 and A9. Set explicitly rather than through the array above
+         * because neither is mass assignable on BusinessAddress — the same
+         * treatment `line_of_business` and `products_services` get on
+         * BusinessLine below, and for the same reason.
+         *
+         * Absent means null, not unchanged. Unlike a line's capitalization
+         * (which the wizard genuinely no longer states, hence the preserve dance
+         * further down), these two ARE stated on every save the wizard makes, so
+         * an omitted key really is the applicant having cleared the field.
+         */
+        $address->telephone = filled($data['address']['telephone'] ?? null)
+            ? trim($data['address']['telephone'])
+            : null;
+        $address->website = filled($data['address']['website'] ?? null)
+            ? trim($data['address']['website'])
+            : null;
+        $address->save();
 
         /*
          * The declared capital per line, as it stands before this write.
