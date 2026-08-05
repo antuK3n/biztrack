@@ -671,7 +671,7 @@ function ZoningFields({
               <input
                 value={get(data, 'authorized_representative')}
                 onChange={(e) => set('authorized_representative', e.target.value)}
-                placeholder="e.g. Juan Dela Cruz"
+                placeholder="Full name"
                 className={inputCls}
               />
             </label>
@@ -856,7 +856,7 @@ function FsicFields({
             <input
               value={get(data, 'authorized_representative')}
               onChange={(e) => set('authorized_representative', e.target.value)}
-              placeholder="e.g. Juan Dela Cruz"
+              placeholder="Full name"
               className={inputCls}
             />
             <p className="mt-1 text-xs text-ink-muted">
@@ -1053,7 +1053,6 @@ function MarketFields({
             <input
               value={get(data, 'market_name')}
               onChange={(e) => set('market_name', e.target.value)}
-              placeholder="e.g. Malabon Central Market"
               className={inputCls}
             />
           </label>

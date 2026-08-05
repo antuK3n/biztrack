@@ -3593,7 +3593,6 @@ export function ApplyWizard() {
                   value={form.name}
                   onChange={(e) => update('name', e.target.value)}
                   onBlur={() => touch('name')}
-                  placeholder="e.g. Dela Cruz Trading"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.name)}
                 />
@@ -3607,7 +3606,6 @@ export function ApplyWizard() {
               <input
                 value={form.trade_name}
                 onChange={(e) => update('trade_name', e.target.value)}
-                placeholder="e.g. Aling Nena's Eatery"
                 className={inputCls}
               />
               </label>
@@ -3640,7 +3638,7 @@ export function ApplyWizard() {
                   value={form.telephone}
                   onChange={(e) => update('telephone', e.target.value)}
                   onBlur={() => touch('telephone')}
-                  placeholder="e.g. 8281 4999"
+                  placeholder="Area code and number"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.telephone)}
                   aria-describedby={fieldErrors.telephone ? 'telephone-error' : undefined}
@@ -3660,7 +3658,7 @@ export function ApplyWizard() {
                   value={form.website}
                   onChange={(e) => update('website', e.target.value)}
                   onBlur={() => touch('website')}
-                  placeholder="e.g. alingnenas.com.ph"
+                  placeholder="yourbusiness.com.ph"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.website)}
                   aria-describedby={fieldErrors.website ? 'website-error' : undefined}
@@ -3705,7 +3703,7 @@ export function ApplyWizard() {
                     <input
                       value={form.president_officer_name}
                       onChange={(e) => update('president_officer_name', e.target.value)}
-                      placeholder="e.g. Maria Clara Santos"
+                      placeholder="Full name"
                       maxLength={255}
                       className={inputCls}
                     />
@@ -3718,7 +3716,6 @@ export function ApplyWizard() {
                       <input
                         value={form.citizenship}
                         onChange={(e) => update('citizenship', e.target.value)}
-                        placeholder="e.g. Filipino"
                         maxLength={100}
                         className={inputCls}
                       />
@@ -4038,7 +4035,7 @@ export function ApplyWizard() {
                   value={form.line1}
                   onChange={(e) => update('line1', e.target.value)}
                   onBlur={() => touch('line1')}
-                  placeholder="e.g. 24 Rizal Street"
+                  placeholder="House/building no. and street"
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.line1)}
                 />
@@ -4073,7 +4070,7 @@ export function ApplyWizard() {
                 <input
                   value={form.line2}
                   onChange={(e) => update('line2', e.target.value)}
-                  placeholder="e.g. beside Sto. Niño Chapel"
+                  placeholder="Nearest landmark"
                   className={inputCls}
                 />
                 </label>
@@ -4125,7 +4122,7 @@ export function ApplyWizard() {
                       value={form.lessor_name}
                       onChange={(e) => update('lessor_name', e.target.value)}
                       onBlur={() => touch('lessor_name')}
-                      placeholder="e.g. Maria Santos"
+                      placeholder="Full name"
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_name)}
                     />
@@ -4147,7 +4144,7 @@ export function ApplyWizard() {
                       value={form.lessor_address}
                       onChange={(e) => update('lessor_address', e.target.value)}
                       onBlur={() => touch('lessor_address')}
-                      placeholder="e.g. 12 Mabini Street, Catmon"
+                      placeholder="House/building no., street, barangay"
                       className={inputCls}
                       aria-invalid={Boolean(fieldErrors.lessor_address)}
                     />
@@ -4167,7 +4164,7 @@ export function ApplyWizard() {
                         value={form.lessor_contact}
                         onChange={(e) => update('lessor_contact', e.target.value)}
                         onBlur={() => touch('lessor_contact')}
-                        placeholder="e.g. 0917 123 4567"
+                        placeholder="11 digits, starting 09"
                         className={inputCls}
                         aria-invalid={Boolean(fieldErrors.lessor_contact)}
                       />
@@ -4209,7 +4206,7 @@ export function ApplyWizard() {
                     value={form.emergency_contact_name}
                     onChange={(e) => update('emergency_contact_name', e.target.value)}
                     onBlur={() => touch('emergency_contact_name')}
-                    placeholder="e.g. Juan Dela Cruz"
+                    placeholder="Full name"
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
                   />
@@ -4228,7 +4225,7 @@ export function ApplyWizard() {
                     value={form.emergency_contact_number}
                     onChange={(e) => update('emergency_contact_number', e.target.value)}
                     onBlur={() => touch('emergency_contact_number')}
-                    placeholder="e.g. 0917 123 4567"
+                    placeholder="11 digits, starting 09"
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
                   />

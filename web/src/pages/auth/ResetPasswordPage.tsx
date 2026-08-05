@@ -21,7 +21,13 @@ function PasswordField({
   errorId,
 }: {
   id: string
-  placeholder: string
+  /*
+   * Optional: a password box has no format to teach and no example that is
+   * safe to show, so it carries no placeholder. Item 113 — a placeholder that
+   * only repeats the label is the label again in grey, and one that looks like
+   * real data invites someone to treat it as theirs.
+   */
+  placeholder?: string
   autoComplete: string
   value: string
   onChange: (v: string) => void
@@ -159,7 +165,6 @@ export function ResetPasswordPage() {
           </label>
           <PasswordField
             id="reset-password"
-            placeholder="Password"
             autoComplete="new-password"
             value={password}
             onChange={(v) => {
@@ -181,7 +186,6 @@ export function ResetPasswordPage() {
           </label>
           <PasswordField
             id="reset-confirm"
-            placeholder="Confirm Password"
             autoComplete="new-password"
             value={confirmation}
             onChange={(v) => {

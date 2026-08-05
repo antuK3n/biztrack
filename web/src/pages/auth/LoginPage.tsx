@@ -240,7 +240,6 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             id="login-password"
             name="password"
             autoComplete="current-password"
-            placeholder="Password"
             value={password}
             onChange={(v) => {
               setPassword(v)

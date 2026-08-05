@@ -1128,7 +1128,6 @@ export function FeeProfileStep({
               onChange={(next) => set('storeys', next)}
               onBlur={() => touch('storeys')}
               error={errorFor('storeys', value.storeys)}
-              placeholder="e.g. 1"
             />
             <NumberField
               label="Number of Employees"
@@ -1148,7 +1147,6 @@ export function FeeProfileStep({
               onChange={(next) => set('employees_in_lgu', next)}
               onBlur={() => touch('employees_in_lgu')}
               error={errorFor('employees_in_lgu', value.employees_in_lgu)}
-              placeholder="e.g. 2"
             />
             {/*
               The male/female breakdown of the total above — BPLO item B2 on the
@@ -1171,7 +1169,6 @@ export function FeeProfileStep({
               onChange={(next) => set('male_employees', next)}
               onBlur={() => touch('male_employees')}
               error={errorFor('male_employees', value.male_employees)}
-              placeholder="e.g. 2"
             />
             <NumberField
               label="Female Employees"
@@ -1180,7 +1177,6 @@ export function FeeProfileStep({
               onChange={(next) => set('female_employees', next)}
               onBlur={() => touch('female_employees')}
               error={errorFor('female_employees', value.female_employees)}
-              placeholder="e.g. 1"
             />
             <NumberField
               label="Motorized Delivery Vehicles"
@@ -1288,7 +1284,6 @@ export function FeeProfileStep({
               onChange={(next) => set('stall_count', next)}
               onBlur={() => touch('stall_count')}
               error={errorFor('stall_count', value.stall_count)}
-              placeholder="e.g. 1"
             />
           </div>
         </section>
