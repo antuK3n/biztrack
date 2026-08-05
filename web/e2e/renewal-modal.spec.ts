@@ -1,0 +1,350 @@
+import { expect, test, type Page } from '@playwright/test'
+
+/*
+ * ITEM 110 — "For the renewal, it should ask first (in modal) the permit ID so
+ * the system will know which specific permit to renew."
+ *
+ * The question used to sit on part 3 of the wizard, after consent, after the
+ * map, and after the form had already prefilled itself from a business whose
+ * permit it had not been told. This file pins the properties that made moving
+ * it worth doing, and the ones that could quietly undo it:
+ *
+ *   - the dialog is there, first, and asks business then permit;
+ *   - two permits of the same type can be told apart;
+ *   - a business with no BizTrack permit is NOT trapped (year one is almost
+ *     entirely renewals of permits issued on paper);
+ *   - a reopened draft that already named its permit is not asked again;
+ *   - a draft that never named one, and could have, IS asked again;
+ *   - the answer can be changed, and backing out of that change keeps it;
+ *   - Confirm is never `disabled` — it says why instead.
+ *
+ * None of these is visible to `tsc` or to the API suite. "The dialog opened
+ * over the wizard" and "the button was reachable but explained itself" are
+ * browser facts.
+ */
+
+test.use({ storageState: 'e2e/.auth/owner.json' })
+
+/*
+ * The seeded owner's one business with permits in the register — and it holds
+ * TWO, both Mayor's / Business Permits, differing only by number and validity.
+ * That is not a convenience, it is the case the item exists for: "which
+ * permit" is a real question precisely because the type does not answer it.
+ */
+const TWO_PERMIT_BUSINESS_ID = 1
+const BUSINESS_PERMIT_TYPE_ID = 1
+
+const DIALOG = /which permit are you renewing/i
+
+function dialog(page: Page) {
+  return page.getByRole('dialog', { name: DIALOG })
+}
+
+function businessSelect(page: Page) {
+  return dialog(page).getByLabel(/which business are you renewing/i)
+}
+
+/** The permit rows, which are radios inside the dialog's own radiogroup. */
+function permitRows(page: Page) {
+  return dialog(page).getByRole('radiogroup', { name: /which permit/i }).getByRole('radio')
+}
+
+/**
+ * Call the API as the app does, through the session already in the page.
+ *
+ * Used to BUILD fixtures — a draft that already names its permit cannot be
+ * produced by driving the wizard without first driving the very dialog under
+ * test, which would make the fixture depend on the thing it is fixing.
+ */
+async function api<T>(page: Page, method: 'GET' | 'POST', path: string, body?: unknown): Promise<T> {
+  return page.evaluate(
+    async ([m, p, b]) => {
+      const token = localStorage.getItem('biztrack.token.public')
+      const res = await fetch(`/api/v1${p}`, {
+        method: m as string,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: b === null ? undefined : JSON.stringify(b),
+      })
+      if (!res.ok) throw new Error(`${m} ${p} -> ${res.status} ${await res.text()}`)
+      return (await res.json()).data
+    },
+    [method, path, body ?? null] as const,
+  ) as Promise<T>
+}
+
+interface SeededPermit {
+  id: number
+  permit_number: string
+}
+
+async function renewablePermits(page: Page, businessId: number): Promise<SeededPermit[]> {
+  const result = await api<{ renewable_permits: SeededPermit[] }>(
+    page,
+    'GET',
+    `/businesses/${businessId}/prefill?type=renewal`,
+  )
+  return result.renewable_permits ?? []
+}
+
+/**
+ * Business Information on a reopened draft, without walking the whole wizard.
+ *
+ * A reopened draft has every section marked opened, and its business fields
+ * come back filled, so Location & Zoning is already complete — the only thing
+ * standing between the applicant and part 3 is the consent tick, which is
+ * deliberately never restored (RA 10173: consent is given, not remembered).
+ */
+async function openBusinessStep(page: Page) {
+  await page.getByRole('checkbox').first().check()
+  const chip = page.getByRole('button', { name: /business information/i })
+  await expect(chip).toBeEnabled({ timeout: 20_000 })
+  await chip.click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+}
+
+/** A renewal draft on the two-permit business, optionally already naming one. */
+async function seedDraft(page: Page, priorPermitId?: number): Promise<number> {
+  const draft = await api<{ id: number }>(page, 'POST', '/applications', {
+    business_id: TWO_PERMIT_BUSINESS_ID,
+    application_type: 'renewal',
+    permit_type_ids: [BUSINESS_PERMIT_TYPE_ID],
+    title: `E2E item 110 — ${priorPermitId ? 'named' : 'unnamed'} ${Date.now()}`,
+    ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
+  })
+  return draft.id
+}
+
+test('a renewal is asked which permit before the wizard opens', async ({ page }) => {
+  await page.goto('/apply?type=renewal')
+
+  /*
+   * The dialog, not the wizard. `role="dialog"` with an accessible name is
+   * what makes a screen reader announce this as an interruption rather than as
+   * more page, and `aria-modal` is what stops it reading the wizard behind.
+   */
+  const modal = dialog(page)
+  await expect(modal).toBeVisible({ timeout: 30_000 })
+  await expect(modal).toHaveAttribute('aria-modal', 'true')
+
+  /*
+   * Business first, permit second. Which business you are renewing decides
+   * which permits there are to choose between, so asking them the other way
+   * round would be asking a question whose options do not exist yet.
+   */
+  await expect(businessSelect(page)).toBeVisible()
+  await expect(permitRows(page)).toHaveCount(0)
+
+  // And focus is inside the dialog, not left on the page underneath it.
+  const focusInside = await modal.evaluate((el) => el.contains(document.activeElement))
+  expect(focusInside, 'focus was left behind the dialog').toBe(true)
+})
+
+test('two permits of the same type are told apart by number and dates', async ({ page }) => {
+  /*
+   * A shop renewing late holds last year's Mayor's Permit and this year's:
+   * same type, same business, same name. A list showing only the type would be
+   * asking the applicant to choose between two identical rows.
+   */
+  await page.goto('/apply?type=renewal')
+  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+
+  await businessSelect(page).selectOption({ value: String(TWO_PERMIT_BUSINESS_ID) })
+
+  const rows = permitRows(page)
+  await expect(rows).toHaveCount(2, { timeout: 20_000 })
+
+  const texts = await rows.allInnerTexts()
+  for (const text of texts) {
+    // A permit number, and BOTH ends of the validity it was issued for.
+    expect(text, 'a permit row with no permit number').toMatch(/[A-Z]{2,}-\d{4}-\d+/)
+    expect(text, 'a permit row with no validity dates').toMatch(
+      /\w{3}\s+\d{1,2},\s+\d{4}\s+–\s+\w{3}\s+\d{1,2},\s+\d{4}/,
+    )
+  }
+  // They differ. If two rows ever read the same, the question is unanswerable.
+  expect(texts[0]).not.toEqual(texts[1])
+})
+
+test('Continue is never disabled — it says what is still missing', async ({ page }) => {
+  /*
+   * WCAG 3.3.1 / 3.3.3. A disabled Confirm is skipped by the tab order, so the
+   * one control that would explain the hold-up is the one a keyboard user
+   * never reaches, and a sighted user gets a grey button and no reason. The
+   * button stays pressable and points at the sentence naming the gap.
+   */
+  await page.goto('/apply?type=renewal')
+  const modal = dialog(page)
+  await expect(modal).toBeVisible({ timeout: 30_000 })
+
+  const proceed = modal.getByRole('button', { name: /continue/i })
+  await expect(proceed).toBeEnabled()
+
+  /*
+   * The reason is described on the button BEFORE it is pressed, so tabbing
+   * onto it reads out the hold-up instead of announcing a dead end. The id
+   * comes from React's useId and is not a valid CSS selector, hence the
+   * attribute match rather than `#id`.
+   */
+  const first = await proceed.getAttribute('aria-describedby')
+  expect(first, 'Continue does not point at a reason').toBeTruthy()
+  await expect(page.locator(`[id="${first}"]`)).toHaveText(/choose the business/i)
+
+  // Pressing it does not proceed, and now shows what it was already saying.
+  await proceed.click()
+  await expect(modal).toBeVisible()
+  await expect(page.locator(`[id="${first}"]`)).toBeVisible()
+
+  // With a business chosen, the reason moves on to the permit.
+  await businessSelect(page).selectOption({ value: String(TWO_PERMIT_BUSINESS_ID) })
+  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+  const second = await proceed.getAttribute('aria-describedby')
+  expect(second).toBeTruthy()
+  await expect(page.locator(`[id="${second}"]`)).toHaveText(/which of these permits/i)
+
+  // Answered, there is nothing left to describe.
+  await permitRows(page).first().click()
+  await expect(proceed).not.toHaveAttribute('aria-describedby', /.+/)
+})
+
+test('a business whose permits are on paper is not trapped', async ({ page }) => {
+  /*
+   * The escape, and why it is not optional: in year one almost every renewal
+   * is of a permit the old counter process issued on paper, so "not in the
+   * register" is the ordinary case. A dialog that insisted on a permit id
+   * would shut the renewal flow to most of the city.
+   */
+  await page.goto('/apply?type=renewal')
+  const modal = dialog(page)
+  await expect(modal).toBeVisible({ timeout: 30_000 })
+
+  const paperOnly = await businessWithoutPermits(page)
+  await businessSelect(page).selectOption({ value: paperOnly })
+
+  await expect(modal.getByText(/no permit issued through biztrack yet/i)).toBeVisible({
+    timeout: 20_000,
+  })
+  // The way through is stated, not merely implied by the absence of a list.
+  await expect(
+    modal.getByText(/upload your paper permit under documentary requirements/i),
+  ).toBeVisible()
+
+  const proceed = modal.getByRole('button', { name: /continue/i })
+  // Nothing left to answer, so nothing left to describe.
+  await expect(proceed).not.toHaveAttribute('aria-describedby', /.+/)
+  await proceed.click()
+
+  // The wizard opens with the dialog gone — that is the escape working.
+  await expect(modal).toBeHidden({ timeout: 20_000 })
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible()
+})
+
+test('a reopened draft that already names its permit is not asked again', async ({ page }) => {
+  /*
+   * The dialog answers a question ONCE. Putting it in front of every reopen
+   * would be the wizard forgetting, every time, a decision the applicant had
+   * already made — and charging them the price of making it again to get back
+   * into their own draft.
+   */
+  await page.goto('/apply')
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+
+  const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
+  expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
+  const draftId = await seedDraft(page, permits[0].id)
+
+  await page.goto(`/apply?draft=${draftId}`)
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  /*
+   * Not a race with the dialog's own mount: the reopen waits for the
+   * prior-permit read before it paints, and that read is what decides. If this
+   * ever flakes, the decision has been moved back after the first paint.
+   */
+  await expect(dialog(page)).toHaveCount(0)
+
+  /*
+   * And the answer it was not asked for is on the screen where it was made. A
+   * draft that kept the permit but stopped SAYING which one would pass the
+   * check above while costing the applicant the same information.
+   */
+  await openBusinessStep(page)
+  await expect(page.getByText(permits[0].permit_number)).toBeVisible()
+})
+
+test('a draft that never named a permit, and could have, is asked again', async ({ page }) => {
+  /*
+   * The other half. A renewal draft with no prior permit against a business
+   * that HAS permits is exactly the draft `canCreateDraft` refuses to save —
+   * so it is stuck, and reopening it without the dialog would show a form that
+   * silently declines to save and never says why.
+   */
+  await page.goto('/apply')
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+
+  const draftId = await seedDraft(page)
+
+  await page.goto(`/apply?draft=${draftId}`)
+  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+  // Opened on the business it already knows, so only the missing half is asked.
+  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+})
+
+test('a wrong permit can be corrected, and backing out keeps the old answer', async ({ page }) => {
+  /*
+   * Two permits a year apart look alike in a hurry, so picking the wrong one is
+   * the ordinary mistake — and before this there was no way back into the
+   * question except abandoning the draft. Change reopens the dialog; Cancel
+   * from Change puts back what was there, so pressing it to LOOK costs nothing.
+   */
+  await page.goto('/apply')
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+
+  const permits = await renewablePermits(page, TWO_PERMIT_BUSINESS_ID)
+  expect(permits.length, 'the two-permit fixture has drifted').toBeGreaterThan(1)
+  const draftId = await seedDraft(page, permits[0].id)
+
+  await page.goto(`/apply?draft=${draftId}`)
+  await expect(page.getByText(/part 1 of/i).first()).toBeVisible({ timeout: 30_000 })
+  await openBusinessStep(page)
+  await expect(page.getByText(permits[0].permit_number)).toBeVisible()
+
+  // Reopen, choose the other one, then back out of it.
+  await page.getByRole('button', { name: /^change$/i }).click()
+  await expect(dialog(page)).toBeVisible()
+  const other = permitRows(page).filter({ hasText: permits[1].permit_number })
+  await other.click()
+  await dialog(page).getByRole('button', { name: /keep what i had/i }).click()
+  await expect(dialog(page)).toBeHidden()
+  await expect(page.getByText(permits[0].permit_number)).toBeVisible()
+
+  // Reopen and commit the change this time.
+  await page.getByRole('button', { name: /^change$/i }).click()
+  await permitRows(page).filter({ hasText: permits[1].permit_number }).click()
+  await dialog(page).getByRole('button', { name: /continue/i }).click()
+  await expect(dialog(page)).toBeHidden({ timeout: 20_000 })
+  await expect(page.getByText(permits[1].permit_number)).toBeVisible()
+})
+
+/* ── Fixtures read off the register, not hard-coded ───────────────────────── */
+
+/**
+ * A business the register holds no permit for — the paper-permit case.
+ *
+ * Discovered rather than named: the owner's businesses are seeded and then
+ * edited by hand on this stack, so pinning one by id or by index makes a test
+ * that breaks the next time somebody registers a shop.
+ */
+async function businessWithoutPermits(page: Page): Promise<string> {
+  const options = await businessSelect(page)
+    .locator('option')
+    .evaluateAll((els) =>
+      els.map((el) => (el as HTMLOptionElement).value).filter((value) => value !== ''),
+    )
+  for (const value of options) {
+    if ((await renewablePermits(page, Number(value))).length === 0) return value
+  }
+  throw new Error('every seeded business holds a permit — the paper-permit case is untestable here')
+}
