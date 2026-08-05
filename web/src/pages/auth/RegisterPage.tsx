@@ -220,7 +220,6 @@ export function RegisterPage() {
             <input
               id="reg-first"
               autoComplete="given-name"
-              placeholder="First Name"
               value={values.first_name}
               onChange={(e) => setValue('first_name', e.target.value)}
               onBlur={() => blurValidate('first_name')}
@@ -233,7 +232,6 @@ export function RegisterPage() {
             <input
               id="reg-last"
               autoComplete="family-name"
-              placeholder="Last Name"
               value={values.last_name}
               onChange={(e) => setValue('last_name', e.target.value)}
               onBlur={() => blurValidate('last_name')}
@@ -249,7 +247,6 @@ export function RegisterPage() {
             <input
               id="reg-middle"
               autoComplete="additional-name"
-              placeholder="Middle Name (optional)"
               value={values.middle_name}
               onChange={(e) => setValue('middle_name', e.target.value)}
               className={inputCls}
@@ -292,7 +289,6 @@ export function RegisterPage() {
               type="email"
               autoComplete="email"
               inputMode="email"
-              placeholder="Email Address"
               value={values.email}
               onChange={(e) => setValue('email', e.target.value)}
               onBlur={() => blurValidate('email')}
@@ -321,7 +317,6 @@ export function RegisterPage() {
             <PasswordInput
               id="reg-password"
               name="password"
-              placeholder="Password"
               value={values.password}
               onChange={(v) => setValue('password', v)}
               onBlur={() => blurValidate('password')}
@@ -333,7 +328,6 @@ export function RegisterPage() {
             <PasswordInput
               id="reg-confirm"
               name="password_confirmation"
-              placeholder="Re-enter Password"
               value={values.password_confirmation}
               onChange={(v) => setValue('password_confirmation', v)}
               onBlur={() => blurValidate('password_confirmation')}

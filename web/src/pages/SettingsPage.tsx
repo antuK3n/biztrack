@@ -260,7 +260,6 @@ export function SettingsPage() {
                   id="profile-first"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
-                  placeholder="First Name"
                   autoComplete="given-name"
                   aria-invalid={fieldErrors.first_name ? true : undefined}
                   aria-describedby={fieldErrors.first_name ? 'profile-first-error' : undefined}
@@ -290,7 +289,6 @@ export function SettingsPage() {
                   id="profile-last"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
-                  placeholder="Last Name"
                   autoComplete="family-name"
                   aria-invalid={fieldErrors.last_name ? true : undefined}
                   aria-describedby={fieldErrors.last_name ? 'profile-last-error' : undefined}
@@ -407,7 +405,6 @@ export function SettingsPage() {
               </label>
               <PasswordInput
                 id="settings-password"
-                placeholder="Password"
                 value={password}
                 onChange={setPassword}
                 invalid={!!fieldErrors.password}
@@ -422,7 +419,6 @@ export function SettingsPage() {
               </label>
               <PasswordInput
                 id="settings-confirm"
-                placeholder="Confirm Password"
                 value={confirm}
                 onChange={setConfirm}
                 iconSize={18}
