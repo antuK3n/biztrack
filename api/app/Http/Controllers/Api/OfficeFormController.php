@@ -58,10 +58,14 @@ class OfficeFormController extends Controller
             ->unique()
             ->values();
 
-        $forms = $codes->map(fn (string $code) => [
-            'permit_type_code' => $code,
-            'form_data' => $this->withDerived($application, $code, $stored[$code]->form_data ?? []),
-        ]);
+        $forms = $codes
+            ->filter(fn (string $code) => $this->readableCode($request, $code))
+            ->values()
+            ->map(fn (string $code) => [
+                'permit_type_code' => $code,
+                'form_data' => $this->withDerived($application, $code, $stored[$code]->form_data ?? []),
+            ])
+            ->values();
 
         return response()->json(['data' => $forms]);
     }
@@ -78,10 +82,20 @@ class OfficeFormController extends Controller
     {
         $user = $request->user();
         $isOwner = $application->applicant_user_id === $user->id;
-        // A reviewer may record issuance dates only on a filing its office is
-        // part of; the permission alone is no longer enough (checklist item 56).
+        /*
+         * A reviewer may record issuance dates only on a filing its office is
+         * part of; the permission alone is no longer enough (checklist item 56).
+         *
+         * Item 111 narrows it once more, to the sheet as well as the filing: the
+         * issuance date on the FSIC sheet is the fire office stating when it
+         * issued that certificate, so it is not the sanitary officer's to write
+         * even though both offices are on the filing. readableCode() is the same
+         * boundary the GET uses — a sheet you may not read is not a sheet you may
+         * sign.
+         */
         $isReviewer = $user->hasPermission('application.review')
-            && ApplicationVisibility::canView($user, $application);
+            && ApplicationVisibility::canView($user, $application)
+            && $this->readableCode($request, $permitTypeCode);
 
         abort_unless($isOwner || $isReviewer, 403, 'This application is not yours.');
 
@@ -277,6 +291,19 @@ class OfficeFormController extends Controller
                 default => 'FSIC for Business Permit (New Business)',
             };
         }
+        if ($permitTypeCode === 'MARKET') {
+            /*
+             * The one derived answer on a sheet that is otherwise invented
+             * (checklist item 109 — the office has no paper form). Worth
+             * deriving precisely because it is invented: whether the stall
+             * holder is new to the market or renewing is the single question
+             * the office would certainly ask, and it is the single question the
+             * filing can already answer for itself.
+             */
+            $derived['application_type'] = $existingBusiness
+                ? 'Renewal of Market Clearance'
+                : 'New Market Clearance';
+        }
         // OCCUPANCY's own "application_type" is Full vs Partial occupancy — a
         // real applicant decision, not the new/renewal the system already knows.
 
@@ -298,6 +325,65 @@ class OfficeFormController extends Controller
             ->first();
 
         return trim((string) ($form?->form_data['authorized_representative'] ?? ''));
+    }
+
+    /**
+     * May this reader see this particular office's sheet? (checklist item 111)
+     *
+     * authorizeView() has already answered the coarse question — may you open
+     * this filing at all. This answers the finer one the client actually
+     * reported: "form submissions for other offices are still present for only
+     * one office/admin account". A six-clearance filing is routed to six
+     * offices, so all six passed the coarse check and each was handed all six
+     * sheets. The sanitary officer could read the fire office's FSIC answers,
+     * which is one office reading another's file on the same applicant.
+     *
+     * The boundary is the permit type's issuing department: the FSIC sheet
+     * belongs to whoever issues FSIC. Three readers keep everything:
+     *
+     *  - the applicant, because every one of these sheets is their own answers.
+     *    They fill all six in the wizard; hiding them would break the filing;
+     *  - BPLO and the super admin (view_any_office), who coordinate and audit
+     *    across offices by design;
+     *  - the office that issues the clearance the sheet is for.
+     *
+     * An unrecognised code fails closed. A reviewer with no department resolves
+     * to null and matches nothing, which is the same fail-closed posture
+     * ApplicationVisibility::scope() takes.
+     */
+    private function readableCode(Request $request, string $code): bool
+    {
+        $user = $request->user();
+
+        if (ApplicationVisibility::readsEveryOffice($user)) {
+            return true;
+        }
+        // The applicant is the author of every sheet on their own filing.
+        if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
+            return true;
+        }
+
+        return $user->department_id !== null
+            && $user->department_id === $this->issuingDepartmentId($code);
+    }
+
+    /**
+     * Which office issues this clearance. Memoised per request because index()
+     * asks once per code and upsert() once per call, and the answer is seeded
+     * reference data that cannot change inside one request.
+     *
+     * @var array<string, int|null>
+     */
+    private array $issuingDepartments = [];
+
+    private function issuingDepartmentId(string $code): ?int
+    {
+        if (! array_key_exists($code, $this->issuingDepartments)) {
+            $this->issuingDepartments[$code] = PermitType::where('code', $code)
+                ->value('issuing_department_id');
+        }
+
+        return $this->issuingDepartments[$code];
     }
 
     /** Owner, an office routed this filing, or BPLO/admin (checklist item 56). */

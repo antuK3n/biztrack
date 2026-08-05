@@ -38,11 +38,16 @@ class PermitType extends Model
      * ZONING joined in August 2026 (checklist item 101), at first as the one
      * sheet not transcribed from a paper form; CPDD's MCG-CPDD-FO-003 v1.2
      * arrived shortly after and the sheet was rebuilt against it (see the
-     * header of OfficeFormStep.tsx and questions-for-malabon E4/C9). MARKET is
-     * still absent, for the reason ZONING used to be: nobody has shown us what
-     * the City Market Administrator asks for.
+     * header of OfficeFormStep.tsx and questions-for-malabon E4/C9).
+     *
+     * MARKET joined last (checklist item 109) and joined differently: the
+     * client said outright that no paper version of it exists and asked for one
+     * to be created, so it is the one code on this list whose sheet nobody at
+     * the city has seen. Applying for the Market Clearance used to collect
+     * nothing at all, which is the worse end of that trade — the office got a
+     * request naming neither a market nor a stall. All six open a form now.
      */
-    public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
+    public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY', 'MARKET'];
 
     /**
      * Display order for the six clearances, as the client's flow lays them out

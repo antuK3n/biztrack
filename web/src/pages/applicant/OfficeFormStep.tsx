@@ -17,11 +17,23 @@ import { formatDate } from '../../lib/format'
  * carries what the paper form needs. Issuance dates ("Date Issued") belong to
  * the office that issued the document and are filled in during officer review.
  *
- * ── All five sheets are transcribed from paper now ────────────────────────
+ * ── Five sheets are transcribed from paper. One is not, and admits it ──────
  *
  * The CHO, CENRO, BFP and OBO forms were always copied from the document the
  * counter hands out, field label for field label, so what BizTrack asks is what
  * the counter asks, word for word.
+ *
+ * MARKET is the exception, and unlike ZONING below it is not an exception that
+ * will resolve itself. Checklist item 109: *"Application form for Market
+ * Clearance is missing. Create something for this since we currently don't have
+ * the paper version."* There is no document to transcribe and the client has
+ * said so directly, so this sheet is written rather than copied — which makes
+ * restraint the only defence available. It asks three questions, every one of
+ * them either the basis of a fee the engine already knows how to charge or the
+ * identity of the stall being cleared, and it says on its own face that it is
+ * interim. Each invented field carries a comment saying why it is there, so the
+ * list can be held up to the City Market Administrator and checked line by
+ * line. See docs/questions-for-malabon.md.
  *
  * ZONING was the exception. CPDD had never sent its locational clearance form
  * (`docs/questions-for-malabon.md` E4/C9 had been chasing it since the first
@@ -78,7 +90,14 @@ export interface CarriedOverBusiness {
  * form?" from a database row and this file cannot be imported from PHP. The two
  * must be changed together or a card offers a sheet that does not exist.
  */
-export const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'] as const
+export const OFFICE_FORM_CODES = [
+  'ZONING',
+  'SANITARY',
+  'CEC',
+  'FSIC',
+  'OCCUPANCY',
+  'MARKET',
+] as const
 export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 
 /** Kicker + h1 + form-ref for each office form sheet (verbatim from prototype). */
@@ -122,6 +141,24 @@ export const OFFICE_FORM_META: Record<
     title: 'Certificate of Occupancy & Fire Safety Inspection Certificate',
     ref: 'Unified Application Form',
   },
+  /*
+   * The one sheet with no paper behind it, and the ref line says so out loud.
+   *
+   * Every other entry here cites a form code because a real document exists to
+   * cite — MCG-CENRO-FO-001, BFP-QSF-FSED-002, and MCG-CPDD-FO-003 once CPDD
+   * finally sent it. Inventing "MCG-CMO-FO-001" would dress three questions we
+   * wrote ourselves as a form the City Market Administrator issued, and the
+   * next person to read this screen would have no way to tell the difference.
+   *
+   * The line is written for the applicant, not for us: it tells a stall holder
+   * why this sheet is shorter than the others, and it is the sentence that has
+   * to be deleted the day the office hands over its real form.
+   */
+  MARKET: {
+    kicker: 'Office of the City Market Administrator',
+    title: 'Application for Market Clearance (Stall Holders)',
+    ref: 'Interim form — the office has no printed version of this application',
+  },
 }
 
 /** True if a permit-type code renders a prototype office form. */
@@ -161,6 +198,31 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
+  }
+  /*
+   * MARKET requires the two answers that identify the thing being cleared.
+   *
+   * Every requirement on this sheet is one we invented, so the bar is higher
+   * than on the transcribed sheets, not lower: a rule the counter does not
+   * enforce is a door this system closes that the office leaves open. The name
+   * of the market and the stall number survive that test because a market
+   * clearance that names neither is not a clearance of anything — the office
+   * would have nothing to write the certificate against.
+   *
+   * The stall count is deliberately NOT required, even though it is the one
+   * field the fee engine reads (see the comment on the input). A blank there
+   * costs the applicant nothing and simply leaves the stall-count rules
+   * unmatched, whereas requiring it would make an invented question a hard
+   * block on submitting the whole filing.
+   */
+  if (code === 'MARKET') {
+    if (!has('market_name')) missing.push('Name of Market')
+    if (!has('stall_no')) missing.push('Stall No.')
+    // Optional, but a typed answer still has to be a countable number of
+    // stalls: the fee rules multiply it by a peso rate.
+    if (has('stall_count') && !/^[1-9]\d*$/.test((data.stall_count as string).trim())) {
+      missing.push('Number of stalls must be a whole number of 1 or more')
+    }
   }
   return missing
 }
@@ -881,6 +943,159 @@ function OccupancyFields({
   )
 }
 
+/**
+ * The Market Clearance sheet — checklist item 109, and the only one of the six
+ * with nothing behind it but this comment.
+ *
+ * *"Create something for this since we currently don't have the paper
+ * version."* So every question below was chosen here, not copied, and the test
+ * each one had to pass was: **would the office be unable to do its job without
+ * it?** Three passed. Everything else a market clearance might plausibly ask —
+ * what is sold at the stall, the size of it, how long it has been held, the
+ * name on the previous clearance — was left out, because a long invented form
+ * is a long list of things to un-invent when the office finally sends its own.
+ *
+ * The two that are asked for identity, and are required:
+ *
+ *   market_name  Which market. `CMO-MARKET` is the Office of the City Market
+ *                Administrator, singular, and it administers more than one
+ *                market — so "a stall" with no market named is not an address
+ *                the office can act on. Nothing else in the filing carries it:
+ *                the business address is the stall's street address, which is
+ *                the market's address for every stall in it and therefore
+ *                cannot distinguish the market from the stall.
+ *   stall_no     Which stall. The clearance is issued against one stall, and
+ *                this is the only field in the entire application that says
+ *                which. INVENTED, but not really a judgement call: without it
+ *                the certificate has no subject.
+ *
+ * The one that is asked for money, and is not required:
+ *
+ *   stall_count  How many stalls are held. This is the ONLY field on this sheet
+ *                that is not a guess about what the office wants, because the
+ *                revenue code already prices market lines per stall and the
+ *                engine already reads the number: `FeeRule.basis = 'stall_count'`
+ *                resolves to `fee_profile.stall_count` (FeeCalculator::basisValue),
+ *                and four seeded rules use it — garbage Schedule J at ₱44/₱55 a
+ *                stall, the privately-owned market bracket, and the fish broker
+ *                market bracket.
+ *
+ *                It is asked HERE and not on the Business & Tax Profile because
+ *                the profile's stall question is gated on `has('MARKET')` over a
+ *                permit-code list every call site fills with BUSINESS alone —
+ *                the clearances are chosen a step LATER than the profile now, so
+ *                that question can never fire. This sheet is the first screen in
+ *                the flow that knows the applicant holds a stall at all.
+ *
+ *                What it does NOT yet do is reach `fee_profile`. Office sheets
+ *                are opaque JSON on `application_office_forms`, and the fee
+ *                engine reads `applications.fee_profile`; nothing carries a
+ *                value from one to the other. So the number is collected and
+ *                shown to the office, and the per-stall rules stay unmatched
+ *                until someone wires it across. That is a fee-assessment change
+ *                with its own consequences and it is not made here — it is
+ *                written up rather than half-done.
+ */
+function MarketFields({
+  data,
+  set,
+}: {
+  data: OfficeFormData
+  set: (key: string, value: string) => void
+}) {
+  const stallCount = get(data, 'stall_count')
+  const stallCountBad = stallCount !== '' && !/^[1-9]\d*$/.test(stallCount.trim())
+
+  return (
+    <div className="space-y-7">
+      <section className="space-y-4">
+        <SectionMarker letter="A" label="Application Details" />
+        <div className="grid gap-5 sm:grid-cols-2">
+          {/* New vs Renewal is the application's own type, as on every other
+            * sheet — the one thing this form does not have to invent. */}
+          <DerivedField
+            label={
+              <>
+                Type of Application
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'application_type')}
+          />
+          {/*
+           * MCM is the prefix the register already mints market clearances
+           * under (`permit_types.permit_number_prefix`), so the placeholder
+           * shows the shape of the number the applicant will be given rather
+           * than one invented to fill the box.
+           */}
+          <ControlNoField
+            label={
+              <>
+                Market Clearance No.
+                <AutoTag />
+              </>
+            }
+            placeholder="MCM-2026-________"
+          />
+          <ApplicationDateField data={data} />
+        </div>
+      </section>
+
+      <section className="space-y-4">
+        <SectionMarker letter="B" label="Stall Details" required />
+        <p className="text-xs text-ink-muted">
+          The business name, address and trade above are carried from your application. What this
+          office needs on top of them is which stall it is clearing.
+        </p>
+        <div className="grid gap-5 sm:grid-cols-2">
+          <label className="block">
+            <FieldLabel required>Name of Market</FieldLabel>
+            <input
+              value={get(data, 'market_name')}
+              onChange={(e) => set('market_name', e.target.value)}
+              placeholder="e.g. Malabon Central Market"
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
+            <FieldLabel required>Stall No.</FieldLabel>
+            <input
+              value={get(data, 'stall_no')}
+              onChange={(e) => set('stall_no', e.target.value)}
+              placeholder="e.g. B-14"
+              className={inputCls}
+            />
+          </label>
+          <div>
+            <label className="block">
+              <FieldLabel>Number of Stalls Held</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={stallCount}
+                onChange={(e) => set('stall_count', e.target.value)}
+                placeholder="1"
+                className={inputCls}
+                aria-invalid={stallCountBad}
+              />
+            </label>
+            {stallCountBad ? (
+              /* role="alert" — a typed answer the sheet is refusing has to
+                 reach a screen reader without being gone looking for. */
+              <p role="alert" className="mt-1 text-xs font-medium text-s-red">
+                Enter a whole number of stalls, 1 or more.
+              </p>
+            ) : (
+              <p className="mt-1 text-xs text-ink-muted">
+                Leave blank if you hold one stall only. Several market fees are charged per stall.
+              </p>
+            )}
+          </div>
+        </div>
+      </section>
+    </div>
+  )
+}
+
 /* ── Office form sheet (composed step) ────────────────────────────────── */
 
 export function OfficeFormSheet({
@@ -912,6 +1127,7 @@ export function OfficeFormSheet({
         {code === 'CEC' && <CecFields data={data} set={set} />}
         {code === 'FSIC' && <FsicFields data={data} set={set} />}
         {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} />}
+        {code === 'MARKET' && <MarketFields data={data} set={set} />}
       </div>
     </div>
   )

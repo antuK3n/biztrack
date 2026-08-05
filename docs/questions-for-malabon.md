@@ -202,6 +202,42 @@ corrected than keep guessing:
 **What we assumed meanwhile.** Optional, like the other five. The card names who
 it is for and nothing compels it.
 
+**Updated 5 August 2026 — the card is now derived, and point 3 is answered.**
+The client came back on item 98 and asked for the Market Clearance to be
+*hidden* from applicants it does not concern rather than shown to everyone with
+a sentence explaining itself, and specifically not to be turned into a yes/no
+put to every applicant in the city. So:
+
+- The card appears when the filing's own declared revenue-code category is one
+  of `public_market_100_plus_stalls`, `public_market_under_100_stalls`,
+  `private_market` or `fish_broker_market` — the four the fee engine already
+  prices per stall — or when a stall count greater than zero has been declared.
+  Both are answered on Business & Tax Profile, the step before the clearances.
+- **The derivation is known to be aimed slightly wrong, and this is the part we
+  need corrected.** Those four categories describe a market **operator**. The
+  "stall holder" of item 98 is that operator's **tenant**, and a fishmonger
+  renting one stall will not have declared themselves a privately-owned market.
+  So a pure filter would show the card to the landlord and hide it from exactly
+  the group the complaint was about.
+- Because of that it only ever *adds* the card. A plain control under the cards
+  — "Trading from a stall inside a public or private market? Show the Market
+  Clearance" — reveals it, and a clearance already applied for stays on screen
+  whatever the derivation says.
+
+**What we still need from you.** Is "stall holder" the right population at all,
+or does the market operator need this clearance too — or instead? If there is a
+fact the city already holds that says a premises is a stall (a stall register, a
+lease with the City Market Administrator, a barangay/market address range), that
+is the honest trigger and we would replace ours with it.
+
+Point 3 above is now partly answered by us: the Market Clearance's own form
+sheet asks for the number of stalls, because that sheet is the first screen in
+the flow that knows the applicant holds a stall at all (item 109). **It is
+collected but not yet priced** — office form answers are stored separately from
+the fee profile the assessment reads, so the markets-by-stall-count bracket
+still has no count to work from. Wiring it across is a fee-assessment change and
+we would rather make it once, after A9c settles what the office charges.
+
 ## A9c. What does the City Market Administrator actually charge, and is it a permit fee at all?
 
 The 2016 Revenue Code on file contains no public-market stall fee schedule —

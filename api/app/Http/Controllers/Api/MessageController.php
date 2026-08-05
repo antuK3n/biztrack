@@ -30,6 +30,78 @@ class MessageController extends Controller
     public function __construct(private NotificationService $notify) {}
 
     /**
+     * Hide other offices' turns in a shared conversation (checklist item 111).
+     *
+     * `message_threads.application_id` is UNIQUE — one conversation per filing,
+     * by construction (see responsibleAssignment() below, which already works
+     * around it). WorkflowService::routeToDepartments then puts up to six
+     * offices on that one filing, so the sanitary officer, the fire inspector
+     * and the market administrator were all reading the same transcript,
+     * including each other's turns. That is the client's "messages from other
+     * officers in other offices show up", and it is a privacy defect: what the
+     * fire office said to this applicant is the fire office's business.
+     *
+     * The boundary is drawn on the MESSAGE, not the thread, and deliberately so.
+     * Splitting the schema into one thread per office is the fuller fix, but it
+     * changes the shape of the applicant's inbox — they would go from one
+     * conversation per filing to one per office — and that is a product decision
+     * about their experience, not a leak to be patched silently. Scoping the
+     * rows closes the leak the client reported without pre-empting that call.
+     *
+     * A scoped office sees exactly two kinds of turn:
+     *
+     *  - the applicant's own, always. They are the other side of every one of
+     *    these conversations, and an office cannot review a filing while being
+     *    unable to read what the applicant told it;
+     *  - its own officers'. Matched through the sender's department rather than
+     *    a column on the message, because that is where the fact lives, and the
+     *    sender is already eager-loaded with `department_id` everywhere.
+     *
+     * Deliberately left OUT, and this is the visible trade: BPLO's and the super
+     * admin's turns are hidden from a scoped office too. BPLO is another office
+     * by this rule and the client named no exception for it. Officers coordinate
+     * through the review sheet and requirement requests, not by reading the
+     * applicant's mail, and BPLO itself keeps the whole transcript because it
+     * holds view_any_office. If the LGU later wants BPLO's coordination visible
+     * in-thread, that is one added clause here, not a redesign.
+     */
+    private function scopeMessagesToReader($query, User $user): void
+    {
+        if (ApplicationVisibility::readsEveryOffice($user)) {
+            return;
+        }
+        // The applicant reads their own file whole; only office seats are scoped.
+        if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
+            return;
+        }
+
+        $deptId = $user->department_id;
+
+        $query->where(function ($q) use ($deptId) {
+            /*
+             * "Sent by the applicant on this filing." Correlated by column so
+             * this works both on a concrete application and inside the inbox's
+             * per-application subqueries, where the applicant differs per row.
+             */
+            $q->whereExists(fn ($sub) => $sub->selectRaw('1')
+                ->from('message_threads as vt')
+                ->join('applications as va', 'va.id', '=', 'vt.application_id')
+                ->whereColumn('vt.id', 'messages.thread_id')
+                ->whereColumn('va.applicant_user_id', 'messages.sender_user_id'));
+
+            // "Sent by one of my own office's people." A reviewer with no
+            // department adds no clause and so sees only the applicant — the
+            // same fail-closed posture ApplicationVisibility::scope() takes.
+            if ($deptId) {
+                $q->orWhereExists(fn ($sub) => $sub->selectRaw('1')
+                    ->from('users as vu')
+                    ->whereColumn('vu.id', 'messages.sender_user_id')
+                    ->where('vu.department_id', $deptId));
+            }
+        });
+    }
+
+    /**
      * Inbox for the dedicated Messages page (checklist item 49): one row per
      * conversation, newest first, named after whoever the reader is talking to.
      * Applicants see their own applications (including ones with no thread yet,
@@ -57,15 +129,24 @@ class MessageController extends Controller
          * it has, the applicant's threadless filings and the officer's threads
          * are the same query with a different WHERE.
          */
+        /*
+         * Item 111: the inbox row summarises only the turns this reader may
+         * read. Without the same scoping as the transcript, the preview line
+         * would quote another office's message and the counter would count it —
+         * the leak would survive in the list even though opening the thread no
+         * longer showed it.
+         */
         $lastMessageAt = Message::query()
             ->selectRaw('MAX(messages.created_at)')
             ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
-            ->whereColumn('message_threads.application_id', 'applications.id');
+            ->whereColumn('message_threads.application_id', 'applications.id')
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user));
 
         $messagesCount = Message::query()
             ->selectRaw('COUNT(*)')
             ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
-            ->whereColumn('message_threads.application_id', 'applications.id');
+            ->whereColumn('message_threads.application_id', 'applications.id')
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user));
 
         $query = Application::query()
             ->select('applications.*')
@@ -82,8 +163,18 @@ class MessageController extends Controller
         ApplicationVisibility::scope($query, $user);
 
         if ($isOfficer) {
-            // An office joins a conversation that exists; it does not open one.
-            $query->whereHas('messageThread');
+            /*
+             * An office joins a conversation that exists; it does not open one.
+             *
+             * "Exists" means "has something this office may read" (item 111), not
+             * merely "has a row". Once another office's turns are hidden, a thread
+             * where only that other office has spoken has nothing in it for this
+             * reader — and listing it would put an inbox row with no messages, no
+             * preview line and a zero count in front of the officer. That is the
+             * leak reappearing as a silhouette: you cannot read what the fire
+             * office said, but you can see that it said something and when.
+             */
+            $query->whereHas('messageThread.messages', fn ($m) => $this->scopeMessagesToReader($m, $user));
         } else {
             /*
              * An applicant who has not said anything yet still needs a way in,
@@ -110,8 +201,10 @@ class MessageController extends Controller
             ->map(fn (Application $app) => $app->messageThread?->id)
             ->filter()
             ->values();
+        // Newest READABLE message per thread — see scopeMessagesToReader().
         $latestIds = Message::query()
             ->whereIn('thread_id', $threadIds)
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
             ->selectRaw('MAX(id) as id')
             ->groupBy('thread_id')
             ->pluck('id');
@@ -313,8 +406,15 @@ class MessageController extends Controller
             ]);
         }
 
-        $total = $thread->messages()->count();
+        // Item 111: an office reads the applicant's turns and its own, never
+        // another office's. Applied to the count as well as the page, so the
+        // "showing N of M" the client sees is a count of what they may read.
+        $user = $request->user();
+        $total = $thread->messages()
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
+            ->count();
         $messages = $thread->messages()
+            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
             ->with(['sender:id,name,department_id', 'attachments'])
             ->reorder()
             ->orderByDesc('created_at')
@@ -396,6 +496,20 @@ class MessageController extends Controller
         $app = $attachment->message?->thread?->application;
         abort_unless($app, 404, 'Attachment not found.');
         $this->authorizeParticipant($request, $app);
+
+        /*
+         * Item 111: hiding another office's message but still serving the file
+         * attached to it would leave the leak open behind a guessable id — the
+         * transcript would not show it, and an enumerated attachment id would.
+         * The message this file hangs off has to be one this reader may read.
+         */
+        abort_unless(
+            Message::whereKey($attachment->message_id)
+                ->tap(fn ($q) => $this->scopeMessagesToReader($q, $request->user()))
+                ->exists(),
+            403,
+            'This attachment belongs to another office’s message.'
+        );
 
         abort_unless(Storage::disk('local')->exists($attachment->stored_path), 404, 'File not found.');
 

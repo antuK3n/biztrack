@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { api } from './api'
 import type {
   AdminBusiness,
@@ -121,12 +122,47 @@ async function unwrapPaged<T, M extends PageMeta = PageMeta>(
 const PICKER_PAGE_SIZE = 200
 
 /**
+ * Turn a failed blob request back into the JSON error envelope (item 111).
+ *
+ * `responseType: 'blob'` applies to the ERROR body too, so when the API refuses
+ * a download the 403 envelope arrives as a Blob rather than an object. Every
+ * reader of that failure — toApiError() above all — looks for `data.message`,
+ * finds undefined on a Blob, and falls back to "Something went wrong on our end.
+ * Please try again."
+ *
+ * That is why "view/download file uploaded not working" was reported as its own
+ * defect. It is largely the office-scoping refusal wearing a mask: the server
+ * was saying "this application belongs to another office", the browser had that
+ * sentence in hand, and threw it away to show a shrug that reads like a crash.
+ * A tester cannot tell a permission boundary from a broken button, so it was
+ * filed as the latter.
+ *
+ * Reading the blob costs one await on the failure path only. The response is
+ * rebuilt in place so the interceptors and toApiError() see exactly the shape
+ * they would have seen from an ordinary JSON request.
+ */
+async function rethrowBlobError(error: unknown): Promise<never> {
+  const res = axios.isAxiosError(error) ? error.response : undefined
+  if (res?.data instanceof Blob) {
+    try {
+      const text = await res.data.text()
+      // A non-JSON body (an HTML error page, a truncated stream) is not worth
+      // guessing at: leave the blob alone and let the generic message stand.
+      res.data = JSON.parse(text)
+    } catch {
+      /* keep the original response */
+    }
+  }
+  throw error
+}
+
+/**
  * Authenticated file download: fetch the endpoint as a blob (Bearer header is
  * injected by the api interceptor), then trigger a browser save as `filename`.
  * Used for permit PDFs, receipts, and the analytics CSV export.
  */
 async function downloadBlob(url: string, filename: string): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob' })
+  const res = await api.get(url, { responseType: 'blob' }).catch(rethrowBlobError)
   const objectUrl = URL.createObjectURL(res.data as Blob)
   const anchor = document.createElement('a')
   anchor.href = objectUrl
@@ -143,7 +179,7 @@ async function downloadBlob(url: string, filename: string): Promise<void> {
  * opened synchronously from the click handler so popup blockers stay quiet.
  */
 async function viewBlob(url: string, target?: Window | null): Promise<void> {
-  const res = await api.get(url, { responseType: 'blob' })
+  const res = await api.get(url, { responseType: 'blob' }).catch(rethrowBlobError)
   const objectUrl = URL.createObjectURL(res.data as Blob)
   if (target && !target.closed) target.location.replace(objectUrl)
   else window.open(objectUrl, '_blank', 'noopener')
@@ -471,7 +507,16 @@ export interface AssignmentWithApplication extends Assignment {
 }
 
 export interface AssignmentFilters extends PageParams {
-  /** The assignment's own state: pending | completed | returned. */
+  /**
+   * The assignment's own state: pending | in_progress | completed | returned.
+   * Comma-separated, like `application_status` below.
+   *
+   * This is THIS OFFICE'S state, not the filing's, and the two are routinely
+   * different: a filing stays `under_review` until every office has signed off,
+   * so an office that has already approved is still looking at an application
+   * in review. The For Approval tab passes the not-yet-done states here so it
+   * stops asking an office to approve what it has already approved.
+   */
   status?: string
   /**
    * The *application's* status, which is what the queue tabs split on.

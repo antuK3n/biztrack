@@ -219,18 +219,40 @@ test('a draft can still choose its clearances, and the cards say what each costs
     timeout: 30_000,
   })
 
+  /*
+   * Five, not six. Item 98: the Market Clearance is derived from the filing's
+   * own declaration rather than shown to everyone, and this draft declares no
+   * market category and no stalls — so its card is not addressed to this
+   * applicant and is not on their screen. The test below reveals it.
+   */
   const cards = page.locator('ul > li').filter({ hasText: /apply/i })
-  await expect(cards).toHaveCount(6)
+  await expect(cards).toHaveCount(5)
+  await expect(cards.filter({ hasText: /market/i })).toHaveCount(0)
 
   // Nothing is locked, so no reason is shown: before submission there is
   // nothing to explain.
   await expect(page.locator('#clearances-locked')).toHaveCount(0)
 
   /*
-   * The consequence, on the card, before either button is pressed. Apply and
-   * Submit sit side by side and look alike; one of them spends money.
+   * The consequence, before either button is pressed. Apply and Submit sit side
+   * by side and look alike, and one of them spends money.
+   *
+   * Said in two places, and each place is asserted for its own half. The RULE
+   * is above the grid, once — it is identical for all six clearances, and the
+   * client's *"absurd amount of text"* was six cards each repeating it. The
+   * AMOUNT is on the card, because that is the part that differs.
    */
-  await expect(cards.first()).toContainText(/tax order of payment|assessment/i)
+  await expect(page.getByText(/apply adds that office.s fee/i)).toBeVisible()
+  await expect(page.getByText(/submit a copy.*costs nothing/i)).toBeVisible()
+  await expect(cards.first()).toContainText(/fee ₱|no fee assessed|fee set by this office/i)
+
+  /*
+   * And no badge on a card nobody has touched. "Not requested" used to sit on
+   * every one of them — *"tf does 'not requested' even mean"* — which is a
+   * status a screen reader reads out six times to say that nothing has
+   * happened six times.
+   */
+  await expect(cards.first()).not.toContainText(/not requested/i)
 
   const apply = cards.first().getByRole('button', { name: /^apply$/i })
   await expect(apply).toHaveAttribute('aria-disabled', 'false')
@@ -247,11 +269,20 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
   })
 
   /*
-   * Visible, not hidden. The six cards are the point of showing a shut stage at
+   * Visible, not hidden. The cards are the point of showing a shut stage at
    * all — this is the record of what the filing asked for.
+   *
+   * A floor rather than an exact count, because item 98 made the number depend
+   * on the filing: the Market Clearance card is on screen only where the
+   * declaration says the applicant trades from a stall, or where they applied
+   * for it anyway. Whichever submitted filing this dataset hands us, the other
+   * five are always there, and pinning "6" would make this test a test of which
+   * application happened to be found.
    */
   const cards = page.locator('ul > li').filter({ hasText: /apply/i })
-  await expect(cards).toHaveCount(6)
+  await expect
+    .poll(() => cards.count(), { timeout: 30_000 })
+    .toBeGreaterThanOrEqual(5)
 
   /*
    * The reason is the server's sentence, not one written here. The condition
@@ -426,18 +457,174 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * running balance that used to carry this job is gone with the accrual, so
    * the live region is the sentence naming what the press did.
    *
-   * MARKET is the clearance to press here, because it is the only one of the
-   * six with no office sheet — Apply therefore stays on the cards and the
-   * announcement is the only thing to observe. This used to be ZONING for the
-   * same reason, until checklist item 101 gave zoning a locational clearance
-   * sheet and Apply on it started navigating away.
+   * This used to press MARKET, because MARKET was the last clearance with no
+   * office sheet and so the last on which Apply stayed put. Checklist item 109
+   * gave it one, so now every one of the six navigates away — first ZONING
+   * (item 101), now the rest. The press and the return are therefore both part
+   * of the test: Apply opens the sheet, and the announcement of what it just
+   * cost is still standing when the applicant comes back to the cards.
    */
-  const card = page.locator('ul > li').filter({ hasText: /market/i })
+  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await card.getByRole('button', { name: /^apply$/i }).click()
+
+  const back = page.getByRole('button', { name: /back without saving/i })
+  await expect(back, 'Apply did not open the office sheet').toBeVisible()
+  await back.click()
 
   const status = page.getByRole('status').filter({ hasText: /applied for your/i })
   await expect(status).toBeVisible()
   await expect(status).toContainText(/tax order of payment/i)
+})
+
+test('the Market Clearance is derived, not offered to everyone — and stays reachable', async ({
+  page,
+}) => {
+  /*
+   * ITEM 98 — *"Market clearance should not be required. It is only required
+   * for stall holders."* The client asked for it to be derived rather than put
+   * to every applicant as a yes/no.
+   *
+   * This draft declares no market category and no stalls, so the card is not
+   * drawn. That half is easy to get right and easy to get wrong in the
+   * dangerous direction, which is what the second half of this test is for: the
+   * declaration the derivation reads (`private_market` and friends) describes
+   * market OPERATORS, and the stall holder the client named is the operator's
+   * tenant. If the reveal ever stops working, the one group item 98 is about is
+   * the group that loses the clearance.
+   */
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
+  await expect(marketCard).toHaveCount(0)
+
+  // Quiet, but findable, and a real button rather than a styled span.
+  await page.getByRole('button', { name: /show the market clearance/i }).click()
+
+  await expect(marketCard).toHaveCount(1)
+  // The reveal is announced, not only drawn: a card appearing at the end of a
+  // list is a change nobody using a screen reader has any reason to look for.
+  await expect(page.getByRole('status').filter({ hasText: /market clearance/i })).toBeVisible()
+  // And the way in is gone, because it has nothing left to do.
+  await expect(page.getByRole('button', { name: /show the market clearance/i })).toHaveCount(0)
+})
+
+test('the Market Clearance opens a sheet, and asks which stall it is clearing', async ({ page }) => {
+  /*
+   * ITEM 109 — *"Application form for Market Clearance is missing. Create
+   * something for this since we currently don't have the paper version."*
+   * Applying for it used to collect nothing whatsoever, so the Office of the
+   * City Market Administrator received a request naming neither a market nor a
+   * stall.
+   *
+   * The sheet is written rather than transcribed — the only one of the six that
+   * is — so this test pins the two answers it refuses to do without. See the
+   * header of web/src/pages/applicant/OfficeFormStep.tsx for why those two and
+   * not more.
+   */
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.getByRole('button', { name: /show the market clearance/i }).click()
+
+  const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
+  await marketCard.getByRole('button', { name: /^apply$/i }).click()
+
+  // Apply opens the sheet, as it does for the other five.
+  await expect(page.getByRole('heading', { name: /market clearance \(stall holders\)/i })).toBeVisible()
+  // It says on its face that it is interim — no invented form code.
+  await expect(page.getByText(/the office has no printed version/i)).toBeVisible()
+
+  // It opens with what it already knows rather than by asking again.
+  await expect(page.getByLabel(/business name/i)).toHaveAttribute('readonly', '')
+  await expect(page.getByLabel(/type of application/i)).toHaveAttribute('readonly', '')
+
+  const save = page.getByRole('button', { name: /save & back to clearances/i })
+  await expect(save).toBeDisabled()
+  await expect(page.getByText(/still needed on this form/i)).toContainText(/name of market/i)
+  await expect(page.getByText(/still needed on this form/i)).toContainText(/stall no/i)
+
+  await page.getByLabel(/name of market/i).fill('Malabon Central Market')
+  await page.getByLabel(/stall no/i).fill('B-14')
+
+  // The stall count is optional, but a typed answer has to be countable: the
+  // revenue-code market lines multiply it by a peso rate.
+  await page.getByLabel(/number of stalls held/i).fill('two')
+  await expect(page.getByRole('alert')).toContainText(/whole number/i)
+  await expect(save).toBeDisabled()
+  await page.getByLabel(/number of stalls held/i).fill('2')
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect(marketCard.first()).toBeVisible()
+
+  // Saved as the office will read it, derived answer and all.
+  const stored = await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const res = await fetch(`/api/v1/applications/${id}/office-forms`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    })
+    const forms = (await res.json()).data as {
+      permit_type_code: string
+      form_data: Record<string, unknown>
+    }[]
+    return forms.find((f) => f.permit_type_code === 'MARKET')?.form_data ?? null
+  }, appId)
+
+  expect(stored, 'the Market sheet was not stored').not.toBeNull()
+  expect(stored).toMatchObject({
+    market_name: 'Malabon Central Market',
+    stall_no: 'B-14',
+    stall_count: '2',
+  })
+  // Derived by the API, never typed.
+  expect(String(stored?.application_type)).toMatch(/market clearance/i)
+})
+
+test('the withdraw control is an ordinary button, not an error', async ({ page }) => {
+  /*
+   * ITEM 107 — *"Fix the UI button for the Don't apply. This should not look
+   * like a warning message or something."*
+   *
+   * It was red underlined text, and red (`--s-red`, #bd0000) is this product's
+   * ERROR colour — the same red the "This office refused it" panel uses. An
+   * ordinary opt-out was therefore dressed as the one thing on the card that
+   * means something has gone wrong.
+   *
+   * Asserted on the computed colour rather than on a class name: the complaint
+   * was about what the applicant sees, and a class list would go on passing if
+   * the red moved somewhere else.
+   */
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+  await applyFor(page, appId, 'SANITARY')
+
+  await page.goto(`/applications/${appId}/clearances`)
+  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  const withdraw = card.getByRole('button', { name: /don’t apply for the/i })
+  await expect(withdraw).toBeVisible()
+
+  // It still says WHICH clearance it withdraws — five cards share this screen.
+  await expect(withdraw).toContainText(/sanitary/i)
+
+  const paint = await withdraw.evaluate((el) => {
+    const s = getComputedStyle(el)
+    return { color: s.color, decoration: s.textDecorationLine, border: s.borderTopWidth }
+  })
+  // Not the error red, and not a bare underlined link either.
+  expect(paint.color).not.toBe('rgb(189, 0, 0)')
+  expect(paint.decoration).not.toContain('underline')
+  expect(paint.border, 'the withdraw control has no button chrome').not.toBe('0px')
 })
 
 test('the wizard puts the clearances last, and one Tax Order of Payment covers them', async ({
@@ -464,8 +651,10 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
   const map = page.locator('ol[aria-label="Application sections"]')
   await map.getByRole('button', { name: /lgu clearances/i }).click()
 
+  // Five: the Market Clearance is derived (item 98) and this draft declares no
+  // market category, so its card is not addressed to this applicant.
   const cards = page.locator('ul > li').filter({ hasText: /apply/i })
-  await expect(cards).toHaveCount(6, { timeout: 30_000 })
+  await expect(cards).toHaveCount(5, { timeout: 30_000 })
 
   /*
    * Until a clearance is decided the step does not pass — item 76's other

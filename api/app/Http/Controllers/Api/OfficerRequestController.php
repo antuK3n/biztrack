@@ -113,12 +113,40 @@ class OfficerRequestController extends Controller
         if (ApplicationVisibility::readsEveryOffice($user)) {
             // BPLO and the super admin coordinate every office's requests.
         } elseif ($user->hasPermission('application.view_all')) {
-            // Officer: requests they created OR on applications in their department queue.
+            /*
+             * Checklist item 111: an office sees its OWN requirements, not every
+             * requirement on a filing it happens to share.
+             *
+             * The previous rule was "any request on an application my department
+             * is assigned to". That reads correctly until you remember what
+             * WorkflowService::routeToDepartments actually does: it creates one
+             * assignment per office that issues a requested permit type, so a
+             * normal six-clearance filing is shared by six offices at once. Every
+             * one of them then matched `application.assignments`, and each office
+             * read all six offices' requirements. Against the tester register the
+             * sanitary officer's list came back 100 rows: 37 raised by BPLO, 21 by
+             * the fire office, 10 by planning — only 32 its own. That is the
+             * "other requirements from other accounts from other offices show up"
+             * the client reported, and it is a privacy defect, not a filter bug.
+             *
+             * The office boundary is `officer_requests.department_id` — the column
+             * the composer has written since item 57 and which the applicant
+             * already sees as `from_office`. Matching on it is what makes "from
+             * the City Health Office" and "visible to the City Health Office" the
+             * same statement.
+             *
+             * `requested_by_user_id` stays as a second, deliberate door: an
+             * officer may raise a requirement on another office's behalf (that is
+             * exactly why department_id is overridable in store()), and losing
+             * sight of something you yourself sent would be a worse bug than the
+             * leak. It is scoped to the acting user, not to their office, so it
+             * cannot re-open the cross-office view.
+             */
             $deptId = $user->department_id;
             $query->where(function ($q) use ($user, $deptId) {
                 $q->where('requested_by_user_id', $user->id);
                 if ($deptId) {
-                    $q->orWhereHas('application.assignments', fn ($a) => $a->where('department_id', $deptId));
+                    $q->orWhere('department_id', $deptId);
                 }
             });
         } else {
@@ -246,6 +274,34 @@ class OfficerRequestController extends Controller
             $officerRequest->application,
             'This request belongs to another office’s application.'
         );
+
+        /*
+         * Item 111: reading the filing is not enough — the requirement has to be
+         * yours to close.
+         *
+         * ApplicationVisibility answers "may this office open this filing", and on
+         * a shared six-clearance filing it says yes to all six offices. Closing is
+         * a stronger act than reading: marking a requirement fulfilled or rejected
+         * decides whether the applicant's answer satisfied the office that asked,
+         * and only the office that asked knows that. Without this the fire office
+         * could accept a water potability result on the City Health Office's
+         * behalf, and the audit row would carry the wrong department's judgement.
+         *
+         * Same two doors as index(): your own office, or a request you raised
+         * yourself on another office's behalf. BPLO and the super admin keep the
+         * wider hand deliberately — BPLO coordinates every other office's
+         * clearance and has to be able to unblock a filing when an office has
+         * gone quiet, which is the whole reason it holds view_any_office.
+         */
+        $user = $request->user();
+        if (! ApplicationVisibility::readsEveryOffice($user)) {
+            abort_unless(
+                $officerRequest->requested_by_user_id === $user->id
+                    || ($user->department_id && $officerRequest->department_id === $user->department_id),
+                403,
+                'This requirement was raised by another office, so only that office can close it.'
+            );
+        }
 
         $data = $request->validate([
             'outcome' => ['required', 'in:fulfilled,rejected'],

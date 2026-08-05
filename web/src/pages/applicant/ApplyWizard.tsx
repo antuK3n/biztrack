@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
@@ -10,6 +10,7 @@ import {
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { DocumentActions } from '../../components/DocumentActions'
+import { TinInput } from '../../components/TinInput'
 import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldLabel,
@@ -30,7 +31,7 @@ import {
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
-import { ClearanceStage, anyClearanceDecided } from './ClearanceStagePage'
+import { ClearanceStage, anyClearanceDecided, marketClearanceApplies } from './ClearanceStagePage'
 import {
   OFFICE_FORM_CODES,
   OfficeFormSheet,
@@ -159,6 +160,7 @@ const OFFICE_LABELS: Record<OfficeFormCode, string> = {
   CEC: 'Environmental Clearance Form',
   FSIC: 'Fire Safety (FSIC) Form',
   OCCUPANCY: 'Occupancy Permit Form',
+  MARKET: 'Market Clearance Form',
 }
 
 /** Document-type code for the repeatable "Other Requirements" uploads. */
@@ -758,18 +760,47 @@ function LinesStep({
    *
    * Rows already filed under it still render below — see the Selected list.
    */
-  const results = useMemo(() => {
+  /*
+   * ── Item 104b · every trade is reachable, and nothing is cut in silence ──
+   *
+   * Two caps used to stand between an applicant and the list. With the box
+   * empty they saw the eight-code COMMON_PSIC_CODES shortlist and nothing else,
+   * so browsing simply could not reach trade nine of 135. With a query typed
+   * the matches were sliced to 25 and the slice was never mentioned — "sale"
+   * matches 48 titles, so twenty-three real trades were dropped off the bottom
+   * with no sign they had ever existed. An applicant whose trade was among them
+   * concluded it was not on the list.
+   *
+   * Both are gone. The empty box now opens on the common eight and then
+   * continues into every remaining code, so the shortlist is a head start
+   * rather than a gate; a query returns all of its matches. 135 rows in a
+   * scrolling 16rem box is a list, not a page — the cap was solving a layout
+   * problem the `overflow-y-auto` had already solved.
+   *
+   * `commonCount` is the boundary the "Most common" heading is drawn at, and it
+   * is 0 while searching: relevance, not familiarity, orders a search result.
+   */
+  const { results, commonCount, total } = useMemo(() => {
     const q = query.trim().toLowerCase()
     const listed = codes.filter((c) => c.code !== OTHER_PSIC_CODE)
-    if (!q) {
-      const common = COMMON_PSIC_CODES.map((code) => listed.find((c) => c.code === code)).filter(
-        (c): c is PsicCode => c !== undefined,
+    if (q) {
+      const matches = listed.filter(
+        (c) => c.title.toLowerCase().includes(q) || c.code.includes(q),
       )
-      return common.length > 0 ? common : listed.slice(0, 8)
+
+      return { results: matches, commonCount: 0, total: listed.length }
     }
-    return listed
-      .filter((c) => c.title.toLowerCase().includes(q) || c.code.includes(q))
-      .slice(0, 25)
+
+    const common = COMMON_PSIC_CODES.map((code) => listed.find((c) => c.code === code)).filter(
+      (c): c is PsicCode => c !== undefined,
+    )
+    const promoted = new Set(common.map((c) => c.id))
+
+    return {
+      results: [...common, ...listed.filter((c) => !promoted.has(c.id))],
+      commonCount: common.length,
+      total: listed.length,
+    }
   }, [codes, query])
 
   /*
@@ -798,6 +829,16 @@ function LinesStep({
     if (exists) onChange(lines.filter((l) => l.psic_code_id !== code.id))
     else onChange([...lines, { psic_code_id: code.id, line_of_business: '', products_services: '' }])
   }
+
+  /*
+   * Named, not counted. "Selected (2)" confirms that something happened; it
+   * does not confirm that the RIGHT thing happened, and the two sari-sari rows
+   * in this list differ only by the words in their brackets.
+   */
+  const selectedTitles = lines
+    .map((l) => codes.find((c) => c.id === l.psic_code_id)?.title)
+    .filter(Boolean)
+    .join(', ')
 
   return (
     <div className="space-y-4">
@@ -829,62 +870,131 @@ function LinesStep({
         </div>
 
         {open && (
-          <ul
-            id="psic-results"
-            /*
-             * Capped and scrollable. Twenty-five matches inside 16rem is a
-             * dropdown; twenty-five stacked in the page is a page.
-             *
-             * z-[1100] rather than a small z-index because the map sits
-             * directly below this and Leaflet builds its own stacking world:
-             * tile and marker panes at 200-600, controls at 1000. At z-20 the
-             * list rendered *under* the map — the results were sliced in half
-             * and the panel's white showed through beneath it, which read as a
-             * layout bug rather than a dropdown.
-             */
-            className="absolute z-[1100] mt-1 max-h-64 w-full divide-y divide-line overflow-y-auto rounded-lg border border-input-border bg-white shadow-lg"
-          >
-            {results.length === 0 ? (
-              <li className="px-4 py-4 text-sm text-ink-secondary">
-                No trade matches “{query.trim()}”. Try a plainer word — “food” rather than the dish,
-                “retail” rather than the goods.
-              </li>
-            ) : (
-              results.map((code) => {
-                const selected = lines.some((l) => l.psic_code_id === code.id)
-                return (
-                  <li key={code.id}>
-                    <button
-                      type="button"
-                      onClick={() => toggle(code)}
-                      aria-pressed={selected}
-                      className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                        selected ? 'bg-input' : 'hover:bg-royal-tint'
-                      }`}
-                    >
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
-                          selected
-                            ? 'border-royal bg-royal text-white'
-                            : 'border-input-border bg-white'
-                        }`}
-                      >
-                        {selected && <CheckIcon size={13} />}
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-ink">{code.title}</span>
-                        <span className="tnum block text-xs text-ink-secondary">
-                          PSIC {code.code}
-                        </span>
-                      </span>
-                    </button>
-                  </li>
-                )
-              })
+          /*
+           * z-[1100] rather than a small z-index because the map sits directly
+           * below this and Leaflet builds its own stacking world: tile and
+           * marker panes at 200-600, controls at 1000. At z-20 the list
+           * rendered *under* the map — the results were sliced in half and the
+           * panel's white showed through beneath it, which read as a layout bug
+           * rather than a dropdown.
+           */
+          <div className="absolute z-[1100] mt-1 w-full overflow-hidden rounded-lg border border-input-border bg-white shadow-lg">
+            {/*
+              * ── Item 104a · the confirmation you can actually see ──────────
+              *
+              * "The selected line of business does not reflect after choosing."
+              * It did reflect — in two places the applicant could not see. The
+              * row's checkbox ticks inside a list they are still reading, and
+              * the "Selected (N)" panel is directly BELOW this dropdown, which
+              * is absolutely positioned and up to 16rem tall and therefore
+              * sitting on top of it. `document.elementFromPoint` over the
+              * "Selected (1)" heading returns a result row, not the heading: at
+              * the moment of the click the only confirmation on screen was a
+              * 20px tick inside a list of identical rows.
+              *
+              * So the confirmation is put where the eye already is — pinned to
+              * the top of the open list, against the tinted background, naming
+              * what is now selected. It cannot be covered by the dropdown
+              * because it is part of it, and it needs no scrolling because it
+              * is directly under the box being typed in.
+              *
+              * The panel below keeps its job (removing a line, describing its
+              * products) and takes over the moment the list closes.
+              */}
+            {lines.length > 0 && (
+              <p className="border-b border-line bg-royal-tint px-4 py-2.5 text-xs font-semibold text-royal">
+                <span className="mr-1.5 inline-flex h-4 w-4 translate-y-0.5 items-center justify-center rounded-sm bg-royal text-white">
+                  <CheckIcon size={11} />
+                </span>
+                Selected ({lines.length}):{' '}
+                <span className="font-normal text-ink">{selectedTitles}</span>
+              </p>
             )}
-          </ul>
+
+            <ul id="psic-results" className="max-h-64 divide-y divide-line overflow-y-auto">
+              {results.length === 0 ? (
+                <li className="px-4 py-4 text-sm text-ink-secondary">
+                  No trade matches “{query.trim()}”. Try a plainer word — “food” rather than the
+                  dish, “retail” rather than the goods.
+                </li>
+              ) : (
+                results.map((code, index) => {
+                  const selected = lines.some((l) => l.psic_code_id === code.id)
+                  return (
+                    <Fragment key={code.id}>
+                      {/*
+                        * The shortlist is a head start, not a fence, so it says
+                        * which it is and where it ends. Without the second
+                        * heading the ninth row looks like more of the same and
+                        * an applicant who has read eight stops reading.
+                        */}
+                      {commonCount > 0 && index === 0 && (
+                        <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+                          Most common
+                        </li>
+                      )}
+                      {commonCount > 0 && index === commonCount && (
+                        <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+                          All other trades ({total - commonCount})
+                        </li>
+                      )}
+                      <li>
+                        <button
+                          type="button"
+                          onClick={() => toggle(code)}
+                          aria-pressed={selected}
+                          className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                            selected ? 'bg-input' : 'hover:bg-royal-tint'
+                          }`}
+                        >
+                          <span
+                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
+                              selected
+                                ? 'border-royal bg-royal text-white'
+                                : 'border-input-border bg-white'
+                            }`}
+                          >
+                            {selected && <CheckIcon size={13} />}
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-ink">{code.title}</span>
+                            <span className="tnum block text-xs text-ink-secondary">
+                              PSIC {code.code}
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    </Fragment>
+                  )
+                })
+              )}
+            </ul>
+
+            {/*
+              * Item 104b — the count, stated. Nothing is cut any more, and
+              * saying so is the half of the fix that stops an applicant giving
+              * up: "8 shown" out of 135 with no total was indistinguishable
+              * from "your trade is not on the list".
+              */}
+            {results.length > 0 && (
+              <p className="border-t border-line bg-white px-4 py-2 text-xs text-ink-secondary">
+                {query.trim()
+                  ? `Showing all ${results.length} of ${total} trades matching “${query.trim()}”.`
+                  : `Showing all ${total} trades — the most common first. Scroll for the rest.`}
+              </p>
+            )}
+          </div>
         )}
       </div>
+
+      {/*
+        * The same confirmation for somebody who cannot see the panel at all.
+        * Always mounted, so the region exists before it has anything to say —
+        * a live region created together with its text is frequently missed.
+        */}
+      <p aria-live="polite" className="sr-only">
+        {lines.length > 0 ? `Selected ${lines.length}: ${selectedTitles}` : 'No line of business selected'}
+      </p>
 
       {lines.length > 0 && (
         <div className="rounded-lg border border-input-border bg-royal-tint p-4">
@@ -1917,13 +2027,23 @@ export function ApplyWizard() {
         : touched.registration_number
           ? `Enter your ${registrationNumberLabel}.`
           : '',
-    tin: form.tin.trim()
-      ? tinValid(form.tin)
-        ? ''
-        : TIN_ERROR
-      : touched.tin
-        ? 'Enter your Tax Identification Number.'
-        : '',
+    /*
+     * Silent until the applicant has left the question (item 105).
+     *
+     * The format error used to appear on the first keystroke, because one digit
+     * is a non-empty value that is not a valid TIN. That was merely untidy in a
+     * single box; across four it paints the whole group red for the eleven
+     * digits it takes to get to a right answer, which teaches the applicant to
+     * ignore the colour. What is still needed is never hidden — the step's
+     * "still needed on this part" list names the TIN from the start.
+     */
+    tin: !touched.tin
+      ? ''
+      : form.tin.trim()
+        ? tinValid(form.tin)
+          ? ''
+          : TIN_ERROR
+        : 'Enter your Tax Identification Number.',
     /*
      * Both optional, so neither can complain about being empty — only about
      * being wrong. `phoneValid` already accepts a landline with or without its
@@ -3108,6 +3228,18 @@ export function ApplyWizard() {
               business={carriedOverBusiness}
               onRowsChange={setClearanceRows}
               /*
+               * ITEM 98 — the Market Clearance card is derived, not offered to
+               * everyone. Read off the LIVE fee draft rather than the saved
+               * fee_profile: Business & Tax Profile is the step immediately
+               * before this one, so a category typed a moment ago may not have
+               * survived the autosave debounce yet, and that is exactly the
+               * applicant whose card must already be there.
+               */
+              marketApplies={marketClearanceApplies(
+                Object.values(feeDraft.categories).map((c) => c.category),
+                feeDraft.stall_count,
+              )}
+              /*
                * Apply opens that office's sheet, and here the sheet is a STEP
                * of its own sitting immediately behind this one — not a panel
                * swapped in over the cards. The jump is finished by an effect,
@@ -3451,23 +3583,35 @@ export function ApplyWizard() {
               )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
+              {/*
+                * Item 105 — four boxes of three digits, not one box with
+                * `000-000-000-000` greyed out inside it.
+                *
+                * The placeholder was doing the work the control should do: it
+                * named a shape and then vanished the moment somebody typed, so
+                * the dashes were the applicant's problem and a miscounted digit
+                * was invisible. TinInput carries the shape itself and emits the
+                * identical dash-joined string, so nothing downstream — the
+                * autosave, BusinessController's normalisation, the stored value
+                * — knows the difference.
+                */}
               <div>
-                <label className="block">
-                <FieldLabel required>Tax Identification Number (TIN)</FieldLabel>
-                <input
-                  inputMode="numeric"
-                  maxLength={20}
-                  pattern="[\d\s.-]{9,20}"
+                <TinInput
                   value={form.tin}
-                  onChange={(e) => update('tin', e.target.value)}
+                  onChange={(tin) => update('tin', tin)}
                   onBlur={() => touch('tin')}
-                  placeholder="000-000-000-000"
-                  className={inputCls}
-                  aria-invalid={Boolean(fieldErrors.tin)}
+                  error={fieldErrors.tin}
+                  hintId="tin-hint"
+                  errorId="tin-error"
                 />
-                </label>
+                <p id="tin-hint" className="mt-1 text-xs text-ink-secondary">
+                  As printed on your BIR certificate, like 123-456-789-000. Leave the last box empty
+                  if you have no branch code.
+                </p>
                 {fieldErrors.tin && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.tin}</p>
+                  <p id="tin-error" className="mt-1 text-xs font-medium text-s-red">
+                    {fieldErrors.tin}
+                  </p>
                 )}
               </div>
               <div>
