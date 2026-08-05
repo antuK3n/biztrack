@@ -580,6 +580,17 @@ export const inspections = {
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
   reschedule: (id: number, scheduled_at: string) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/reschedule`, { scheduled_at })),
+  /**
+   * Book a fresh visit after a failed one. Answers with the NEW inspection.
+   *
+   * Not `reschedule`. That one moves a visit that has not happened yet and
+   * overwrites `scheduled_at` on the row; this one leaves the failed visit
+   * exactly where it is and adds a second row, so the record keeps saying the
+   * premises failed once and passed later. The returned id is a different
+   * inspection, and the caller has to go to it to record the result.
+   */
+  reinspect: (id: number, scheduled_at: string) =>
+    unwrap<Inspection>(api.post(`/inspections/${id}/reinspect`, { scheduled_at })),
 }
 
 /* ── Permits ──────────────────────────────────────────────────────────── */

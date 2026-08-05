@@ -26,7 +26,16 @@ it('filters the queue by application status on the server', function () {
     $moved = Application::whereHas('assignments')->firstOrFail();
     $moved->update(['status' => ApplicationStatus::ForInspection]);
 
-    $approvalStatuses = ['submitted', 'pending_payment', 'under_review', 'returned'];
+    /*
+     * The two tabs this endpoint feeds, as QueuePage.tsx sends them.
+     *
+     * `submitted` and `pending_payment` used to be in the approval list and are
+     * not any more. They were never reachable through this endpoint: an unpaid
+     * filing has no assignment row (routing happens at payment — see
+     * PendingPaymentQueueTest), so the filter named two statuses it could not
+     * match. They have their own tab now, on `/applications`.
+     */
+    $approvalStatuses = ['under_review', 'returned'];
     $inspectionStatuses = ['for_inspection', 'approved', 'issued'];
 
     $approval = test()->withHeaders($admin)

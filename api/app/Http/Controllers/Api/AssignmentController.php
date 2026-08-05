@@ -52,6 +52,15 @@ class AssignmentController extends Controller
             'status' => ['sometimes'],
             // Repeatable or comma-separated: ?application_status=submitted,under_review
             'application_status' => ['sometimes'],
+            /*
+             * Free-text search over the tracking ID and the business name.
+             *
+             * Bounded for the same reason ApplicationController bounds its own:
+             * the value goes into two unanchored LIKE patterns, and an
+             * unbounded needle is a cheap way to make the database scan the
+             * whole table on every keystroke.
+             */
+            'q' => ['sometimes', 'string', 'max:100'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -72,6 +81,35 @@ class AssignmentController extends Controller
         $applicationStatuses = $this->applicationStatuses($request);
         if ($applicationStatuses !== []) {
             $query->whereHas('application', fn ($a) => $a->whereIn('status', $applicationStatuses));
+        }
+
+        /*
+         * Search the whole scoped queue, not the page the officer happens to
+         * have loaded.
+         *
+         * This feed had no `q` at all, so the queue screen filtered the rows it
+         * already held and reported "Showing 0 of the 13 loaded". Two things
+         * went wrong at once: a filing past the first page could not be found,
+         * and — worse — search was scoped to the open tab, so an officer on For
+         * Approval searching for a filing that had moved to For Inspection was
+         * told it did not exist. It did; it was one tab away, and the screen
+         * said "Nothing matches".
+         *
+         * The same two columns as ApplicationController::index deliberately:
+         * the tracking ID an applicant quotes over the phone, and the business
+         * name an officer actually remembers. Both are matched here rather than
+         * only the ID, because "check the tracking ID, or search by the business
+         * name instead" is what the empty state already promises.
+         *
+         * Applied to the ASSIGNMENT query through whereHas, so it narrows
+         * within the department scoping above rather than round it — an office
+         * must not be able to search its way to a filing it was never routed.
+         */
+        if ($q = $request->query('q')) {
+            $query->whereHas('application', function ($a) use ($q) {
+                $a->where('tracking_id', 'like', "%{$q}%")
+                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"));
+            });
         }
 
         /*

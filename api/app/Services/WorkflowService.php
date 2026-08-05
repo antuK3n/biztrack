@@ -232,20 +232,112 @@ class WorkflowService
         }
     }
 
-    /** Auto-schedule an inspection per inspecting department (least-loaded inspector). */
+    /**
+     * Auto-schedule an inspection per inspecting department (least-loaded inspector).
+     *
+     * This was `Inspection::firstOrCreate(['application_id', 'department_id'])`,
+     * which encoded an assumption that stopped being true the moment failed
+     * visits started being kept: ONE inspection per (filing, office). With
+     * history on the table that lookup matches the OLDEST row for the pair —
+     * a visit conducted and closed weeks ago — and calls it the office's
+     * inspection. It happened to be harmless here only because the return value
+     * was thrown away.
+     *
+     * An office is skipped when it already has a CURRENT visit, and that word is
+     * `Inspection::scopeCurrentPerDepartment()` — the same predicate
+     * recordInspection() uses to decide the filing has cleared, on purpose.
+     * Note what the skip covers: a current visit that was conducted and FAILED
+     * also counts as "has one", so re-running this never books a replacement
+     * visit behind anyone's back. A re-inspection is a decision an officer takes
+     * on a date they choose (scheduleReinspection below); quietly booking one
+     * two weekdays out would pre-empt that and leave no record of who decided.
+     */
     public function scheduleInspections(Application $app): void
     {
         $app->loadMissing('permitTypes.department');
         foreach ($app->permitTypes->where('requires_inspection', true) as $pt) {
-            Inspection::firstOrCreate(
-                ['application_id' => $app->id, 'department_id' => $pt->issuing_department_id],
-                [
-                    'status' => InspectionStatus::Scheduled,
-                    'scheduled_at' => now()->addWeekdays(2),
-                    'inspector_user_id' => $this->leastLoadedInspector($pt->issuing_department_id),
-                ]
-            );
+            $alreadyHasVisit = $app->inspections()
+                ->currentPerDepartment()
+                ->where('department_id', $pt->issuing_department_id)
+                ->exists();
+            if ($alreadyHasVisit) {
+                continue;
+            }
+            $this->openInspection($app, $pt->issuing_department_id, now()->addWeekdays(2));
         }
+    }
+
+    /**
+     * Write one booking. The only place a row is added to `inspections`.
+     *
+     * Both the automatic first round and a hand-scheduled re-inspection come
+     * through here so that a re-inspection is the same kind of object as the
+     * visit it follows — same status, same least-loaded assignment. A second
+     * creation path is how a re-inspection would end up without an inspector,
+     * or in a status the officer's queue does not filter for.
+     */
+    private function openInspection(Application $app, int $departmentId, mixed $scheduledAt): Inspection
+    {
+        return Inspection::create([
+            'application_id' => $app->id,
+            'department_id' => $departmentId,
+            'status' => InspectionStatus::Scheduled,
+            'scheduled_at' => $scheduledAt,
+            'inspector_user_id' => $this->leastLoadedInspector($departmentId),
+        ]);
+    }
+
+    /**
+     * Book a fresh visit for an office whose inspection failed.
+     *
+     * The filing stays `for_inspection` throughout — deliberately, and it is the
+     * whole reason this does not go through `transition()`. The applicant is
+     * still waiting on a site visit; that is what the status says, and saying it
+     * again would write a for_inspection → for_inspection row into the timeline
+     * that reads as movement where there is none. Nothing here approves
+     * anything: the new visit has to be conducted and passed like any other, and
+     * recordInspection() is the only thing that can then release the permits.
+     *
+     * The failed row is left exactly as it is. It is not updated, not
+     * rescheduled, not cancelled — the client asked for a record that shows a
+     * business failed once and passed later, and overwriting the failure is the
+     * one thing that would destroy it. `currentPerDepartment()` is what stops
+     * that kept row from also blocking the filing forever.
+     *
+     * Preconditions are `Inspection::canBeReinspected()`, enforced by the
+     * caller: this codebase guards in controllers (InspectionController::
+     * reinspect) and keeps services free of HTTP concerns.
+     */
+    public function scheduleReinspection(Inspection $failed, mixed $scheduledAt): Inspection
+    {
+        return DB::transaction(function () use ($failed, $scheduledAt) {
+            $app = $failed->application;
+            $visit = $this->openInspection($app, $failed->department_id, $scheduledAt);
+
+            Audit::log('inspection.reinspection_scheduled', $visit, [
+                'replaces_inspection_id' => $failed->id,
+                'department_id' => $failed->department_id,
+                'scheduled_at' => (string) $visit->scheduled_at,
+            ]);
+
+            /*
+             * The applicant is told, through the same channel every other
+             * movement on their filing uses. `applicationStatus()` rather than a
+             * new method: the fact being reported IS the filing's status — it is
+             * for inspection, and here is the date of the visit — and it carries
+             * the in-app push plus the mail/SMS fan-out that a status ping
+             * already has. Inventing a channel for this one event would give the
+             * applicant a message that only appears in one of the three places
+             * they are used to hearing from us.
+             */
+            $this->notify->applicationStatus(
+                $app,
+                ApplicationStatus::ForInspection,
+                'A re-inspection has been scheduled for '.$visit->scheduled_at->format('d M Y').'.',
+            );
+
+            return $visit;
+        });
     }
 
     private function leastLoadedInspector(int $departmentId): ?int
@@ -270,11 +362,39 @@ class WorkflowService
         Audit::log('inspection.recorded', $inspection, ['result' => $result->value]);
 
         if (! $result->progresses()) {
-            return; // failed: department may schedule a re-inspection
+            /*
+             * A failure moves nothing on its own, and must not: the premises did
+             * not pass, so no permit is due. What happens next is that an officer
+             * schedules a re-inspection against this row — scheduleReinspection()
+             * above, reached from the inspection detail screen.
+             *
+             * This early return used to be the end of the road. The comment here
+             * said "department may schedule a re-inspection" and nothing in the
+             * codebase could: the filing sat in `for_inspection` with every visit
+             * conducted, which is also the state in which the officer's screen
+             * hides its Approve and Reject controls, so the filing became
+             * unreachable from both ends. Six live filings are in that state.
+             */
+            return;
         }
 
         $app = $inspection->application;
+
+        /*
+         * CURRENT visits only — `$app->inspections()->get()` was the whole set.
+         *
+         * That was correct while a department could only ever have one row, and
+         * became a permanent block the moment failed visits started being kept:
+         * the failed row stays on the filing for good, so a re-inspection could
+         * pass and this would still find a `failed` in the set and refuse to
+         * approve. The office's standing is its LATEST visit; the earlier ones
+         * are history, and history is not a veto.
+         *
+         * Same predicate the scheduler uses, from the model, for the reason
+         * written on it there.
+         */
         $allPassed = $app->inspections()
+            ->currentPerDepartment()
             ->get()
             ->every(fn ($i) => $i->status === InspectionStatus::Completed
                 && $i->result?->progresses());

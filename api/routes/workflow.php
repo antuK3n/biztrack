@@ -164,6 +164,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('inspections/{inspection}', [InspectionController::class, 'show']);
         Route::post('inspections/{inspection}/conduct', [InspectionController::class, 'conduct']);
         Route::post('inspections/{inspection}/reschedule', [InspectionController::class, 'reschedule']);
+        /*
+         * Re-inspection after a failure. On `inspection.manage` with the rest,
+         * because it is the same act as scheduling the first visit and the same
+         * people do it — the office that failed the premises, and BPLO/admin.
+         * It is not a decision on the application, so it does not belong with
+         * `application.reject`: nothing here approves, and the filing stays for
+         * inspection until somebody conducts the new visit.
+         */
+        Route::post('inspections/{inspection}/reinspect', [InspectionController::class, 'reinspect']);
     });
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)

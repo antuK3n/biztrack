@@ -270,7 +270,25 @@ export function ApplicationDetailPage() {
   const status = app.status
   const isPayment = status === 'pending_payment'
   const issuedPermit = app.permits[0]
-  const inspection = app.inspections.find((i) => i.scheduled_at) ?? app.inspections[0]
+  /*
+   * The visit the applicant should be getting ready for.
+   *
+   * Pending ones first, soonest first. A filing carries one visit per inspecting
+   * office, and now a second visit for any office that failed the first — the
+   * failed visit is kept on the record rather than overwritten, so a filing that
+   * is waiting on a re-inspection holds both. Taking the first row with a date
+   * meant reading the OLDEST of them, which after a re-inspection is a visit
+   * that has already happened: the card announced "Scheduled Date" as a day in
+   * the past while somebody was booked to come next Tuesday.
+   *
+   * The last two fallbacks are the old behaviour, for a filing whose visits have
+   * all been conducted — there is nothing upcoming to name, and a date already
+   * gone still tells the applicant which visit the office is deciding on.
+   */
+  const upcoming = app.inspections
+    .filter((i) => i.scheduled_at && !i.conducted_at)
+    .sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
+  const inspection = upcoming[0] ?? app.inspections.find((i) => i.scheduled_at) ?? app.inspections[0]
   const withRemarks = status === 'rejected' || status === 'returned'
 
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
