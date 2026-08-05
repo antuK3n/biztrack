@@ -832,8 +832,7 @@ export function FeeProfileStep({
   return (
     <div className="space-y-8">
       <p className="-mt-2 text-xs text-ink-secondary">
-        These details compute your Tax Order of Payment from the New Revenue Code of Malabon
-        (Ord. A10-2016). Everything here is declared by you and verified by the reviewing officer.
+        Your Tax Order of Payment is computed from these, under the Revenue Code (Ord. A10-2016).
       </p>
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
@@ -928,11 +927,9 @@ export function FeeProfileStep({
           <div>
             <FieldLabel required>Tax Classification (Malabon Revenue Code)</FieldLabel>
             <p id="fee-category-help" className="mb-3 text-xs text-ink-secondary">
-              This is not your line of business again — it is the Revenue Code bracket that trade is
-              taxed under, and one trade can fall under several. A carinderia and a franchised
-              fast-food branch are both food, and are assessed at different rates. Type the closest
-              match (e.g. retailer, carinderia, manufacturer); the reviewing officer verifies it
-              during assessment.
+              Not the line of business again — the Revenue Code bracket it is taxed under. A carinderia
+              and a franchised fast-food branch are both food, at different rates. Type the closest
+              match; the reviewing officer checks it.
             </p>
             <datalist id="fee-categories">
               {COMMON_CATEGORIES.map((c) => (

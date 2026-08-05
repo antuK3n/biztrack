@@ -3926,10 +3926,8 @@ export function ApplyWizard() {
           <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
           <div className="mb-2 h-px bg-ink/40" />
           <p className="mb-6 text-xs text-ink-secondary">
-            Pin your exact location and enter your address. The pin has to fall within Malabon —
-            BPLO can only license a business inside the city. These details go to the City Planning
-            and Development Office (CPDO), which evaluates your zoning / locational clearance
-            during processing.
+            Pin your location and enter your address. The pin must fall inside Malabon. CPDO evaluates
+            your zoning clearance from it during processing.
           </p>
 
           {/*

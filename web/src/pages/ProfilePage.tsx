@@ -518,8 +518,8 @@ export function ProfilePage() {
         <ChevronRightIcon size={24} className="shrink-0 text-white" strokeWidth={2.25} />
       </Link>
       <p className="mt-2 text-xs text-ink-muted">
-        Your full name, gender, mobile number, and password are changed on the Settings page. Your email
-        address is your sign-in ID, so the City BPLO updates it for you.
+        Name, gender, mobile number and password are on the Settings page. Your email is your sign-in
+        ID — the City BPLO changes it for you.
       </p>
     </div>
   )

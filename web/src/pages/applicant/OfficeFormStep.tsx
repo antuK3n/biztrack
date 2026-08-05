@@ -395,8 +395,8 @@ function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
     <section className="space-y-4">
       <SectionMarker letter="✓" label="Business Details" />
       <p className="text-xs text-ink-muted">
-        Carried over from what you have already filled in. To change any of it, go back to Business
-        Information or Location &amp; Zoning — editing it there updates every office form at once.
+        From your earlier answers. Change it on Business Information or Location &amp; Zoning and every
+        office form follows.
       </p>
       <div className="grid gap-5 sm:grid-cols-2">
         <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />

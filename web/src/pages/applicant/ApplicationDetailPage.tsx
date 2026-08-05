@@ -456,9 +456,7 @@ export function ApplicationDetailPage() {
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             <p className="mt-1 text-sm text-ink-secondary">
-              Sanitary, fire, zoning, environmental, occupancy and market. Each goes to a separate
-              office with its own fee, and every one you chose is billed on this filing’s Tax Order
-              of Payment.
+              Each goes to its own office, and every one you chose is billed on this filing.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}
