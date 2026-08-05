@@ -96,6 +96,24 @@ function MovedToStaff({ path }: { path: string }) {
   return <Navigate to={portalPath('staff', id ? `${path}/${id}` : path)} replace />
 }
 
+/**
+ * The analytics shim, which unlike the others has subpaths under it.
+ *
+ * It used to be a bare `<Navigate to="/staff/analytics">`, so every deep link
+ * — /analytics/renewal-risk, /analytics/processing-time — landed on the
+ * Overview instead. That is not just a stale-bookmark problem: it is how the
+ * tab strip's own broken links stayed invisible, because the tabs pointed here
+ * and the redirect quietly answered every one of them with the dashboard.
+ *
+ * Carrying the rest of the path across means a wrong link now lands on the
+ * right screen, and a genuinely wrong one reaches the 404 instead of being
+ * absorbed.
+ */
+function MovedAnalytics() {
+  const rest = useParams()['*'] ?? ''
+  return <Navigate to={portalPath('staff', rest ? `/analytics/${rest}` : '/analytics')} replace />
+}
+
 export default function App() {
   const bootstrap = useAuth((s) => s.bootstrap)
 
@@ -334,7 +352,7 @@ export default function App() {
         <Route path="/queue/:id" element={<MovedToStaff path="/queue" />} />
         <Route path="/inspections" element={<MovedToStaff path="/inspections" />} />
         <Route path="/inspections/:id" element={<MovedToStaff path="/inspections" />} />
-        <Route path="/analytics/*" element={<Navigate to="/staff/analytics" replace />} />
+        <Route path="/analytics/*" element={<MovedAnalytics />} />
         <Route path="/admin/*" element={<Navigate to="/staff/dashboard" replace />} />
 
         <Route path="*" element={<NotFoundRedirect />} />

@@ -143,12 +143,63 @@ test('every analytics screen states where its numbers came from', async ({ page 
 })
 
 test('the analytics tabs reach all four screens', async ({ page }) => {
+  /*
+   * This test used to assert only that the four links were VISIBLE, and it
+   * passed for as long as the tab strip was completely broken.
+   *
+   * The tabs pointed at pre-portal-split URLs (/analytics/...), which the
+   * legacy shim in App.tsx answered by redirecting to the Overview and
+   * discarding the subpath. So every tab rendered, every tab was clickable,
+   * every tab took you to the dashboard. The client's report was "why is
+   * overview renewal risk lifecycle and processing time all the same".
+   *
+   * A navigation test that never navigates is not a navigation test. Each tab
+   * is now pressed, and asserted on the URL it reaches AND the heading that
+   * renders — the heading because a URL alone would still pass if all four
+   * routes resolved to the same component.
+   */
+  const TABS = [
+    { label: 'Renewal Risk', path: '/staff/analytics/renewal-risk', heading: /renewal risk/i },
+    {
+      label: 'Lifecycle',
+      path: '/staff/analytics/business-growth',
+      heading: /business lifecycle monitoring/i,
+    },
+    {
+      label: 'Processing Time',
+      path: '/staff/analytics/processing-time',
+      heading: /permit processing time monitoring/i,
+    },
+    { label: 'Overview', path: '/staff/analytics', heading: /analytics dashboard/i },
+  ]
+
   await page.goto('/staff/analytics')
   await waitForAnalytics(page, 'Analytics Dashboard')
 
-  for (const label of ['Renewal Risk', 'Lifecycle', 'Processing Time', 'Overview']) {
-    await expect(page.getByRole('link', { name: label, exact: true }).first()).toBeVisible()
+  for (const tab of TABS) {
+    await page.getByRole('link', { name: tab.label, exact: true }).first().click()
+    await expect(page, `the ${tab.label} tab did not change the URL`).toHaveURL(
+      new RegExp(`${tab.path}$`),
+    )
+    await expect(
+      page.getByRole('heading', { name: tab.heading }).first(),
+      `the ${tab.label} tab did not render its own screen`,
+    ).toBeVisible({ timeout: 30_000 })
   }
+})
+
+test('a link made before the portal split still lands on the right screen', async ({ page }) => {
+  /*
+   * The shim for /analytics/* exists for bookmarks and already-sent
+   * notifications. It threw the subpath away, so every one of them arrived at
+   * the Overview — and that silent absorption is what kept the broken tab
+   * strip above from ever looking broken.
+   */
+  await page.goto('/analytics/renewal-risk')
+  await expect(page).toHaveURL(/\/staff\/analytics\/renewal-risk$/)
+  await expect(page.getByRole('heading', { name: /renewal risk/i }).first()).toBeVisible({
+    timeout: 30_000,
+  })
 })
 
 test('the growth screen agrees with its own API about its name', async ({ page }) => {
