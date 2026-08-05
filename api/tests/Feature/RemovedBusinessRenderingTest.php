@@ -21,6 +21,14 @@ use App\Models\User;
  * These tests pin the shape they were taught to expect: the endpoints must keep
  * answering — not 500, not omit the row — and must keep saying `null` rather
  * than inventing a name, so that "removed" stays distinguishable from "named".
+ *
+ * The queue and review-sheet reads are made as BPLO. They were the super
+ * admin's until the client took Track off that role ("it is not his role to do
+ * those things"), and `application.review` is what the assignment endpoints are
+ * gated on. BPLO is the honest replacement rather than a workaround: it holds
+ * `application.view_any_office`, so it sees every office's assignments — which
+ * is what these tests need, since the orphaned filing is whichever one the
+ * fixture happens to find and it is not necessarily BPLO's own.
  */
 
 /** Soft-delete the business behind one routed filing and hand back both ids. */
@@ -38,9 +46,9 @@ function removeBusinessBehindAnAssignment(): array
 
 it('keeps a filing in the officer queue after its business is removed', function () {
     [$applicationId] = removeBusinessBehindAnAssignment();
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
-    $rows = test()->withHeaders($admin)
+    $rows = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?per_page=200')
         ->assertOk()
         ->json('data');
@@ -62,11 +70,11 @@ it('keeps a filing in the officer queue after its business is removed', function
 
 it('opens the review sheet for a filing whose business was removed', function () {
     [$applicationId] = removeBusinessBehindAnAssignment();
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
     $assignmentId = Application::findOrFail($applicationId)->assignments()->firstOrFail()->id;
 
-    $body = test()->withHeaders($admin)
+    $body = test()->withHeaders($bplo)
         ->getJson("/api/v1/assignments/{$assignmentId}")
         ->assertOk()
         ->json('data');
@@ -161,7 +169,7 @@ it('names a live business on the inspections nested in the review sheet', functi
     $application = scheduleVisitOnALiveFiling();
     $assignmentId = $application->assignments()->firstOrFail()->id;
 
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson("/api/v1/assignments/{$assignmentId}")
         ->assertOk()
         ->json('data');

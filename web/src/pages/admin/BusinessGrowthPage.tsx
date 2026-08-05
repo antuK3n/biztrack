@@ -309,10 +309,18 @@ export function BusinessGrowthPage() {
               metric="closures"
               hint={`${data.period_start} to ${data.period_end}`}
             />
+            {/*
+              No `metric` here, and it is not an oversight. The Top Growing
+              Barangays panel further down carries the same definition under the
+              same name, so an info button here rendered a second control
+              announcing "How Top Growing Barangays is measured" with identical
+              contents — two stops for a screen-reader user, one explanation. The
+              same reasoning already governs the approval rate and the pass rate
+              on the dashboard: the button belongs beside the panel it explains.
+            */}
             <SummaryCard
               value={top ? top.barangay : 'No data'}
               label="Top Growing Barangay"
-              metric="top_barangays"
               muted={!top}
               hint={top ? `${signed(top.delta)} new registrations vs last period` : undefined}
             />

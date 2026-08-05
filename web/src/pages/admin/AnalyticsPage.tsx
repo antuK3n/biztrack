@@ -61,26 +61,37 @@ import { GenerateReportButton } from './GenerateReportButton'
  * the first build of this screen answered every question with a table. The
  * mapping this file implements, so nobody has to re-derive it from the spec:
  *
- *   Application Volume            vertical bar chart
- *   Decision Outcomes             donut, approval rate in the hole
- *   Processing time by RA tier    horizontal bar chart
- *   Time-in-stage by department   horizontal bar chart
- *   Compliance                    three KPI cards
- *   Top 5 barangays / categories  vertical bar charts
- *   Form of Organization          pie chart
- *   Inspections                   horizontal STACKED bar chart
- *   Officer activity              three KPI cards
+ *   Application Volume                        vertical bar chart
+ *   Decision Outcomes                         donut, approval rate in the hole
+ *   Average Processing Time (RA 11032)        horizontal bar chart
+ *   Average Processing Time by Department     horizontal bar chart
+ *   Compliance Rate                           three KPI cards
+ *   Top Five Barangays / Business Categories  vertical bar charts
+ *   Form of Organization                      pie chart
+ *   Inspections                               horizontal STACKED bar chart
+ *   Officer Activity                          three KPI cards
  *
  * Every one of them goes through components/charts, which is what supplies the
  * accessible name and the sr-only table of the underlying numbers. A chart
  * dropped straight into this file would be an unreadable graphic to a screen
  * reader; read components/charts/ChartFrame.tsx before adding one.
  *
- * The prose on this screen is deliberately short. It used to run to a paragraph
- * per panel and the client's verdict was that it was unreadable; the long-form
- * account of every figure now lives behind the info affordance beside its label
- * (components/ui/MetricInfo), where it is available to whoever wants it and
- * costs nothing to whoever does not. Resist putting it back inline.
+ * THE HEADINGS ARE THE PAPER'S TEN REPORT NAMES, spelled as its §1 table spells
+ * them, because the client's instruction is to follow the paper's terms. Each
+ * heading's `metric` pulls its info-button name from the same `label` in
+ * AnalyticsDefinitions::dashboard(), so a heading renamed here without renaming
+ * it there gives one figure two names — which is the fault this screen is least
+ * able to afford.
+ *
+ * The prose on this screen is deliberately short, and got shorter. It used to
+ * run to a paragraph per panel; the client's verdict was that the lengthy text
+ * made the screen overwhelming and hard to understand on a first visit. What a
+ * neighbouring label already says is not repeated, and what survives is the
+ * handful of sentences that exist to stop a specific misreading — the legal
+ * limits, the denominators, the exclusions. Those are shortened, never dropped.
+ * Everything else lives behind the info affordance beside its label
+ * (components/ui/MetricInfo), where it costs nothing to whoever does not want
+ * it. Resist putting it back inline.
  */
 
 /*
@@ -394,7 +405,7 @@ function DecisionsPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Average Processing Time by RA 11032 Tier ──────────────────────────── */
+/* ── Average Processing Time (RA 11032) ────────────────────────────────── */
 
 /**
  * The three statutory tiers against their legal limits, as a horizontal bar
@@ -447,7 +458,7 @@ function TierPanel({ report }: { report: DashboardReport }) {
       label: `${row.label} · ${row.statutory_working_days}d`,
       value: Number(((mean / row.statutory_working_days) * 100).toFixed(1)),
       valueText: `${mean.toFixed(1)}d`,
-      note: `${row.statutory_working_days}-day statutory limit`,
+      note: `${row.statutory_working_days}-day legal limit`,
       color: row.breaching ? BREACH : CHART_ROYAL,
     }
   })
@@ -458,16 +469,16 @@ function TierPanel({ report }: { report: DashboardReport }) {
     <ProtoCard className="px-4 pb-3 pt-4">
       {data.length === 0 ? (
         <p className="py-3 text-[13px] text-ink-secondary">
-          No application has been decided in this window, so no tier has an average to compare
-          against its statutory limit.
+          Nothing has been decided in this window, so there is no average to set against the legal
+          limits.
         </p>
       ) : (
         <HorizontalBars
-          title="Mean processing time per RA 11032 tier, as a percentage of that tier's own statutory limit"
+          title="Average processing time per RA 11032 tier, as a percentage of that tier's own legal limit"
           data={data}
-          categoryHeading="Tier and statutory limit"
-          valueHeading="Mean working days"
-          noteHeading="Statutory limit"
+          categoryHeading="Tier and legal limit"
+          valueHeading="Average working days"
+          noteHeading="Legal limit"
           categoryWidth={132}
           rowHeight={34}
           reference={{ value: 100, label: 'Legal limit', color: '#1a1f2b' }}
@@ -512,15 +523,21 @@ function TierPanel({ report }: { report: DashboardReport }) {
         ))}
         {unmeasured.map((row) => (
           <li key={row.tier} className="text-[11px] text-ink-muted">
-            {row.label}: nothing decided in this window, so there is no average to compare against
-            the {row.statutory_working_days}-day limit.
+            {row.label}: nothing decided in this window, so there is no average against the{' '}
+            {row.statutory_working_days}-day limit.
           </li>
         ))}
       </ul>
 
+      {/*
+        The two sentences that may not be cut. RA 11032's limits are law, and
+        this system stamps a different deadline on every filing — a reader who
+        takes the on-time figures elsewhere in the product as compliance with the
+        statute is reading the wrong number. Both are stated plainly and once.
+      */}
       <p className="mt-2 text-[11px] leading-snug text-ink-muted">
-        Limits and averages are in <strong className="font-semibold">working days</strong>, as RA
-        11032 sets them.
+        Limits are in <strong className="font-semibold">working days</strong> and set by law, not by
+        the office.
         {breaching.length > 0 && (
           <span className="font-semibold text-ink">
             {' '}
@@ -532,10 +549,10 @@ function TierPanel({ report }: { report: DashboardReport }) {
           <>
             {' '}
             <strong className="font-semibold text-ink">
-              The deadline this system records is not the statutory one
+              The deadline this system records is not the legal one
             </strong>{' '}
-            — every filing gets a flat {lenient[0].recorded_deadline_working_days}-working-day
-            internal deadline, so on-time figures elsewhere are more forgiving than the law.
+            — every filing gets {lenient[0].recorded_deadline_working_days} working days, so on-time
+            figures elsewhere are more forgiving than RA 11032.
           </>
         )}
       </p>
@@ -543,7 +560,7 @@ function TierPanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Average Time-in-Stage by Department ───────────────────────────────── */
+/* ── Average Processing Time by Department ─────────────────────────────── */
 
 /**
  * Department headings in the paper's words.
@@ -584,7 +601,7 @@ function StagePanel({ report }: { report: DashboardReport }) {
     return (
       <ProtoCard className="px-5 py-4">
         <p className="text-[13px] text-ink-secondary">
-          No review assignment was completed in this window, so there is no time-in-stage to report.
+          No review was finished in this window, so there is no department time to report.
         </p>
       </ProtoCard>
     )
@@ -607,10 +624,10 @@ function StagePanel({ report }: { report: DashboardReport }) {
   return (
     <ProtoCard className="px-4 pb-3 pt-4">
       <HorizontalBars
-        title="Mean days a review spends with each department"
+        title="Average days a review spends with each department"
         data={data}
         categoryHeading="Department"
-        valueHeading="Mean days per review"
+        valueHeading="Average days per review"
         noteHeading="Reviews completed"
         categoryWidth={104}
         tooltipUnit="days per review"
@@ -637,7 +654,7 @@ function StagePanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Compliance Monitoring ─────────────────────────────────────────────── */
+/* ── Compliance Rate ───────────────────────────────────────────────────── */
 
 /**
  * One compliance indicator, one card — the spec asks for three KPI cards here
@@ -662,7 +679,7 @@ function ComplianceCard({ indicator }: { indicator: ComplianceIndicator }) {
       detail={
         unavailable
           ? (indicator.unavailable_reason ??
-            `Nothing to count this against: no ${indicator.denominator_label} in this window.`)
+            `No ${indicator.denominator_label} in this window, so there is nothing to count this against.`)
           : `${num(indicator.numerator)} of ${num(indicator.denominator)} ${indicator.denominator_label} ${indicator.numerator_label}.`
       }
     />
@@ -896,8 +913,8 @@ function OrganizationPanel({ report }: { report: DashboardReport }) {
         <>
           <p className="text-[13px] font-semibold text-ink">Not recorded for any business yet</p>
           <p className="mt-1 text-[12px] leading-snug text-ink-secondary">
-            None of the {num(total)} registered businesses has this field on file, and it is not
-            inferred from anything else in the register.
+            None of the {num(total)} registered businesses has this on file, and it is not guessed
+            from anything else.
           </p>
         </>
       ) : (
@@ -970,9 +987,9 @@ function InspectionsPanel({ report }: { report: DashboardReport }) {
             <strong className="font-semibold text-ink">
               {combined.pass_rate === null ? 'No pass rate' : pct(combined.pass_rate)}
             </strong>{' '}
-            overall — {num(combined.passed)} passed of {num(combined.completed)} carried out, from{' '}
-            {num(combined.scheduled)} scheduled. The rate divides by inspections carried out, never
-            by ones scheduled.
+            overall — {num(combined.passed)} passed of {num(combined.completed)} completed, from{' '}
+            {num(combined.scheduled)} scheduled. The rate divides by completed inspections, never by
+            scheduled ones.
             <Info metric="inspections.pass_rate" />
           </>
         }
@@ -1021,9 +1038,9 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         detail={
           (a.mean_response_hours === null
             ? 'No applicant message has been answered in this window.'
-            : `Mean over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; median ${a.median_response_hours?.toFixed(1)}h.`) +
+            : `Average over ${num(a.responses)} ${a.responses === 1 ? 'reply' : 'replies'}; middle wait ${a.median_response_hours?.toFixed(1)}h.`) +
           (a.threads_awaiting_reply > 0
-            ? ` ${num(a.threads_awaiting_reply)} ${a.threads_awaiting_reply === 1 ? 'thread' : 'threads'} still waiting.`
+            ? ` ${num(a.threads_awaiting_reply)} still waiting.`
             : '')
         }
       />
@@ -1040,8 +1057,16 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
         }
       />
 
+      {/*
+        "Meeting participation", not "Meetings attended" — the same name the
+        server's definition uses, and for the reason that definition gives:
+        nothing in the register records who actually turned up, so a recorded
+        reply is standing in for attendance. A card headed "attended" beside a
+        popover explaining it is not attendance was the screen contradicting
+        itself in two places at once.
+      */}
       <StatCard
-        label="Meetings attended"
+        label="Meeting participation"
         metric="officer_activity.meetings_attended_rate"
         unavailable={a.meetings_scheduled === 0}
         value={a.meetings_scheduled === 0 ? 'None scheduled' : num(a.meetings_attended)}
@@ -1052,8 +1077,8 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
                * column exists and nothing has ever been written to it, so no
                * officer has skipped anything.
                */
-              'No meeting has been scheduled in this window, so there is no participation to report.'
-            : `${num(a.meetings_attended)} of ${num(a.meetings_scheduled)} scheduled had a recorded response (${pct(a.meetings_attended_rate)}).`
+              'No meeting has been scheduled in this window, so there is nothing to report.'
+            : `${num(a.meetings_attended)} of ${num(a.meetings_scheduled)} scheduled had a reply (${pct(a.meetings_attended_rate)}).`
         }
       />
     </div>
@@ -1254,10 +1279,10 @@ function BusinessMap({ report }: { report: DashboardReport }) {
           'No business has coordinates on record yet, so there is nothing to plot.'
         ) : (
           <>
-            {num(plotted)} of {num(total_businesses)} businesses plotted from their
-            business-location coordinates.
+            {num(plotted)} of {num(total_businesses)} businesses plotted from their recorded
+            coordinates.
             {mapped > plotted && (
-              <> {num(mapped - plotted)} more have coordinates but exceed this layer&rsquo;s cap.</>
+              <> {num(mapped - plotted)} more have coordinates but are past this map&rsquo;s cap.</>
             )}
           </>
         )}
@@ -1396,7 +1421,7 @@ export function AnalyticsPage() {
 
             <section>
               <SectionHeading note={trailing} metric="processing_tiers">
-                Average Processing Time by RA 11032 Tier
+                Average Processing Time (RA 11032)
               </SectionHeading>
               <TierPanel report={data} />
             </section>
@@ -1408,7 +1433,16 @@ export function AnalyticsPage() {
           </div>
 
           <section className="mt-5">
-            <SectionHeading note={trailing}>Compliance Monitoring</SectionHeading>
+            {/*
+              The paper's §1 term is "Compliance Rate". The adviser's own note
+              (docs/r-integration-revisions.md §1.5) proposed "Compliance
+              Monitoring Rate through RA 11032", which was never applied — and
+              could not be, because only the first of these three cards is about
+              RA 11032 at all. Her substantive demand there was that the three
+              indicators be split apart with their own denominators, and that is
+              what CompliancePanel does.
+            */}
+            <SectionHeading note={trailing}>Compliance Rate</SectionHeading>
             <CompliancePanel report={data} />
           </section>
 
@@ -1426,13 +1460,16 @@ export function AnalyticsPage() {
             </section>
 
             {/*
-              "Top 5", not "Top": the shares here do not sum to 100 and the
-              client called that out by name. A title that claims to rank every
-              barangay while showing five of twenty-one is the misread.
+              The count stays in the title. The shares under these two charts do
+              not sum to 100, and a title claiming to rank every barangay while
+              showing five of twenty-one is exactly the misread the adviser
+              called out — see the override note on `top_lines_of_business` in
+              AnalyticsDefinitions. "Five" spelled as a word is the paper's
+              spelling; the arithmetic it protects is unchanged.
             */}
             <section>
               <SectionHeading note={asOf} metric="top_barangays">
-                Top 5 Barangays by Active Businesses
+                Top Five Barangays by Active Businesses
               </SectionHeading>
               <RankedBarsPanel
                 rows={data.top_barangays.rows}
@@ -1441,23 +1478,23 @@ export function AnalyticsPage() {
                 categoryHeading="Barangay"
                 valueHeading="Active businesses"
                 labelBy="name"
-                footnote={`Counted out of the ${num(data.top_barangays.total)} active businesses with a barangay on record, across ${num(data.top_barangays.groups)} barangays.`}
+                footnote={`Five of ${num(data.top_barangays.groups)} barangays. Shares are of the ${num(data.top_barangays.total)} active businesses with a barangay on record.`}
                 empty="No active business has a barangay address on record, so there is nothing to rank."
               />
             </section>
 
             <section>
               <SectionHeading note={asOf} metric="top_lines_of_business">
-                Top 5 Business Categories
+                Top Five Business Categories
               </SectionHeading>
               <RankedBarsPanel
                 rows={data.top_lines_of_business.rows}
                 name={(row) => (row as LineOfBusinessRow).industry}
-                title="The five most common lines of business among active businesses"
+                title="The five most common business categories among active businesses"
                 categoryHeading="Rank"
                 valueHeading="Active businesses"
                 labelBy="rank"
-                footnote={`Grouped by PSIC code across ${num(data.top_lines_of_business.groups)} lines on record; shares are of the ${num(data.top_lines_of_business.total)} active businesses with one recorded.`}
+                footnote={`Five of ${num(data.top_lines_of_business.groups)} categories, grouped by PSIC code. Shares are of the ${num(data.top_lines_of_business.total)} active businesses with a category on record.`}
                 empty="No active business has a line of business on record, so there is nothing to rank."
               />
             </section>
@@ -1468,7 +1505,24 @@ export function AnalyticsPage() {
             </section>
 
             <section>
-              <SectionHeading note={trailing}>Staff Activity</SectionHeading>
+              {/*
+                ADVISER OVERRIDE, RECORDED — do not "fix" this back to "Staff
+                Activity".
+
+                docs/r-integration-revisions.md §1.11 has the adviser asking for
+                both a rename and a split: "Ano 'yung Officer Activity? …  If I
+                were you, hindi Officer Activity ang ilalagay ko dito", and
+                "Sino ba si officer — si staff?". The paper's §1 table names the
+                report "Officer Activity", the client was shown the conflict, and
+                the client chose the paper.
+
+                THE SPLIT IS NOT PART OF THE OVERRIDE and stays exactly as she
+                asked. Her actual complaint was that three unrelated measures
+                were being averaged under one label; OfficerPanel below still
+                breaks them into three separately named cards with three
+                separate denominators. Only the heading reverted.
+              */}
+              <SectionHeading note={trailing}>Officer Activity</SectionHeading>
               <OfficerPanel report={data} />
             </section>
           </div>

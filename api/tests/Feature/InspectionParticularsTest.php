@@ -25,6 +25,14 @@ use App\Models\Inspection;
  * owner / address / line-of-business assertions below mean anything — a
  * hand-built business with hand-built relations would only prove the resource
  * can read what the test just wrote.
+ *
+ * Booked to CHO specifically, and read below as CHO's officer. It used to be
+ * `Department::firstOrFail()` — whichever office the reference seeder happened
+ * to write first, which is BPLO, an office that conducts no visits at all — and
+ * it was read as the super admin, who could open any of them. Neither is true
+ * now: the client took Inspections off the super admin ("it is not his role to
+ * do those things"), and InspectionController scopes every read to the caller's
+ * own department, so the visit and the reader have to name the same office.
  */
 function inspectionWithFiling(): Inspection
 {
@@ -35,7 +43,7 @@ function inspectionWithFiling(): Inspection
 
     return Inspection::create([
         'application_id' => $application->id,
-        'department_id' => Department::firstOrFail()->id,
+        'department_id' => Department::where('code', 'CHO')->firstOrFail()->id,
         'status' => 'scheduled',
         'scheduled_at' => now()->addDay(),
     ]);
@@ -45,7 +53,7 @@ it('returns the applicant\'s submitted particulars on the inspection detail', fu
     $inspection = inspectionWithFiling();
     $business = $inspection->application->business->load(['owner', 'address.barangay', 'lines.psicCode']);
 
-    $res = $this->withHeaders(authAs('admin@biztrack.local'))
+    $res = $this->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/inspections/{$inspection->id}")
         ->assertOk();
 
@@ -87,7 +95,7 @@ it('returns the applicant\'s submitted particulars on the inspection detail', fu
 it('leaves the particulars null on the inspection list rather than sending a block of nulls', function () {
     inspectionWithFiling();
 
-    $res = $this->withHeaders(authAs('admin@biztrack.local'))
+    $res = $this->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/inspections')
         ->assertOk();
 
@@ -110,7 +118,7 @@ it('still answers when the business behind the visit has left the register', fun
     // answer 200 with honest nulls rather than 500 or a half-built block.
     Business::findOrFail($businessId)->delete();
 
-    $res = $this->withHeaders(authAs('admin@biztrack.local'))
+    $res = $this->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson("/api/v1/inspections/{$inspection->id}")
         ->assertOk();
 

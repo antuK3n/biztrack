@@ -2,6 +2,25 @@ import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 /*
+ * Runs as a clearance office, not as the super admin.
+ *
+ * Recording a visit needs BOTH `application.review`, to open the filing from
+ * Application Verification, and `inspection.manage`, to set the result. The
+ * super admin holds neither any more — the client's ruling was that Messages,
+ * Track, Inspections and Other Requirements are "not his role to do those
+ * things" — and the default chromium project hands every spec the admin
+ * session, so this suite began 403ing the moment that landed.
+ *
+ * BPLO would not serve either: it coordinates the clearances and holds
+ * `application.review`, but it does not inspect, so it has no
+ * `inspection.manage`. It has to be one of the six offices that issues a
+ * clearance. ApplicationVisibility scopes this session to filings routed to
+ * CPDO, which is why the helpers below find their filing rather than hard-code
+ * one.
+ */
+test.use({ storageState: 'e2e/.auth/zoning.json' })
+
+/*
  * Opening a For Inspection filing from Application Verification.
  *
  * The regression this guards is the one the client reported in full:
@@ -40,13 +59,40 @@ import type { Page } from '@playwright/test'
 const ADMIN_REVIEW_SHEET = 'Business Permit & Licensing Office · Admin Review'
 
 /**
- * The queue rather than a hardcoded id.
+ * This office's OWN queue rather than a hardcoded id, or the register.
  *
- * Which application sits in `for_inspection` changes every time anybody works
- * the queue — the two this was written against were both approved within the
- * hour — so pinning an id here would make the spec fail for a reason that has
- * nothing to do with the screen. Skips rather than fails when the register
- * happens to hold none: that is a fixture gap, not a defect.
+ * Two separate things make anything else wrong here, and both of them present
+ * as a blank page rather than as an error, so they are worth naming.
+ *
+ * The first is churn. Which application sits in `for_inspection` changes every
+ * time anybody works the queue — the two this was written against were both
+ * approved within the hour — and re-running the analytics history seeder
+ * renumbers rows outright. An id written down here is stale by definition.
+ *
+ * The second is the office boundary, and it is what broke this suite. Picking
+ * off `GET /applications?status=for_inspection` and following
+ * `assignments[0]` looks safe because that list is already narrowed by
+ * ApplicationVisibility — but the row it hands back first is BPLO's, since
+ * BPLO is routed every filing it coordinates. `GET /assignments/{id}` is
+ * narrowed a second time and much harder, by
+ * AssignmentController::authorizeDepartment, which answers 403 for any
+ * department but the reader's own and exempts exactly one role: `admin`. So
+ * this worked for as long as every spec inherited the super admin session and
+ * failed the moment that account stopped being able to review at all.
+ *
+ * `GET /assignments` is the fix rather than a filter on top of the old call:
+ * it IS this office's queue, so every row in it is a row this session may
+ * open. There is no id here to go stale and no boundary left to trip over.
+ *
+ * A filing carrying an OUTSTANDING visit for this office is preferred over one
+ * that merely has visits. `canAct` in InspectionDecision draws the
+ * Approve/Reject pair only for the inspecting department, so a filing whose
+ * open visits all belong to Fire or Sanitary would silently skip the two tests
+ * below that press those controls. Any filing with visits still satisfies the
+ * first test, so that is the fallback rather than the target.
+ *
+ * Skips rather than fails when the register holds none: that is a fixture gap,
+ * not a defect.
  */
 async function openForInspectionFiling(page: Page): Promise<number | null> {
   /*
@@ -60,20 +106,47 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
     const token = localStorage.getItem('biztrack.token.staff')
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
 
-    const list = await fetch('/api/v1/applications?status=for_inspection&per_page=5', { headers })
-    const apps = (await list.json()).data as { id: number }[]
+    const list = await fetch(
+      '/api/v1/assignments?application_status=for_inspection&per_page=20',
+      { headers },
+    )
+    const rows = (await list.json()).data as {
+      id: number
+      department: { code: string } | null
+      application: { id: number }
+    }[]
 
-    for (const app of apps) {
-      const detail = await fetch(`/api/v1/applications/${app.id}`, { headers })
-      const data = (await detail.json()).data as {
-        inspections: unknown[]
-        assignments: { id: number }[]
+    let anyWithVisits: number | null = null
+
+    for (const row of rows) {
+      const detail = await fetch(`/api/v1/applications/${row.application.id}`, { headers })
+      const app = (await detail.json()).data as {
+        inspections: {
+          status: string
+          conducted_at: string | null
+          department: { code: string } | null
+        }[]
       }
       // A filing with no visit scheduled renders the empty-state copy instead
       // of cards, which is a different branch than the one under test.
-      if (data.inspections.length > 0 && data.assignments.length > 0) return data.assignments[0].id
+      if (app.inspections.length === 0) continue
+
+      // Mirrors `inspectionDone` in InspectionDecision.tsx: a visit is over
+      // once it has been conducted, whatever the result was.
+      const outstandingHere = app.inspections.some(
+        (visit) =>
+          // Both codes, never two absences: `undefined === undefined` would
+          // call an unrouted visit ours and pick a filing with no buttons.
+          Boolean(row.department) &&
+          visit.department?.code === row.department?.code &&
+          !visit.conducted_at &&
+          !['completed', 'passed', 'failed'].includes(visit.status.toLowerCase()),
+      )
+      if (outstandingHere) return row.id
+      anyWithVisits ??= row.id
     }
-    return null
+
+    return anyWithVisits
   })
 
   if (assignmentId === null) return null
@@ -122,13 +195,35 @@ test('every outstanding visit carries its own named Approve and Reject', async (
   expect(await reject.count()).toBe(approveCount)
 
   /*
-   * A filing carries a visit per inspecting office — sanitary and fire on a
-   * typical one — so these controls repeat, and a column of buttons all called
-   * "Approve" is a list a screen-reader user cannot navigate. Each name has to
-   * say which office's visit it decides.
+   * A filing carries a visit per inspecting office — up to six now that every
+   * clearance requires one — so the CARDS repeat, and a column of buttons all
+   * called "Approve" is a list a screen-reader user cannot navigate. Each name
+   * has to say which office's visit it decides.
+   *
+   * Read honestly, the uniqueness check alone no longer proves much from this
+   * seat: `canAct` draws the pair only for the reader's own department, so a
+   * single office session usually sees one. That is the product working — no
+   * account can decide another office's visit — but it means the naming rule
+   * has to be asserted directly as well, on the office actually appearing in
+   * the label, or a control that fell back to the generic "Inspecting office"
+   * heading would sail through.
    */
   const names = await approve.evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))
   expect(new Set(names).size).toBe(names.length)
+
+  const office = await page.evaluate(async () => {
+    const token = localStorage.getItem('biztrack.token.staff')
+    const res = await fetch('/api/v1/auth/me', {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+    return ((await res.json()).data as { department: { name: string } | null }).department?.name
+  })
+  expect(office, 'an office reviewer always belongs to a department').toBeTruthy()
+  for (const name of names) {
+    expect(name, 'the control names the office whose visit it decides').toBe(
+      `Approve the ${office} inspection`,
+    )
+  }
 
   /*
    * Shut controls use `aria-disabled`, never the native attribute: `disabled`
@@ -187,19 +282,18 @@ test('a filing that is not for inspection still opens on the full review sheet',
    * officer under review would lose every field they are meant to read.
    */
   await page.goto('/staff/queue')
+  // This office's own queue, for the same reason as above: an assignment on
+  // somebody else's department answers 403 and leaves an empty page behind.
   const assignmentId = await page.evaluate(async () => {
     const token = localStorage.getItem('biztrack.token.staff')
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
-    const list = await fetch('/api/v1/applications?status=under_review&per_page=3', { headers })
-    const apps = (await list.json()).data as { id: number }[]
-    for (const app of apps) {
-      const detail = await fetch(`/api/v1/applications/${app.id}`, { headers })
-      const data = (await detail.json()).data as { assignments: { id: number }[] }
-      if (data.assignments.length > 0) return data.assignments[0].id
-    }
-    return null
+    const list = await fetch('/api/v1/assignments?application_status=under_review&per_page=3', {
+      headers,
+    })
+    const rows = (await list.json()).data as { id: number }[]
+    return rows[0]?.id ?? null
   })
-  test.skip(assignmentId === null, 'no under_review filing on this stack')
+  test.skip(assignmentId === null, 'no under_review filing on this office’s queue')
 
   await page.goto(`/staff/queue/${assignmentId}`)
   await page.waitForLoadState('networkidle')

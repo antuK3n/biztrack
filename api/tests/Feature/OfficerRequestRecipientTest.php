@@ -45,21 +45,42 @@ it('lets the requester name the office the applicant sees', function () {
     expect(OfficerRequest::find($id)->department_id)->toBe($cho);
 });
 
-it('gives the super admin a way to attribute a request to an office', function () {
-    // Regression guard: admin has no department_id, so before this the request
-    // was created with a null office and reached the applicant from nobody.
+/*
+ * The super admin does not ask an applicant for anything.
+ *
+ * This was written the other way round — "gives the super admin a way to
+ * attribute a request to an office" — because the admin holds no
+ * `department_id`, so a request it raised reached the applicant from nobody
+ * until an explicit `department_id` was allowed on the payload.
+ *
+ * The client has since taken the whole activity off the role: "In the super
+ * admin's account (admin@), remove Messages, Track, Inspections, and Other
+ * Requirements. It is not his role to do those things." Asking an applicant for
+ * a further requirement is an office's work — the office that will read the
+ * answer, and the office whose name the applicant sees on it. So `request.create`
+ * came off `admin`, and this endpoint answers 403.
+ *
+ * The `department_id` override the old test was guarding did NOT go away with
+ * it, and that is why this is an inversion rather than a deletion: it is still
+ * how one office attributes a request to another (the test above this one,
+ * BPLO naming CHO). Only the department-less caller it was originally added for
+ * is gone.
+ */
+it('refuses the super admin a request: asking the applicant is an office’s work', function () {
     $app = openApplicationForRequest();
     $bplo = Department::where('code', 'BPLO')->value('id');
 
-    $id = $this->withHeaders(authAs('admin@biztrack.local'))
+    $this->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/requests", [
             'request_type' => 'message',
             'subject' => 'Clarification',
             'body' => 'Please confirm your floor area.',
             'department_id' => $bplo,
-        ])->assertCreated()->json('data.id');
+        ])->assertStatus(403);
 
-    expect(OfficerRequest::find($id)->department_id)->toBe($bplo);
+    // Nothing was written on the way to the 403.
+    expect(OfficerRequest::where('application_id', $app->id)->where('subject', 'Clarification')->exists())
+        ->toBeFalse();
 });
 
 it('rejects an office that does not exist', function () {

@@ -7,7 +7,7 @@
     "period_end": "2026-07-30",
     "prior_period_start": "2024-07-30",
     "top_n": 6,
-    "survival_methodology": "Cohort survival is a Kaplan-Meier estimate over observed renewal cycles: of the businesses that reached a given renewal, the share that had renewed every previous one without a lapse in cover. Businesses still within their current permit are censored rather than counted as failures. It describes what this cohort did, and is not a forecast of what any business will do next.",
+    "survival_methodology": "Of the businesses that reached each renewal, this is the share that had renewed every earlier one with no gap in cover. Businesses still inside their current permit are set aside rather than counted as failures. It describes what this group of businesses did. It is not a forecast of what any business will do next.",
     "grace_days": 30,
     "registrations": 40,
     "registrations_prior": 32,

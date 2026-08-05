@@ -2,12 +2,21 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\Department;
 use App\Models\User;
 
 /*
  * Rejecting an application ends it for every office at once. That is the
  * issuing office's call (BPLO) or the super admin's. A per-office reviewer
  * returns its own assignment instead, which is a different, recoverable act.
+ *
+ * A note on the super admin half, because it has become odd. The role still
+ * holds `application.reject` — nobody asked for it to be removed — but it has
+ * lost `application.review`, so it can no longer open the queue the Reject
+ * control lives on. The permission is real and the endpoint honours it (the
+ * test below proves that); there is simply no longer a screen behind it. Left
+ * exactly as it is rather than tidied away, because removing a permission the
+ * client did not ask about is a policy decision, not a cleanup.
  */
 
 /** An application still open to a decision (see ApplicationStatus::isTerminal). */
@@ -100,12 +109,22 @@ it('refuses a rejection with no reason', function () {
 });
 
 it('refuses a return with no remarks', function () {
-    $assignment = ApplicationAssignment::whereHas(
-        'application',
-        fn ($a) => $a->whereIn('status', ['submitted', 'under_review', 'pending_payment'])
-    )->firstOrFail();
+    /*
+     * Returned by the office that holds the assignment, which is what returning
+     * one means. The super admin used to stand here and cannot any more:
+     * `application.review` came off that role with the Track rail entry the
+     * client asked to remove, so it no longer reaches the queue at all — and a
+     * 403 would have satisfied nothing this test is about, which is the 422 on a
+     * missing remark.
+     */
+    $bploDepartmentId = Department::where('code', 'BPLO')->value('id');
+    $assignment = ApplicationAssignment::where('department_id', $bploDepartmentId)
+        ->whereHas(
+            'application',
+            fn ($a) => $a->whereIn('status', ['submitted', 'under_review', 'pending_payment'])
+        )->firstOrFail();
 
-    $this->withHeaders(authAs('admin@biztrack.local'))
+    $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/assignments/{$assignment->id}/return", [])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['remarks']);

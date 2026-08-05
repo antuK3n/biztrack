@@ -82,12 +82,22 @@ final class BusinessGrowthAnalytics
     /**
      * The sentence that has to travel with the survival figure, wherever it is
      * shown. Kept server-side so an export cannot ship the number without it.
+     *
+     * It no longer names the estimator. It used to open "Cohort survival is a
+     * Kaplan-Meier estimate over observed renewal cycles" and call the set-aside
+     * businesses "censored" — three method words in one sentence, printed under
+     * the chart on the face of the screen. The client's instruction is that the
+     * explanations be simple enough for a first-time reader, and a BPLO officer
+     * cannot act differently for knowing the estimator's name; what they have to
+     * know is which businesses were followed and which were set aside, and that
+     * is still here. NOTHING ABOUT THE METHOD CHANGED — only the words for it.
+     * The method is documented on computeSurvival() below and in r/R/service.R,
+     * where the audience is a developer rather than an officer.
      */
-    public const SURVIVAL_METHODOLOGY = 'Cohort survival is a Kaplan-Meier estimate over observed '
-        .'renewal cycles: of the businesses that reached a given renewal, the share that had renewed '
-        .'every previous one without a lapse in cover. Businesses still within their current permit '
-        .'are censored rather than counted as failures. It describes what this cohort did, and is not '
-        .'a forecast of what any business will do next.';
+    public const SURVIVAL_METHODOLOGY = 'Of the businesses that reached each renewal, this is the '
+        .'share that had renewed every earlier one with no gap in cover. Businesses still inside '
+        .'their current permit are set aside rather than counted as failures. It describes what this '
+        .'group of businesses did. It is not a forecast of what any business will do next.';
 
     /**
      * @return array<string, mixed>

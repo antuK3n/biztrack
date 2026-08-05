@@ -68,3 +68,26 @@ setup('authenticate as business owner', async ({ page }) => {
 setup('authenticate as a BPLO officer', async ({ page }) => {
   await saveSession(page, 'bplo', 'staff', 'bplo.json')
 })
+
+/*
+ * An officer of a clearance office, for the specs that inspect.
+ *
+ * The super admin used to cover this and no longer can. The client's
+ * instruction was that Messages, Track, Inspections and Other Requirements are
+ * "not his role to do those things", so `admin` lost `application.review` and
+ * `inspection.manage` along with them — and the default chromium project hands
+ * every spec the admin session, which is why two suites started 403ing at once.
+ *
+ * Zoning rather than BPLO: conducting a visit needs BOTH `application.review`
+ * to open the filing and `inspection.manage` to record the result, and BPLO
+ * holds only the first. It coordinates the clearances; it does not inspect.
+ * Every one of the six clearance offices would do — zoning is simply the one
+ * already in ACCOUNTS.
+ *
+ * Note this session is departmentally scoped by ApplicationVisibility, so a
+ * spec using it can only reach filings routed to CPDO. That is the product
+ * working, not a limitation to design around.
+ */
+setup('authenticate as a clearance-office inspector', async ({ page }) => {
+  await saveSession(page, 'zoning', 'staff', 'zoning.json')
+})

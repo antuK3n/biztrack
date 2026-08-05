@@ -87,9 +87,10 @@ use Illuminate\Support\Facades\Hash;
  *                                    line of business and declared capital, so
  *                                    RA 11032's 20-working-day limit has filings
  *                                    to be measured against
- *   inspections.inspection_type      written from the inspecting office, along
- *                                    with the CPDO zoning visits, the failed
- *                                    visits, and the re-inspections that follow
+ *   inspections.inspection_type      written from the inspecting office, so the
+ *                                    sanitary, fire and zoning visits, the
+ *                                    failed ones, and the re-inspections that
+ *                                    follow all carry their own type
  *   officer_requests / messages      requests with responses, meetings with
  *                                    attendance, and replies placed by walking
  *                                    forward through office hours so the
@@ -192,7 +193,19 @@ class AnalyticsHistorySeeder extends Seeder
      * Target mean review turnaround per office, in days, measured the way the
      * chart measures it: `completed_at - assigned_at`, queue time included.
      */
-    private const OFFICE_TURNAROUND_DAYS = ['BPLO' => 2.0, 'CHO' => 2.5, 'BFP' => 3.0, 'CPDO' => 2.2];
+    private const OFFICE_TURNAROUND_DAYS = [
+        'BPLO' => 2.0, 'CHO' => 2.5, 'BFP' => 3.0, 'CPDO' => 2.2,
+        // The three offices that had almost no seeded history at all — see
+        // CLEARANCE_ATTACH_RATES below. Targets are their own rather than
+        // copies: OBO signs off a certificate of occupancy against a building
+        // record, which is the slowest desk read of the seven; CENRO checks an
+        // environmental questionnaire against the declared line; and a market
+        // clearance is a stall lookup, which is the quickest thing any of these
+        // offices does. Nothing here is measured from the live register —
+        // there was no history to measure — so they are ordered by how much
+        // paper each decision actually involves.
+        'OBO' => 2.8, 'CENRO' => 2.4, 'CMO-MARKET' => 1.8,
+    ];
 
     /** Shape of the lognormal review duration (generate.R's sdlog). */
     private const SERVICE_SDLOG = 0.40;
@@ -207,7 +220,80 @@ class AnalyticsHistorySeeder extends Seeder
     protected const OWNER_ACCOUNTS = 60;
 
     /** Reviewer headcount per office (r/config.R DEPARTMENTS$reviewers). */
-    private const REVIEWERS = ['BPLO' => 3, 'CHO' => 2, 'BFP' => 2, 'CPDO' => 1];
+    private const REVIEWERS = [
+        'BPLO' => 3, 'CHO' => 2, 'BFP' => 2, 'CPDO' => 1,
+        // One each. StaffingSimulation models office capacity from the count of
+        // active officers per department, so these are not decoration: an office
+        // carrying a hundred-odd reviews a year with nobody on its roll would
+        // make that screen incoherent in the other direction.
+        'OBO' => 1, 'CENRO' => 1, 'CMO-MARKET' => 1,
+    ];
+
+    /**
+     * How often each supporting clearance is asked for, as [new, renewal].
+     *
+     * WHY THIS EXISTS AT ALL. Permit Processing Time Monitoring charted four of
+     * the seven offices. Over the trailing 24 weeks the live register held BPLO
+     * 273 completed reviews, CHO 215, BFP 209, CPDO 58 — and then OBO 3, CENRO
+     * 4, CMO-MARKET 4. `Spc::MIN_COMPLETIONS_PER_WEEK` is 3, so a week needs
+     * three finished reviews before it can be averaged at all; those three
+     * offices could not produce a single chartable week and were demoted to the
+     * payload's `thin` list. The client: "fill it asw".
+     *
+     * It is the same root cause as two other things that broke today, and worth
+     * naming as one fact rather than three coincidences: OBO, CENRO, CPDO and
+     * the Market Office had no `requires_inspection` on the permits they issue,
+     * no `inspection.manage` on the roles that staff them, and next to no seeded
+     * history behind them. They were second-class in the reference data, in the
+     * permission matrix and in the demo register at once, because all three were
+     * written from the three offices the manuscript names (BPLO / CHO / BFP)
+     * plus zoning. This is the third of the three.
+     *
+     * WHY THESE NUMBERS. The trailing 52 weeks carry roughly 11 filings a week.
+     * The rates below are chosen to put each of the three comfortably clear of
+     * the minimum of 3 in most weeks while keeping them visibly the minor
+     * offices they are — the chart should show BPLO/CHO/BFP as the busy desks
+     * and these as the quiet ones, because that is true. Flat-rating them to
+     * BPLO's volume would chart them and lie.
+     *
+     * The split by application type is the real-world reading, not a knob:
+     *
+     *  - OCCUPANCY (OBO) is about the premises. A new business fitting out a
+     *    unit needs a certificate of occupancy; a renewal in the same unit
+     *    mostly does not, so the renewal rate is a fraction of the new one.
+     *  - CEC (CENRO) is an annual environmental compliance certificate, so it
+     *    recurs on renewal nearly as often as it appears on a new filing.
+     *  - MARKET is a stall clearance and applies to market-based businesses
+     *    only, which is why it is the lowest of the three on both counts. It is
+     *    still seeded high enough to chart, which is a deliberate trade: a
+     *    truthful market-stall share of a general business register would leave
+     *    the office un-chartable again and back in the footnote.
+     *
+     * Amendments carry none of these. An amendment changes a detail on a permit
+     * already issued and is routed to BPLO alone, which is the behaviour the
+     * existing `$codes` table already had.
+     *
+     * ZONING is in this table too, and only for renewals. It was never thin
+     * enough to be dropped from the chart — 58 completed reviews against OBO's
+     * 3 — but it was the only one of the four minor offices whose clearance is
+     * asked for on new filings alone, and once the other three were seeded
+     * properly it became the sparse office in their place: around ten chartable
+     * weeks in twenty-four, against twenty-plus for the rest. Moving the
+     * footnote from three offices to one is not a fix. A locational clearance is
+     * re-validated when a business renews at a site the plan may have been
+     * re-zoned around, so a renewal share is the honest way to lift it. The new
+     * rate stays at 0.0 because the `$codes` table above already decides ZONING
+     * for new filings (highly-technical always, 35% otherwise) and a second roll
+     * would double-count it.
+     *
+     * @var array<string, array{float, float}>
+     */
+    private const CLEARANCE_ATTACH_RATES = [
+        'OCCUPANCY' => [0.62, 0.30],
+        'CEC' => [0.52, 0.40],
+        'MARKET' => [0.44, 0.34],
+        'ZONING' => [0.0, 0.34],
+    ];
 
     /* ── register attributes the paper reports on ─────────────────────────── */
 
@@ -334,6 +420,10 @@ class AnalyticsHistorySeeder extends Seeder
         'CPDO' => 'zoning',
         'OBO' => 'building',
         'CENRO' => 'environmental',
+        // The market visit had no entry because no seeded filing had ever been
+        // routed to the Market Office. It has one now, and without this its
+        // inspections would be the only ones on the register with a null type.
+        'CMO-MARKET' => 'market',
     ];
 
     /* ── officer activity ─────────────────────────────────────────────────── */
@@ -519,12 +609,32 @@ class AnalyticsHistorySeeder extends Seeder
 
     private function bootReferenceData(): void
     {
-        $this->departments = Department::whereIn('code', ['BPLO', 'CHO', 'BFP', 'CPDO'])
+        /*
+         * All seven offices and all seven permit types, where this used to load
+         * four of each.
+         *
+         * The four were the manuscript's three (BPLO / CHO / BFP) plus zoning,
+         * and everything downstream inherited that boundary: no filing could be
+         * routed to OBO, CENRO or the Market Office, so none of them could
+         * accumulate the completed reviews Permit Processing Time Monitoring
+         * needs to fit a control chart. See CLEARANCE_ATTACH_RATES for the
+         * volumes and the reasoning behind them.
+         *
+         * The counts are asserted rather than assumed because a missing office
+         * fails silently and far away: `reviewerFor()` returns null for an
+         * office with no pool, and runReview then falls back to
+         * `$app->applicant` — an APPLICANT approving an office's own assignment,
+         * which is a plausible-looking history that is quietly wrong.
+         */
+        $officeCodes = ['BPLO', 'CHO', 'BFP', 'CPDO', 'OBO', 'CENRO', 'CMO-MARKET'];
+        $permitCodes = ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET'];
+
+        $this->departments = Department::whereIn('code', $officeCodes)
             ->get()->keyBy('code')->all();
-        $this->permitTypes = PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING'])
+        $this->permitTypes = PermitType::whereIn('code', $permitCodes)
             ->get()->keyBy('code')->all();
 
-        if (count($this->departments) < 4 || count($this->permitTypes) < 4) {
+        if (count($this->departments) < count($officeCodes) || count($this->permitTypes) < count($permitCodes)) {
             throw new \RuntimeException(
                 'AnalyticsHistorySeeder needs ReferenceSeeder + RbacSeeder to have run first.'
             );
@@ -652,12 +762,18 @@ class AnalyticsHistorySeeder extends Seeder
             'CHO' => 'sanitary_officer',
             'BFP' => 'fire_inspector',
             'CPDO' => 'zoning_officer',
+            'OBO' => 'obo_staff',
+            'CENRO' => 'cenro_officer',
+            'CMO-MARKET' => 'market_admin',
         ];
         $names = [
             'BPLO' => [['Perlita', 'Sandoval'], ['Ignacio', 'Bermudez'], ['Sonia', 'Talusan']],
             'CHO' => [['Almira', 'Delgado'], ['Bonifacio', 'Yumul']],
             'BFP' => [['Rodel', 'Pineda'], ['Marissa', 'Concepcion']],
             'CPDO' => [['Herminia', 'Alcantara']],
+            'OBO' => [['Teodoro', 'Mangahas']],
+            'CENRO' => [['Rosalinda', 'Buenaventura']],
+            'CMO-MARKET' => [['Efren', 'Salvacion']],
         ];
 
         foreach (self::REVIEWERS as $code => $headcount) {
@@ -872,6 +988,10 @@ class AnalyticsHistorySeeder extends Seeder
                 : ['BUSINESS'],
             default => ['BUSINESS'],
         };
+        // array_unique because ZONING can be reached from either the table above
+        // (new filings) or the attach rates (renewals), and a duplicate code
+        // would be synced twice into application_permit_types.
+        $codes = array_values(array_unique([...$codes, ...$this->supportingClearancesFor($type)]));
         $requested = array_map(fn (string $c) => $this->permitTypes[$c], $codes);
 
         // The permit this filing replaces. Real column, real link: it is what
@@ -984,16 +1104,32 @@ class AnalyticsHistorySeeder extends Seeder
             return;
         }
 
-        // ── inspections (scheduled by the workflow when reviews all clear) ──
+        /*
+         * ── inspections ────────────────────────────────────────────────────
+         *
+         * Every row here was booked by WorkflowService::scheduleInspections on
+         * the last office sign-off, one per inspecting office, two working days
+         * out. Nothing is added by hand.
+         *
+         * There used to be an addZoningInspection() at this point, writing the
+         * CPDO visit itself because `permit_types.ZONING.requires_inspection`
+         * was false and the workflow therefore never scheduled one — the
+         * Inspections panel's third type was structurally empty and this seeder
+         * filled it in for seeded filings only. All six supporting clearances
+         * are inspected now (see ReferenceSeeder), so the workflow books the
+         * zoning visit like any other and that compensation is gone. It could
+         * not be left in place harmlessly either: it consumed a reviewerFor()
+         * draw per zoning filing, and mt_rand is a single seeded stream shared
+         * by the whole run, so a dead call still moves every number after it.
+         */
         $app->refresh();
-        // Written before any visit is recorded: recordInspection issues the
-        // permits as soon as every inspection on the file has passed, so an
-        // inspection added afterwards would arrive after its own approval.
-        $this->addZoningInspection($app, $lastCompletedAt ?? $paidAt);
 
         $highlyTechnical = $tier === 'highly_technical';
         $visits = [];
         foreach ($app->inspections()->with('department')->get() as $inspection) {
+            if ($inspection->department->code === 'CPDO') {
+                $this->counts['zoning_inspections']++;
+            }
             $inspector = $this->reviewerFor($inspection->department->code);
             if ($inspector) {
                 // The workflow picks the least-loaded active inspector, which
@@ -1131,42 +1267,6 @@ class AnalyticsHistorySeeder extends Seeder
     }
 
     /**
-     * The CPDO site verification behind a locational clearance.
-     *
-     * `permit_types.ZONING.requires_inspection` is false, so the workflow never
-     * schedules one and the register held zero Zoning inspections — the panel's
-     * third type was structurally empty. Flipping the reference flag was the
-     * other option and was rejected: it would change what happens to a live
-     * tester's next filing. So the row is written here instead, for seeded
-     * filings only, following the workflow's own scheduling rule (two working
-     * days out) so the dates line up with the sanitary and fire visits.
-     */
-    private function addZoningInspection(Application $app, Carbon $reviewsClearedAt): void
-    {
-        $app->loadMissing('permitTypes');
-        if (! $app->permitTypes->contains(fn ($pt) => $pt->code === 'ZONING')) {
-            return;
-        }
-
-        $cpdo = $this->departments['CPDO'];
-        if ($app->status === ApplicationStatus::Approved
-            || $app->inspections()->where('department_id', $cpdo->id)->exists()) {
-            return;
-        }
-
-        $this->travelTo($reviewsClearedAt);
-        $inspection = Inspection::create([
-            'application_id' => $app->id,
-            'department_id' => $cpdo->id,
-            'inspector_user_id' => $this->reviewerFor('CPDO')?->id,
-            'status' => InspectionStatus::Scheduled,
-            'scheduled_at' => $reviewsClearedAt->copy()->addWeekdays(2),
-        ]);
-        $this->tagInspectionType($inspection->setRelation('department', $cpdo));
-        $this->counts['zoning_inspections']++;
-    }
-
-    /**
      * Write `inspections.inspection_type` from the inspecting office.
      *
      * Not a derived label standing in for a missing column: the column is filled
@@ -1274,6 +1374,44 @@ class AnalyticsHistorySeeder extends Seeder
             && $capital >= self::HIGH_TECH_CAPITAL_FLOOR
                 ? 'highly_technical'
                 : 'complex';
+    }
+
+    /**
+     * Which of OBO's, CENRO's and the Market Office's clearances this filing
+     * asks for.
+     *
+     * Three independent rolls rather than one bundled choice, because they are
+     * three independent facts about a business: whether it is fitting out
+     * premises, whether its line has an environmental questionnaire against it,
+     * and whether it trades from a market stall. Bundling them would produce
+     * filings that carry all three or none, and the three offices' weekly
+     * volumes would then move in lockstep — which would show up on the control
+     * charts as three offices with suspiciously identical shapes.
+     *
+     * The rates and the reasoning behind them are on CLEARANCE_ATTACH_RATES.
+     * `chance()` is the same generator the four original offices are driven by,
+     * drawing from the same seeded `mt_srand` stream, so these filings are
+     * built by the existing machinery rather than a second one bolted alongside.
+     *
+     * @return list<string>
+     */
+    private function supportingClearancesFor(ApplicationType $type): array
+    {
+        // An amendment changes a detail on a permit already issued; it is BPLO's
+        // alone and does not re-open any office's clearance.
+        if ($type === ApplicationType::Amendment) {
+            return [];
+        }
+
+        $isNew = $type === ApplicationType::New;
+        $codes = [];
+        foreach (self::CLEARANCE_ATTACH_RATES as $code => [$newRate, $renewalRate]) {
+            if ($this->chance($isNew ? $newRate : $renewalRate)) {
+                $codes[] = $code;
+            }
+        }
+
+        return $codes;
     }
 
     /**
@@ -2152,7 +2290,7 @@ class AnalyticsHistorySeeder extends Seeder
                 ))),
             sprintf('renewals linked       %d to the permit they replace (%d filed after it expired)',
                 $this->counts['renewals_linked'], $this->counts['renewals_late']),
-            sprintf('inspections recorded  %d (%d zoning added, %d re-inspections, %d failures, %d ended in rejection)',
+            sprintf('inspections recorded  %d (%d zoning, %d re-inspections, %d failures, %d ended in rejection)',
                 $this->counts['inspections'], $this->counts['zoning_inspections'],
                 $this->counts['reinspections'], $this->counts['inspection_failures'],
                 $this->counts['inspection_rejections']),

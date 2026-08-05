@@ -14,7 +14,7 @@ import { useAsync } from '../../lib/useAsync'
 import type {
   MetricDefinition,
   ProcessingTimeDepartment,
-  ProcessingTimeReport,
+  ThinDepartment,
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
@@ -52,9 +52,11 @@ import { ComputedAt } from './ComputedAt'
  *   "Remove large spaces; fix the UI design of the analytics."
  *
  * The status indicator was a 34px word alone in a tall card, and every panel
- * had a paragraph under it. Status is now a four-across strip that doubles as
- * the office picker, so one row carries both the per-department verdict the
- * spec asks for and the control that used to be buried in the Filter menu.
+ * had a paragraph under it. Status is now a wrapping strip of cards that
+ * doubles as the office picker, so it carries both the per-department verdict
+ * the spec asks for and the control that used to be buried in the Filter menu.
+ * Every office the register knows about gets a card there, charted or not —
+ * see StatusStrip for why that is not negotiable.
  *
  *   Plain language, not control-chart vocabulary.
  *
@@ -179,59 +181,211 @@ function SectionHeading({ children, metric }: { children: ReactNode; metric?: st
 }
 
 /*
+ * ── The third state on the strip, and the revision that put it there ───────
+ *
+ * The city has seven offices. On any real window only four of them finish
+ * enough reviews in a week to be averaged at all — a week under
+ * `min_completions_per_week` is dropped, because the mean of one review is a
+ * fact about that review and not about the office. The remaining three arrive
+ * in the payload's `thin` collection, fully named, with their counts.
+ *
+ * They used to be named in a grey footnote under the strip. The client read the
+ * screen and reported the offices as missing, which is the correct reading of
+ * it: a strip of four is an answer to "how is each office doing", and an office
+ * that is not in the answer reads as an office that does not exist, whatever a
+ * line of small print says underneath. So all seven get a card and the footnote
+ * is gone.
+ *
+ * These words are deliberately NOT a Verdict. `verdictOf` reports what the
+ * server said about a department it classified, and the server said nothing at
+ * all about these three; putting "Within Normal Range" on them would invent a
+ * finding, which is the same mistake `unreported` exists one block up to
+ * prevent. Nor is this a warning: "Outside Normal Range" earns the error red
+ * because something has gone wrong, and nothing has gone wrong here. A thin
+ * office is not underperforming, it is unmeasured, so the tone is the muted
+ * grey of an absence of information (DESIGN.md reserves #bd0000 for errors).
+ */
+const THIN_VERDICT = 'Not enough reviews to judge'
+
+/** Layout and focus ring shared by every card in the strip; fill and elevation vary. */
+const CARD_SHELL =
+  'rounded-xl px-3.5 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-royal'
+
+/**
+ * One office in the strip: who it is, the verdict, and the figure behind it.
+ *
+ * Charted and thin offices share this component on purpose. The moment the two
+ * are drawn as different kinds of thing — a card for one, a footnote for the
+ * other — the strip stops answering "how is each office doing" and starts
+ * answering "how is each office we could measure doing", without ever telling
+ * the reader that the question changed.
+ */
+function OfficeCard({
+  code,
+  name,
+  verdict,
+  tone,
+  detail,
+  chartable,
+  active,
+  onSelect,
+}: {
+  code: string
+  name: string
+  /** The words in the verdict slot. Never a status the server did not assert. */
+  verdict: string
+  /** Tailwind colour for those words — the second signal here, never the only one. */
+  tone: string
+  /** The figure the verdict rests on: the latest week, or the review count. */
+  detail: string
+  /** False for a thin office: there is no series behind it for the chart to draw. */
+  chartable: boolean
+  active: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      /*
+       * A thin office is not a toggle, so it gets no `aria-pressed` at all
+       * rather than one pinned to false — announcing a two-state control that
+       * has only ever had one state is its own small lie.
+       *
+       * `aria-disabled`, never `disabled`. The native attribute drops the card
+       * out of the tab order and most screen readers walk straight past it, so
+       * a reader working through the strip by keyboard would meet four offices
+       * and conclude the city has four. That is the exact bug this revision
+       * fixes, relocated from the screen into the accessibility tree. Same rule
+       * as the Generate Report button below, and the one e2e/clearances.spec.ts
+       * and e2e/inspection-review.spec.ts hold their own shut controls to.
+       *
+       * Prevented rather than allowed-and-empty because the card is already the
+       * whole answer for a thin office. Selecting it could only swap a chart for
+       * a restatement of the card's own two lines, and would empty Noted Delays
+       * beside it into a second one — three panels saying the one thing this
+       * card says, and the reader loses the chart they were last looking at to
+       * get there.
+       */
+      aria-pressed={chartable ? active : undefined}
+      aria-disabled={chartable ? undefined : true}
+      onClick={chartable ? onSelect : undefined}
+      className={`${CARD_SHELL} ${
+        !chartable
+          ? // Flat and hairline-ruled instead of raised: still plainly a card of
+            // equal standing, but visibly not one of the controls. Kept on solid
+            // white so the muted text holds its contrast ratio.
+            'cursor-default bg-white ring-1 ring-line'
+          : active
+            ? 'bg-white shadow-card ring-2 ring-royal'
+            : 'bg-white shadow-card ring-1 ring-transparent hover:ring-line-strong'
+      }`}
+    >
+      <span className="flex items-baseline gap-1.5 overflow-hidden">
+        {/*
+         * `whitespace-nowrap` because a code is one token however it is spelt:
+         * CMO-MARKET broke at its hyphen into "CMO-" / "MARKET", which read as
+         * an office called CMO and pushed the whole thin row 23px taller than
+         * the charted one above it. It is the only one of the seven codes with
+         * a hyphen in it, which is why nothing caught this until it was drawn.
+         */}
+        <span className="whitespace-nowrap text-[13px] font-bold text-ink">{code}</span>
+        {/* The office picker needs a name, but the code is what fits. */}
+        <span className="truncate text-[11px] text-ink-muted">{name}</span>
+      </span>
+      <span className={`mt-0.5 block text-[13px] font-semibold ${tone}`}>{verdict}</span>
+      <span className="mt-0.5 block text-[11px] leading-snug text-ink-muted">{detail}</span>
+    </button>
+  )
+}
+
+/*
  * ── Process Status Indicator ───────────────────────────────────────────────
  *
  * The spec asks this to classify *each* department, not just the one on the
- * chart, so all of them are on screen at once. Each is also the button that
- * points the chart at that department: the reader's next move after seeing
- * "Outside Normal Range" is always "show me that one", and making the verdict
- * itself the control saves a trip to the filter menu — which is where this used
- * to live, one office at a time, behind a menu.
+ * chart, so all of them are on screen at once. Each charted one is also the
+ * button that points the chart at that department: the reader's next move after
+ * seeing "Outside Normal Range" is always "show me that one", and making the
+ * verdict itself the control saves a trip to the filter menu — which is where
+ * this used to live, one office at a time, behind a menu.
  */
 function StatusStrip({
   departments,
+  thin,
+  minPerWeek,
   selected,
   onSelect,
 }: {
   departments: ProcessingTimeDepartment[]
-  selected: ProcessingTimeDepartment
+  thin: ThinDepartment[]
+  /** A week under this is never averaged — the whole reason a thin office is thin. */
+  minPerWeek: number
+  /** Absent when no office could be charted at all; then every card here is thin. */
+  selected?: ProcessingTimeDepartment
   onSelect: (code: string) => void
 }) {
   return (
     <div
       role="group"
       aria-label="Process status by department"
-      className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4"
+      /*
+       * Four across had to become seven cards, and the strip wraps rather than
+       * shrinking to fit them: seven in one row costs about 90px a card and
+       * takes "Outside Normal Range" down to a size the client has already told
+       * us reads as cramped. At 1440 this lands as a row of four and a row of
+       * three at the original card size; below xl it steps down to three, two,
+       * then one. Charted offices are emitted first, so on a wide screen the
+       * two rows happen to fall as "measured" then "unmeasured" — pleasant, but
+       * not something to rely on: change how many offices chart and the split
+       * moves, which is fine because every card states its own condition.
+       */
+      className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
     >
       {departments.map((department) => {
         const verdict = verdictOf(department)
-        const active = department.code === selected.code
         return (
-          <button
+          <OfficeCard
             key={department.code}
-            type="button"
-            aria-pressed={active}
-            onClick={() => onSelect(department.code)}
-            className={`rounded-xl bg-white px-3.5 py-2.5 text-left shadow-card transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-royal ${
-              active ? 'ring-2 ring-royal' : 'ring-1 ring-transparent hover:ring-line-strong'
-            }`}
-          >
-            <span className="flex items-baseline gap-1.5 overflow-hidden">
-              <span className="text-[13px] font-bold text-ink">{department.code}</span>
-              {/* The office picker needs a name, but the code is what fits. */}
-              <span className="truncate text-[11px] text-ink-muted">{department.name}</span>
-            </span>
-            <span className={`mt-0.5 block text-[13px] font-semibold ${VERDICT_TONE[verdict]}`}>
-              {VERDICT_LABEL[verdict]}
-            </span>
-            <span className="mt-0.5 block text-[11px] text-ink-muted">
-              {department.latest_week
+            code={department.code}
+            name={department.name}
+            verdict={VERDICT_LABEL[verdict]}
+            tone={VERDICT_TONE[verdict]}
+            detail={
+              department.latest_week
                 ? `week of ${spcWeekDate(department.latest_week)} · ${department.latest_mean_days.toFixed(1)} days`
-                : 'no week reported'}
-            </span>
-          </button>
+                : 'no week reported'
+            }
+            chartable
+            active={department.code === selected?.code}
+            onSelect={() => onSelect(department.code)}
+          />
         )
       })}
+      {thin.map((office) => (
+        <OfficeCard
+          key={office.code}
+          code={office.code}
+          name={office.name}
+          verdict={THIN_VERDICT}
+          tone="text-ink-muted"
+          /*
+           * Both numbers come from the payload — the office's own
+           * `completed_reviews` and the report's `min_completions_per_week` —
+           * so neither is retyped here and lowering the server's minimum cannot
+           * leave the card quoting the old one.
+           *
+           * Said per WEEK on purpose, and kept to one line so the thin row sits
+           * at the same height as the charted one. CENRO has finished three
+           * reviews and the minimum is three; "3 reviews, needs 3" would read as
+           * a contradiction rather than as what it is, three reviews landing in
+           * three separate weeks. The threshold has always been a within-a-week
+           * one and the sentence has to say so or it invites a bug report.
+           */
+          detail={`${office.completed_reviews} finished review${office.completed_reviews === 1 ? '' : 's'} · no week reached ${minPerWeek}`}
+          chartable={false}
+          active={false}
+          onSelect={() => {}}
+        />
+      ))}
     </div>
   )
 }
@@ -418,28 +572,28 @@ function SlowdownWarnings({ departments }: { departments: ProcessingTimeDepartme
   )
 }
 
-/**
- * The offices the server could not chart, named rather than silently dropped.
- *
- * An oversight screen that shows four departments when the city has seven
- * implies the other three were checked. They were not: a week with fewer than
- * three finished reviews is left off, because an average of one review is a
- * fact about that review and not about the office.
+/*
+ * `NotCharted` used to live here: a grey line under the strip reading
+ * "Not charted: OBO, CENRO, CMO-MARKET — too few finished reviews a week to
+ * average." It is gone because every word of it is now on the offices' own
+ * cards, where the reader is already looking. Do not bring it back alongside
+ * the cards — a footnote repeating what the cards say is how three offices came
+ * to be readable as absent in the first place.
  */
-function NotCharted({ thin }: { thin: ProcessingTimeReport['thin'] }) {
-  if (!thin?.length) return null
-  return (
-    <p className="mt-1.5 text-[12px] text-ink-muted">
-      Not charted: {thin.map((office) => office.code).join(', ')} — too few finished reviews a week
-      to average.
-    </p>
-  )
-}
 
 function LoadingState() {
   return (
     <div className="space-y-4">
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      {/*
+       * Seven placeholders because the strip now draws every office rather than
+       * only the charted ones, and reserving four would drop the chart half a
+       * row down the moment the payload landed. A guess either way; this is the
+       * guess that matches what the register has.
+       */}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <Skeleton className="h-20 w-full rounded-xl" />
+        <Skeleton className="h-20 w-full rounded-xl" />
         <Skeleton className="h-20 w-full rounded-xl" />
         <Skeleton className="h-20 w-full rounded-xl" />
         <Skeleton className="h-20 w-full rounded-xl" />
@@ -547,8 +701,13 @@ export function ProcessingTimePage() {
           <div className="space-y-4">
             <section>
               <SectionHeading metric="departments.status">Process Status Indicator</SectionHeading>
-              <StatusStrip departments={departments} selected={selected} onSelect={setOffice} />
-              <NotCharted thin={data.thin} />
+              <StatusStrip
+                departments={departments}
+                thin={data.thin ?? []}
+                minPerWeek={data.min_completions_per_week}
+                selected={selected}
+                onSelect={setOffice}
+              />
             </section>
 
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -574,18 +733,39 @@ export function ProcessingTimePage() {
         </MetricDefinitions>
       ) : (
         <MetricDefinitions value={definitions}>
-          <EmptyState
-            title="Not enough review history to chart yet"
-            description={
-              <>
-                Across the last {data.window_weeks} weeks the offices finished{' '}
-                {data.completed_reviews}
-                <Info metric="completed_reviews" /> reviews, but no single week reached the{' '}
-                {data.min_completions_per_week} finished reviews a weekly average needs. The chart
-                appears once enough reviews are being finished each week.
-              </>
-            }
-          />
+          <div className="space-y-4">
+            {/*
+             * Nothing charts, but the offices still exist and the payload still
+             * names them. Leaving the strip out here would put the reader back
+             * in front of a screen that mentions offices only in prose, which is
+             * the state this revision exists to end — and on a window where
+             * nothing charted at all, "which offices are even in this" is the
+             * one question left to answer.
+             */}
+            {data.thin?.length ? (
+              <section>
+                <SectionHeading metric="departments.status">Process Status Indicator</SectionHeading>
+                <StatusStrip
+                  departments={[]}
+                  thin={data.thin}
+                  minPerWeek={data.min_completions_per_week}
+                  onSelect={setOffice}
+                />
+              </section>
+            ) : null}
+            <EmptyState
+              title="Not enough review history to chart yet"
+              description={
+                <>
+                  Across the last {data.window_weeks} weeks the offices finished{' '}
+                  {data.completed_reviews}
+                  <Info metric="completed_reviews" /> reviews, but no single week reached the{' '}
+                  {data.min_completions_per_week} finished reviews a weekly average needs. The chart
+                  appears once enough reviews are being finished each week.
+                </>
+              }
+            />
+          </div>
         </MetricDefinitions>
       )}
     </div>

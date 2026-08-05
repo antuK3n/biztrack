@@ -13,12 +13,21 @@ use App\Models\Application;
  * arrive, and the count beside it would always be ≤ 50 and always look
  * plausible. So the filter and the whole-set counts are part of the endpoint,
  * and these tests are what stop them drifting back into the page.
+ *
+ * BPLO is the reader throughout, where this used to be the super admin. Two
+ * reasons, and they point the same way. The queue is `application.review`, which
+ * the client took off the super admin along with the Track rail entry — "it is
+ * not his role to do those things" — so an admin session is a 403 here now. And
+ * BPLO is the right stand-in rather than merely an available one: it holds
+ * `application.view_any_office`, so it is the one office role that sees every
+ * office's assignments, which is the register-wide view these whole-set counts
+ * are about.
  */
 
 it('filters the queue by application status on the server', function () {
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
-    $all = test()->withHeaders($admin)->getJson('/api/v1/assignments')->assertOk()->json('meta');
+    $all = test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('meta');
     expect($all['total'])->toBeGreaterThan(0);
 
     // Put one routed filing on the inspection side, so the two tabs genuinely
@@ -38,11 +47,11 @@ it('filters the queue by application status on the server', function () {
     $approvalStatuses = ['under_review', 'returned'];
     $inspectionStatuses = ['for_inspection', 'approved', 'issued'];
 
-    $approval = test()->withHeaders($admin)
+    $approval = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status='.implode(',', $approvalStatuses))
         ->assertOk()->json();
 
-    $inspection = test()->withHeaders($admin)
+    $inspection = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status='.implode(',', $inspectionStatuses))
         ->assertOk()->json();
 
@@ -67,13 +76,13 @@ it('filters the queue by application status on the server', function () {
 });
 
 it('accepts the filter as a repeated parameter as well as a comma-separated one', function () {
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
-    $csv = test()->withHeaders($admin)
+    $csv = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status=under_review,returned')
         ->assertOk()->json('meta.total');
 
-    $repeated = test()->withHeaders($admin)
+    $repeated = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status[]=under_review&application_status[]=returned')
         ->assertOk()->json('meta.total');
 
@@ -81,10 +90,10 @@ it('accepts the filter as a repeated parameter as well as a comma-separated one'
 });
 
 it('ignores an unknown status rather than 500ing or emptying the queue', function () {
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
-    $unfiltered = test()->withHeaders($admin)->getJson('/api/v1/assignments')->assertOk()->json('meta.total');
-    $bogus = test()->withHeaders($admin)
+    $unfiltered = test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('meta.total');
+    $bogus = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status=not_a_real_status')
         ->assertOk()->json('meta.total');
 
@@ -94,9 +103,9 @@ it('ignores an unknown status rather than 500ing or emptying the queue', functio
 });
 
 it('counts each tab over the whole scoped set, not the page in hand', function () {
-    $admin = authAs('admin@biztrack.local');
+    $bplo = authAs('bplo@biztrack.local');
 
-    $body = test()->withHeaders($admin)->getJson('/api/v1/assignments?per_page=1')->assertOk()->json();
+    $body = test()->withHeaders($bplo)->getJson('/api/v1/assignments?per_page=1')->assertOk()->json();
     $counts = $body['meta']['application_status_counts'];
 
     expect(count($body['data']))->toBe(1)
@@ -105,7 +114,7 @@ it('counts each tab over the whole scoped set, not the page in hand', function (
 
     // Every count is reachable by asking for that status directly.
     foreach ($counts as $status => $count) {
-        $total = test()->withHeaders($admin)
+        $total = test()->withHeaders($bplo)
             ->getJson("/api/v1/assignments?application_status={$status}")
             ->assertOk()->json('meta.total');
 
@@ -117,9 +126,12 @@ it('counts only the office the reader belongs to', function () {
     $sanitary = authAs('sanitary@biztrack.local');
     $body = test()->withHeaders($sanitary)->getJson('/api/v1/assignments')->assertOk()->json();
 
-    $admin = authAs('admin@biztrack.local');
-    $adminTotal = test()->withHeaders($admin)->getJson('/api/v1/assignments')->assertOk()->json('meta.total');
+    // BPLO as the register-wide reader: it is the only office role holding
+    // `application.view_any_office`, so its total is the whole queue and CHO's
+    // is a strict slice of it.
+    $bplo = authAs('bplo@biztrack.local');
+    $wholeQueueTotal = test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('meta.total');
 
     expect(array_sum($body['meta']['application_status_counts']))->toBe($body['meta']['total'])
-        ->and($body['meta']['total'])->toBeLessThanOrEqual($adminTotal);
+        ->and($body['meta']['total'])->toBeLessThanOrEqual($wholeQueueTotal);
 });

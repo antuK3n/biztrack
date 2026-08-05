@@ -29,8 +29,37 @@ class RbacSeeder extends Seeder
          * BPLO, the issuing office that coordinates every other office's
          * clearance, and the super admin hold it.
          */
-        $review = ['application.view_all', 'application.review', 'permit.view_all',
-            'request.create', 'message.participate', 'compliance.view'];
+        /*
+         * `inspection.manage` is on every office that issues a clearance, and
+         * that is now all six rather than the two it used to be.
+         *
+         * It was on `sanitary_officer` and `fire_inspector` only, on the
+         * reasoning that they were the only permit types carrying
+         * `requires_inspection`. That reasoning inverted the dependency: the
+         * flag was false for OCCUPANCY / CEC / ZONING / MARKET *because* those
+         * offices could not conduct a visit, and they could not conduct a visit
+         * because the flag was false. The client broke the loop from the other
+         * end — "OBO, CENRO, Market, and Zoning admins cannot approve
+         * inspection. Only Sanitary and Fire has it. so basically their permits
+         * also have inspections lol, not just those two" — and ReferenceSeeder
+         * now sets the flag true for all six.
+         *
+         * Without this permission that change strands filings rather than
+         * fixing anything. Every /inspections* route is behind
+         * `permission:inspection.manage`, so an OBO / CENRO / CPDO / Market
+         * officer could not so much as SEE the visit booked against their own
+         * office; WorkflowService::recordInspection only issues once every
+         * inspection on the file has passed, so the filing would sit in
+         * `for_inspection` with no one but the super admin able to move it.
+         * The nav entry and the /inspections routes on the web side read the
+         * same permission off the profile payload, so granting it here is what
+         * puts the screen in front of those four offices too.
+         *
+         * `zoning_officer` keeps its own entry further down because it also
+         * holds `zoning.evaluate`; the other three share this list.
+         */
+        $review = ['application.view_all', 'application.review', 'inspection.manage',
+            'permit.view_all', 'request.create', 'message.participate', 'compliance.view'];
 
         $matrix = [
             'business_owner' => [
@@ -104,14 +133,55 @@ class RbacSeeder extends Seeder
                 'description' => 'Reviews market-clearance requirements for the CMO Market Office.',
                 'permissions' => $review,
             ],
+            /*
+             * The super admin OVERSEES the process; it does not work inside it.
+             *
+             * Four permissions came off this role, and each one was a rail entry
+             * the client asked to be rid of: "In the super admin's account
+             * (admin@), remove Messages, Track, Inspections, and Other
+             * Requirements. It is not his role to do those things."
+             *
+             *   message.participate  -> Messages
+             *   application.review   -> Track (the officer queue at /queue)
+             *   inspection.manage    -> Inspections
+             *   request.create       -> Other Requirements
+             *
+             * The nav filters off the permissions in the profile payload, so
+             * dropping the permission is what removes the entry; there is no
+             * frontend special case and there must not be one, because the API
+             * routes are gated on the same four names and a hidden-but-callable
+             * screen is the worse half of the bug.
+             *
+             * The distinction being drawn is doing versus watching. Reviewing a
+             * filing, closing a site visit, asking an applicant for a document
+             * and answering their message are all an OFFICE's work, and every
+             * one of them belongs to an office that is accountable for it —
+             * which is also what makes the audit trail mean anything. The super
+             * admin's job is the register itself: accounts, reference data,
+             * OIC cover, the audit log, and the Processing Time oversight
+             * screen that watches the departments (including BPLO) for
+             * slowdowns. Handing the overseer the same buttons as the overseen
+             * is what this separation avoids.
+             *
+             * What it keeps and why: `application.view_all` plus
+             * `application.view_any_office` still let the admin READ any
+             * filing in the register — oversight needs to see everything and
+             * change nothing. `permit.issue` and `fee.adjust` stay because they
+             * were not asked for and are the escalation path when an office
+             * cannot act. `application.reject` also stays, unasked, and is now
+             * a permission with no screen behind it: rejection is driven from
+             * the review queue this role no longer reaches. Left in place
+             * deliberately rather than tidied away, because removing it is a
+             * policy decision the client has not made.
+             */
             'admin' => [
                 'display_name' => 'Administrator',
-                'description' => 'Super admin: full system access, user management, and audit.',
+                'description' => 'Super admin: oversight of the register — accounts, reference data, audit, and processing-time monitoring.',
                 'permissions' => [
                     'application.view_all', 'application.view_any_office',
-                    'application.review', 'application.reject',
-                    'fee.adjust', 'inspection.manage', 'permit.view_all', 'permit.issue',
-                    'request.create', 'message.participate', 'compliance.view',
+                    'application.reject',
+                    'fee.adjust', 'permit.view_all', 'permit.issue',
+                    'compliance.view',
                     /*
                      * The super admin holds `analytics.processing_time` and NOT
                      * `analytics.view`, which reads like a mistake and is not.
@@ -153,6 +223,10 @@ class RbacSeeder extends Seeder
                 'description' => 'Reviews zoning/locational clearance for the CPDO.',
                 'permissions' => [
                     'application.view_all', 'application.review', 'zoning.evaluate',
+                    // Locational clearance is a statement about a site, so CPDO
+                    // conducts a visit like the other five clearance offices —
+                    // see the note on `$review` above.
+                    'inspection.manage',
                     'permit.view_all', 'request.create', 'message.participate',
                     'compliance.view',
                 ],

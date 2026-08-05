@@ -25,6 +25,27 @@ use App\Models\PermitType;
  * real and expected, and `/applications` is the feed that can answer for the
  * stage — with an exact server-side total, a server-side search, and the office
  * boundary of ApplicationVisibility still closed.
+ *
+ * WHO CAN ACTUALLY REACH THIS TAB, WHICH IS NO LONGER WHAT IT WAS
+ * ---------------------------------------------------------------
+ * The tab was built for "BPLO + the super admin", and it is gated on
+ * `application.view_any_office` — which those two hold and no other office
+ * does. The API half of that is unchanged and is still asserted below: the
+ * super admin reads the stage from `/applications` perfectly well.
+ *
+ * The SCREEN half is not. Pending Payment is a tab on QueuePage, which lives at
+ * `/staff/queue` behind `RequirePermission permission="application.review"` —
+ * and `application.review` is one of the four the client took off the super
+ * admin ("remove Messages, Track, Inspections, and Other Requirements"). So the
+ * super admin can no longer open the screen the tab is on, and in practice the
+ * stage is BPLO's alone.
+ *
+ * Left as it is on purpose. Nothing is broken — no 500, no leak, and the office
+ * that issues the Tax Order of Payment is the office chasing it — but it is a
+ * narrowing that fell out of an unrelated request rather than one anybody asked
+ * for, and whether the super admin should get another route to the stage is a
+ * product decision. Recorded here so it is found deliberately rather than
+ * rediscovered as a bug report.
  */
 
 /** A freshly filed application, sitting unpaid exactly as the wizard leaves it. */
@@ -61,12 +82,23 @@ it('leaves a submitted-but-unpaid filing with no assignment at all', function ()
      */
     expect($filing->assignments()->count())->toBe(0);
 
-    $admin = authAs('admin@biztrack.local');
+    /*
+     * The assignment feed is read as BPLO, not as the super admin. It is
+     * `application.review`, which came off the super admin with the Track rail
+     * entry the client asked to remove, and BPLO is the reader that sees every
+     * office's assignments anyway (`application.view_any_office`) — so this
+     * still asks the strongest available version of the question: the filing is
+     * absent from the whole queue, not merely from one office's slice.
+     *
+     * Note the tab itself is unaffected. Pending Payment reads `/applications`,
+     * which the super admin keeps.
+     */
+    $bplo = authAs('bplo@biztrack.local');
 
     // Not on the assignment feed under its own status, and not under any status:
     // there is no row to filter, so no filter could have produced one.
     foreach (['pending_payment', 'submitted,pending_payment', ''] as $filter) {
-        $rows = test()->withHeaders($admin)
+        $rows = test()->withHeaders($bplo)
             ->getJson('/api/v1/assignments?per_page=200&application_status='.$filter)
             ->assertOk()
             ->json('data');
@@ -76,6 +108,8 @@ it('leaves a submitted-but-unpaid filing with no assignment at all', function ()
     }
 });
 
+// "Admin queue" here means the endpoint, not the screen — see the note at the
+// top of this file about the super admin no longer reaching /staff/queue.
 it('shows an unpaid filing to the admin queue, with an exact server-side total', function () {
     $filing = unpaidFiling();
     $admin = authAs('admin@biztrack.local');
