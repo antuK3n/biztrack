@@ -1057,49 +1057,21 @@ function LinesStep({
                     </p>
                   )}
                   {/*
-                    * Products / Services — the second column of the paper's
-                    * line-of-business table, on both BPLO forms and on CENRO's
-                    * CEC application, and never asked by this wizard.
+                    * Products / Services used to sit here, and no longer does.
                     *
-                    * It sits under the line it belongs to rather than in a
-                    * business-wide box because that is the only place it can be
-                    * right: the column is per row on all three forms. The PSIC
-                    * title says what trade this is, and CENRO reviews what is
-                    * actually handled — "Retail sale in non-specialised stores"
-                    * does not distinguish a sari-sari store from one selling
-                    * paint thinner.
+                    * It is the second column of the paper's line-of-business
+                    * table on both BPLO forms and on CENRO's CEC application,
+                    * so it was added to match the paper. In use it read as
+                    * clutter: a third row of chrome under every trade you pick,
+                    * on the step that is already the heaviest in the wizard,
+                    * for an answer no form marks required.
                     *
-                    * Not offered on an unclassified "Other" row: that row's only
-                    * remedy is removal, and inviting more typing into it would
-                    * be asking for work that is about to be thrown away.
-                    *
-                    * Optional. No paper form marks it required, and a wrapping
-                    * <label> gives it a real accessible name that includes the
-                    * trade, so a screen-reader user with four lines selected
-                    * hears which one they are describing.
+                    * The column, the API validation and the officer's review
+                    * sheet all still handle it — nothing was torn out — so if
+                    * BPLO says the counter needs it, it comes back somewhere
+                    * quieter rather than being rebuilt. Recorded in
+                    * docs/questions-for-malabon.md.
                     */}
-                  {!isOther && (
-                    <label className="mt-2 block">
-                      <span className="mb-1 block text-xs font-semibold text-ink-secondary">
-                        Products / Services for {code?.title ?? 'this line'}
-                      </span>
-                      <input
-                        value={line.products_services}
-                        onChange={(e) =>
-                          onChange(
-                            lines.map((l) =>
-                              l.psic_code_id === line.psic_code_id
-                                ? { ...l, products_services: e.target.value }
-                                : l,
-                            ),
-                          )
-                        }
-                        placeholder="e.g. canned goods, rice, soft drinks"
-                        maxLength={1000}
-                        className={inputCls}
-                      />
-                    </label>
-                  )}
                 </div>
               )
             })}
