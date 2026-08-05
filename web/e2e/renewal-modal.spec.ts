@@ -50,6 +50,22 @@ function permitRows(page: Page) {
 }
 
 /**
+ * Choose a business, having first checked it is on offer at all.
+ *
+ * `selectOption` on an absent option only reports "did not find some options"
+ * after a fifteen-second timeout, which is how a real bug read as a flake once:
+ * the list behind this select is paged, and when the tester's register grew past
+ * one page the seeded business stopped being offered — not hidden below a
+ * scroll, absent. `businesses.list()` asks for the picker ceiling now, and this
+ * says so out loud if that ever comes undone.
+ */
+async function chooseBusiness(page: Page, id: number) {
+  const option = businessSelect(page).locator(`option[value="${id}"]`)
+  await expect(option, `business ${id} is not offered — is the list paged again?`).toHaveCount(1)
+  await businessSelect(page).selectOption({ value: String(id) })
+}
+
+/**
  * Call the API as the app does, through the session already in the page.
  *
  * Used to BUILD fixtures — a draft that already names its permit cannot be
@@ -152,7 +168,7 @@ test('two permits of the same type are told apart by number and dates', async ({
   await page.goto('/apply?type=renewal')
   await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
 
-  await businessSelect(page).selectOption({ value: String(TWO_PERMIT_BUSINESS_ID) })
+  await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
 
   const rows = permitRows(page)
   await expect(rows).toHaveCount(2, { timeout: 20_000 })
@@ -199,7 +215,7 @@ test('Continue is never disabled — it says what is still missing', async ({ pa
   await expect(page.locator(`[id="${first}"]`)).toBeVisible()
 
   // With a business chosen, the reason moves on to the permit.
-  await businessSelect(page).selectOption({ value: String(TWO_PERMIT_BUSINESS_ID) })
+  await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
   await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
   const second = await proceed.getAttribute('aria-describedby')
   expect(second).toBeTruthy()

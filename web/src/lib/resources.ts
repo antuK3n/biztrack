@@ -200,8 +200,20 @@ export const reference = {
 /* ── Businesses ───────────────────────────────────────────────────────── */
 
 export const businesses = {
-  /** The caller's own businesses, newest first. Paged (default 50). */
-  list: (params: PageParams = {}) => unwrap<Business[]>(api.get('/businesses', { params })),
+  /**
+   * The caller's own businesses, newest first.
+   *
+   * Asks for the picker ceiling, not the default page. Item 110 made this list
+   * the ONLY way to say which business a renewal is against — the dialog owns
+   * that decision now, and there is no second control further down the wizard
+   * to fall back on. A 50-row page would mean an owner with fifty-one
+   * businesses simply could not renew the fifty-first: it would not be missing
+   * from a list they could scroll, it would not be offered at all.
+   *
+   * Callers that want the page meta still have `page()` below.
+   */
+  list: (params: PageParams = {}) =>
+    unwrap<Business[]>(api.get('/businesses', { params: { per_page: PICKER_PAGE_SIZE, ...params } })),
   /** Same list, keeping the page meta. */
   page: (params: PageParams = {}) => unwrapPaged<Business>(api.get('/businesses', { params })),
   get: (id: number) => unwrap<Business>(api.get(`/businesses/${id}`)),
