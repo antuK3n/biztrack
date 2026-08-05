@@ -208,7 +208,7 @@ async function findShut(page: Page): Promise<number | null> {
   })
 }
 
-test('a draft can still choose its clearances, and the cards say what each costs', async ({
+test('a draft can still choose its clearances, and the grid says which button spends money', async ({
   page,
 }) => {
   await page.goto('/dashboard')
@@ -248,14 +248,19 @@ test('a draft can still choose its clearances, and the cards say what each costs
    * The consequence, before either button is pressed. Apply and Submit sit side
    * by side and look alike, and one of them spends money.
    *
-   * Said in two places, and each place is asserted for its own half. The RULE
-   * is above the grid, once — it is identical for all six clearances, and the
-   * client's *"absurd amount of text"* was six cards each repeating it. The
-   * AMOUNT is on the card, because that is the part that differs.
+   * The RULE is above the grid, once — it is identical for all six clearances,
+   * and the client's *"absurd amount of text"* was six cards each repeating it.
+   *
+   * The AMOUNT is no longer on the card. It printed there until the client saw
+   * the finished grid — a chip, a fee, a tinted panel and three controls per
+   * card, six times over — and said the older, plainer card was better. Every
+   * clearance's fee still lands on the one Tax Order of Payment at Review &
+   * Submit, which is where the money is actually agreed to, and which the last
+   * test in this file asserts end to end.
    */
   await expect(page.getByText(/apply adds that office.s fee/i)).toBeVisible()
   await expect(page.getByText(/submit a copy.*costs nothing/i)).toBeVisible()
-  await expect(cards.first()).toContainText(/fee ₱|no fee assessed|fee set by this office/i)
+  await expect(cards.first()).not.toContainText(/fee ₱/i)
 
   /*
    * And no badge on a card nobody has touched. "Not requested" used to sit on
@@ -265,7 +270,7 @@ test('a draft can still choose its clearances, and the cards say what each costs
    */
   await expect(cards.first()).not.toContainText(/not requested/i)
 
-  const apply = cards.first().getByRole('button', { name: /^apply$/i })
+  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
   await expect(apply).toHaveAttribute('aria-disabled', 'false')
 })
 
@@ -319,7 +324,7 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
    * most screen readers pass over it, so an applicant using one would never
    * learn the button exists or why it does nothing.
    */
-  const apply = cards.first().getByRole('button', { name: /^apply$/i })
+  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
   await expect(apply).toHaveAttribute('aria-disabled', 'true')
   await expect(apply).toHaveAttribute('aria-describedby', 'clearances-locked')
   /*
@@ -375,25 +380,31 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
 
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await expect(card).toHaveCount(1)
+  /*
+   * The state reads off the button itself now that the status chip is gone —
+   * "Applied ✓" where an untouched card says "Apply".
+   */
+  const applied = card.getByRole('button', { name: /^applied for the/i })
+
   // Under the old toggle this click un-applied it and opened nothing.
-  await expect(card).toContainText(/applied for/i)
+  await expect(applied).toBeVisible()
 
   const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
 
-  await card.getByRole('button', { name: /^apply$/i }).click()
+  await applied.click()
   await expect(backToCards, 'Apply did not open the office form').toBeVisible()
 
   await page.getByRole('button', { name: /back without saving/i }).click()
   await expect(backToCards).toBeHidden()
 
   // Still applied for: the click opened a form, it did not undo anything.
-  await expect(card).toContainText(/applied for/i)
+  await expect(applied).toBeVisible()
 
   // And again. A toggle would open nothing the second time.
-  await card.getByRole('button', { name: /^apply$/i }).click()
+  await applied.click()
   await expect(backToCards, 'a second Apply did not open the office form').toBeVisible()
   await page.getByRole('button', { name: /back without saving/i }).click()
-  await expect(card).toContainText(/applied for/i)
+  await expect(applied).toBeVisible()
 })
 
 test('Submit always opens the upload box, and never removes what is there', async ({ page }) => {
@@ -426,31 +437,17 @@ test('Submit always opens the upload box, and never removes what is there', asyn
   await dialog.getByRole('button', { name: /^cancel$/i }).click()
 })
 
-test('un-applying has its own labelled control, apart from Apply', async ({ page }) => {
-  await page.goto('/dashboard')
-  const appId = await makeDraft(page)
-  await applyFor(page, appId, 'SANITARY')
-
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
-
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
-
-  /*
-   * Destroying something must never be the alternate meaning of the button
-   * that created it. The withdraw control names the clearance it withdraws, so
-   * a screen reader moving button to button is told which of six it is on.
-   */
-  const withdraw = card.getByRole('button', { name: new RegExp(`don’t apply for the`, 'i') })
-  await expect(withdraw).toBeVisible()
-  await expect(withdraw).toContainText(/sanitary/i)
-
-  // Three distinct controls, not two doing four jobs between them.
-  await expect(card.getByRole('button', { name: /^apply$/i })).toBeVisible()
-  await expect(card.getByRole('button', { name: /submit a copy/i })).toBeVisible()
-})
+/*
+ * REMOVED: 'un-applying has its own labelled control, apart from Apply'.
+ *
+ * The control it asserted is gone from the card — see the test near the end of
+ * this file, which keeps the half of the property that still holds (Apply
+ * reports its own state and never means the opposite on a second press).
+ *
+ * The half that is genuinely unenforced now: there is no way to withdraw a
+ * clearance you applied for. `clearances.unapply` still exists and works. When
+ * that control finds a home, this test should come back pointed at it.
+ */
 
 test('what just happened is announced, not only drawn', async ({ page }) => {
   await page.goto('/dashboard')
@@ -476,7 +473,7 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * cost is still standing when the applicant comes back to the cards.
    */
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
-  await card.getByRole('button', { name: /^apply$/i }).click()
+  await card.getByRole('button', { name: /^apply for the/i }).click()
 
   const back = page.getByRole('button', { name: /back without saving/i })
   await expect(back, 'Apply did not open the office sheet').toBeVisible()
@@ -526,7 +523,7 @@ test('the Market Clearance is offered to everyone, and says who it is for', asyn
    * sighted reader gets is not a note that stops anyone applying for a market
    * stall they do not have.
    */
-  const apply = marketCard.getByRole('button', { name: /^apply$/i })
+  const apply = marketCard.getByRole('button', { name: /^apply for the/i })
   const describedBy = await apply.getAttribute('aria-describedby')
   expect(describedBy, 'the Apply button names nothing that says who the card is for').toBeTruthy()
   await expect(page.locator(`#${describedBy!.split(' ').at(-1)}`)).toContainText(/stall/i)
@@ -554,7 +551,7 @@ test('the Market Clearance opens a sheet, and asks which stall it is clearing', 
   })
   // No reveal step any more — the card is on the grid with the other five.
   const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
-  await marketCard.getByRole('button', { name: /^apply$/i }).click()
+  await marketCard.getByRole('button', { name: /^apply for the/i }).click()
 
   // Apply opens the sheet, as it does for the other five.
   await expect(page.getByRole('heading', { name: /market clearance \(stall holders\)/i })).toBeVisible()
@@ -608,19 +605,20 @@ test('the Market Clearance opens a sheet, and asks which stall it is clearing', 
   expect(String(stored?.application_type)).toMatch(/market clearance/i)
 })
 
-test('the withdraw control is an ordinary button, not an error', async ({ page }) => {
+test('applying is reported on the button, and never by a second meaning of it', async ({
+  page,
+}) => {
   /*
-   * ITEM 107 — *"Fix the UI button for the Don't apply. This should not look
-   * like a warning message or something."*
+   * Replaces the ITEM 107 test, which asserted the paint on a "Don't apply for
+   * the <clearance>" button. That control has been removed from the card along
+   * with the status chip, the fee line and the panel around them: six cards
+   * each carrying five pieces of furniture made the grid unreadable, and the
+   * client's verdict on seeing it was that the older, plainer card was better.
    *
-   * It was red underlined text, and red (`--s-red`, #bd0000) is this product's
-   * ERROR colour — the same red the "This office refused it" panel uses. An
-   * ordinary opt-out was therefore dressed as the one thing on the card that
-   * means something has gone wrong.
-   *
-   * Asserted on the computed colour rather than on a class name: the complaint
-   * was about what the applicant sees, and a class list would go on passing if
-   * the red moved somewhere else.
+   * What has to stay true is the rule underneath that control, which is why
+   * this test exists rather than nothing: Apply reports its own state, and
+   * pressing it again must not mean the opposite. The original bug was a
+   * toggle — a second click silently un-applied and opened no form.
    */
   await page.goto('/dashboard')
   const appId = await makeDraft(page)
@@ -628,20 +626,25 @@ test('the withdraw control is an ordinary button, not an error', async ({ page }
 
   await page.goto(`/applications/${appId}/clearances`)
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
-  const withdraw = card.getByRole('button', { name: /don’t apply for the/i })
-  await expect(withdraw).toBeVisible()
 
-  // It still says WHICH clearance it withdraws — five cards share this screen.
-  await expect(withdraw).toContainText(/sanitary/i)
+  // The state is on the control that changed it, not in a separate badge.
+  const apply = card.getByRole('button', { name: /^applied for the/i })
+  await expect(apply).toBeVisible()
+  await expect(card.getByRole('button', { name: /don’t apply/i })).toHaveCount(0)
 
-  const paint = await withdraw.evaluate((el) => {
-    const s = getComputedStyle(el)
-    return { color: s.color, decoration: s.textDecorationLine, border: s.borderTopWidth }
-  })
-  // Not the error red, and not a bare underlined link either.
-  expect(paint.color).not.toBe('rgb(189, 0, 0)')
-  expect(paint.decoration).not.toContain('underline')
-  expect(paint.border, 'the withdraw control has no button chrome').not.toBe('0px')
+  /*
+   * Every control on the grid is named for ITS clearance. The visible labels
+   * are one word and identical on all six cards, so the accessible name is the
+   * only thing telling them apart.
+   */
+  await expect(apply).toHaveAccessibleName(/sanitary/i)
+  await expect(card.getByRole('button', { name: /^submit a copy of the/i })).toHaveAccessibleName(
+    /sanitary/i,
+  )
+
+  // Pressing it again opens the office form. It must NOT un-apply.
+  await apply.click()
+  await expect(card.getByRole('button', { name: /^apply for the/i })).toHaveCount(0)
 })
 
 test('the wizard puts the clearances last, and one Tax Order of Payment covers them', async ({
@@ -690,7 +693,7 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
    * the end mean something. Apply must open the sheet, never toggle the card
    * off.
    */
-  await cards.filter({ hasText: /fire/i }).getByRole('button', { name: /^apply$/i }).click()
+  await cards.filter({ hasText: /fire/i }).getByRole('button', { name: /^apply for the/i }).click()
 
   const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
   await expect(backToCards, 'Apply did not open the office sheet as a wizard step').toBeVisible()
