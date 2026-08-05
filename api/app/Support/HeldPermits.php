@@ -10,10 +10,29 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
+/**
+ * A clearance the applicant already holds, submitted instead of applied for
+ * (tester checklist item 59).
+ *
+ * The mechanism is deliberately the ordinary document table: the copy is an
+ * ApplicationDocument carrying `permit_type_id`, under a document type whose
+ * code is HELD_<PERMIT CODE>. What makes it "held" rather than "applied for" is
+ * the absence of the permit type from `application_permit_types` — that absence
+ * is what spares the applicant the office form, the assignment, and (because
+ * FeeCalculator::assess gates every rule on the selected permit types) the fee.
+ *
+ * Extracted here when the clearance stage moved after payment: two endpoints
+ * now accept the same upload — DocumentController for the wizard's existing
+ * path, ClearanceController for the post-payment stage — and a second copy of
+ * "which document type, and what happens to the previous file" would have been
+ * two mechanisms wearing one name.
+ */
 final class HeldPermits
 {
+    /** Document-type code prefix for a clearance the applicant already holds. */
     public const CODE_PREFIX = 'HELD_';
 
+    /** The single held copy on this filing for this clearance, if any. */
     public static function find(Application $application, PermitType $permitType): ?ApplicationDocument
     {
         return ApplicationDocument::where('application_id', $application->id)
@@ -22,6 +41,15 @@ final class HeldPermits
             ->first();
     }
 
+    /**
+     * Store the uploaded copy, replacing any earlier one for the same clearance.
+     *
+     * The path layout matches DocumentController's exactly — private disk,
+     * one directory per application, UUID filename — because these files are
+     * served by the same download endpoint and an officer reading the
+     * attachment list cannot tell (and should not have to) which screen the
+     * copy arrived through.
+     */
     public static function store(Application $application, PermitType $permitType, UploadedFile $file): ApplicationDocument
     {
         $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
@@ -42,11 +70,21 @@ final class HeldPermits
 
         Audit::log('document.uploaded', $doc);
 
+        // One certificate per clearance: re-submitting replaces, so the office
+        // never has to work out which of two sanitary permits is the live one.
         self::forgetAllExcept($application, $permitType, $doc->id);
 
         return $doc;
     }
 
+    /**
+     * The document type used for a certificate the applicant already holds.
+     *
+     * Created on demand rather than seeded: the set of clearances is data, so
+     * an LGU that adds a permit type gets the matching "already held" slot
+     * without a migration. The name carries the permit, which is what makes
+     * the attachment readable in an officer's document list.
+     */
     public static function documentType(PermitType $permitType): DocumentType
     {
         return DocumentType::firstOrCreate(
@@ -59,11 +97,19 @@ final class HeldPermits
         );
     }
 
+    /**
+     * Drop every certificate for this clearance, file and all.
+     *
+     * The stored file goes with the row: a "removed" document still sitting on
+     * disk is not removed, and it stays downloadable through
+     * /documents/{id}/download for as long as it is there.
+     */
     public static function forget(Application $application, PermitType $permitType): int
     {
         return self::forgetAllExcept($application, $permitType, null);
     }
 
+    /** @param  int|null  $keepId  the row to spare, or null to drop them all */
     public static function forgetAllExcept(Application $application, PermitType $permitType, ?int $keepId): int
     {
         $query = ApplicationDocument::where('application_id', $application->id)
