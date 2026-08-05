@@ -49,24 +49,31 @@ function seedWeeklyTurnaround(string $departmentCode, array $weeklyMeans, ?Carbo
 
 /* ── access ───────────────────────────────────────────────────────────── */
 
-it('serves the processing time monitor to the super admin and to BPLO', function () {
+it('serves the processing time monitor to the super admin and to nobody else, BPLO included', function () {
+    /*
+     * Spec §6 "Permit Processing Time Monitoring (Super Admin)" — this screen,
+     * alone among the four, sits on `analytics.processing_time`, and the super
+     * admin is the only role holding it.
+     *
+     * The negative half below is the whole point of the split. This monitor
+     * measures the DEPARTMENTS — BPLO among them — for genuine slowdowns, so it
+     * belongs to the office doing the oversight rather than to an office being
+     * overseen. The client said it in those words: "Super admin side should only
+     * have Processing Time dashboard", "Processing Time should not exist" on the
+     * BPLO side.
+     */
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/analytics/processing-time')
         ->assertOk();
 
-    /*
-     * Checklist item 78 — "the dashboard should be transferred to BPLO admin,
-     * not super admin". BPLO is the issuing office that coordinates every other
-     * office's clearance and is the one office role already holding
-     * application.view_any_office, so the aggregate summarises nothing it could
-     * not already open one filing at a time.
-     */
+    // BPLO holds `analytics.view` and every screen hanging off it, but not this
+    // one — being measured is not the same as doing the measuring.
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/processing-time')
-        ->assertOk();
+        ->assertForbidden();
 
-    // An ordinary office reviewer holds application.view_all but not
-    // analytics.view; letting them read this would summarise filings never
+    // An ordinary office reviewer holds application.view_all but neither
+    // analytics permission; letting them read this would summarise filings never
     // routed to them.
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/analytics/processing-time')
@@ -85,14 +92,27 @@ it('refuses both analytics feeds to a caller with no session', function () {
     test()->get('/api/v1/analytics/business-growth/report')->assertUnauthorized();
 });
 
-it('serves business growth analysis to the super admin and to BPLO', function () {
-    test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')
-        ->assertOk();
-
+it('serves business growth analysis to BPLO and not to the super admin', function () {
+    /*
+     * Spec §4 "Business Growth Analysis (Admin - BPLO)". BPLO is the issuing
+     * office that coordinates every other office's clearance and the one office
+     * role already holding application.view_any_office, so the aggregate
+     * summarises nothing it could not already open one filing at a time.
+     */
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk();
+
+    /*
+     * The super admin does NOT get this, which reads like a mistake and is not:
+     * the three operational screens (dashboard, renewal risk, business growth)
+     * were assigned to BPLO and the one oversight screen to the super admin.
+     * "Full system access" stops at a separation of duties the client asked for
+     * in writing, so the negative is asserted rather than assumed.
+     */
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/business-growth')
+        ->assertForbidden();
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
@@ -103,12 +123,24 @@ it('serves business growth analysis to the super admin and to BPLO', function ()
         ->assertForbidden();
 });
 
-it('refuses both report downloads to anyone without analytics.view', function () {
+it('refuses each report download to whoever does not hold that screen permission', function () {
+    // Neither analytics permission at all.
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->get('/api/v1/analytics/processing-time/report')
         ->assertForbidden();
 
     test()->withHeaders(authAs('owner@biztrack.local'))
+        ->get('/api/v1/analytics/business-growth/report')
+        ->assertForbidden();
+
+    // And the two roles that each hold one of them: the PDF is the same figures
+    // as the screen, so the split has to hold on the download route too or the
+    // "Generate Report" button becomes the way round it.
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->get('/api/v1/analytics/processing-time/report')
+        ->assertForbidden();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
         ->get('/api/v1/analytics/business-growth/report')
         ->assertForbidden();
 });
@@ -214,7 +246,7 @@ it('ignores completions outside the requested window', function () {
 /* ── Business growth ──────────────────────────────────────────────────── */
 
 it('counts business lifecycle status from permits and soft deletes', function () {
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
         ->json('data');
@@ -232,16 +264,35 @@ it('counts business lifecycle status from permits and soft deletes', function ()
 });
 
 it('counts a closure in the period it happened in', function () {
-    $before = test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')->json('data.closures');
+    /*
+     * assertOk() on both reads, and a null check on the month row, because this
+     * test used to take the payload straight off ->json() and index into it. When
+     * the analytics split moved this screen off the super admin, the 403 body had
+     * no `data` key, `$after` came back null, and the suite reported "Trying to
+     * access array offset on null" from a line about closure counting — an error
+     * that named neither the endpoint nor the status that caused it. A response
+     * that is read for its shape has to be asserted for its status first, or the
+     * next permission change costs another debugging pass.
+     */
+    $before = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/business-growth')
+        ->assertOk()
+        ->json('data.closures');
 
     Business::firstOrFail()->delete();
 
-    $after = test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/business-growth')->json('data');
+    $after = test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/analytics/business-growth')
+        ->assertOk()
+        ->json('data');
 
     expect($after['closures'])->toBe($before + 1);
-    $currentMonth = collect($after['closure_trend'])->firstWhere('month', CarbonImmutable::now()->format('Y-m'));
+
+    $month = CarbonImmutable::now()->format('Y-m');
+    $currentMonth = collect($after['closure_trend'])->firstWhere('month', $month);
+    // The closure just made falls in this month, so the trend must carry a row
+    // for it. Saying so here means a dropped bucket reads as a dropped bucket.
+    expect($currentMonth)->not->toBeNull("The closure trend has no row for {$month}.");
     expect($currentMonth['closures'])->toBeGreaterThan(0);
 });
 
@@ -262,7 +313,7 @@ it('ranks barangays by the change in new registrations', function () {
         ]);
     }
 
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
         ->json('data');
@@ -276,7 +327,7 @@ it('ranks barangays by the change in new registrations', function () {
 it('leaves the growth rate null when there is no prior period to compare against', function () {
     // Everything the seeder creates is registered "now", so a one-month window
     // has an empty prior month. A percentage change from zero is not a number.
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth?months=1')
         ->assertOk()
         ->json('data');
@@ -286,7 +337,7 @@ it('leaves the growth rate null when there is no prior period to compare against
 });
 
 it('reports renewal performance as a cohort survival curve, not a single ratio', function () {
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
         ->json('data.cohort_survival');
@@ -328,7 +379,7 @@ it('leaves a cohort that has not reached a renewal without a survival rate', fun
     // The divide-by-zero guard the spec asks for, at cohort level: a business
     // registered this year has had no renewal to miss, so its cohort has no rate
     // rather than a fabricated 0% or a flattering 100%.
-    $cohorts = test()->withHeaders(authAs('admin@biztrack.local'))
+    $cohorts = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
         ->json('data.cohort_survival.cohorts');
@@ -345,7 +396,7 @@ it('leaves a cohort that has not reached a renewal without a survival rate', fun
 });
 
 it('groups industry growth by PSIC line of business', function () {
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/business-growth')
         ->assertOk()
         ->json('data.industry_growth');
@@ -376,7 +427,7 @@ it('generates a processing time PDF that carries the flagged weeks', function ()
 });
 
 it('generates a business growth PDF', function () {
-    $response = test()->withHeaders(authAs('admin@biztrack.local'))
+    $response = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->get('/api/v1/analytics/business-growth/report')
         ->assertOk();
 
@@ -387,15 +438,13 @@ it('generates a business growth PDF', function () {
 
 /* ── Analytics Dashboard (spec §1) ─────────────────────────────────────── */
 
-it('serves the analytics dashboard to the super admin and to BPLO', function () {
-    test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/dashboard')
-        ->assertOk();
-
+it('serves the analytics dashboard to BPLO and not to the super admin', function () {
     /*
-     * Checklist item 78 asked for exactly this screen. BPLO gets the panels and
-     * the PDF; the boundary below is what makes "transferred to BPLO" different
-     * from "opened to every office".
+     * Spec §1 "Analytics Dashboard (Admin - BPLO)", and checklist item 78 asked
+     * for exactly this screen: "the dashboard should be transferred to BPLO
+     * admin, not super admin." Transferred, not shared — BPLO gets the panels
+     * and the PDF, and the two boundaries below are what make that different
+     * from "opened to everyone above a reviewer".
      */
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
@@ -410,7 +459,11 @@ it('serves the analytics dashboard to the super admin and to BPLO', function () 
     // office reviewer holds application.view_all but not analytics.view; letting
     // them read this would hand them an aggregate of filings
     // ApplicationVisibility deliberately keeps out of their queue.
-    foreach (['sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
+    //
+    // The super admin is on the same list, for a different reason: it holds
+    // `analytics.processing_time` only, so that the office being measured and
+    // the office measuring it do not read from the same screens.
+    foreach (['admin@biztrack.local', 'sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/analytics/dashboard')
             ->assertForbidden();
@@ -428,7 +481,7 @@ it('refuses the dashboard and its report to a caller with no session', function 
 });
 
 it('returns every panel the dashboard spec asks for', function () {
-    $body = test()->withHeaders(authAs('admin@biztrack.local'))
+    $body = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json();
@@ -449,7 +502,7 @@ it('returns every panel the dashboard spec asks for', function () {
 });
 
 it('excludes pending filings from the approval rate denominator', function () {
-    $decisions = test()->withHeaders(authAs('admin@biztrack.local'))
+    $decisions = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.decisions');
@@ -472,7 +525,7 @@ it('excludes pending filings from the approval rate denominator', function () {
 });
 
 it('measures RA 11032 tiers against the statute and not against the recorded deadline', function () {
-    $tiers = test()->withHeaders(authAs('admin@biztrack.local'))
+    $tiers = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.processing_tiers');
@@ -508,7 +561,7 @@ it('measures RA 11032 tiers against the statute and not against the recorded dea
 });
 
 it('derives the bottleneck from the computed means rather than naming an office', function () {
-    $stages = test()->withHeaders(authAs('admin@biztrack.local'))
+    $stages = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.stages');
@@ -528,7 +581,7 @@ it('derives the bottleneck from the computed means rather than naming an office'
 });
 
 it('nests the permit expiry windows cumulatively', function () {
-    $expiry = test()->withHeaders(authAs('admin@biztrack.local'))
+    $expiry = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.expiry');
@@ -548,7 +601,7 @@ it('nests the permit expiry windows cumulatively', function () {
 });
 
 it('divides the inspection pass rate by completed inspections, not scheduled', function () {
-    $inspections = test()->withHeaders(authAs('admin@biztrack.local'))
+    $inspections = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.inspections');
@@ -568,7 +621,7 @@ it('divides the inspection pass rate by completed inspections, not scheduled', f
 });
 
 it('reports a compliance indicator it cannot compute as null with a reason', function () {
-    $compliance = test()->withHeaders(authAs('admin@biztrack.local'))
+    $compliance = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.compliance');
@@ -592,7 +645,7 @@ it('reports a compliance indicator it cannot compute as null with a reason', fun
 });
 
 it('plots businesses from their own coordinates rather than reporting none', function () {
-    $map = test()->withHeaders(authAs('admin@biztrack.local'))
+    $map = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.map');
@@ -614,7 +667,7 @@ it('plots businesses from their own coordinates rather than reporting none', fun
 });
 
 it('says a form of organization is unrecorded rather than reporting four zeros', function () {
-    $forms = test()->withHeaders(authAs('admin@biztrack.local'))
+    $forms = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard')
         ->assertOk()
         ->json('data.organization_forms');
@@ -636,7 +689,7 @@ it('says a form of organization is unrecorded rather than reporting four zeros',
 });
 
 it('generates an analytics dashboard PDF', function () {
-    $response = test()->withHeaders(authAs('admin@biztrack.local'))
+    $response = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->get('/api/v1/analytics/dashboard/report')
         ->assertOk();
 

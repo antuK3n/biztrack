@@ -4,7 +4,6 @@ namespace App\Support;
 
 final class RenewalRiskScoring
 {
-
     public const HIGH_THRESHOLD = 50;
 
     public const MODERATE_THRESHOLD = 25;
@@ -70,7 +69,6 @@ final class RenewalRiskScoring
             $score >= self::MODERATE_THRESHOLD => 'moderate',
             default => 'low',
         };
-
 
         [$action, $actionLabel] = match ($band) {
             'high' => ['immediate_follow_up', 'Immediate follow-up'],
@@ -247,7 +245,6 @@ final class RenewalRiskScoring
 
     private static function sortByPoints(array $drivers): array
     {
-
         usort($drivers, static fn (array $a, array $b) => [$b['points'], $b['max']] <=> [$a['points'], $a['max']]);
 
         return $drivers;

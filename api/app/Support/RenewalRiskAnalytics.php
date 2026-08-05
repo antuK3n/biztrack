@@ -10,93 +10,25 @@ use App\Enums\PermitStatus;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
-/**
- * Renewal Risk, computed from the register.
- *
- * The scoring rules and every claim about what the number means live in
- * RenewalRiskScoring — read its docblock before touching either file. In one
- * line: this ranks permits by known risk signals, it does not predict anything,
- * and the score is not a probability.
- *
- * This class gathers the five facts each rule needs and does it in five bulk
- * queries rather than per permit, because the watchlist covers every permit in
- * the expiry window and an N+1 here would be a page load per business.
- *
- * DEFINITIONS THAT ARE CHOICES
- *
- *  - **In scope** is a permit whose `valid_until` falls between LAPSED_GRACE_DAYS
- *    ago and `horizon` days ahead, whose status is Active or Expired, and whose
- *    business is still registered. Recently lapsed permits are included
- *    deliberately: they are the highest-risk rows on the screen, and a watchlist
- *    that dropped them the day they expired would hide its own failures. Revoked
- *    and suspended permits are excluded — those are enforcement states, not
- *    renewal states, and no reminder is going to fix them.
- *  - **A renewal belongs to a permit** through `applications.prior_permit_id`.
- *    That is the only link in the schema between a filing and the permit it
- *    replaces.
- *  - **A renewal was late** when it was submitted after the permit it replaced
- *    had already expired. Filings never submitted are not counted either way —
- *    an abandoned draft is not evidence of lateness.
- *  - **An open finding** is an unticked compliance check on a filing that has
- *    not yet been decided, or a failed/conditional inspection in the last
- *    twelve months. Unticked checks on decided filings are history, not debt.
- *  - **Fee state is read off the renewal filing**, not the business. A business
- *    with no renewal filed owes nothing yet, so it scores `settled` on that rule
- *    and carries its risk on the progress rule instead. Scoring it twice would
- *    double-count one fact.
- */
 final class RenewalRiskAnalytics
 {
-    /**
-     * How far ahead the watchlist looks by default, in days.
-     *
-     * A full renewal cycle, not a quarter. The KPI cards count every permit in
-     * the window, so a 90-day window would report "Low Risk: 0" — not because no
-     * permit is low risk but because a permit has to be near expiry to be in the
-     * window at all. Covering the year makes the three bands a real distribution
-     * of the register instead of a slice of its most urgent edge.
-     */
     public const DEFAULT_HORIZON_DAYS = 365;
 
-    /** Permits that lapsed within this many days stay on the watchlist. */
     public const LAPSED_GRACE_DAYS = 60;
 
-    /** Rows in the "Businesses at Risk" table. */
     public const DEFAULT_LIMIT = 25;
 
-    /** Drivers shown per row before the rest are folded away. */
     private const DRIVERS_PER_ROW = 3;
 
-    /** Window for counting a failed inspection against a business, in months. */
     private const FINDINGS_LOOKBACK_MONTHS = 12;
 
-    /**
-     * The sentence the screen, the CSV, and any future PDF all have to carry.
-     * Kept server-side on purpose: if the honesty statement lived only in the
-     * React copy, an export would quietly ship the numbers without it.
-     */
     public const METHODOLOGY = 'Each permit is checked against five things: how soon it expires, whether a '
         .'renewal has been filed, whether this business has renewed late before, open compliance findings, '
         .'and unpaid fees. Each adds points, up to 100. A higher score means more warning signs — it is not '
         .'a prediction, and it does not say how likely a renewal is to be late.';
 
-    /** The R endpoint that scores this dataset. */
     public const R_ENDPOINT = '/renewal-risk';
 
-    /**
-     * The facts each in-scope permit carries, gathered from the register.
-     *
-     * This is the whole SQL half of the feature and the payload
-     * `analytics:refresh` pushes to R. The split matters here more than anywhere
-     * else in the analytics code, because the two halves are different kinds of
-     * decision: *what counts as a risk signal* is a register question settled by
-     * the five bulk queries below, and *how signals become a score and a band* is
-     * the rule set — which lives in R, with RenewalRiskScoring as its fallback.
-     *
-     * Note what is NOT here: no scores, no bands, no ranking. R gets facts.
-     *
-     * @return array<string, mixed>
-     */
     public static function dataset(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
     {
         $now = CarbonImmutable::now();
@@ -112,11 +44,7 @@ final class RenewalRiskAnalytics
             'window_end' => $windowEnd->toDateString(),
             'drivers_per_row' => self::DRIVERS_PER_ROW,
             'methodology' => self::METHODOLOGY,
-            // The rule set travels with the facts. R reads the weights, bands and
-            // thresholds out of this payload instead of keeping its own copy, so
-            // there is exactly one place the numbers live (RenewalRiskScoring)
-            // and no way for the two engines to disagree about them. What R
-            // duplicates is the logic, which is what the parity test checks.
+
             'parameters' => RenewalRiskScoring::parameters(),
             'rulebook' => RenewalRiskScoring::rulebook(),
         ];
@@ -149,9 +77,7 @@ final class RenewalRiskAnalytics
                 'barangay' => $permit['barangay'],
                 'permit_type' => $permit['permit_type'],
                 'valid_until' => $validUntil->toDateString(),
-                // Whole days, signed: negative means the permit has already
-                // lapsed. Computed here, not in R, because "today" is Laravel's
-                // clock and R must stay a pure function of its input.
+
                 'days_to_expiry' => (int) $today->diffInDays($validUntil, false),
                 'renewal_stage' => $renewal['stage'] ?? 'none',
                 'renewal_tracking_id' => $renewal['tracking_id'] ?? null,
@@ -166,27 +92,13 @@ final class RenewalRiskAnalytics
         return $frame + ['reminders_sent' => array_sum($noticeCounts), 'permits' => $rows];
     }
 
-    /**
-     * @return array<string, mixed>
-     */
     public static function build(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
     {
         return self::compute(self::dataset($horizonDays, $limit));
     }
 
-    /**
-     * The local (PHP) engine: facts in, scored watchlist out, no database.
-     *
-     * R's `POST /renewal-risk` returns this same schema from the same facts. The
-     * numbers must agree — AnalyticsParityTest is what enforces that, and without
-     * it the fallback would quietly become a second, divergent rule set.
-     *
-     * @param  array<string, mixed>  $dataset  as returned by dataset()
-     * @return array<string, mixed>
-     */
     public static function compute(array $dataset): array
     {
-        // Echoed, not re-parsed: see the note in ProcessingTimeAnalytics::compute().
         $now = (string) $dataset['now'];
         $limit = (int) $dataset['params']['limit'];
         $driversPerRow = (int) ($dataset['drivers_per_row'] ?? self::DRIVERS_PER_ROW);
@@ -224,8 +136,7 @@ final class RenewalRiskAnalytics
                 'renewal_stage' => $facts['renewal_stage'],
                 'renewal_tracking_id' => $permit['renewal_tracking_id'] ?? null,
                 'reminders_sent' => (int) $permit['reminders_sent'],
-                // Only the drivers that actually cost points; a row listing
-                // "Fees settled: 0" is noise dressed as transparency.
+
                 'drivers' => array_slice(
                     array_values(array_filter($scored['drivers'], static fn (array $d): bool => $d['points'] > 0)),
                     0,
@@ -234,8 +145,6 @@ final class RenewalRiskAnalytics
             ];
         }
 
-        // Highest score first, then soonest expiry: two permits on the same
-        // score are not equally urgent.
         usort($rows, static fn (array $a, array $b) => [$b['score'], $a['days_to_expiry']] <=> [$a['score'], $b['days_to_expiry']]);
 
         return [
@@ -258,12 +167,6 @@ final class RenewalRiskAnalytics
         ];
     }
 
-    /**
-     * Permits whose expiry falls in the window, with the business and barangay
-     * the table needs.
-     *
-     * @return list<array{id: int, permit_number: string, business_id: int, business: string, barangay: string|null, permit_type: string, valid_until: string}>
-     */
     private static function permitsInScope(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $rows = DB::table('permits')
@@ -292,8 +195,6 @@ final class RenewalRiskAnalytics
         $permits = [];
         $seen = [];
         foreach ($rows as $row) {
-            // The left join on addresses can duplicate a permit when a business
-            // recorded more than one business_location row.
             if (isset($seen[$row->id])) {
                 continue;
             }
@@ -312,16 +213,6 @@ final class RenewalRiskAnalytics
         return $permits;
     }
 
-    /**
-     * The renewal filing standing against each in-scope permit, if any.
-     *
-     * An approved renewal wins over anything else — a business that filed twice
-     * and got one through is not at risk. Otherwise the most recent filing that
-     * was not cancelled represents the state of play.
-     *
-     * @param  list<int>  $permitIds
-     * @return array<int, array{application_id: int, tracking_id: string|null, stage: string}>
-     */
     private static function renewalsByPriorPermit(array $permitIds): array
     {
         $rows = DB::table('applications')
@@ -340,7 +231,7 @@ final class RenewalRiskAnalytics
 
             $permitId = (int) $row->prior_permit_id;
             $existing = $best[$permitId] ?? null;
-            // Later row wins, except that an approval already recorded stands.
+
             if ($existing !== null && $existing['stage'] === 'approved') {
                 continue;
             }
@@ -355,7 +246,6 @@ final class RenewalRiskAnalytics
         return $best;
     }
 
-    /** Map an application status onto a scoring stage; null means "ignore it". */
     private static function stageFor(string $status): ?string
     {
         return match ($status) {
@@ -367,23 +257,11 @@ final class RenewalRiskAnalytics
             ApplicationStatus::PendingPayment->value,
             ApplicationStatus::UnderReview->value,
             ApplicationStatus::ForInspection->value => 'in_progress',
-            // Cancelled leaves no filing standing, which is the same position as
-            // never having filed — handled by the caller's 'none' default.
+
             default => null,
         };
     }
 
-    /**
-     * Earlier renewal cycles per business, and how many were filed late.
-     *
-     * Only filings against permits OTHER than the ones on the watchlist count:
-     * the current cycle is scored by the progress rule, and letting it in here
-     * would score the same fact twice.
-     *
-     * @param  list<int>  $businessIds
-     * @param  list<int>  $excludePermitIds
-     * @return array<int, array{total: int, late: int}>
-     */
     private static function punctualityByBusiness(array $businessIds, array $excludePermitIds): array
     {
         $rows = DB::table('applications')
@@ -415,12 +293,6 @@ final class RenewalRiskAnalytics
         return $out;
     }
 
-    /**
-     * Open compliance findings per business.
-     *
-     * @param  list<int>  $businessIds
-     * @return array<int, int>
-     */
     private static function openFindingsByBusiness(array $businessIds, CarbonImmutable $now): array
     {
         $decided = [
@@ -460,12 +332,6 @@ final class RenewalRiskAnalytics
         return $out;
     }
 
-    /**
-     * Fee state per renewal application: settled, pending, or unpaid.
-     *
-     * @param  list<int>  $applicationIds
-     * @return array<int, string>
-     */
     private static function feeStateByApplication(array $applicationIds): array
     {
         if ($applicationIds === []) {
@@ -503,8 +369,7 @@ final class RenewalRiskAnalytics
             $out[$id] = match (true) {
                 isset($hasCompleted[$id]) => 'settled',
                 isset($hasPending[$id]) => 'pending',
-                // No payment row, or only failed/refunded ones: nothing has been
-                // collected against an assessment that exists.
+
                 default => 'unpaid',
             };
         }
@@ -512,25 +377,6 @@ final class RenewalRiskAnalytics
         return $out;
     }
 
-    /**
-     * Expiry reminders already sent, per permit.
-     *
-     * Counted off `permit_expiry_notices`, the dedupe ledger
-     * `biztrack:scan-permits` writes one row into each time it actually sends a
-     * notification. These are real sends, not a derived estimate — but only the
-     * reminder kinds count. `threshold_60` / `_30` / `_7` are the pre-expiry
-     * nudges and `renewal_due` is the post-expiry one; `expired` is the
-     * status-change notice telling an owner their permit has lapsed, which is
-     * not a reminder to renew and would inflate the KPI if pooled in.
-     *
-     * Consequence worth knowing: the figure is zero until the nightly scan has
-     * run at least once. That is a true zero — nothing was sent — and the screen
-     * says so rather than substituting a count of permits that were merely
-     * eligible for a reminder.
-     *
-     * @param  list<int>  $permitIds
-     * @return array<int, int>
-     */
     private static function noticeCountsByPermit(array $permitIds): array
     {
         $rows = DB::table('permit_expiry_notices')
@@ -550,13 +396,6 @@ final class RenewalRiskAnalytics
         return $out;
     }
 
-    /**
-     * The Recommended Actions panel: one bar per action, sized by how many
-     * permits landed in the band that recommends it.
-     *
-     * @param  array{high: int, moderate: int, low: int}  $counts
-     * @return list<array{action: string, label: string, band: string, count: int}>
-     */
     private static function actionTotals(array $counts): array
     {
         return [

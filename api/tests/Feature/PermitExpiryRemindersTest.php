@@ -309,9 +309,22 @@ it('makes the Reminders Sent KPI read a real number once the scan has run', func
     reminderPermit(30);
     reminderPermit(7);
 
+    /*
+     * Read as BPLO. Renewal Risk is spec §2 "(Admin - BPLO)" and sits on
+     * `analytics.view`, which the super admin does not hold — it holds
+     * `analytics.processing_time` and nothing else in analytics. BPLO is also the
+     * office the KPI is for: it issues the permits these reminders are about.
+     *
+     * assertOk() on both reads, because the assertion underneath is on a figure
+     * dug out of the body. Before it was here, the 403 that followed the
+     * permission split surfaced as "null is identical to 0" from a line about
+     * reminder counting, which named neither the status nor the route.
+     */
     expect(
-        $this->withHeaders(authAs('admin@biztrack.local'))
-            ->getJson('/api/v1/analytics/renewal-risk')->json('data.reminders_sent')
+        $this->withHeaders(authAs('bplo@biztrack.local'))
+            ->getJson('/api/v1/analytics/renewal-risk')
+            ->assertOk()
+            ->json('data.reminders_sent')
     )->toBe(0);
 
     $this->artisan('biztrack:scan-permits')->assertSuccessful();
@@ -319,7 +332,9 @@ it('makes the Reminders Sent KPI read a real number once the scan has run', func
     // Not a counter the command increments — the KPI counts ledger rows, so this
     // is the same two reminders seen from the analytics side.
     expect(
-        $this->withHeaders(authAs('admin@biztrack.local'))
-            ->getJson('/api/v1/analytics/renewal-risk')->json('data.reminders_sent')
+        $this->withHeaders(authAs('bplo@biztrack.local'))
+            ->getJson('/api/v1/analytics/renewal-risk')
+            ->assertOk()
+            ->json('data.reminders_sent')
     )->toBe(2);
 });

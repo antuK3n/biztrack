@@ -3,6 +3,7 @@
 use App\Models\AnalyticsSnapshot;
 use App\Services\RAnalytics;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Testing\TestResponse;
 
 /*
  * The manual refresh endpoint behind the "Refresh now" button.
@@ -13,19 +14,30 @@ use Illuminate\Support\Facades\Http;
  * from "R answered and computed nothing" has no way to report that honestly.
  */
 
-function refreshAs(string $email): \Illuminate\Testing\TestResponse
+function refreshAs(string $email): TestResponse
 {
     return test()->withHeaders(authAs($email))->postJson('/api/v1/analytics/refresh');
 }
 
 it('refuses the refresh to anyone without analytics.view', function () {
     // Not a read: it pushes the whole register to an external service, so it sits
-    // on the same permission as the figures it recomputes. BPLO now holds that
-    // permission (checklist item 78) and so is no longer asserted here — the
-    // "Refresh now" button sits on the screens it was just given, and a button
-    // that 403s would be worse than no button.
+    // on the same permission as the figures it recomputes. BPLO holds that
+    // permission (checklist item 78) and so is not asserted here — the "Refresh
+    // now" button sits on the screens it was given, and a button that 403s would
+    // be worse than no button.
     refreshAs('sanitary@biztrack.local')->assertForbidden();
     refreshAs('owner@biztrack.local')->assertForbidden();
+
+    /*
+     * The super admin is refused too, which is the one that needs saying. It
+     * holds `analytics.processing_time` only, and refresh recomputes every
+     * dataset — dashboard, renewal risk and business growth among them. Letting
+     * it through would mean the office that cannot read three of these screens
+     * can still make the app push their contents to an external service and
+     * rewrite their snapshots. Processing Time is refreshed by the nightly run
+     * like everything else; nobody loses a figure over this.
+     */
+    refreshAs('admin@biztrack.local')->assertForbidden();
 });
 
 it('refuses the refresh to a caller with no session', function () {
@@ -41,7 +53,7 @@ it('recomputes snapshots from R and reports what it did', function () {
         '*' => Http::response(['generated_at' => now()->toISOString()]),
     ]);
 
-    $response = refreshAs('admin@biztrack.local')->assertOk();
+    $response = refreshAs('bplo@biztrack.local')->assertOk();
 
     expect($response->json('data.refreshed'))->toBeGreaterThan(0);
     expect($response->json('data.failed'))->toBe(0);
@@ -68,13 +80,13 @@ it('reports the service being unreachable without touching existing snapshots', 
             : Http::response(['status' => 'ok', 'r_version' => '4.6.1', 'generated_at' => now()->toISOString()]);
     });
 
-    refreshAs('admin@biztrack.local')->assertOk();
+    refreshAs('bplo@biztrack.local')->assertOk();
     $before = AnalyticsSnapshot::count();
     expect($before)->toBeGreaterThan(0);
 
     $down = true;
 
-    refreshAs('admin@biztrack.local')
+    refreshAs('bplo@biztrack.local')
         ->assertStatus(503)
         ->assertJsonPath('refreshed', 0)
         ->assertJsonFragment(['message' => 'The R statistics service did not answer. The screens keep serving the last figures and say how old they are.']);
@@ -86,7 +98,7 @@ it('says so when R is switched off rather than reporting a successful refresh', 
     config()->set('analytics.r.enabled', false);
     app()->forgetInstance(RAnalytics::class);
 
-    refreshAs('admin@biztrack.local')
+    refreshAs('bplo@biztrack.local')
         ->assertStatus(409)
         ->assertJsonPath('refreshed', 0);
 });

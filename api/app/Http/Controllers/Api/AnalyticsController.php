@@ -28,35 +28,6 @@ use Illuminate\Http\Response;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
-/**
- * Dashboard aggregates and the R-computed analytics screens.
- *
- * Laravel owns all SQL; R is the statistics engine and stays a separate program
- * (docs/r-integration-spec.md). Nothing here calls R, though — the architecture
- * is batch. `analytics:refresh` pushes register rows to plumber, R computes, and
- * Laravel persists the result; these endpoints read that persisted result. So an
- * analytics page load costs one indexed read and cannot be slowed or broken by
- * the R service being slow or down.
- *
- * When no snapshot exists, the PHP port computes the figures instead and the
- * response says so in `meta`. Both engines emit the same schema, so the only way
- * a screen can tell them apart is that `meta`, which is exactly why every
- * analytics response carries it and every screen displays it. Serving fallback
- * numbers as R output would make the drift between two implementations
- * invisible.
- *
- * `meta.computed_at` is not decoration either. Figures are as fresh as the last
- * refresh, so a tester's brand-new application legitimately will not appear
- * until the next one — the timestamp on screen is what stops that reading as a
- * bug.
- *
- * Every route in this controller sits behind `analytics.view`, held by the super
- * admin and by BPLO (checklist #78). That matters: these aggregates read every
- * office's assignments, so exposing them to an ordinary office reviewer would
- * hand them a summary of filings ApplicationVisibility deliberately keeps out of
- * their queue. BPLO is the exception because it already holds
- * `application.view_any_office` and can open those filings one at a time.
- */
 class AnalyticsController extends Controller
 {
     public function summary(): JsonResponse
@@ -64,20 +35,11 @@ class AnalyticsController extends Controller
         return response()->json(['data' => $this->buildSummary()]);
     }
 
-    /**
-     * Screen 1: the Analytics Dashboard panels (spec §1).
-     *
-     * Every panel arrives on one payload deliberately. They share a clock — the
-     * KPI cards, the volume table and the outcome table all have to reconcile to
-     * the same month — and splitting them across endpoints would let a screen
-     * render two different refreshes side by side and quietly fail to add up.
-     */
     public function dashboard(Request $request): JsonResponse
     {
         return $this->serve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
     }
 
-    /** Printable Analytics Dashboard report. */
     public function dashboardReport(Request $request): Response
     {
         $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
@@ -91,13 +53,11 @@ class AnalyticsController extends Controller
         return PdfFile::render($pdf)->download('analytics-dashboard.pdf');
     }
 
-    /** Feature 7: per-department control charts over weekly review turnaround. */
     public function processingTime(Request $request): JsonResponse
     {
         return $this->serve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);
     }
 
-    /** Printable Permit Processing Time Monitoring report. */
     public function processingTimeReport(Request $request): Response
     {
         $resolved = $this->resolve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);
@@ -112,13 +72,11 @@ class AnalyticsController extends Controller
         return PdfFile::render($pdf)->download('processing-time-monitoring.pdf');
     }
 
-    /** Feature: business growth analysis over the register. */
     public function businessGrowth(Request $request): JsonResponse
     {
         return $this->serve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
     }
 
-    /** Printable Business Lifecycle Monitoring report. */
     public function businessGrowthReport(Request $request): Response
     {
         $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);

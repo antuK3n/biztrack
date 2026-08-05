@@ -68,12 +68,55 @@ function OwnerHome() {
 function StaffHome({ permissions }: { permissions: string[] }) {
   // Absolute /staff paths: this landing only ever renders on the LGU site, and
   // spelling them out keeps them greppable against the route table in App.tsx.
-  const cards: { to: string; icon: IconType; label: string; permission: string }[] = [
+  /*
+   * `permission` is a single string on every card but Analytics, which carries a
+   * list plus a destination per permission.
+   *
+   * Analytics is no longer one screen behind one permission. It was split along
+   * the line the client drew — "BPLO side should only have the 3 dashboards
+   * (Processing Time should not exist here) — Super admin side should only have
+   * Processing Time dashboard" — so `analytics.view` opens the dashboard and
+   * `analytics.processing_time` opens the monitor, and NOBODY holds both.
+   *
+   * A single `permission: 'analytics.view'` therefore hid this card from the
+   * super admin entirely: the one role whose whole job on this screen is
+   * oversight arrived at a landing page with no way into the only analytics
+   * screen they are allowed to read. Sending them to /staff/analytics instead
+   * would have been worse — that route now answers them with a 403.
+   *
+   * So the card asks which of the two the reader holds and points at the screen
+   * that permission actually opens. Same shape as the left rail in lib/nav.ts;
+   * if a third analytics permission ever appears, both need the new entry.
+   */
+  type Card = {
+    to: string
+    icon: IconType
+    label: string
+    permission?: string
+    anyPermission?: { permission: string; to: string }[]
+  }
+
+  const cards: Card[] = [
     { to: '/staff/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
-    { to: '/staff/analytics', icon: ChartIcon, label: 'Analytics', permission: 'analytics.view' },
+    {
+      to: '/staff/analytics',
+      icon: ChartIcon,
+      label: 'Analytics',
+      anyPermission: [
+        { permission: 'analytics.view', to: '/staff/analytics' },
+        { permission: 'analytics.processing_time', to: '/staff/analytics/processing-time' },
+      ],
+    },
     { to: '/staff/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
   ]
-  const visible = cards.filter((c) => permissions.includes(c.permission))
+
+  const visible = cards.flatMap((c) => {
+    if (c.anyPermission) {
+      const held = c.anyPermission.find((p) => permissions.includes(p.permission))
+      return held ? [{ ...c, to: held.to }] : []
+    }
+    return c.permission && permissions.includes(c.permission) ? [c] : []
+  })
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">

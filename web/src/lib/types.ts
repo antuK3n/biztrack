@@ -985,7 +985,7 @@ export interface DashboardReport {
   }
 }
 
-/* Business Lifecycle Monitoring (spec §4; mockup 122 renames it from the
+/* Business Growth Analysis (spec §4; mockup 122 renames it from the
  * paper's "Business Growth Analysis" and the mockup wins on naming). */
 
 export interface BusinessStatusRow {

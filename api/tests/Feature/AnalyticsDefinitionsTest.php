@@ -211,7 +211,9 @@ it('never describes the renewal risk score as a prediction', function () {
 });
 
 it('ships the definitions in meta, beside the engine rather than inside the figures', function () {
-    $response = test()->withHeaders(authAs('admin@biztrack.local'))
+    // Read as BPLO: the dashboard sits on `analytics.view`, which BPLO holds and
+    // the super admin does not.
+    $response = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/dashboard');
 
     $response->assertOk();
@@ -226,8 +228,22 @@ it('ships the definitions in meta, beside the engine rather than inside the figu
 });
 
 it('ships definitions on every analytics screen, not only the dashboard', function () {
-    foreach (['processing-time', 'renewal-risk', 'business-growth'] as $route) {
-        $response = test()->withHeaders(authAs('admin@biztrack.local'))
+    /*
+     * Each screen is read by whoever actually holds it. The four analytics
+     * screens no longer sit behind one permission: `analytics.view` carries the
+     * three operational ones and belongs to BPLO, while `analytics.processing_
+     * time` carries the oversight one and belongs to the super admin. Reading
+     * all four as a single account would 403 on one of them whichever account
+     * were chosen, so the caller is part of the fixture here.
+     */
+    $screens = [
+        'processing-time' => 'admin@biztrack.local',
+        'renewal-risk' => 'bplo@biztrack.local',
+        'business-growth' => 'bplo@biztrack.local',
+    ];
+
+    foreach ($screens as $route => $email) {
+        $response = test()->withHeaders(authAs($email))
             ->getJson("/api/v1/analytics/{$route}");
 
         $response->assertOk();

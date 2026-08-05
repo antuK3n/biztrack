@@ -32,6 +32,32 @@ export interface NavItem {
   to?: string
   /** Show only when the user holds this permission. Absent = everyone. */
   permission?: string
+  /**
+   * Show when the user holds ANY of these. For an entry whose destinations are
+   * split across roles that share no single permission.
+   *
+   * Analytics is the case that forced this: `analytics.view` (the three BPLO
+   * dashboards) and `analytics.processing_time` (the super admin's one screen)
+   * are disjoint — neither role holds both — so gating the rail entry on either
+   * one alone hides Analytics entirely from the other role. A single
+   * `permission` cannot express "either of these people".
+   *
+   * Ignored when `permission` is set; `permission` is the narrower claim and
+   * every other entry still uses it.
+   */
+  anyPermission?: string[]
+  /**
+   * Where the entry goes for a user who holds `permission`/`anyPermission[n]`.
+   *
+   * Only needed when one rail entry has to land different roles on different
+   * screens — `to` is the fallback for anyone the map does not cover. Analytics
+   * again: the super admin is FORBIDDEN from /staff/analytics (the dashboard is
+   * `analytics.view`), so sending them to the shared `to` would bounce them
+   * straight back to their home screen via RequirePermission.
+   *
+   * First match wins, in the order the keys are listed here.
+   */
+  toByPermission?: Record<string, string>
   /** Include in the mobile bottom tab bar (max 5 survive the filter). */
   mobile?: boolean
 }
@@ -56,7 +82,30 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Inspections', icon: SearchIcon, to: '/inspections', permission: 'inspection.manage', mobile: true },
   { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
   // Admin
-  { label: 'Analytics', icon: ChartIcon, to: '/analytics', permission: 'analytics.view' },
+  /*
+   * One rail entry, two different audiences behind it.
+   *
+   * BPLO holds `analytics.view` and gets the three dashboards (Analytics
+   * Dashboard, Renewal Risk, Business Growth Analysis). The super admin holds
+   * `analytics.processing_time` and gets exactly one screen. The permissions are
+   * disjoint by design, so this entry needs `anyPermission` to appear for both
+   * and `toByPermission` to send each of them somewhere they are allowed to be.
+   *
+   * `to` was '/analytics' — a pre-portal-split path that only resolved because
+   * the legacy shim in App.tsx redirects it. The rail is inside the staff site
+   * and has no business needing a bookmark shim to work, so it now addresses
+   * /staff/analytics directly. The shim stays for links already sent out.
+   */
+  {
+    label: 'Analytics',
+    icon: ChartIcon,
+    to: '/analytics',
+    anyPermission: ['analytics.view', 'analytics.processing_time'],
+    toByPermission: {
+      'analytics.view': '/analytics',
+      'analytics.processing_time': '/analytics/processing-time',
+    },
+  },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
   /*
@@ -76,7 +125,31 @@ const NAV_ITEMS: NavItem[] = [
  * rail even though both sites are built from this one list.
  */
 export function navItemsFor(user: User, portal: Portal): NavItem[] {
-  return NAV_ITEMS.filter(
-    (item) => !item.permission || user.permissions.includes(item.permission),
-  ).map((item) => (item.to ? { ...item, to: portalPath(portal, item.to) } : item))
+  return NAV_ITEMS.filter((item) => visibleTo(user, item)).map((item) => {
+    const to = destinationFor(user, item)
+    return to ? { ...item, to: portalPath(portal, to) } : item
+  })
+}
+
+/** No permission stated = everyone. Otherwise the single claim, else any of them. */
+function visibleTo(user: User, item: NavItem): boolean {
+  if (item.permission) return user.permissions.includes(item.permission)
+  if (item.anyPermission) return item.anyPermission.some((p) => user.permissions.includes(p))
+  return true
+}
+
+/**
+ * The portal-relative path this user should land on for this entry.
+ *
+ * `toByPermission` exists so a shared entry does not point one of its audiences
+ * at a screen their own route guard will bounce them off. If a new entry ever
+ * needs it, list the narrower permission first — the first held key wins.
+ */
+function destinationFor(user: User, item: NavItem): string | undefined {
+  if (item.toByPermission) {
+    for (const [permission, to] of Object.entries(item.toByPermission)) {
+      if (user.permissions.includes(permission)) return to
+    }
+  }
+  return item.to
 }

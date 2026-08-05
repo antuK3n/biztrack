@@ -39,7 +39,10 @@
     @include('pdf.partials.local-notice')
 
     <div class="note">
-        Every figure is computed from the register. Lifecycle status is derived from permits: Active
+        {{-- "Business status", not "Lifecycle status". Spec §4 calls this row the
+             Business Status Summary, and the printed report must not reintroduce
+             the word the rest of this rename just removed. --}}
+        Every figure is computed from the register. Business status is derived from permits: Active
         means a permit valid today, Expired means every permit has lapsed, Inactive means registered
         but never issued one, and Closed means the registration was removed. A closure is dated by
         when the registration was removed, which is the only closure date the schema records. Where a
