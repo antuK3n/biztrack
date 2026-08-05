@@ -21,11 +21,55 @@ class Business extends Model
         'registration_number', 'tin', 'ban', 'is_active', 'status',
         'is_rented', 'lessor_name', 'lessor_address', 'lessor_contact',
         'monthly_rental', 'emergency_contact_name', 'emergency_contact_number',
+        /*
+         * Paper BPLO fields that had columns and no way in. Every one of these
+         * was added by the Table 40 migration and never written by anything —
+         * not the controllers, not the seeders, not the factories — because the
+         * wizard had no input for it. `form_of_organization` above is the
+         * cautionary tale: it was set by the controller, silently dropped by
+         * mass assignment for want of a line here, and read null on every real
+         * business. These are listed at the same time as the inputs that fill
+         * them so the same thing cannot happen twice.
+         *
+         * Items B6 (economic organization), A13-A15 (president/OIC, their
+         * citizenship, the Filipino share of capital) and B8/B7 (tax incentives).
+         */
+        'economic_organization', 'economic_organization_others',
+        'president_officer_name', 'citizenship', 'capital_participation_filipino',
+        'has_tax_incentives',
+    ];
+
+    /**
+     * BPLO item B6. What this PREMISES is to the business, which is a different
+     * question from `form_of_organization` — what the business is in law.
+     *
+     * It is the answer that decides whether the paper's two addresses (item A5
+     * Main Office Address, item B5 Business Location Address) are the same
+     * place. BizTrack holds one address per business today; a Branch or an
+     * Ancillary Unit is the case where that is not enough, and this column is
+     * what will identify those when the second address exists.
+     */
+    public const ECONOMIC_ORGANIZATIONS = [
+        'single_establishment',
+        'branch',
+        'establishment_and_main_office',
+        'main_office_only',
+        'ancillary_unit',
+        'others',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'is_rented' => 'boolean',
+        'has_tax_incentives' => 'boolean',
+        /*
+         * decimal(5,2) in the schema, and cast so the JSON type is stable — the
+         * same reason `monthly_rental` below is cast. Without it SQLite hands
+         * back an int for "100" and a float for "60.5", so the wizard's percent
+         * input would be re-hydrated from two different JSON types depending on
+         * what somebody happened to type.
+         */
+        'capital_participation_filipino' => 'decimal:2',
         /*
          * Cast so the JSON type is stable. The column is `numeric` and had no
          * cast, so SQLite handed back an int for a whole amount and a float
