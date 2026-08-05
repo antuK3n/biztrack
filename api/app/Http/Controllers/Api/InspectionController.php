@@ -71,9 +71,24 @@ class InspectionController extends Controller
     {
         $this->authorizeDepartment($request, $inspection);
 
+        /*
+         * The detail read goes deeper than the list on purpose.
+         *
+         * `business.owner` and `business.lines.psicCode` are here so
+         * InspectionResource::particulars() can put the owner's name and the
+         * declared line(s) of business on the sheet — the two facts an officer
+         * standing at the premises could not previously see. They stay out of
+         * `$this->eager` because the list renders neither, and this endpoint
+         * reads one row while the list reads a page of them.
+         *
+         * `permitTypes` doubles as the gate particulars() checks: it is loaded
+         * here and in no other inspection response, so a payload that carries
+         * it is exactly a payload that went and looked.
+         */
         $inspection->load(array_merge($this->eager, [
             'application.applicant', 'application.permitTypes',
             'application.documents.documentType',
+            'application.business.owner', 'application.business.lines.psicCode',
         ]));
 
         // Flat inspection shape (matches the list resource + frontend contract):
@@ -128,6 +143,49 @@ class InspectionController extends Controller
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
         ]);
+    }
+
+    /**
+     * Book a fresh visit after a failed one (POST /inspections/{id}/reinspect).
+     *
+     * Distinct from `reschedule`, and the difference is the point. Rescheduling
+     * MOVES a visit that has not happened yet; it overwrites `scheduled_at` on
+     * the row and nothing is lost, because there is nothing yet to lose. This
+     * books a SECOND visit and leaves the failed one untouched, so the filing's
+     * record keeps saying that the premises failed on 02 August and passed on
+     * the 12th. Rescheduling the failed row would have been the smaller change
+     * and would have erased exactly the fact the client asked to keep.
+     *
+     * 422 rather than 403 when the visit cannot be re-inspected: the caller is
+     * allowed to act on this inspection, it is the inspection that is in the
+     * wrong state (already passed, superseded by a later visit, or on a filing
+     * that has since been decided). The message says which, because the officer
+     * reading it is looking at a screen that offered them the button.
+     */
+    public function reinspect(Request $request, Inspection $inspection): JsonResponse
+    {
+        $this->authorizeDepartment($request, $inspection);
+
+        $data = $request->validate([
+            'scheduled_at' => ['required', 'date'],
+        ]);
+
+        abort_unless(
+            $inspection->canBeReinspected(),
+            422,
+            'A re-inspection can only be scheduled from an office’s most recent failed visit, '
+                .'while the application is still for inspection.'
+        );
+
+        $visit = $this->workflow->scheduleReinspection($inspection, $data['scheduled_at']);
+
+        // 201 with the NEW visit, not the failed one: the caller has to navigate
+        // to it to record the result, and it is a different row with a different
+        // id. Answering with the row they posted to would send the officer back
+        // to a conducted visit that has no controls.
+        return response()->json([
+            'data' => new InspectionResource($visit->load($this->eager)),
+        ], 201);
     }
 
     private function scopeToDepartment(Request $request, $query): void

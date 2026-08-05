@@ -227,7 +227,15 @@ const ASSIGNMENTS = [
       tracking_id: 'BIZ-2026-00201',
       business: { name: 'Zamora Printing Press' },
       application_type: 'new',
-      status: 'submitted',
+      /*
+       * `returned`, not `submitted`. A pre-payment filing cannot reach this feed
+       * at all — it has no assignment row until payment routes it — so a stub
+       * that put one here was describing something the API cannot produce, and
+       * it stopped matching the queue the moment those statuses moved to their
+       * own tab. `returned` is the approval tab's other real status, so the
+       * Filter test below still has two things to partition.
+       */
+      status: 'returned',
     },
   },
   {
@@ -268,21 +276,72 @@ const ASSIGNMENTS = [
   },
 ]
 
+/*
+ * The Pending Payment tab's rows, which come off a different endpoint.
+ *
+ * They have to: an unpaid filing has no assignment row at all. Routing is
+ * WorkflowService::routeToDepartments and its only caller is onPaymentCompleted,
+ * so nothing exists on /assignments until the fees are settled — which is why
+ * every one of these is an application, not an assignment, and why none of them
+ * has a `/staff/queue/:id` to link to.
+ */
+const UNPAID = [
+  {
+    id: 93001,
+    tracking_id: 'BIZ-2026-00301',
+    application_type: 'new',
+    title: null,
+    status: 'pending_payment',
+    status_label: 'Pending Payment',
+    business: { id: 11, name: 'Roberto’s Laundry Shop' },
+    applicant: { id: 51, name: 'Roberto Dela Cruz' },
+    submitted_at: '2026-08-01T02:00:00.000000Z',
+    deadline_at: '2026-08-15T00:00:00.000000Z',
+    permit_types: [{ code: 'BUSINESS', name: 'Business Permit' }],
+    created_at: '2026-08-01T02:00:00.000000Z',
+  },
+  {
+    id: 93002,
+    tracking_id: 'BIZ-2026-00302',
+    application_type: 'renewal',
+    title: null,
+    status: 'pending_payment',
+    status_label: 'Pending Payment',
+    business: { id: 12, name: 'Kalayaan Water Refilling' },
+    applicant: { id: 52, name: 'Imelda Santos' },
+    submitted_at: '2026-07-11T02:00:00.000000Z',
+    deadline_at: '2026-08-25T00:00:00.000000Z',
+    permit_types: [{ code: 'BUSINESS', name: 'Business Permit' }],
+    created_at: '2026-07-11T02:00:00.000000Z',
+  },
+]
+
 test.describe('officer queue', () => {
   test.use({ storageState: 'e2e/.auth/bplo.json' })
 
   /** Every /assignments URL the page asked for, in order. */
   let requested: string[]
+  /** Every /applications URL the page asked for, decoded, in order. */
+  let applicationQueries: string[]
 
   test.beforeEach(async ({ page }) => {
     requested = []
-    await page.route('**/api/v1/assignments*', async (route) => {
+    applicationQueries = []
+
+    /*
+     * The Pending Payment feed. `q` is honoured here on purpose: the point of
+     * the tests below is that the term reaches the API and comes back as both
+     * the rows AND the total, which is the difference between "Showing 1 of 1"
+     * and the "Showing 0 of the 13 loaded" the client was shown while searching
+     * a business the register plainly held.
+     */
+    await page.route('**/api/v1/applications*', async (route) => {
       const url = new URL(route.request().url())
-      requested.push(url.search)
-      const wanted = (url.searchParams.get('application_status') ?? '').split(',').filter(Boolean)
-      const rows = wanted.length
-        ? ASSIGNMENTS.filter((a) => wanted.includes(a.application.status))
-        : ASSIGNMENTS
+      applicationQueries.push(decodeURIComponent(url.search))
+      const q = (url.searchParams.get('q') ?? '').toLowerCase()
+      const rows = q
+        ? UNPAID.filter((a) => `${a.tracking_id} ${a.business.name}`.toLowerCase().includes(q))
+        : UNPAID
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -293,7 +352,51 @@ test.describe('officer queue', () => {
             last_page: 1,
             per_page: Number(url.searchParams.get('per_page') ?? 25),
             total: rows.length,
-            application_status_counts: { submitted: 1, under_review: 2 },
+          },
+        }),
+      })
+    })
+
+    await page.route('**/api/v1/assignments*', async (route) => {
+      const url = new URL(route.request().url())
+      requested.push(url.search)
+      const wanted = (url.searchParams.get('application_status') ?? '').split(',').filter(Boolean)
+      let rows = wanted.length
+        ? ASSIGNMENTS.filter((a) => wanted.includes(a.application.status))
+        : ASSIGNMENTS
+
+      /*
+       * The stub has to search, because the endpoint it stands in for does.
+       *
+       * It honoured `application_status` and ignored `q`, which was fine while
+       * the queue filtered in the browser — the term never reached the network.
+       * Now that it does, a stub that returns the full set regardless would let
+       * a completely broken search pass this suite: the rows would be there,
+       * the assertions would find them, and nothing would have been narrowed.
+       *
+       * Same two columns as AssignmentController::index — the tracking ID and
+       * the business name — so the fake and the real one disagree about as
+       * little as possible.
+       */
+      const q = (url.searchParams.get('q') ?? '').toLowerCase()
+      if (q) {
+        rows = rows.filter(
+          (a) =>
+            a.application.tracking_id.toLowerCase().includes(q) ||
+            (a.application.business?.name ?? '').toLowerCase().includes(q),
+        )
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: rows,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: Number(url.searchParams.get('per_page') ?? 25),
+            total: rows.length,
+            application_status_counts: { returned: 1, under_review: 2 },
           },
         }),
       })
@@ -305,7 +408,23 @@ test.describe('officer queue', () => {
     ).toBeVisible()
   })
 
-  test('search narrows the queue and reports how much of it was searched', async ({ page }) => {
+  test('search narrows the queue on the server, over the whole queue', async ({ page }) => {
+    /*
+     * This test used to assert the opposite, and passed for as long as the
+     * search was broken.
+     *
+     * The queue filtered the rows it already held and said so honestly —
+     * "Showing 1 of the 3 loaded". Honest and wrong twice over: a filing past
+     * the first page could not be found at all, and the search only ever looked
+     * inside the OPEN tab, so an officer on For Approval searching a business
+     * whose filing had moved to For Inspection was told "Nothing matches". It
+     * matched; it was one tab away. The client hit exactly that, searching
+     * "roberto" against a filing sitting in the other tab.
+     *
+     * `/assignments` now takes `q`, so the narrowing is a query rather than a
+     * slice of the page — and the wording drops "loaded", because the count is
+     * no longer hedged against what happened to be in the browser.
+     */
     const status = page.getByRole('status').filter({ hasText: 'Showing' })
     await expect(status).toHaveText('Showing 3 of 3, newest first.')
 
@@ -315,12 +434,11 @@ test.describe('officer queue', () => {
 
     await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(1)
     await expect(page.locator('a[href^="/staff/queue/"]')).toContainText('Malasiqui Feeds Trading')
-    // The count is stated against what was loaded, not implied over the queue.
-    await expect(status).toHaveText('Showing 1 of the 3 loaded, newest first.')
 
-    // Searching asks for the API's ceiling rather than a screenful, so a
-    // search usually covers the whole queue in one request.
-    expect(requested.at(-1)).toContain('per_page=200')
+    // The proof it is a query and not a browser-side slice: the term went to
+    // the server. Same standard the Filter test below holds itself to.
+    await expect.poll(() => requested.at(-1)).toContain('q=malasiqui')
+    await expect(status).not.toContainText('loaded')
   })
 
   test('Sort reorders the loaded rows', async ({ page }) => {
@@ -343,9 +461,9 @@ test.describe('officer queue', () => {
     /*
      * `exact` because the tab and one of its statuses are both called "For
      * Approval" now, so the listbox holds "All in For Approval" as well as the
-     * status itself. That is the intended wording — the tab is everything not
-     * yet past review, the status is the filings actually sitting with the
-     * offices — and it is only ambiguous to a substring match.
+     * status itself. That is the intended wording — the tab is what is with the
+     * offices awaiting a decision (under review, or sent back), the status is
+     * the first of those two — and it is only ambiguous to a substring match.
      */
     await page.getByRole('option', { name: 'For Approval', exact: true }).click()
 
@@ -367,5 +485,64 @@ test.describe('officer queue', () => {
 
     await expect(search).toHaveValue('')
     await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(3)
+  })
+
+  /* ── Pending Payment ──────────────────────────────────────────────────── */
+
+  test('Pending Payment shows the filings the assignment feed cannot hold', async ({ page }) => {
+    await page.getByRole('button', { name: 'Pending Payment' }).click()
+
+    /*
+     * A different endpoint, and the whole pre-payment stage asked for in ONE
+     * request. Both halves matter: the assignment feed can never answer for this
+     * stage, and a stage split across two requests would have to be totalled in
+     * the browser — which is the "count one page and call it the queue" failure
+     * the other two tabs were built to avoid.
+     */
+    await expect
+      .poll(() => applicationQueries.at(-1))
+      .toContain('status=submitted,pending_payment')
+
+    await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toHaveText(
+      'Showing 2 of 2, newest first.',
+    )
+    await expect(page.getByText('Roberto’s Laundry Shop')).toBeVisible()
+
+    /*
+     * Nothing on this tab is an officer's to open, and the rows say so rather
+     * than looking broken: there is no assignment, so there is no review sheet,
+     * so there is no `/staff/queue/:id` to link to.
+     */
+    await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(0)
+    await expect(page.getByText(/Waiting on the applicant’s payment/).first()).toBeVisible()
+  })
+
+  test('Pending Payment searches on the server, not over the loaded rows', async ({ page }) => {
+    await page.getByRole('button', { name: 'Pending Payment' }).click()
+    await expect(page.getByText('Roberto’s Laundry Shop')).toBeVisible()
+
+    await page.getByRole('searchbox', { name: /Search this queue/ }).fill('roberto')
+
+    // The term reached the API …
+    await expect.poll(() => applicationQueries.at(-1)).toContain('q=roberto')
+    // … so the count is the queue's and not the page's. "1 of 1", with no
+    // "of the N loaded" hedge, is the assertion that would fail the moment this
+    // tab started filtering rows it had already fetched.
+    await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toHaveText(
+      'Showing 1 of 1 matching “roberto”, newest first.',
+    )
+    await expect(page.getByText('Kalayaan Water Refilling')).toBeHidden()
+  })
+
+  test('Pending Payment offers only its own statuses in the Filter', async ({ page }) => {
+    await page.getByRole('button', { name: 'Pending Payment' }).click()
+    await page.getByRole('button', { name: /^Filter/ }).click()
+
+    // A tab never offers a status it excludes — and, since the pre-payment
+    // statuses moved here, For Approval no longer offers two that could only
+    // ever return nothing.
+    await expect(page.getByRole('option', { name: 'All in Pending Payment' })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Pending Payment', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'For Approval', exact: true })).toBeHidden()
   })
 })

@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import type { ReactNode } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeftIcon, CalendarIcon, CheckCircleFilledIcon, SearchIcon, XCircleIcon, XIcon } from '../../components/icons'
 import { EmptyState, ErrorState, Skeleton, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, ProtoModal, SortFilter, StatusCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
-import { businessName, formatDate } from '../../lib/format'
+import { applicationTypeLabel, businessName, formatDate } from '../../lib/format'
 import { inspections } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { Inspection } from '../../lib/types'
+import type { Inspection, InspectionParticulars } from '../../lib/types'
 
 /*
  * Inspections (PDF p79, p81–82): queue-style white rows with the solid status
@@ -265,6 +266,146 @@ function FailModal({
   )
 }
 
+/* ── What the applicant filed (GUI updated-gui/68.png, 69.png) ────────── */
+
+/** One submitted answer, presented as a record and never as a control. */
+function Fact({ label, value, className = '' }: { label: string; value: string | null; className?: string }) {
+  return (
+    <div className={className}>
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">{label}</dt>
+      <dd className="mt-0.5 text-sm text-ink">{value || '—'}</dd>
+    </div>
+  )
+}
+
+/** Royal tick sub-section label, matching the review sheet's "Main Office Address". */
+function FactHeading({ children }: { children: ReactNode }) {
+  return (
+    <div className="col-span-full mb-0.5 mt-2 flex items-center gap-2 first:mt-0">
+      <span className="h-3.5 w-1 rounded-full bg-royal" aria-hidden="true" />
+      <h3 className="text-[13px] font-bold text-ink">{children}</h3>
+    </div>
+  )
+}
+
+/**
+ * The filing's particulars, on the visit that is meant to verify them.
+ *
+ * The screen used to carry a status, a date and a name, which meant an officer
+ * standing outside the premises could not see the address they had come to
+ * inspect, who owned it, or what trade it claimed to be in. The client asked for
+ * "the same as what was submitted in the application form; refer to the modal in
+ * the GUI".
+ *
+ * There is no such modal in the mockups — updated-gui/ has no dialog listing a
+ * filing's answers. What it does have is the full-page BPLO admin review sheet
+ * (68.png / 69.png / 76.png, "Application for New Business Permit"), which this
+ * app already renders as ReviewPage. So the labels below are that sheet's, to
+ * the letter — "Trade Name / Franchise", "DTI / SEC / CDA Registration Number",
+ * "Main Office Address", "City / Municipality". An officer who reads the review
+ * sheet and then this card must not have to work out that two different phrases
+ * name the same box on the paper form.
+ *
+ * Deliberately compact, and deliberately below the decision controls — see the
+ * comment at the call site for why the reading order loses that argument.
+ */
+function SubmittedDetails({ particulars }: { particulars: InspectionParticulars }) {
+  const p = particulars
+
+  // House/building number and street are stored apart (line2 is the number) and
+  // are read as one line by anybody trying to find the place. Joined here rather
+  // than shown as two fields for that reason; either half can be absent.
+  const street = [p.address_line2, p.address].filter(Boolean).join(' ') || null
+
+  /*
+   * `businessName()`, not `p.business_name`, for the same reason every other
+   * officer screen uses it: `Business` soft-deletes while its inspections stay,
+   * so this is null on visits against a business that has left the register.
+   * "Business removed from register" tells the officer why the rest of the card
+   * is empty; a blank heading would send them looking for a bug.
+   */
+  const removed = !p.business_name
+
+  return (
+    <section
+      aria-label="Application details"
+      className="mt-6 rounded-lg bg-white px-6 py-5 text-left shadow-card"
+    >
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-3">
+        <h2 className="text-[15px] font-bold text-ink">Application Details</h2>
+        <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          {p.application_type ? applicationTypeLabel(p.application_type) : 'As submitted'}
+        </p>
+      </div>
+
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-3.5 sm:grid-cols-3">
+        <Fact label="Owner" value={p.owner_name} />
+        <Fact
+          label="Business Name"
+          value={removed ? businessName(null) : p.business_name}
+          className={removed ? 'italic text-ink-muted' : ''}
+        />
+        <Fact label="Trade Name / Franchise" value={p.trade_name} />
+
+        <Fact label="DTI / SEC / CDA Registration Number" value={p.registration_number} />
+        <Fact label="Tax Identification Number (TIN)" value={p.tin} />
+        <Fact label="Line of Business" value={p.line_of_business} />
+
+        <FactHeading>Main Office Address</FactHeading>
+        <Fact label="Address" value={street} className="sm:col-span-2" />
+        <Fact label="Barangay" value={p.barangay} />
+        <Fact label="City / Municipality" value={p.city} />
+        <Fact label="Province" value={p.province} />
+        <Fact label="Postal Code" value={p.postal_code} />
+      </dl>
+
+      {/*
+        Which permits this visit is for. A filing can carry several and the
+        checklist differs per permit, so the officer is told all of them rather
+        than left to infer it from whichever office they happen to work in.
+      */}
+      <div className="mt-5 border-t border-line pt-4">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
+          Permits applied for
+        </p>
+        {p.permit_types.length > 0 ? (
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {p.permit_types.map((pt) => (
+              <li
+                key={pt.code}
+                className="rounded-full bg-royal-tint px-3 py-1 text-xs font-semibold text-royal"
+              >
+                {pt.name}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-sm text-ink">—</p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * Fold an action reply into the record on screen without losing the filing.
+ *
+ * `conduct` and `reschedule` answer with a plain InspectionResource — the same
+ * eager set as the list, which does not reach the owner, the address or the
+ * declared lines, so `particulars` comes back null. Assigning that reply
+ * straight over the loaded record made the whole Application Details card
+ * vanish the moment an officer pressed Approve, which is precisely when they
+ * are most likely to want to re-read what they just approved.
+ *
+ * The reply wins on every field it actually carries; `particulars` only falls
+ * back when the reply has none. Nothing here invents state — the filing's
+ * particulars cannot change as a side effect of recording a visit, so the copy
+ * already fetched is still the truth.
+ */
+function keepParticulars(updated: Inspection): (prev: Inspection | null) => Inspection {
+  return (prev) => ({ ...updated, particulars: updated.particulars ?? prev?.particulars ?? null })
+}
+
 function DetailSkeleton() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -274,13 +415,35 @@ function DetailSkeleton() {
   )
 }
 
+/**
+ * The filing's own status, when the response carried it.
+ *
+ * `GET /inspections/{id}` swaps the stub `application` for the whole
+ * ApplicationResource, so the filing's status is on this screen's payload and on
+ * no other inspection payload. The shared `Inspection` type describes the stub,
+ * which is the honest description of what the LIST sends, so this reads the
+ * extra field through a local widening rather than adding a property the list
+ * would then be claiming to send and does not.
+ *
+ * `undefined` means "this response did not carry it" and never "the filing has
+ * no status" — the caller below treats it as unknown rather than as a reason to
+ * withhold the action, because the API refuses the action anyway and a control
+ * that vanishes on a thin payload is harder to explain than one that answers.
+ */
+function filingStatus(item: Inspection): string | undefined {
+  return (item.application as { status?: unknown } | null)?.status as string | undefined
+}
+
 export function InspectionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const inspectionId = Number(id)
+  const navigate = useNavigate()
   const { data, loading, error, reload, setData } = useAsync(() => inspections.get(inspectionId), [inspectionId])
   const [failOpen, setFailOpen] = useState(false)
   const [reschedOpen, setReschedOpen] = useState(false)
   const [reschedValue, setReschedValue] = useState('')
+  const [reinspectOpen, setReinspectOpen] = useState(false)
+  const [reinspectValue, setReinspectValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -321,12 +484,49 @@ export function InspectionDetailPage() {
   const done = Boolean(data.conducted_at) || ['completed', 'passed', 'failed'].includes(data.status.toLowerCase())
   const passed = data.result === 'passed'
 
+  /*
+   * The one control a conducted visit may still offer.
+   *
+   * `done` hides Approve and Reject, correctly — the visit has happened and its
+   * result is recorded. But a FAILED visit used to leave this screen with no
+   * control at all, on a filing the workflow had also left in `for_inspection`
+   * forever: six live filings sat in exactly that dead end, openable and
+   * unactionable from both ends. This is the way out, and it is the only action
+   * offered here because it is the only one that makes sense — the visit is not
+   * being re-judged, a second visit is being booked.
+   *
+   * Not offered on a decided filing (nothing left to inspect for). It IS still
+   * offered on a failure that a later visit has already replaced, because this
+   * payload cannot see that later visit; the API refuses that one with a 422
+   * saying so, which surfaces in the same place every other action error does.
+   */
+  const filing = filingStatus(data)
+  /*
+   * The server's answer wins whenever it gave one.
+   *
+   * The local test below can see two of the three conditions — the visit
+   * failed, the filing is still for inspection — but not the third, which is
+   * whether a LATER visit has already replaced this one. Nothing in this
+   * payload says another row exists, so an office that had failed twice went on
+   * offering "Schedule re-inspection" on the older failure, and the API
+   * answered every press with a 422. A control whose only outcome is an error
+   * message is not a control.
+   *
+   * `can_reinspect` is null when the response was not asked to load the filing
+   * (the paginated list nests this resource without it), and null means "not
+   * computed" rather than "no" — so the local test stays as the fallback for
+   * exactly that case, and is not deleted.
+   */
+  const canReinspect =
+    data.can_reinspect ??
+    (done && data.result === 'failed' && (filing === undefined || filing === 'for_inspection'))
+
   async function conduct(result: 'passed' | 'failed', findings?: string) {
     setBusy(true)
     setActionError(null)
     try {
       const updated = await inspections.conduct(inspectionId, { result, findings })
-      setData(updated)
+      setData(keepParticulars(updated))
       setFailOpen(false)
     } catch (err) {
       setActionError(toApiError(err).message)
@@ -341,9 +541,34 @@ export function InspectionDetailPage() {
     setActionError(null)
     try {
       const updated = await inspections.reschedule(inspectionId, new Date(reschedValue).toISOString())
-      setData(updated)
+      setData(keepParticulars(updated))
       setReschedOpen(false)
       setReschedValue('')
+    } catch (err) {
+      setActionError(toApiError(err).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /**
+   * Book the follow-up visit, then go to it.
+   *
+   * The reply is a DIFFERENT inspection — the failed one is left on the record
+   * untouched — so this navigates instead of folding the reply into the record
+   * on screen the way conduct and reschedule do. Staying put would leave the
+   * officer looking at the failure they just acted on while the visit they
+   * created, and will have to conduct, sits at another URL.
+   */
+  async function reinspect() {
+    if (!reinspectValue) return
+    setBusy(true)
+    setActionError(null)
+    try {
+      const created = await inspections.reinspect(inspectionId, new Date(reinspectValue).toISOString())
+      setReinspectOpen(false)
+      setReinspectValue('')
+      navigate(`/staff/inspections/${created.id}`)
     } catch (err) {
       setActionError(toApiError(err).message)
     } finally {
@@ -434,6 +659,50 @@ export function InspectionDetailPage() {
                 Approve
               </button>
             </div>
+          ) : canReinspect ? (
+            /*
+              The failed visit's one action, in the slot Approve and Reject
+              occupy on a visit that has not happened yet — this is the primary
+              thing to do on this screen, and the complaint upstream of the whole
+              change was a control nobody could find.
+            */
+            <div className="flex flex-wrap items-center gap-2.5">
+              {reinspectOpen ? (
+                <>
+                  <input
+                    type="datetime-local"
+                    value={reinspectValue}
+                    onChange={(e) => setReinspectValue(e.target.value)}
+                    aria-label="Re-inspection date and time"
+                    className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+                  />
+                  <button
+                    type="button"
+                    onClick={reinspect}
+                    disabled={busy || !reinspectValue}
+                    className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
+                  >
+                    Book this visit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReinspectOpen(false)}
+                    className="text-sm font-semibold text-ink-muted underline underline-offset-2"
+                  >
+                    Never mind
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReinspectOpen(true)}
+                  disabled={busy}
+                  className="rounded-lg bg-royal px-8 py-3 text-base font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
+                >
+                  Schedule re-inspection
+                </button>
+              )}
+            </div>
           ) : (
             <span />
           )}
@@ -464,6 +733,24 @@ export function InspectionDetailPage() {
             </svg>
           </div>
         </div>
+
+        {/*
+          What the button will actually do, said before it is pressed.
+
+          "Re-inspection" is a word an officer could reasonably read as "undo
+          the failure" or "let it through this time", and it is neither. The
+          three facts that matter are that the failure is kept, that the
+          applicant's filing does not move, and that nothing is approved without
+          somebody conducting the new visit.
+        */}
+        {canReinspect && !reinspectOpen && (
+          <p className="mt-3 max-w-xl text-sm text-ink-secondary">
+            This visit stays on the record as a failure. Scheduling a re-inspection books a fresh visit
+            {data.department ? ` for ${data.department.name}` : ''} once the owner has put the finding
+            right — the application stays “For Inspection” until that visit passes, and nothing is
+            approved on its own.
+          </p>
+        )}
 
         {!done && (
           <div className="mt-5">
@@ -503,6 +790,27 @@ export function InspectionDetailPage() {
             )}
           </div>
         )}
+
+        {/*
+          What the applicant filed, below the decision controls rather than
+          above them.
+
+          Reading order says the record should come first — you approve a site
+          visit because of these facts. It is here anyway, because the complaint
+          this screen is answering came in two halves and the other half was
+          "there is no approval button". The mock (updated-gui/82.png) puts
+          Approve directly under the status card, and a record block of this
+          height in between pushed it to the very bottom of a 1000px viewport
+          and off a shorter one. Losing the button again to make the sheet read
+          better would be trading one half of the complaint for the other.
+
+          Rendered only when the response actually carried it. `particulars` is
+          null on any payload that did not eager-load the filing — the list, and
+          the conduct/reschedule replies — and null there means "not fetched",
+          not "nothing was submitted". An empty card would be a claim about the
+          applicant that the response never made.
+        */}
+        {data.particulars && <SubmittedDetails particulars={data.particulars} />}
       </div>
 
       {failOpen && (

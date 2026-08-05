@@ -9,10 +9,11 @@ import {
 } from '../../components/icons'
 import { ApplicationProgress } from '../../components/ApplicationProgress'
 import { DocumentActions } from '../../components/DocumentActions'
+import { InspectionDecisionPanel } from '../../components/InspectionDecision'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { MessagesPanel } from '../../components/MessagesPanel'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
-import { FieldLabel, FilterPills, ProtoModal, inputCls } from '../../components/ui/Proto'
+import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { admin, applications, assignments, officeForms as officeFormsApi } from '../../lib/resources'
@@ -641,6 +642,85 @@ export function ReviewPage() {
   const decided = rejected || approvedHere || Boolean(data.completed_at)
   // A decided review is a record for good: there is nothing left to change.
   const editing = mode === 'edit' && !decided
+
+  /*
+   * ── The For Inspection screen ─────────────────────────────────────────────
+   *
+   * A filing waiting on a site visit gets its own, much smaller page, and
+   * returns before any of the review sheet below is built.
+   *
+   * Why it needed one at all. A filing only REACHES `for_inspection` because
+   * every review assignment completed (WorkflowService::afterReviewProgress),
+   * so `completed_at` is always set by then and `decided` above is always true.
+   * This page therefore rendered its closed-review shape: a static green
+   * "Approved" that meant "the paperwork review is done" but sat beside an
+   * un-inspected permit reading as though the permit were granted, no controls
+   * of any kind, and 1,200 lines of read-only form opened flat. The client, in
+   * order: "why is the entire application form showing it should just be like
+   * the other ones where its just a box", "there's no thing to approve
+   * something that's for inspection", and on seeing a first pass that merely
+   * folded the form behind a disclosure, "I can still see the application
+   * details. Please remove this."
+   *
+   * So the form is GONE here, not collapsed. `decided` was never wrong — this
+   * office's review IS finished — it was being asked a question it does not
+   * answer. What is outstanding is the inspection, which lives on the
+   * application rather than on this assignment, and it is now the only thing on
+   * the page apart from the progression rail the client asked to keep.
+   *
+   * The layout is updated-gui/82.png: page title, the business so the officer
+   * can confirm they opened the right row, a centred serif "Application Status"
+   * and the card. Messages stays because the mock's chat bubble has to mean
+   * something — it is how an officer asks the owner about a finding, and
+   * deleting the sheet must not delete that too.
+   *
+   * Read off `app.status` rather than off the presence of inspections: a visit
+   * can exist on a filing that has already moved past inspection (a failed one
+   * stays on the record for good), and a filing can sit in `for_inspection`
+   * before anything is scheduled. The status is the thing that says what the
+   * office is waiting for.
+   *
+   * Every other status falls straight through to the sheet, unchanged.
+   *
+   * Safe as an early return: every hook on this component runs above the
+   * `loading` guard, so nothing below here is a hook and no render path can
+   * skip one.
+   */
+  if (app.status === 'for_inspection') {
+    return (
+      <div>
+        {backLink}
+        <PageTitle>Business Permit</PageTitle>
+
+        <div className="mx-auto max-w-3xl">
+          <p className={`text-center text-xl font-bold ${businessRemoved ? 'italic text-ink-muted' : 'text-ink'}`}>
+            {businessRemoved ? 'Business removed from the register' : business.name}
+          </p>
+          <p className="mt-1 text-center text-sm font-semibold uppercase tracking-wide text-ink-muted">
+            {app.tracking_id}
+          </p>
+
+          <h2 className="display-serif mb-6 mt-4 text-center text-3xl text-ink">Application Status</h2>
+
+          {/*
+           * `reload`, not a local patch of the card. Recording the last
+           * outstanding visit as passed issues the permit and moves
+           * `app.status` off `for_inspection` altogether — at which point this
+           * whole branch stops applying and the officer should be looking at
+           * the approved filing, not at a stale card.
+           */}
+          <InspectionDecisionPanel inspections={app.inspections ?? []} onChanged={reload} />
+
+          {/* The rail the client asked to keep: "but the progress thingy is cool". */}
+          <div className="mt-6">
+            <ApplicationProgress app={app} />
+          </div>
+
+          <MessagesPanel applicationId={app.id} />
+        </div>
+      </div>
+    )
+  }
 
   // Read back from the record, not typed here: the paper form still carries
   // these boxes, but the system already knows every one of them.
