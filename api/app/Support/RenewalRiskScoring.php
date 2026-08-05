@@ -245,6 +245,7 @@ final class RenewalRiskScoring
 
     private static function sortByPoints(array $drivers): array
     {
+
         usort($drivers, static fn (array $a, array $b) => [$b['points'], $b['max']] <=> [$a['points'], $a['max']]);
 
         return $drivers;
