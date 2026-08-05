@@ -48,6 +48,7 @@
         table.row { width: 100%; border-collapse: collapse; }
         table.row td { vertical-align: top; padding: 0; }
 
+        .seal { height: 46px; margin-bottom: 4px; }
         .republic { font-size: 9px; letter-spacing: 1px; color: #555; }
         .city { font-size: 15px; font-weight: bold; letter-spacing: 1px; margin-top: 2px; }
         .office { font-size: 9px; font-weight: bold; letter-spacing: 1px; color: #444; margin-top: 2px; }
@@ -94,6 +95,13 @@
     <table class="row">
         <tr>
             <td>
+                {{-- Item 95: the city's seal, not ours. dompdf reads it off
+                     disk rather than over HTTP, so it renders the same whether
+                     or not the app is reachable from wherever the PDF is
+                     generated. --}}
+                @if(file_exists(public_path('malabon-seal.png')))
+                    <img class="seal" src="{{ public_path('malabon-seal.png') }}" alt="">
+                @endif
                 <div class="republic">REPUBLIC OF THE PHILIPPINES</div>
                 <div class="city">CITY OF MALABON</div>
                 <div class="office">{{ strtoupper($department_name ?? 'Business Permits and Licensing Office') }}</div>

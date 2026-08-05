@@ -223,14 +223,31 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   const trade = ((await row.textContent()) ?? '').replace(/PSIC\s*\d+$/, '').trim()
   await row.click()
 
-  // Named, not just counted: two rows in this list differ only by the words in
-  // their brackets, so "Selected (1)" alone does not confirm the right one.
-  const confirmation = page.getByText(/^Selected \(1\):/)
-  await expect(confirmation).toBeVisible()
-  await expect(confirmation).toContainText(trade)
+  /*
+   * The confirmation now lives in the "Selected" panel below the search box,
+   * and it is readable because the dropdown closes on choosing.
+   *
+   * That is a change of mechanism, not of promise. When this was a
+   * multi-select the list had to stay open to pick a second trade, so the
+   * confirmation was pinned inside the dropdown to escape being covered by it.
+   * A filing declares ONE trade now — the zoning verdict, the carried-over
+   * business block and the Location Insights lookup all read lines[0] and
+   * ignored the rest — so choosing is finishing, the list closes, and the
+   * panel it used to hide is in plain sight.
+   *
+   * What is still asserted is the thing item 104a was about: at the moment of
+   * the click, the applicant can SEE which trade they picked, named rather
+   * than counted. Two rows in this list differ only by the words in their
+   * brackets, so "Selected (1)" alone confirms nothing.
+   */
+  await expect(results).toBeHidden()
 
-  // The dropdown is still open — this is a multi-select — so nothing may be
-  // covering the confirmation. Hit-testing is the whole point of the test.
+  const confirmation = page.getByText(/^Selected \(1\)/)
+  await expect(confirmation).toBeVisible()
+  await expect(page.getByText(trade, { exact: false }).first()).toBeVisible()
+
+  // And nothing is lying on top of it — the original bug was a covered
+  // confirmation, so the hit-test stays even though the coverer is gone.
   const box = await confirmation.boundingBox()
   expect(box).not.toBeNull()
   const onTop = await page.evaluate((b) => {
