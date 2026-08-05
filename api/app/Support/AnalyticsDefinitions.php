@@ -2,60 +2,8 @@
 
 namespace App\Support;
 
-/**
- * What each figure on an analytics screen actually measures, and why it is there.
- *
- * These travel in `meta.definitions` beside `meta.engine` and `meta.computed_at`,
- * never inside `data`. The reason is the one AnalyticsController already states
- * about provenance: `data` is exactly the payload the engine returned, and how a
- * figure was derived is not one of the figures. Putting definitions in `data`
- * would also mean R had to emit them, which would fork the wording across two
- * implementations — the precise drift the parity test exists to prevent.
- *
- * They live in PHP rather than in the React screens because a sentence typed into
- * a component is a copy of the truth, not the truth. Change a `where` clause in
- * DashboardAnalytics and a frontend string describing it goes stale silently, on a
- * screen whose entire purpose is to be trusted. AnalyticsDefinitionsTest walks
- * every key here and fails if it no longer resolves against a built payload, so a
- * renamed metric breaks the build instead of shipping a confident lie.
- *
- * Each entry answers four questions, and the fourth is not decoration. The
- * professor's cross-cutting requirement 0.1 (docs/r-integration-revisions.md) is
- * that every data element be justified — "state why it is there, who uses it, how
- * they use it" — and she flagged it as the question most likely to be asked. A
- * formula alone answers how, and leaves why unanswered:
- *
- *   label    the name as printed on screen
- *   formula  how the number is produced, saying explicitly what is divided by what
- *   covers   which rows it is over: the window, and what is left out
- *   why      what decision it informs, and who makes that decision
- *
- * `covers` is where the honesty lives. A rate whose exclusions are unstated reads
- * as a rate over everything, and several of these are not: the approval rate omits
- * pending filings, the inspection pass rate divides by completed rather than
- * scheduled, and the rankings are shares of the subset that has the field on
- * record at all. Every one of those omissions is defensible and none of them is
- * self-evident from the number.
- *
- * WRITE THESE FOR A BPLO CLERK, not for a statistician. The reader is the officer
- * who has to act on the figure, and client testing (checklist item 102) came back
- * asking for plainer words here. So: "average", not "mean"; "the middle value,
- * half above and half below", not "the median"; "what it is divided by", not "the
- * denominator"; "the months set by the filter at the top", not "the trailing
- * window". Where a term is genuinely the name of the thing — cohort survival, PSIC
- * code, RA 11032 tier — keep the term and gloss it in the same sentence rather
- * than dropping either the word or its meaning.
- *
- * Plainer must never become looser. Every window, table and exclusion these
- * sentences name is a claim the reader can check, and simplifying is not licence
- * to drop one — nor to upgrade a rule score into something the register cannot
- * support. See the renewalRisk() docblock for where that line sits.
- */
 final class AnalyticsDefinitions
 {
-    /**
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
     public static function for(string $dataset): array
     {
         return match ($dataset) {
@@ -67,17 +15,6 @@ final class AnalyticsDefinitions
         };
     }
 
-    /**
-     * Keys are dot paths into the dashboard payload.
-     *
-     * Panels are defined once at the panel level rather than once per cell. A
-     * count in a table ("New: 12") needs no formula; what the reader cannot see is
-     * the window it counts over and what it drops, and that is a property of the
-     * panel. Rates and derived figures get their own entry because those are the
-     * ones where the denominator is the whole question.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
     private static function dashboard(): array
     {
         return [
@@ -230,20 +167,6 @@ final class AnalyticsDefinitions
         ];
     }
 
-    /**
-     * Keys are dot paths into the processing-time payload.
-     *
-     * This screen is a control chart, and a control chart is the one analytics
-     * shape whose vocabulary the reader is least likely to share. Revision 6.1
-     * (docs/r-integration-revisions.md) is a question about exactly that —
-     * "ito bang processing ay processed? o processing time is from the
-     * application until the process?" — and 6.2 struck through the word
-     * "Inside" on the status pill. So the two things these entries owe the
-     * reader before anything else are which two timestamps the clock runs
-     * between, and which direction on the chart is the good one.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
     private static function processingTime(): array
     {
         return [
@@ -284,37 +207,20 @@ final class AnalyticsDefinitions
         ];
     }
 
-    /**
-     * Keys are dot paths into the renewal-risk payload.
-     *
-     * Read the honesty constraint in docs/r-integration-spec.md before editing
-     * a word of this. The paper and the mockup both described this column as an
-     * "Estimated Probability of Delayed Renewal" and printed percentages
-     * against it. No model exists: nothing here is fitted on historical
-     * outcomes, there is no outcome variable, and there is no calibration to
-     * report. What exists is a weighted rule score whose every rule is printed
-     * on the same screen.
-     *
-     * So these entries may not call the score a probability, a prediction, a
-     * likelihood or a confidence, and may not render it as a percentage. The
-     * risk is concrete rather than academic: an officer who reads "88%" as
-     * calibrated will act on it as calibrated, and the register cannot support
-     * that. The score's only claim is ordinal — it sorts, it does not forecast.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
     private static function renewalRisk(): array
     {
         return [
             'at_risk' => [
-                'label' => 'Businesses at Risk',
+
+                'label' => 'Businesses Requiring Review',
                 'formula' => 'Permits falling due inside the period set by the filter at the top, scored against five rules and listed worst first. Where two score the same, whichever expires sooner goes first.',
                 'covers' => 'Active and expired permits whose cover ends between 60 days ago and the end of that period — recently lapsed ones are kept in, because a permit that quietly expired last month is the case most worth chasing. Revoked and suspended permits are excluded: those are enforcement outcomes, and neither is waiting to be renewed. Only the leading rows are listed, while the band counts below are over every permit scored.',
                 'why' => 'The follow-up list. It is ordered by score rather than by expiry date so that a permit expiring in a fortnight with nothing filed and fees outstanding outranks one expiring next week whose renewal is already approved.',
             ],
 
             'at_risk.score' => [
-                'label' => 'Risk score',
+
+                'label' => 'Renewal Risk Index',
                 'formula' => 'Points out of 100, added up across five rules. The number in brackets is the most each rule can add: how soon the permit expires (30), how far any renewal has got (25), whether this business has renewed late before (20), open compliance findings (15), and unpaid fees on the renewal (10).',
                 'covers' => 'A checklist in which some rules are worth more points than others. Nothing behind it is worked out from what businesses did in the past: the register does not record whether a business ended up renewing late, so there was no past result to work from and there is no accuracy figure to quote. The number sorts a queue; it says nothing about what any one business will do.',
                 'why' => 'Scoring is what lets a hundred permits be worked in the order that matters instead of by expiry date alone. Every rule and its weight is printed below the table on purpose — an officer must be able to disagree with the ranking on the merits, which they cannot do with a number whose workings are hidden.',
@@ -399,18 +305,6 @@ final class AnalyticsDefinitions
         ];
     }
 
-    /**
-     * Keys are dot paths into the business-growth payload.
-     *
-     * The trap on this screen is that its panels do not all count the same
-     * population. Registrations and the barangay ranking include businesses
-     * later removed from the register, because they were genuinely registered
-     * in the period; the industry breakdown excludes them, because it describes
-     * what is trading now. Both are defensible and the difference is invisible
-     * in the bars, so each entry says which population it is over.
-     *
-     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
-     */
     private static function businessGrowth(): array
     {
         return [
@@ -450,7 +344,8 @@ final class AnalyticsDefinitions
             ],
 
             'cohort_survival.survival' => [
-                'label' => 'Cohort Survival Rate',
+
+                'label' => 'Business Renewal Performance',
                 'formula' => 'The share still renewing without a gap at the furthest cycle any business in the register has reached.',
                 'covers' => 'The furthest cycle, which may rest on very few businesses — the number that had actually reached that point is shown alongside for exactly that reason. A register only a few years old will work this out from a handful of businesses.',
                 'why' => 'One number for how well the city holds on to its businesses over time. It is the hardest figure on the screen to read at a glance, which is why the count behind it is never shown without it.',
@@ -473,7 +368,8 @@ final class AnalyticsDefinitions
             'industry_growth' => [
                 'label' => 'Business Industry Growth Trend',
                 'formula' => 'Lines of business on record, grouped by PSIC code — the national numbering for industries — with this period\'s new registrations set against the period before, ranked by how many businesses carry that line today.',
-                'covers' => 'Counted per declared line, not per business — a business declaring three lines appears under all three. Businesses removed from the register are excluded here, unlike the registration and barangay figures, because this panel describes what is trading now. The bar length is how many carry that line today, so the ranking is by size while the growing or declining word beside it is about the change — the longest bar is not necessarily the fastest growing.',
+
+                'covers' => 'Counted per declared line, not per business — a business declaring three lines appears under all three. Businesses removed from the register are excluded here, unlike the registration and barangay figures, because this panel describes what is trading now. Each line follows one industry across the period, so height is how many carry that line while the growing or declining word beside it is about the change — the highest line is not necessarily the fastest growing.',
                 'why' => 'What kind of city this is becoming, in the register\'s own classification. Feeds zoning and the concentration figure an applicant is shown before committing to a location.',
             ],
         ];

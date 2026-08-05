@@ -18,6 +18,11 @@ use Carbon\CarbonImmutable;
  * is tested here is the trip through the database and the JSON envelope: that
  * the facts are read off the register correctly, that the honesty statement
  * survives, and that the feed is unreachable without analytics.view.
+ *
+ * These read as BPLO throughout. Spec §2 assigns Renewal Risk to "(Admin -
+ * BPLO)", and `analytics.view` is BPLO's alone — the super admin holds only
+ * `analytics.processing_time`. The access test below is where that is asserted;
+ * everywhere else it is just who the caller has to be.
  */
 
 /**
@@ -47,7 +52,7 @@ function permitExpiringIn(int $days, ?Business $business = null): Permit
 /** @return array<string, mixed> */
 function renewalRisk(string $query = ''): array
 {
-    return test()->withHeaders(authAs('admin@biztrack.local'))
+    return test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/renewal-risk'.$query)
         ->assertOk()
         ->json('data');
@@ -55,17 +60,26 @@ function renewalRisk(string $query = ''): array
 
 /* ── access ───────────────────────────────────────────────────────────── */
 
-it('serves renewal risk to the super admin and to BPLO', function () {
-    test()->withHeaders(authAs('admin@biztrack.local'))
-        ->getJson('/api/v1/analytics/renewal-risk')
-        ->assertOk();
-
-    // Checklist item 78: BPLO holds analytics.view. Renewals are BPLO's own
-    // work — it is the office that issues the permit being renewed — so the
-    // watchlist is queue-processing information for it specifically.
+it('serves renewal risk to BPLO and not to the super admin', function () {
+    // Spec §2 "Renewal Risk Prediction (Admin - BPLO)", and checklist item 78:
+    // BPLO holds analytics.view. Renewals are BPLO's own work — it is the office
+    // that issues the permit being renewed — so the watchlist is queue-processing
+    // information for it specifically.
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/renewal-risk')
         ->assertOk();
+
+    /*
+     * The super admin is refused, and that is the deliberate half. It holds
+     * `analytics.processing_time` and nothing else in analytics: the three
+     * operational screens went to the office that acts on them, and the one
+     * oversight screen stayed with the office that watches the departments.
+     * A super admin who could read this too would collapse the split back into
+     * "the admin sees everything", which is what the client ruled out.
+     */
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/analytics/renewal-risk')
+        ->assertForbidden();
 
     // For every other office a watchlist of which businesses are about to fall
     // out of compliance is management information, not queue-processing
@@ -89,6 +103,13 @@ it('refuses the report download to anyone without analytics.view', function () {
         ->assertForbidden();
 
     test()->withHeaders(authAs('owner@biztrack.local'))
+        ->get('/api/v1/analytics/renewal-risk/report')
+        ->assertForbidden();
+
+    // The super admin included: it does not hold analytics.view either, and the
+    // PDF carries the same watchlist as the screen. A download route that stayed
+    // open would be the way round the split rather than an exception to it.
+    test()->withHeaders(authAs('admin@biztrack.local'))
         ->get('/api/v1/analytics/renewal-risk/report')
         ->assertForbidden();
 });
@@ -288,7 +309,7 @@ it('generates a renewal risk PDF that carries the methodology', function () {
     permitExpiringIn(-5);
     permitExpiringIn(30);
 
-    $response = test()->withHeaders(authAs('admin@biztrack.local'))
+    $response = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->get('/api/v1/analytics/renewal-risk/report')
         ->assertOk();
 
@@ -296,4 +317,3 @@ it('generates a renewal risk PDF that carries the methodology', function () {
     expect($response->getContent())->toStartWith('%PDF-');
     expect(strlen($response->getContent()))->toBeGreaterThan(2000);
 });
-

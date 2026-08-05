@@ -284,15 +284,26 @@ export default function App() {
             }
           />
           {/*
-            Features 6/7 came out of the standalone R project and into the site.
-            Same permission as the overview: analytics.view, held by the super
-            admin and by BPLO (checklist #78). These aggregate every office's
-            queue, which is why the other office roles still do not hold it.
+            Processing Time is the ONE analytics screen that is not BPLO's.
+
+            All four used to sit on `analytics.view`, which meant whoever could
+            open the dashboard could open this too. The client drew the line the
+            other way round: "BPLO side should only have the 3 dashboards
+            (Processing Time should not exist here) — Super admin side should
+            only have Processing Time dashboard". The R INTEGRATION DRAFTS
+            headings say the same thing — §1/§2/§4 are "(Admin - BPLO)", §6 is
+            "(Super Admin)" — so the permission was split to match: `analytics.view`
+            for the three, `analytics.processing_time` for this one.
+
+            The two are deliberately disjoint. Neither role holds both, so this
+            route is unreachable for BPLO and the other three are unreachable for
+            the super admin. Granting a role both permissions would quietly undo
+            the separation the client asked for, and nothing here would fail.
           */}
           <Route
             path="/staff/analytics/processing-time"
             element={
-              <RequirePermission permission="analytics.view">
+              <RequirePermission permission="analytics.processing_time">
                 <ProcessingTimePage />
               </RequirePermission>
             }
@@ -307,8 +318,8 @@ export default function App() {
           />
           {/*
             Renewal Risk ranks every business's permits by a weighted rule score,
-            so it sits on the same permission as the rest of analytics rather
-            than being visible to every office reviewer.
+            so it sits on `analytics.view` alongside the other two BPLO screens
+            rather than being visible to every office reviewer.
           */}
           <Route
             path="/staff/analytics/renewal-risk"
