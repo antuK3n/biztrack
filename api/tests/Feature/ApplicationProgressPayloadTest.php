@@ -122,7 +122,25 @@ it('says of each permit type whether it will ever be inspected', function () {
 });
 
 it('lets a filing with no inspecting permit type be recognised as one that skips inspection', function () {
-    $appId = progressFiling(['BUSINESS', 'ZONING']);
+    /*
+     * BUSINESS alone, and BUSINESS is the only fixture that can stand here.
+     *
+     * That is a fact about the domain rather than a convenience. All six
+     * supporting clearances — SANITARY, FSIC, OCCUPANCY, CEC, ZONING, MARKET —
+     * are inspected, because each of them certifies something about the
+     * premises or the site and none can honestly be granted from a desk. The
+     * Mayor's Permit is the exception: BPLO issues it on the strength of those
+     * six clearances rather than a visit of its own, so it is the one permit
+     * type that leaves `requires_inspection` false and therefore the one route
+     * on which For Inspection is never drawn.
+     *
+     * This test used to file BUSINESS + ZONING, from when zoning was granted on
+     * paper. If a seventh non-inspecting type is ever added it may join this
+     * fixture; if BUSINESS is ever flipped to true, this test has nothing left
+     * to assert and the skip-inspection branch of the rail is dead code — which
+     * is exactly what a failure here should be read as.
+     */
+    $appId = progressFiling(['BUSINESS']);
 
     $types = test()->withHeaders(authAs('owner@biztrack.local'))
         ->getJson("/api/v1/applications/{$appId}")
@@ -131,6 +149,23 @@ it('lets a filing with no inspecting permit type be recognised as one that skips
 
     // This is the exact predicate the rail runs before drawing the step.
     expect(collect($types)->contains('requires_inspection', true))->toBeFalse();
+});
+
+it('has exactly one permit type that skips inspection, and it is the mayor’s permit', function () {
+    /*
+     * The companion to the test above: it pins WHY that fixture is the only one
+     * available, so a future reader does not read `['BUSINESS']` as an
+     * arbitrary pick. ReferenceSeeder is the source of the rule; this reads it
+     * back off the reference endpoint the wizard itself uses.
+     */
+    $types = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/reference/permit-types')
+        ->assertOk()
+        ->json('data');
+
+    $skipsInspection = collect($types)->reject->requires_inspection->pluck('code')->values()->all();
+
+    expect($skipsInspection)->toBe(['BUSINESS']);
 });
 
 it('carries the history into the officer review sheet without a second request', function () {

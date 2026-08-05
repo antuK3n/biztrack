@@ -1,7 +1,11 @@
 <?php
 
+use App\Enums\InspectionStatus;
+use App\Models\Application;
 use App\Models\AppNotification;
 use App\Models\AuditLog;
+use App\Models\Department;
+use App\Models\Inspection;
 use App\Models\User;
 
 /*
@@ -21,16 +25,35 @@ use App\Models\User;
  *     `scheduled_at`, so page one opened on 2023.
  */
 
-/** Every paginated list, as [label, uri, account]. */
+/**
+ * Every paginated list, as [label, uri, account].
+ *
+ * The account is whoever is ALLOWED to read that list, not a convenience. Nine
+ * of these used to say `admin@` because the super admin could open everything;
+ * it no longer can. The client took four activities off the role — "In the
+ * super admin's account (admin@), remove Messages, Track, Inspections, and
+ * Other Requirements. It is not his role to do those things." — and the four
+ * permissions behind them are exactly what gates four of these endpoints:
+ *
+ *   /assignments      application.review    -> BPLO
+ *   /message-threads  message.participate   -> BPLO
+ *   /requests         request.create        -> BPLO
+ *   /inspections      inspection.manage     -> an inspecting office (CHO here)
+ *
+ * The admin keeps the rest because oversight is reading: `application.view_all`
+ * plus `application.view_any_office` for /applications, `permit.view_all` for
+ * /permits, and its own admin screens. Anything that reverts here would be a
+ * 403, so this table doubles as a record of who owns each list.
+ */
 function paginatedLists(): array
 {
     return [
         ['applications', '/api/v1/applications', 'admin@biztrack.local'],
-        ['assignments', '/api/v1/assignments', 'admin@biztrack.local'],
+        ['assignments', '/api/v1/assignments', 'bplo@biztrack.local'],
         ['permits', '/api/v1/permits', 'admin@biztrack.local'],
-        ['inspections', '/api/v1/inspections', 'admin@biztrack.local'],
-        ['requests', '/api/v1/requests', 'admin@biztrack.local'],
-        ['message-threads', '/api/v1/message-threads', 'admin@biztrack.local'],
+        ['inspections', '/api/v1/inspections', 'sanitary@biztrack.local'],
+        ['requests', '/api/v1/requests', 'bplo@biztrack.local'],
+        ['message-threads', '/api/v1/message-threads', 'bplo@biztrack.local'],
         ['admin/users', '/api/v1/admin/users', 'admin@biztrack.local'],
         ['admin/businesses', '/api/v1/admin/businesses', 'admin@biztrack.local'],
         ['admin/audit-logs', '/api/v1/admin/audit-logs', 'admin@biztrack.local'],
@@ -103,6 +126,12 @@ it('splits pages without overlapping or dropping rows', function () {
 });
 
 it('opens each list on the rows that are worth seeing first', function () {
+    /*
+     * Three accounts rather than one, for the reason set out on
+     * paginatedLists(): the queue belongs to BPLO and the inspection list to an
+     * inspecting office, and the super admin is on neither since the client took
+     * Track and Inspections off that role.
+     */
     $admin = authAs('admin@biztrack.local');
 
     // Applications: newest filing first.
@@ -116,19 +145,45 @@ it('opens each list on the rows that are worth seeing first', function () {
 
     // Assignments: newest routing first — an officer wants the work that just
     // arrived, not the first thing the office was ever sent.
+    $bplo = authAs('bplo@biztrack.local');
     $assigned = array_filter(array_column(
-        test()->withHeaders($admin)->getJson('/api/v1/assignments')->assertOk()->json('data'),
+        test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('data'),
         'assigned_at',
     ));
+    // An empty list would satisfy the sort trivially, which is how this test
+    // would quietly stop testing anything if the account lost its scope.
+    expect($assigned)->not->toBeEmpty('BPLO has no assignments to order');
     $sortedAssigned = $assigned;
     rsort($sortedAssigned);
     expect(array_values($assigned))->toBe(array_values($sortedAssigned), 'assignments are not newest-first');
 
-    // Inspections: the visit just done or about to be, not one from 2023.
+    /*
+     * Inspections: the visit just done or about to be, not one from 2023 — the
+     * ordering bug that took the page down in the first place.
+     *
+     * The rows are made here because the demo storyline seeds none, so this
+     * assertion had been reading an empty array and sorting it successfully
+     * ever since it was written. Deliberately out of chronological order, and
+     * deliberately spanning years, so that ascending-by-scheduled_at would put
+     * 2023 first and fail rather than pass on an absence of data.
+     */
+    $sanitaryDepartmentId = Department::where('code', 'CHO')->value('id');
+    $applicationId = Application::query()->value('id');
+    foreach (['2023-02-14', '2026-05-06', '2024-11-20'] as $day) {
+        Inspection::create([
+            'application_id' => $applicationId,
+            'department_id' => $sanitaryDepartmentId,
+            'status' => InspectionStatus::Scheduled,
+            'scheduled_at' => $day.' 09:00:00',
+        ]);
+    }
+
+    $sanitary = authAs('sanitary@biztrack.local');
     $scheduled = array_filter(array_column(
-        test()->withHeaders($admin)->getJson('/api/v1/inspections')->assertOk()->json('data'),
+        test()->withHeaders($sanitary)->getJson('/api/v1/inspections')->assertOk()->json('data'),
         'scheduled_at',
     ));
+    expect($scheduled)->toHaveCount(3, 'CHO cannot see the visits booked to it');
     $sortedScheduled = $scheduled;
     rsort($sortedScheduled);
     expect(array_values($scheduled))->toBe(array_values($sortedScheduled), 'inspections are not newest-first');
