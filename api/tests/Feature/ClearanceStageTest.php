@@ -538,18 +538,92 @@ it('keeps applying and submitting mutually exclusive', function () {
  * them is the test below: a filing with clearances on it, paid for once, is
  * issued when its offices sign off and nothing asks for money again.
  */
-it('issues every permit once the offices sign off, with no balance to settle', function () {
+/**
+ * A paid filing carrying the business permit plus ZONING, taken as far as the
+ * offices can take it: every assignment approved, nothing inspected yet.
+ *
+ * The office accounts are picked by department because that is the only way a
+ * sign-off happens — ApplicationVisibility keeps a reviewer to the filings
+ * routed to their own office, so BPLO cannot close CPDO's assignment.
+ */
+function clearanceFilingAwaitingInspection(): Application
+{
     $app = draftClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
-    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+    test()->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+    test()->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    test()->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     foreach (ApplicationAssignment::where('application_id', $app->id)->get() as $assignment) {
         authAs($assignment->department_id === Department::where('code', 'CPDO')->first()->id
             ? 'zoning@biztrack.local'
             : 'bplo@biztrack.local');
-        $this->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
+        test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     }
+
+    return Application::findOrFail($app->id);
+}
+
+/**
+ * Drive every visit booked against a filing to a pass, through the endpoint an
+ * officer actually uses.
+ *
+ * THE RULE THIS ENCODES: all six supporting clearances — SANITARY, FSIC,
+ * OCCUPANCY, CEC, ZONING, MARKET — carry `requires_inspection`, and only
+ * BUSINESS does not. So a filing that asks for any clearance does NOT get its
+ * permits when the last office signs off; WorkflowService::afterReviewProgress
+ * books the visits and parks it in `for_inspection`, and recordInspection is
+ * the only thing that can then issue, once EVERY visit has passed.
+ *
+ * The account is chosen by the inspecting office on purpose, and it is load
+ * bearing twice over. `inspections/{id}/conduct` sits behind
+ * `permission:inspection.manage`, and InspectionController scopes every read
+ * and write to the caller's own department — so a visit booked for CPDO can
+ * only be closed by a CPDO officer holding that permission. A 403 out of here
+ * means an office was routed an inspection it cannot conduct, which is the
+ * precise failure the client reported of OBO, CENRO, Market and Zoning before
+ * RbacSeeder put `inspection.manage` on all six.
+ */
+function passEveryScheduledInspection(Application $app): void
+{
+    $officerFor = [
+        'CHO' => 'sanitary@biztrack.local',
+        'BFP' => 'fire@biztrack.local',
+        'CPDO' => 'zoning@biztrack.local',
+        'OBO' => 'obo@biztrack.local',
+        'CENRO' => 'cenro@biztrack.local',
+        'CMO-MARKET' => 'market@biztrack.local',
+    ];
+
+    $inspections = $app->inspections()->with('department')->get();
+
+    // An empty loop would let this helper "pass" a filing that was never booked
+    // an inspection at all, which is how these tests would silently stop
+    // covering the inspected path if the flag were ever flipped back.
+    expect($inspections)->not->toBeEmpty();
+
+    foreach ($inspections as $inspection) {
+        authAs($officerFor[$inspection->department->code]);
+        test()->postJson("/api/v1/inspections/{$inspection->id}/conduct", [
+            'result' => 'passed',
+            'findings' => 'Premises inspected and found compliant.',
+        ])->assertOk();
+    }
+}
+
+it('issues every permit once the offices sign off, with no balance to settle', function () {
+    $app = clearanceFilingAwaitingInspection();
+
+    /*
+     * The sign-offs alone no longer issue anything, and that is the rule rather
+     * than an accident of this fixture: ZONING is inspected, so the filing waits
+     * for the site visit. Asserting the intermediate state means a change that
+     * skipped straight to `approved` would be caught here rather than quietly
+     * making the rest of the test pass for the wrong reason.
+     */
+    expect($app->status)->toBe(ApplicationStatus::ForInspection)
+        ->and($app->permits()->count())->toBe(0);
+
+    passEveryScheduledInspection($app);
 
     $settled = Application::findOrFail($app->id);
 
@@ -560,17 +634,20 @@ it('issues every permit once the offices sign off, with no balance to settle', f
 });
 
 it('reports a clearance as issued once its permit exists', function () {
-    $app = draftClearanceApplication();
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
-    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
-    $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
+    $app = clearanceFilingAwaitingInspection();
 
-    foreach (ApplicationAssignment::where('application_id', $app->id)->get() as $assignment) {
-        authAs($assignment->department_id === Department::where('code', 'CPDO')->first()->id
-            ? 'zoning@biztrack.local'
-            : 'bplo@biztrack.local');
-        $this->postJson("/api/v1/assignments/{$assignment->id}/approve");
-    }
+    /*
+     * Before the visit the clearance is still only `applied` — the office has
+     * agreed to it on paper, but a locational clearance is a statement about a
+     * site and the site has not been looked at. `issued` is a claim that the
+     * permit row exists, so it must not appear until the inspection releases it.
+     */
+    authAs('owner@biztrack.local');
+    $beforeVisit = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json('data'))
+        ->firstWhere('permit_type.code', 'ZONING');
+    expect($beforeVisit['state'])->toBe('applied');
+
+    passEveryScheduledInspection($app);
 
     authAs('owner@biztrack.local');
     $row = collect($this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json('data'))

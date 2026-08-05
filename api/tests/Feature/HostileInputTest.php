@@ -36,7 +36,12 @@ it('rejects an array in a scalar field on the business form instead of crashing'
 it('ignores a nested array in the queue filter instead of crashing', function () {
     // `?application_status[][]=x` — casting the inner array to string is a
     // TypeError, and the queue answered 500 to a malformed query string.
-    test()->withHeaders(authAs('admin@biztrack.local'))
+    //
+    // As BPLO: the queue is an officer's screen, and the super admin lost
+    // `application.review` when the client took Track off that role, so an
+    // admin session would be turned away at the gate and never reach the parser
+    // this is about.
+    test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/assignments?application_status[][]=submitted')
         ->assertOk();
 });
@@ -91,11 +96,18 @@ it('caps a fee adjustment rather than overflowing the money columns', function (
 });
 
 it('answers 422, not 500, to hostile query strings on every list', function () {
+    /*
+     * The account has to be one that may actually READ each list. This asserts
+     * "not a 500", and a 403 clears that bar without the query string ever
+     * reaching the code being tested — so leaving the super admin on
+     * /assignments, /inspections and /requests after it lost Track, Inspections
+     * and Other Requirements would leave three of these seven passing vacuously.
+     */
     $lists = [
         ['/api/v1/applications', 'admin@biztrack.local'],
-        ['/api/v1/assignments', 'admin@biztrack.local'],
-        ['/api/v1/inspections', 'admin@biztrack.local'],
-        ['/api/v1/requests', 'admin@biztrack.local'],
+        ['/api/v1/assignments', 'bplo@biztrack.local'],
+        ['/api/v1/inspections', 'sanitary@biztrack.local'],
+        ['/api/v1/requests', 'bplo@biztrack.local'],
         ['/api/v1/admin/users', 'admin@biztrack.local'],
         ['/api/v1/admin/businesses', 'admin@biztrack.local'],
         ['/api/v1/admin/audit-logs', 'admin@biztrack.local'],
@@ -104,7 +116,9 @@ it('answers 422, not 500, to hostile query strings on every list', function () {
     foreach ($lists as [$uri, $email]) {
         foreach (['?status[]=x', '?q[]=x', '?per_page[]=1', '?page[]=1', '?action[]=x', '?role[]=x'] as $query) {
             $status = test()->withHeaders(authAs($email))->getJson($uri.$query)->getStatusCode();
-            expect($status)->toBeLessThan(500, "{$uri}{$query} answered {$status}");
+
+            expect($status)->toBeLessThan(500, "{$uri}{$query} answered {$status}")
+                ->and($status)->not->toBe(403, "{$uri}: {$email} may not read this list, so nothing was tested");
         }
     }
 });

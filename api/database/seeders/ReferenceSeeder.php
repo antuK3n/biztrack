@@ -287,7 +287,27 @@ class ReferenceSeeder extends Seeder
             'permit_number_prefix' => 'MCO',
             'issuing_department_id' => $dept('OBO'),
             'validity_days' => 365, 'description' => 'Certificate of occupancy for the business premises.',
-            'requires_inspection' => false,
+            /*
+             * All six supporting clearances are inspected. Only SANITARY and
+             * FSIC carried the flag, so OBO, CENRO, CPDO and the Market Office
+             * were routed filings they could review on paper and then had no
+             * way to inspect — the client's report was that those four "cannot
+             * approve inspection ... so basically their permits also have
+             * inspections lol, not just those two".
+             *
+             * It is the obvious reading of what each office issues: an
+             * occupancy permit certifies the premises, an environmental
+             * certificate and a locational clearance are both about the site,
+             * and a market clearance is about a stall that has to be looked at.
+             * None of those can honestly be granted from the desk.
+             *
+             * BUSINESS stays false, and that is the one real exception: the
+             * Mayor's Permit is issued by BPLO on the strength of the six
+             * clearances rather than a visit of its own. Setting it true would
+             * put a seventh visit on every filing and stall approveAndIssue
+             * behind an inspection nobody performs.
+             */
+            'requires_inspection' => true,
             'base_fee' => 800, 'per_line_surcharge' => 0,
         ]);
         $cec = PermitType::updateOrCreate(['code' => 'CEC'], [
@@ -295,7 +315,8 @@ class ReferenceSeeder extends Seeder
             'permit_number_prefix' => 'MCE',
             'issuing_department_id' => $dept('CENRO'),
             'validity_days' => 365, 'description' => 'Environmental compliance certificate.',
-            'requires_inspection' => false,
+            // Inspected, like the other clearances — see the note on OCCUPANCY.
+            'requires_inspection' => true,
             'base_fee' => 400, 'per_line_surcharge' => 0,
         ]);
         $zoning = PermitType::updateOrCreate(['code' => 'ZONING'], [
@@ -303,7 +324,8 @@ class ReferenceSeeder extends Seeder
             'permit_number_prefix' => 'MCZ',
             'issuing_department_id' => $dept('CPDO'),
             'validity_days' => 365, 'description' => 'Confirms the business location conforms to the city zoning ordinance.',
-            'requires_inspection' => false,
+            // Inspected, like the other clearances — see the note on OCCUPANCY.
+            'requires_inspection' => true,
             // Legacy flat-fee fallback only. The real charge comes from the
             // revenue-code rules (Sec. 3.D.01: 45 filing + 345 verification +
             // 345 processing = 735), which supersede this column.
@@ -314,7 +336,8 @@ class ReferenceSeeder extends Seeder
             'permit_number_prefix' => 'MCM',
             'issuing_department_id' => $dept('CMO-MARKET'),
             'validity_days' => 365, 'description' => 'Clearance for market-based businesses.',
-            'requires_inspection' => false,
+            // Inspected, like the other clearances — see the note on OCCUPANCY.
+            'requires_inspection' => true,
             'base_fee' => 300, 'per_line_surcharge' => 0,
         ]);
 

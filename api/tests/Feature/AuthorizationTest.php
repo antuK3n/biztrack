@@ -36,6 +36,87 @@ it('forbids an owner from analytics with 403', function () {
 });
 
 /*
+ * The super admin oversees the process and does not work inside it.
+ *
+ * The client, in full: "In the super admin's account (admin@), remove Messages,
+ * Track, Inspections, and Other Requirements. It is not his role to do those
+ * things." Those are four rail entries, and each one is a permission — the nav
+ * filters off the profile payload, so the permission IS the rail entry, and the
+ * API routes are gated on the same four names.
+ *
+ * Asserted against the seeded matrix rather than through the four endpoints,
+ * for the same reason the analytics split below is: the grant is the thing that
+ * was asked for, and every screen and route hangs off it. An endpoint test would
+ * also go green if the route moved to a different permission the admin happens
+ * to hold.
+ *
+ * The positive half matters as much as the negative one. "Remove these four" is
+ * not "strip the role": reading the register is oversight, and the admin still
+ * holds `application.view_all` + `application.view_any_office` (every filing),
+ * `permit.view_all`, and its own account / reference / audit powers. Pinning
+ * both lists is what stops this being re-read later as either a demotion or a
+ * restoration.
+ */
+it('keeps the four working permissions off the super admin, and the oversight ones on', function () {
+    $admin = Role::where('name', 'admin')->firstOrFail();
+    $held = $admin->permissions->pluck('name');
+
+    $removed = [
+        'message.participate' => 'Messages',
+        'application.review' => 'Track (the officer queue)',
+        'inspection.manage' => 'Inspections',
+        'request.create' => 'Other Requirements',
+    ];
+
+    /*
+     * toBeFalse() rather than not->toContain(), so a failure names the
+     * permission and the rail entry it puts back. Pest's toContain() is
+     * variadic and would silently swallow the message as a second needle.
+     */
+    foreach ($removed as $permission => $railEntry) {
+        expect($held->contains($permission))->toBeFalse(
+            "The super admin holds [{$permission}], which puts [{$railEntry}] back on its rail."
+        );
+    }
+
+    foreach (['application.view_all', 'application.view_any_office', 'permit.view_all',
+        'permit.issue', 'user.manage', 'reference.manage', 'audit.view',
+        'analytics.processing_time'] as $permission) {
+        expect($held->contains($permission))->toBeTrue(
+            "The super admin lost [{$permission}], which is oversight rather than office work."
+        );
+    }
+});
+
+/*
+ * The other side of the same rule: the six offices that issue a clearance are
+ * the ones that inspect for it.
+ *
+ * `inspection.manage` did not simply leave the super admin — it moved outwards.
+ * It used to be `sanitary_officer` and `fire_inspector` alone, which left OBO,
+ * CENRO, CPDO and the Market Office unable to see a visit booked against their
+ * own office. The client reported exactly that ("OBO, CENRO, Market, and Zoning
+ * admins cannot approve inspection. Only Sanitary and Fire has it"), and
+ * ReferenceSeeder now marks all six supporting clearances as inspected — so
+ * every one of those offices must be able to close its own visit or the filing
+ * strands in `for_inspection` with nobody to move it.
+ */
+it('grants inspection.manage to the six clearance offices and no one else', function () {
+    $holders = Role::whereHas('permissions', fn ($q) => $q->where('name', 'inspection.manage'))
+        ->pluck('name')
+        ->sort()
+        ->values()
+        ->all();
+
+    // BPLO is absent and should be: it issues the Mayor's Permit on the strength
+    // of the six clearances rather than a visit of its own.
+    expect($holders)->toBe([
+        'cenro_officer', 'fire_inspector', 'market_admin',
+        'obo_staff', 'sanitary_officer', 'zoning_officer',
+    ]);
+});
+
+/*
  * Checklist item 78 — "the dashboard should be transferred to BPLO admin, not
  * super admin."
  *

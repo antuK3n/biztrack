@@ -229,7 +229,33 @@ it('refuses a re-inspection once the filing has been decided', function () use (
         ])->assertStatus(422);
 });
 
-it('lets the admin schedule a re-inspection on any office’s failed visit', function () use ($deptEmail) {
+/*
+ * The re-inspection belongs to the office that failed the visit — the super
+ * admin does not book it.
+ *
+ * This test used to assert the opposite, and said so: "the stranded filings are
+ * opened by an admin, not by the office that failed them, so this is the path
+ * that actually unsticks them". That was true of the six stranded filings
+ * because at the time the admin was the only account that could reach an
+ * inspection at all — OBO, CENRO, CPDO and the Market Office had no
+ * `inspection.manage`, so a rescue by the responsible office was not on offer
+ * and the admin was standing in for it.
+ *
+ * Both halves of that have since been fixed, in opposite directions. Every
+ * clearance office now holds `inspection.manage` (RbacSeeder), so each one can
+ * rebook its own failed visit — which is what the test above this one proves,
+ * through the same endpoint, for the same failure. And the super admin lost it,
+ * at the client's request: "In the super admin's account (admin@), remove
+ * Messages, Track, Inspections, and Other Requirements. It is not his role to
+ * do those things."
+ *
+ * So the rescue path did not disappear, it moved to the office that owns the
+ * premises it is about. Asserting the 403 is what keeps the two facts from
+ * drifting apart: if the admin ever answers 201 here again, either the client's
+ * separation was undone or an office lost the permission and the admin is
+ * covering for it once more.
+ */
+it('refuses the super admin a re-inspection: it belongs to the office that failed the visit', function () use ($deptEmail) {
     [, $visits] = filingAwaitingInspection($deptEmail, 'Admin Rescue Mart');
 
     $fire = $visits->firstWhere('department.code', 'BFP');
@@ -237,10 +263,19 @@ it('lets the admin schedule a re-inspection on any office’s failed visit', fun
         ->postJson("/api/v1/inspections/{$fire->id}/conduct", ['result' => 'failed', 'findings' => 'no extinguisher'])
         ->assertOk();
 
-    // The stranded filings are opened by an admin, not by the office that failed
-    // them, so this is the path that actually unsticks them.
+    $payload = ['scheduled_at' => now()->addWeekdays(5)->toIso8601String()];
+
+    // 403 from the route's `permission:inspection.manage` gate, before the
+    // controller is reached — the admin cannot see the visit either.
     test()->withHeaders(authAs('admin@biztrack.local'))
-        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", [
-            'scheduled_at' => now()->addWeekdays(5)->toIso8601String(),
-        ])->assertCreated();
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", $payload)
+        ->assertStatus(403);
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/inspections/{$fire->id}")
+        ->assertStatus(403);
+
+    // And the filing is not stranded by that: BFP books its own replacement.
+    test()->withHeaders(authAs($deptEmail['BFP']))
+        ->postJson("/api/v1/inspections/{$fire->id}/reinspect", $payload)
+        ->assertCreated();
 });
