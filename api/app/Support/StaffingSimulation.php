@@ -5,20 +5,78 @@ namespace App\Support;
 use App\Enums\ApplicationType;
 use App\Models\Department;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
+/**
+ * Feature 6 on real data: the staffing/queue simulation, driven by the register
+ * instead of the synthetic frames `r/R/generate.R` used to build.
+ *
+ * The maths lives in Des (the port of r/R/des.R); this class only decides what
+ * to feed it and shapes the answer for the Staffing Simulation screen. It
+ * answers one question — "what happens to the backlog if I add one reviewer to
+ * OBO?" — by running the observed pipeline twice: once at today's headcount, and
+ * once with the change the admin asked for.
+ *
+ * WHERE EACH INPUT COMES FROM
+ *
+ *  - Service times: `application_assignments.assigned_at -> completed_at`, in
+ *    days, per office, over the requested window. Fitted lognormal by MLE.
+ *  - Inspection times: `inspections.scheduled_at -> conducted_at`, per office.
+ *  - Arrival rate: filings submitted in the window, divided by the window's
+ *    calendar days. Not a knob — the observed rate. The `demand` parameter
+ *    scales it so an admin can ask what next renewal season would do.
+ *  - Complexity mix: `application_type`. New filings traverse the full pipeline;
+ *    renewals and amendments are the lighter revalidation path, matching both
+ *    real LGU practice and des.R's own modelling note. The `complexity` column
+ *    exists but is unpopulated, so it is not used.
+ *  - Reviewer headcount: active officers with `users.department_id` set.
+ *
+ * DIVERGENCES FROM r/R/des.R, AND WHY
+ *
+ *  - **Inspections seize the office, not a separate inspector pool.** config.R
+ *    declared `INSPECTORS <- list(sanitary = 2L, fire = 2L)` as standalone
+ *    resources. The register has no such pool: an inspection's
+ *    `inspector_user_id` is a user who belongs to a department, so the same
+ *    officers review and inspect. Modelling a separate pool would invent
+ *    capacity the LGU does not have, and would make "add one reviewer to CHO"
+ *    silently fail to relieve CHO's inspection queue.
+ *  - **The offices are whichever ones the data routes to**, not a hard-coded
+ *    BPLO/CHO/BFP triple. The register has seven.
+ *  - **An office with too little history borrows the pooled fit** across every
+ *    office rather than dropping out of the pipeline, and the response names it,
+ *    so the screen can say the number rests on borrowed timings. Dropping the
+ *    office instead would quietly remove a bottleneck and flatter the answer.
+ */
 final class StaffingSimulation
 {
+    /** Months of history the service-time fits are drawn from. */
     public const DEFAULT_WINDOW_MONTHS = 12;
 
+    /** Simulated horizon, in 30-day months. */
     public const DEFAULT_HORIZON_MONTHS = Des::DEFAULT_MONTHS;
 
+    /** Replications averaged per scenario. */
     public const DEFAULT_REPS = Des::DEFAULT_REPS;
 
+    /** Most extra reviewers a single scenario may add. */
     public const MAX_ADDED_REVIEWERS = 10;
 
+    /**
+     * RA 11032 processing deadlines in working days (`DEADLINES` in r/config.R).
+     * Only the two the pipeline distinguishes are used.
+     */
     private const DEADLINE_WORKING_DAYS = ['complex' => 7, 'simple' => 3];
 
+    /**
+     * Fixed intake/payment and issuance delays, uniform over these ranges. Taken
+     * from des.R, where they stand in for the parts of the pipeline that are not
+     * queueing for an officer. Left as the reference had them: the register does
+     * not timestamp "waiting for the applicant to pay" separately from the
+     * status change, so there is nothing better to fit.
+     *
+     * @var array<string, array{0: float, 1: float}>
+     */
     private const DELAYS = [
         'complex_intake' => [0.25, 1.0],
         'complex_issuance' => [0.1, 0.5],
@@ -26,6 +84,14 @@ final class StaffingSimulation
         'simple_issuance' => [0.1, 0.4],
     ];
 
+    /**
+     * Build the baseline and one what-if scenario.
+     *
+     * @param  string|null  $office  Department code to add reviewers to.
+     * @param  int  $added  Extra reviewers for that office.
+     * @param  int  $demandPercent  Arrival rate as a percentage of observed.
+     * @return array<string, mixed>
+     */
     public static function build(
         int $windowMonths = self::DEFAULT_WINDOW_MONTHS,
         ?string $office = null,
@@ -49,6 +115,10 @@ final class StaffingSimulation
 
         $notes = [];
 
+        // Pooled fit, used by any office whose own history is too thin. Pooling
+        // reviews and inspections together is deliberate: both are "an officer
+        // working a filing", and splitting the pool would leave nothing to
+        // borrow from on a register this young.
         $pooled = Des::fitLognormal([...array_merge(...array_values($reviewSamples)), ...array_merge(...array_values($inspectionSamples))]);
 
         $reviewFits = [];
@@ -79,9 +149,14 @@ final class StaffingSimulation
             $inspectionFits[$code] = [...$fit, 'source' => 'fitted'];
         }
 
+        // The office the simple (revalidation) path runs through: BPLO when it
+        // has history, otherwise whichever office handled the most filings.
         $frontOffice = self::frontOffice($reviewFits, $reviewSamples);
 
         if ($reviewFits === [] || $arrivals <= 0.0 || $frontOffice === null) {
+            // Same envelope shape as a successful run, minus the runs themselves.
+            // A caller rendering this should show `reason`, and should not have to
+            // guard every other key to do it.
             return [
                 'generated_at' => $now->toISOString(),
                 'window_months' => $windowMonths,
@@ -122,6 +197,7 @@ final class StaffingSimulation
             }
         }
 
+        // An office that only ever inspects still needs capacity to seize.
         foreach (array_keys($inspectionFits) as $code) {
             $capacities[$code] ??= max(1, $headcount[$code] ?? 0);
         }
@@ -152,6 +228,10 @@ final class StaffingSimulation
 
         $horizonDays = max(1, $horizonMonths) * 30;
 
+        // Demand scales BOTH runs. It sets the operating point the question is
+        // asked at ("at next renewal season's volume, does a hire help?"); if it
+        // moved only the scenario, the comparison would mix a staffing change
+        // with a demand change and neither column would mean anything.
         $demand = $arrivals * ($demandPercent / 100);
 
         $baseline = Des::simulate(
@@ -200,6 +280,17 @@ final class StaffingSimulation
         ];
     }
 
+    /**
+     * Assemble the Des model: intake delay, parallel reviews, parallel
+     * inspections, issuance delay for new filings; a single-office
+     * revalidation for renewals and amendments.
+     *
+     * @param  array<string, int>  $capacities
+     * @param  array<string, array<string, mixed>>  $reviewFits
+     * @param  array<string, array<string, mixed>>  $inspectionFits
+     * @param  array{complex_share: float, complex: int, simple: int}  $mix
+     * @return array<string, mixed>
+     */
     private static function model(
         array $capacities,
         array $reviewFits,
@@ -262,6 +353,11 @@ final class StaffingSimulation
         ];
     }
 
+    /**
+     * Completed review durations in days, keyed by office code.
+     *
+     * @return array<string, list<float>>
+     */
     private static function reviewDurations(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $rows = DB::table('application_assignments')
@@ -279,6 +375,11 @@ final class StaffingSimulation
         return self::durations($rows, 'assigned_at', 'completed_at');
     }
 
+    /**
+     * Conducted inspection durations in days, keyed by office code.
+     *
+     * @return array<string, list<float>>
+     */
     private static function inspectionDurations(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $rows = DB::table('inspections')
@@ -292,6 +393,10 @@ final class StaffingSimulation
         return self::durations($rows, 'scheduled_at', 'conducted_at');
     }
 
+    /**
+     * @param  Collection<int, object>  $rows
+     * @return array<string, list<float>>
+     */
     private static function durations($rows, string $startColumn, string $endColumn): array
     {
         $samples = [];
@@ -309,6 +414,12 @@ final class StaffingSimulation
         return $samples;
     }
 
+    /**
+     * Active officers per office. A user with no `department_id` — the super
+     * admin, an applicant — is nobody's reviewer.
+     *
+     * @return array<string, int>
+     */
     private static function headcount(): array
     {
         $rows = DB::table('users')
@@ -336,6 +447,7 @@ final class StaffingSimulation
             ->count();
     }
 
+    /** Observed filings per calendar day over the window. */
     private static function arrivalRate(CarbonImmutable $from, CarbonImmutable $to): float
     {
         $days = max(1, $from->diffInDays($to));
@@ -343,6 +455,15 @@ final class StaffingSimulation
         return self::submissions($from, $to) / $days;
     }
 
+    /**
+     * Share of filings that traverse the full pipeline.
+     *
+     * New filings are complex; renewals and amendments are the revalidation
+     * path. When nothing was submitted, fall back to an even split rather than
+     * dividing by zero — the caller has already refused to simulate by then.
+     *
+     * @return array{complex_share: float, complex: int, simple: int}
+     */
     private static function complexityMix(CarbonImmutable $from, CarbonImmutable $to): array
     {
         $rows = DB::table('applications')
@@ -370,6 +491,12 @@ final class StaffingSimulation
         ];
     }
 
+    /**
+     * The office the revalidation path runs through.
+     *
+     * @param  array<string, array<string, mixed>>  $reviewFits
+     * @param  array<string, list<float>>  $samples
+     */
     private static function frontOffice(array $reviewFits, array $samples): ?string
     {
         if (isset($reviewFits['BPLO'])) {
@@ -392,6 +519,17 @@ final class StaffingSimulation
         return $best;
     }
 
+    /**
+     * Default target for the what-if: the office carrying the most simulated
+     * work per reviewer, which is where a hire buys the most relief.
+     *
+     * Offered load is arrival rate times mean service time over headcount — the
+     * same ratio utilisation converges to, computed without running anything.
+     *
+     * @param  array<string, int>  $capacities
+     * @param  array<string, array<string, mixed>>  $reviewFits
+     * @param  array{complex_share: float, complex: int, simple: int}  $mix
+     */
     private static function busiestOffice(array $capacities, array $reviewFits, float $arrivals, array $mix): string
     {
         $worst = array_key_first($capacities);
@@ -408,6 +546,12 @@ final class StaffingSimulation
         return (string) $worst;
     }
 
+    /**
+     * @param  array<string, array<string, mixed>>  $reviewFits
+     * @param  array<string, array<string, mixed>>  $inspectionFits
+     * @param  array<string, string>  $names
+     * @return list<array<string, mixed>>
+     */
     private static function shapeFits(array $reviewFits, array $inspectionFits, array $names): array
     {
         $out = [];
@@ -430,6 +574,17 @@ final class StaffingSimulation
         return $out;
     }
 
+    /**
+     * Per-office comparison rows: today's queue against the scenario's.
+     *
+     * @param  array<string, int>  $capacities
+     * @param  array<string, int>  $scenarioCapacities
+     * @param  array<string, mixed>  $baseline
+     * @param  array<string, mixed>  $scenario
+     * @param  array<string, string>  $names
+     * @param  array<string, array<string, mixed>>  $inspectionFits
+     * @return list<array<string, mixed>>
+     */
     private static function shapeOffices(
         array $capacities,
         array $scenarioCapacities,
@@ -466,17 +621,23 @@ final class StaffingSimulation
             ];
         }
 
+        // Worst queue first: the screen's job is to point at the bottleneck.
         usort($rows, static fn (array $a, array $b) => $b['baseline']['wait_days'] <=> $a['baseline']['wait_days']);
 
         return $rows;
     }
 
+    /**
+     * @param  array<string, mixed>  $run
+     * @return array<string, mixed>
+     */
     private static function shapeRun(array $run): array
     {
         return [
             'arrivals' => round($run['arrivals'], 1),
             'finished' => round($run['finished'], 1),
-
+            // Filings still in the pipeline when the clock stops — the backlog
+            // the staffing question is actually about.
             'backlog' => round($run['unfinished'], 1),
             'mean_flow_days' => $run['mean_flow_days'] === null ? null : round($run['mean_flow_days'], 2),
             'p90_flow_days' => $run['p90_flow_days'] === null ? null : round($run['p90_flow_days'], 2),
