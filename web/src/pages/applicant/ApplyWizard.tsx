@@ -31,7 +31,7 @@ import {
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
-import { ClearanceStage, anyClearanceDecided, marketClearanceApplies } from './ClearanceStagePage'
+import { ClearanceStage, anyClearanceDecided } from './ClearanceStagePage'
 import {
   OFFICE_FORM_CODES,
   OfficeFormSheet,
@@ -825,10 +825,29 @@ function LinesStep({
     }
   }, [open])
 
+  /*
+   * One trade, not several.
+   *
+   * The picker was multi-select, and the zoning step it lives on only ever
+   * read `lines[0]`: the conformity verdict, the carried-over business block
+   * and the Location Insights lookup all take the first line and ignore the
+   * rest. So a second trade was accepted, stored, and then quietly left out of
+   * the decision it was supposed to inform — the worst of both, since the
+   * applicant had every reason to think it counted.
+   *
+   * Barely used in practice either: of 733 registered businesses, 728 declare
+   * one line and 5 declare two.
+   *
+   * `lines` stays an array so the payload, the API and `lines[0]` readers are
+   * untouched — it just never holds more than one now. Choosing a different
+   * trade replaces the current one rather than adding to it, and clearing is
+   * the Remove control below, which is the only place removal should live.
+   */
   function toggle(code: PsicCode) {
-    const exists = lines.find((l) => l.psic_code_id === code.id)
-    if (exists) onChange(lines.filter((l) => l.psic_code_id !== code.id))
-    else onChange([...lines, { psic_code_id: code.id, line_of_business: '', products_services: '' }])
+    const already = lines[0]?.psic_code_id === code.id
+    if (already) return
+    onChange([{ psic_code_id: code.id, line_of_business: '', products_services: '' }])
+    setOpen(false)
   }
 
   /*
@@ -912,7 +931,14 @@ function LinesStep({
               </p>
             )}
 
-            <ul id="psic-results" className="max-h-64 divide-y divide-line overflow-y-auto">
+            <ul
+              id="psic-results"
+              // The rows are radios now, so the list that holds them has to say
+              // so — otherwise a screen reader meets a radio with no group.
+              role="radiogroup"
+              aria-label="Line of business"
+              className="max-h-64 divide-y divide-line overflow-y-auto"
+            >
               {results.length === 0 ? (
                 <li className="px-4 py-4 text-sm text-ink-secondary">
                   No trade matches “{query.trim()}”. Try a plainer word — “food” rather than the
@@ -943,7 +969,13 @@ function LinesStep({
                         <button
                           type="button"
                           onClick={() => toggle(code)}
-                          aria-pressed={selected}
+                          /*
+                           * radio, not aria-pressed: these are exclusive
+                           * answers to one question now, and `aria-pressed`
+                           * would announce 134 independent switches.
+                           */
+                          role="radio"
+                          aria-checked={selected}
                           className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
                             selected ? 'bg-input' : 'hover:bg-royal-tint'
                           }`}
@@ -3749,18 +3781,6 @@ export function ApplyWizard() {
               applicationId={applicationId}
               business={carriedOverBusiness}
               onRowsChange={setClearanceRows}
-              /*
-               * ITEM 98 — the Market Clearance card is derived, not offered to
-               * everyone. Read off the LIVE fee draft rather than the saved
-               * fee_profile: Business & Tax Profile is the step immediately
-               * before this one, so a category typed a moment ago may not have
-               * survived the autosave debounce yet, and that is exactly the
-               * applicant whose card must already be there.
-               */
-              marketApplies={marketClearanceApplies(
-                Object.values(feeDraft.categories).map((c) => c.category),
-                feeDraft.stall_count,
-              )}
               /*
                * Apply opens that office's sheet, and here the sheet is a STEP
                * of its own sitting immediately behind this one — not a panel

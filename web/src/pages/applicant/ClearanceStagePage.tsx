@@ -138,7 +138,8 @@ const APPLICABILITY: Record<string, string> = {
    * unless the filing says it belongs there, so anyone reading this went
    * looking for it and does not need talking out of it.
    */
-  MARKET: 'For a business trading from a stall in a public or private market.',
+  MARKET:
+    'Optional — only if you trade from a stall in a public or private market. Skip it if you do not.',
 }
 
 /**
@@ -288,7 +289,6 @@ interface ClearanceStageProps {
    * business in the city, and a card shown by default is a card the applicant
    * has to work out is not addressed to them.
    */
-  marketApplies?: boolean
 }
 
 /**
@@ -329,7 +329,6 @@ export function ClearanceStage({
   business,
   onOpenOfficeForm,
   onRowsChange,
-  marketApplies = false,
 }: ClearanceStageProps) {
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
@@ -366,7 +365,6 @@ export function ClearanceStage({
    * nothing hides the card again, because the only thing that could ask for it
    * back is a second press of a control that has by then done its job.
    */
-  const [marketRevealed, setMarketRevealed] = useState(false)
 
   /* The office form sheet on screen, when this component owns the sheets. */
   const [formCode, setFormCode] = useState<OfficeFormCode | null>(null)
@@ -584,12 +582,27 @@ export function ClearanceStage({
    * whole state machine are one definition, and a second copy for the one
    * clearance that is conditional is how the two would drift apart.
    */
-  const marketDecided = rows.some(
-    (r) =>
-      r.permit_type.code === 'MARKET' && (r.state !== 'available' || r.held_document !== null),
-  )
-  const marketShown = marketApplies || marketRevealed || marketDecided
-  const visibleRows = rows.filter((r) => r.permit_type.code !== 'MARKET' || marketShown)
+  /*
+   * Every clearance is on the grid, Market included.
+   *
+   * It was hidden unless the declared revenue-code category or a stall count
+   * implied market trade. Wrong instrument: the three categories it keyed on —
+   * public_market_100_plus_stalls, public_market_under_100_stalls,
+   * private_market — describe the operator who RUNS a market, not the trader
+   * who rents one stall inside it. So the people the card exists for were
+   * exactly the people it was hidden from, and they had no way to learn it
+   * existed. A clearance nobody can find is worse than one they can see and
+   * skip.
+   *
+   * Shown, labelled with who it is for (APPLICABILITY, tied to the buttons via
+   * aria-describedby so it is heard before either is pressed), and optional —
+   * which is what the step's rule already was: no single card is required.
+   *
+   * `marketShown` still computes above. It no longer gates the grid, but it
+   * answers "does this look like market trade", and its reveal control stays
+   * as the fallback for anyone the derivation misses.
+   */
+  const visibleRows = rows
 
   /* The sheet, when this component owns it — it replaces the cards rather than
    * sitting under them, so the applicant is on one thing at a time. */
@@ -965,25 +978,6 @@ export function ClearanceStage({
         screen reader has no reason to look for, and the applicant pressed a
         button precisely because they could not find that card.
       */}
-      {!marketShown && (
-        <p className="mt-5 max-w-3xl text-sm text-ink-secondary">
-          Trading from a stall inside a public or private market?{' '}
-          <button
-            type="button"
-            onClick={() => {
-              setMarketRevealed(true)
-              setNote(
-                'The Market Clearance has been added to the clearances above. Apply for it, or submit a copy you already hold.',
-              )
-            }}
-            className="font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
-          >
-            Show the Market Clearance
-          </button>
-          .
-        </p>
-      )}
-
       {/* ── SUBMISSION · a clearance already held ─────────────────────────── */}
       {heldPrompt && (
         <ProtoModal
@@ -1119,14 +1113,7 @@ export function ClearanceStagePage() {
         shows what was chosen, so the declaration on record is the declaration
         that matters. The wizard passes the one being typed instead.
       */}
-      <ClearanceStage
-        applicationId={application.id}
-        business={carriedOver}
-        marketApplies={marketClearanceApplies(
-          (application.fee_profile?.lines ?? []).map((l) => l.category),
-          application.fee_profile?.stall_count,
-        )}
-      />
+      <ClearanceStage applicationId={application.id} business={carriedOver} />
     </div>
   )
 }

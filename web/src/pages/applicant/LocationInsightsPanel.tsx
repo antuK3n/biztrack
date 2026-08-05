@@ -247,9 +247,14 @@ export function LocationInsightsPanel({
 
               <InsightRow
                 label="Most common line of business"
+                /*
+                 * "15 of 48" on its own said nothing — fifteen of forty-eight
+                 * what? Both numbers need naming: how many nearby businesses
+                 * are in this trade, out of how many are nearby at all.
+                 */
                 note={
                   insights.common_type.available
-                    ? `${insights.common_type.count} of ${insights.common_type.of_total}`
+                    ? `${insights.common_type.count} of the ${insights.common_type.of_total} businesses near this pin`
                     : undefined
                 }
               >
@@ -278,14 +283,20 @@ export function LocationInsightsPanel({
           </table>
 
           {/*
-           * Says out loud what the panel is for. Without this an applicant can
-           * read four confident figures as part of the conformity decision, which
-           * is the one thing they are not. Trimmed for tone in checklist item 68
-           * but not for meaning — the sentence is deliberate and stays.
+           * "These figures are not part of the zoning decision." stood here and
+           * was removed on the client's instruction (checklist item 112).
+           *
+           * It was guarding against an applicant reading four confident numbers
+           * as the conformity verdict. That job has not gone away — it has moved
+           * to where it belongs. The panel is headed "Location insights", and
+           * the zoning modal this step opens into names CPDO as the office that
+           * actually decides. A disclaimer repeated beside every figure was
+           * saying a third time what those two already say once each.
+           *
+           * If the CPDO line ever leaves that modal, this sentence has to come
+           * back — the screen would then be asserting conformity with nothing
+           * anywhere saying who decides it.
            */}
-          <p className="mt-3 text-xs leading-relaxed text-ink-muted">
-            These figures are not part of the zoning decision.
-          </p>
         </>
       )}
     </section>

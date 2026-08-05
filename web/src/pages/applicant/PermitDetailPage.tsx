@@ -186,22 +186,22 @@ export function PermitDetailPage() {
                   The downloaded PDF never carried it — only this on-screen
                   view did, so the two disagreed about whose document it was.
 
-                  The Malabon seal belongs in this slot. We do not have the
-                  artwork: nothing in the repo carries it, and the paper forms
-                  it might have been lifted from are photographs that never
-                  reached the repository. So the space is held and labelled
-                  rather than filled with something invented — an approximated
-                  civic seal would be worse than none. Drop a file in and
-                  render it here.
+                  The city seal now sits in that slot, supplied by the client.
+
+                  aria-hidden, and deliberately so: it carries no information a
+                  reader needs, and the two lines under it already say Republic
+                  of the Philippines and City of Malabon. Announcing "Seal of
+                  Malabon" to a screen-reader user before those lines would make
+                  them hear the same fact twice, once as an image.
                 */}
-                <div
+                <img
+                  src="/malabon-seal.png"
+                  alt=""
                   aria-hidden="true"
-                  className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-line-strong text-[8px] uppercase leading-tight tracking-wide text-ink-muted"
-                >
-                  City
-                  <br />
-                  seal
-                </div>
+                  width={56}
+                  height={57}
+                  className="h-14 w-auto"
+                />
                 <p className="mt-2 text-base font-bold uppercase tracking-wide text-ink">
                   Republic of the Philippines
                 </p>
