@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   ArrowLeftIcon,
   CheckIcon,
+  ChevronDownIcon,
   ClipboardIcon,
   EyeIcon,
 } from '../../components/icons'
@@ -32,6 +33,11 @@ import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/
  * decision buttons. The applicant's own answers are never editable in either
  * mode, which is what the API enforces too: OfficeFormController lets the owner
  * write the answers and the reviewer write only the issuance dates.
+ *
+ * The applicant's filed sheet — sections A–E — is behind a disclosure and
+ * starts CLOSED. That is the THIRD position this file has held on that sheet;
+ * the reasoning is written out in full at the disclosure itself (search
+ * `application-as-filed`). Read it before moving the sheet a fourth time.
  */
 
 /** The assignment detail embeds the FULL business (address, lines) — the list types understate it. */
@@ -504,6 +510,17 @@ export function ReviewPage() {
 
   // Opens as a record of the filing; Edit turns on the office's own fields.
   const [mode, setMode] = useState<ReviewMode>('view')
+
+  /*
+   * Is the applicant's filed sheet open?
+   *
+   * Closed on arrival, every time, for every status that renders the sheet.
+   * Not persisted and not remembered across reloads: the client's whole
+   * complaint is about what greets an officer when the page opens, and a
+   * sticky "last time you left it open" would reproduce that on the next
+   * visit for the officer who opened it once.
+   */
+  const [sheetOpen, setSheetOpen] = useState(false)
 
   const [popup, setPopup] = useState<'reject' | 'return' | null>(null)
   const [busy, setBusy] = useState(false)
@@ -1075,9 +1092,51 @@ export function ReviewPage() {
     ? 'This review is closed. The page is a record of the application and the decision made on it.'
     : editing
       ? `${fieldsNote} ${lockedNote} ${decisionNote}`
-      : `View mode. Everything below is the application exactly as the applicant submitted it. Switch to Edit to fill in ${
+      : /*
+         * This used to open "Everything below is the application exactly as
+         * the applicant submitted it", which stopped being true when that
+         * sheet went behind a closed disclosure — what is below now is this
+         * office's clearance and the panel it fills in.
+         */
+        `View mode. Below are your office’s clearance and the panel it records into; the applicant’s filed sheet is folded away until you ask for it. Switch to Edit to fill in ${
           liveFields.length === 1 ? liveFields[0] : `your office’s ${liveFields.length} fields`
         } and record a decision.`
+
+  /*
+   * What is behind the disclosure, named rather than implied.
+   *
+   * A collapsed region labelled "Show more" is a mystery box: the officer who
+   * needs the barangay, or the floor area, or the uploaded requirements has
+   * nothing telling them that THIS is where those live, so they either never
+   * open it or they open every collapsed thing on the page hunting. The
+   * summary is the fix, and it is built from the payload rather than written
+   * as a fixed sentence so it cannot describe a sheet that is not there.
+   *
+   * Counted where a count exists. "8 uploaded requirements" is a claim the
+   * officer can check against Section C the moment it opens; "documents" is
+   * not, and a filing with none of them would be described as having some.
+   */
+  const filedSheetParts = [
+    app.application_type === 'amendment' ? 'what is being amended' : null,
+    'business registration and address',
+    'line of business',
+    app.documents.length === 0
+      ? 'no uploaded requirements'
+      : app.documents.length === 1
+        ? '1 uploaded requirement'
+        : `${app.documents.length} uploaded requirements`,
+    /*
+     * Only when the payload actually carried somebody else's sheet. For a
+     * clearance office the server now filters Section D down to nothing
+     * (the `owner_birthday` fix), so promising "other offices' answers" to a
+     * sanitary officer would advertise a section that opens empty — and read
+     * as a leak to a client who has already reported one here.
+     */
+    otherOfficeForms.length > 0 ? 'the other offices’ form answers' : null,
+    'the fee declaration',
+    'the signed data-privacy consent',
+  ].filter((part): part is string => part !== null)
+  const filedSheetSummary = listPhrase(filedSheetParts)
 
   const existingRemarks = [
     ...app.assignments
@@ -1319,14 +1378,136 @@ export function ReviewPage() {
                     ))}
                   </div>
                 )}
+                {/*
+                  * Says where the rest went, now that it is folded away. The
+                  * old wording — "the rest of this sheet is..." — described a
+                  * sheet that ran on down the page, which stopped being true
+                  * the moment the disclosure below went in.
+                  */}
                 <p className="mt-3 text-xs text-ink-muted">
-                  The rest of this sheet is the applicant’s own filing — address, line of business,
-                  uploaded requirements and fee declaration — which your office needs in order to
-                  decide this clearance.
+                  The applicant’s own filing — address, line of business, uploaded requirements and
+                  fee declaration — is folded away below, under{' '}
+                  <span className="font-semibold">Show the application as filed</span>. Open it when
+                  you need it to decide this clearance.
                 </p>
               </section>
             )
           })}
+
+          {/*
+           * ── The applicant's filed sheet, closed on arrival ────────────────
+           *
+           * Everything from here to the signature block is the application AS
+           * FILED: Amendment From, sections A–E, the consent note and the two
+           * signatures. It is present, it is reachable in one click, and it is
+           * not what greets the officer.
+           *
+           * ── This is the THIRD position on this sheet. Read all three ──────
+           *
+           * 1. It rendered flat, for every status, at full height. The client:
+           *    "why is the entire application form showing it should just be
+           *    like the other ones where its just a box (see others)".
+           * 2. It was folded behind a disclosure. The client, from an office
+           *    that had ALREADY finished its review: "In reviewing the
+           *    inspections (admin side), I can still see the application
+           *    details. Please remove this." So it was deleted outright.
+           * 3. That deletion was keyed on the FILING's status rather than on
+           *    the reading office's own assignment, and it deadlocked five
+           *    offices on BIZ-2026-00958 — no Approve control anywhere in the
+           *    product. The INS-1 block above re-keyed it on `owesReview`.
+           *
+           * Collapsed-by-default is what reconciles all three rather than
+           * being a fourth swing at it, and the distinction that makes it work
+           * is one the earlier passes did not draw:
+           *
+           *   - An office that has FINISHED its review never gets here at all.
+           *     The INS-1 early return hands it the compact status box and
+           *     returns before this sheet is built. That is the seat the
+           *     client was sitting in for complaints 1 and 2, and it is
+           *     untouched — "Please remove this" is still honoured literally
+           *     for the only office that said it.
+           *   - An office that still OWES a review gets the sheet, because
+           *     without it there is no page to decide on. What complaint 1
+           *     actually objected to was the sheet's PROMINENCE — "they dont
+           *     need this form exactly" — not its existence, and a closed
+           *     disclosure answers prominence exactly.
+           *
+           * ── Why it collapses on every status, not just when deciding ──────
+           *
+           * The complaint is about the sheet being the thing on screen, and it
+           * is the thing on screen in every status that renders it — a closed
+           * record reads the same as an open review from two feet away. Gating
+           * the collapse on `owesReview` would also mean the sheet's shape
+           * changed under an officer at the exact moment they approved, which
+           * is the one moment they are least likely to want the page to move.
+           *
+           * ── What stays OUT of this region, deliberately ───────────────────
+           *
+           * The sheet header, the office's own clearance panel above, FOR
+           * OFFICE USE ONLY (Assessed Fee, Evaluator Remarks, issuance dates),
+           * Assign officer-in-charge, the Tax Order of Payment and Messages.
+           * Those are why the officer is on this page; the decision buttons
+           * are in the header. Nothing an officer has to TYPE or PRESS is
+           * behind this button — only what they may need to READ.
+           *
+           * ── Implementation notes ──────────────────────────────────────────
+           *
+           * A <button> with aria-expanded/aria-controls rather than <details>.
+           * <details> was the shape of pass 2 and a passing test asserts there
+           * is none on this page; a button is also the only one of the two
+           * whose open state React actually controls.
+           *
+           * `hidden` rather than unmounting. `aria-controls` has to point at
+           * an element that exists, the region keeps its DOM order so the
+           * "own office form leads the sheet" test still measures something
+           * real, and `hidden` takes the content out of the accessibility tree
+           * and out of find-in-page, so a closed sheet is genuinely closed and
+           * not merely off-screen.
+           *
+           * NEVER `disabled` on this button. There is no state in which it
+           * should be unreachable, and a disabled control drops out of the tab
+           * order entirely.
+           */}
+          <div className="mt-7 border-t border-line pt-5">
+            <button
+              type="button"
+              onClick={() => setSheetOpen((open) => !open)}
+              aria-expanded={sheetOpen}
+              aria-controls="application-as-filed"
+              className="flex w-full items-start gap-3 rounded-lg border border-line bg-canvas px-4 py-3 text-left hover:border-royal/40 hover:bg-royal-tint focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+            >
+              <span
+                className={`mt-0.5 shrink-0 text-royal transition-transform ${sheetOpen ? 'rotate-180' : ''}`}
+                aria-hidden="true"
+              >
+                <ChevronDownIcon size={18} />
+              </span>
+              <span className="min-w-0">
+                {/*
+                 * The accessible name says WHAT opens, not "Show more". A
+                 * screen-reader user tabbing this page hears one control per
+                 * section, and "Show more" is indistinguishable from every
+                 * other one.
+                 */}
+                <span className="block text-sm font-bold text-ink">
+                  {sheetOpen
+                    ? 'Hide the application as filed'
+                    : 'Show the application as filed'}
+                </span>
+                {/*
+                 * Inside the button on purpose: it becomes part of the
+                 * accessible name, so the summary is announced with the
+                 * control rather than being visual-only detail beside it.
+                 */}
+                <span className="mt-0.5 block text-xs text-ink-secondary">
+                  Sections A–E exactly as the applicant submitted them — {filedSheetSummary}. Nothing
+                  in here is editable.
+                </span>
+              </span>
+            </button>
+          </div>
+
+          <div id="application-as-filed" hidden={!sheetOpen}>
 
           {/*
             * Amendment from: — checklist items 82/84.
@@ -1665,6 +1846,9 @@ export function ReviewPage() {
                 Signature of Representative over Printed Name
               </p>
             </div>
+          </div>
+
+          {/* ── End of the applicant's filed sheet (#application-as-filed) ──── */}
           </div>
 
           {/*
