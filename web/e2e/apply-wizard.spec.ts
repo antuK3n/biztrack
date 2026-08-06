@@ -738,7 +738,10 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
     (r) => r.url().includes('location-insights') && r.status() === 200,
   )
   await map.click()
-  const radiusM = (await (await answered).json()).data.radius_m as number
+  const payload = (await (await answered).json()).data
+  const radiusM = payload.radius_m as number
+  const mediumFrom = payload.concentration.thresholds.medium_from as number
+  const highFrom = payload.concentration.thresholds.high_from as number
   expect(radiusM).toBeGreaterThan(0)
 
   // The card is on the step, headed the way the client names it.
@@ -756,16 +759,68 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
   await expect(panel.getByText(new RegExp(`within ${radiusM} m`, 'i')).first()).toBeVisible()
 
   /*
+   * Four rows, each a Title over a Description, named exactly as the client
+   * specified them. The titles are load-bearing and not decoration: "Nearby
+   * Similar Businesses" counts the applicant's 3-digit PSIC trade GROUP while
+   * "Most Common Line of Business" takes the mode of the 2-digit DIVISION, and
+   * since the client removed the third figure that used to reconcile the two,
+   * these words are now the only thing on screen carrying that difference.
+   */
+  for (const title of [
+    'Nearby Similar Businesses',
+    'Business Concentration',
+    'Most Common Line of Business',
+    'Average Distance to Similar Businesses',
+  ]) {
+    await expect(panel.getByText(title, { exact: true })).toBeVisible()
+  }
+
+  /*
+   * And the row that used to sit between them is gone and stays gone. It
+   * reconciled the two widths above with a third count, and the client decided
+   * against it in favour of the titles doing that work — so a reader meeting the
+   * old bug report must not "restore" it. See the panel's module docblock.
+   */
+  await expect(panel.getByText(/businesses in your own category/i)).toBeHidden()
+
+  /*
    * The band is a word, not just a tint. DESIGN.md's Never Color Alone rule —
    * an ordinal scale carried in colour alone is no scale at all for a reader who
    * cannot separate the tints, and it must never be the error red either,
    * because a busy block is not a fault.
    *
-   * Anchored to the count in brackets so this matches the BADGE and not the
-   * legend beneath it, which spells "Low 0–5 · Medium 6–10 · High 11+" as static
-   * text and would let a badge that lost its word go on passing.
+   * Anchored to the count in brackets so this matches the BADGE specifically.
    */
   await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+\)$/)).toBeVisible()
+
+  /*
+   * ── The band scale, behind an info affordance ────────────────────────────
+   *
+   * "Low 0–5 · Medium 6–10 · High 11+" used to be printed inline under this
+   * row. The client moved it into an affordance, which is the right call for
+   * reference material read once — but only if the affordance is a real one.
+   *
+   * A `title=` tooltip would satisfy the request and fail the applicant: there
+   * is no hover on touch, and hover is not reachable by keyboard. So this
+   * asserts the WCAG 2.1 AA SC 1.4.13 behaviour rather than the presence of an
+   * icon — it opens from the KEYBOARD, and Escape dismisses it.
+   *
+   * The scale itself is built from the payload's own thresholds, so a test that
+   * hard-coded 5, 6 and 11 could not catch the legend drifting from the banding.
+   */
+  const bandScale = `Low 0–${mediumFrom - 1} · Medium ${mediumFrom}–${highFrom - 1} · High ${highFrom}+`
+  await expect(panel.getByText(bandScale)).toBeHidden()
+
+  const bandInfo = panel.getByRole('button', { name: /business concentration bands/i })
+  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
+
+  await bandInfo.focus()
+  await expect(bandInfo).toHaveAttribute('aria-expanded', 'true')
+  await expect(panel.getByText(bandScale)).toBeVisible()
+
+  await page.keyboard.press('Escape')
+  await expect(panel.getByText(bandScale)).toBeHidden()
+  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
 
   /* ── and the modal it used to live in no longer carries it ─────────────── */
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
