@@ -76,7 +76,23 @@ class ClearanceController extends Controller
         return $this->rowResponse($application, $type);
     }
 
-    /** DELETE {code}/apply — withdraw the request before the office acts. */
+    /**
+     * DELETE {code}/apply — withdraw the request before the office acts.
+     *
+     * The only thing in the system that detaches a permit type from a filing,
+     * and therefore the only way out of `apply`. For four days it had no caller
+     * on any screen while `storeHeld` went on telling applicants to use it
+     * (CLR-1): 15 real drafts could not withdraw a clearance, 5 of them could
+     * not be submitted at all because applying spawns a mandatory office sheet,
+     * and the one route out was to destroy the whole filing.
+     *
+     * It now has two callers, both on the clearance card, and both arrive here
+     * rather than at a paraphrase of it: the Withdraw control, and the Submit
+     * dialog on an applied card, which withdraws and then uploads. The three
+     * guards below are the reason that is the right shape — a switch is a new
+     * way into all three, and `officeHasActed` in particular was written as
+     * defence in depth when nothing could reach it.
+     */
     public function unapply(Request $request, Application $application, string $code): JsonResponse
     {
         $this->authorizeOwner($request, $application);
@@ -135,10 +151,42 @@ class ClearanceController extends Controller
             'file.mimes' => 'Upload a PDF, JPG, or PNG file.',
         ]);
 
+        /*
+         * The mutual exclusion, and it stays server-side — CLR-1.
+         *
+         * `HeldPermits` states the invariant: a clearance is "held" precisely
+         * because its permit type is NOT in `application_permit_types`, and
+         * that absence is what spares the applicant the office form, the
+         * assignment and (FeeCalculator::assess gates every rule on the
+         * selected types) the fee. Both records at once would put two
+         * contradictory claims about one clearance in the register — billed
+         * and routed and eventually issued as a Permit, next to the
+         * applicant's own copy of the same certificate. No filing has ever
+         * reached that state and this line is why.
+         *
+         * What was wrong was never the rule; it was the sentence. It named a
+         * "Withdraw" control that did not exist on any screen (9e30b44 removed
+         * it), and closed with a dangling "if you already hold one" — a doubt
+         * about the very thing the applicant is uploading a file to assert.
+         * Both halves now match the product: Withdraw is a control on the
+         * clearance card, and the Submit dialog on an applied card performs
+         * the withdrawal itself before it uploads, so this refusal is reached
+         * only by a direct API caller or by a card the screen has not
+         * refreshed. It still has to say something they can act on.
+         *
+         * Deliberately NOT an auto-withdraw here. Detaching a permit type has
+         * three preconditions of its own (nothing issued, the office has not
+         * acted, the business record is still live enough to re-price) that
+         * `unapply` applies and this endpoint does not — see the note on the
+         * front end's onSubmitHeld. Teaching `storeHeld` to write both sides
+         * of the switch would mean a second copy of those guards, and the
+         * first time the two copies disagreed the invariant above would be the
+         * thing that gave way.
+         */
         abort_if(
             $this->clearances->isAppliedFor($application, $type),
             422,
-            'You have applied for the '.$type->name.' on this application. Withdraw that request first if you already hold one.'
+            'You have applied for the '.$type->name.' on this application, so it can’t also be one you already hold. Press Withdraw on its card first, then submit your copy.'
         );
 
         HeldPermits::store($application, $type, $request->file('file'));

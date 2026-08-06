@@ -166,6 +166,35 @@ export function hasOfficeForm(code: string): code is OfficeFormCode {
   return (OFFICE_FORM_CODES as readonly string[]).includes(code)
 }
 
+/**
+ * The sheets that can strand a filing, and therefore the ones that say how to
+ * get off them — CLR-2.
+ *
+ * Applying for a clearance inserts its sheet as a mandatory step directly
+ * behind LGU Clearances. Where the sheet has a required answer, Next is
+ * disabled until it is given and the section map refuses to jump forward over
+ * it, so an accidental Apply on Market Clearance means a shopfront greengrocer
+ * must invent a market name and a stall number or cancel the whole filing.
+ *
+ * Five real drafts were in exactly that state — 4, 5, 7, 3376 and 3379, split
+ * across two testers' accounts, none of them able to reach Review & Submit.
+ * Withdrawing MARKET was verified to free all five against a copy of the
+ * register; app 5 needed three (it also carried SANITARY and OCCUPANCY with no
+ * saved sheet, which is what an accidental "apply for everything" looks like).
+ *
+ * The escape is real again (the Withdraw control on the clearance card), and
+ * this is the list of sheets that have to POINT AT IT — the applicant who needs
+ * it is not looking at the cards, they are looking at the form they cannot
+ * finish, which is the one screen that never mentioned the cards.
+ *
+ * Derived from officeFormMissing below rather than typed out, so a sheet that
+ * gains or loses a required answer cannot fall out of step with the sentence
+ * that explains what to do about it.
+ */
+export function officeFormCanBlock(code: OfficeFormCode): boolean {
+  return officeFormMissing(code, {}).length > 0
+}
+
 /** Today as a local-timezone YYYY-MM-DD string (input[type=date] max). */
 export function todayISO(): string {
   const d = new Date()
@@ -1116,6 +1145,30 @@ export function OfficeFormSheet({
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">{meta.kicker}</p>
       <h1 className="mt-1.5 text-2xl font-bold text-ink">{meta.title}</h1>
       <p className="mt-1 text-xs text-ink-muted">Form Ref: {meta.ref}</p>
+      {/*
+        CLR-2 — where the exit is, said on the screen you cannot leave.
+
+        This sheet exists because Apply was pressed on the clearance card, and
+        on the three sheets with required answers it cannot be walked past: Next
+        stays disabled and the section map refuses to skip it. An applicant who
+        pressed Apply by mistake — the Market Clearance card is on the grid for
+        every business in the city — has no reason to guess that the way out is
+        a control on a different step, and the audit found five real drafts
+        stuck here.
+
+        One line of ordinary text under the form reference, not a banner. It is
+        addressed to a minority (most people reading this sheet want it), it is
+        not an error, and nothing here is wrong — a tinted panel would say
+        otherwise to everyone else. Only on the sheets that can actually block;
+        the rest can simply be left blank and walked past.
+      */}
+      {officeFormCanBlock(code) && (
+        <p className="mt-2 text-xs text-ink-muted">
+          Applied for this by mistake? Go back to <span className="font-semibold">LGU Clearances</span>{' '}
+          and press <span className="font-semibold">Withdraw</span> on this card — the section
+          disappears with it, and nothing you have typed here is deleted.
+        </p>
+      )}
       <div className="mb-6 mt-3 h-px bg-royal" />
       <div className="space-y-7">
         {/* First, so the sheet opens by showing what it already knows rather

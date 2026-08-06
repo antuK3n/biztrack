@@ -312,7 +312,20 @@ class ClearanceService
      * The office form's saved answers stay. They are the applicant's own words,
      * re-applying is a plausible next move, and silently discarding a filled
      * sheet to tidy up a table is a worse outcome than an orphan row that
-     * nobody reads until it is relevant again.
+     * nobody reads until it is relevant again. (It is also what lets the
+     * clearance card promise, in the Submit dialog, that nothing typed into the
+     * sheet is lost by changing your mind — see ClearanceStagePage.)
+     *
+     * Detaching does three things at once, and the third is the one that was
+     * not obvious until it went missing (CLR-2): the fee lines come off the
+     * assessment that has not been written yet; the office stops being routed
+     * an assignment at payment; and the wizard's mandatory office-form STEP
+     * disappears, because `selectedOfficeCodes` is derived from the rows whose
+     * state is `applied`. Applying for MARKET, SANITARY or OCCUPANCY inserts a
+     * step with required answers that Next will not walk past and the section
+     * map will not jump over. With no caller for this method, five real drafts
+     * could not reach Review & Submit at all. This is the only thing in the
+     * system that makes that step go away.
      */
     public function unapply(Application $application, PermitType $type): void
     {

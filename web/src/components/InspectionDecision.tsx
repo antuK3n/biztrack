@@ -12,14 +12,21 @@ import type { Inspection } from '../lib/types'
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
  *
- * A filing sitting in `for_inspection` has, by definition, finished every
- * paperwork review: WorkflowService::afterReviewProgress only moves it there
- * once the last office assignment completes. So ReviewPage saw `completed_at`
- * set on the assignment, concluded the review was `decided`, printed a static
- * green "Approved" in the header, and offered no controls at all — while the
- * thing actually outstanding, the inspection, had nowhere on that page to be
- * approved or rejected. The officer's own words: "there's no thing to approve
- * something that's for inspection".
+ * An office that has finished its paperwork review sees `completed_at` set on
+ * its assignment, so ReviewPage concluded the review was `decided`, printed a
+ * static green "Approved" in the header, and offered no controls at all — while
+ * the thing actually outstanding, the inspection, had nowhere on that page to
+ * be approved or rejected. The officer's own words: "there's no thing to
+ * approve something that's for inspection".
+ *
+ * NOTE, because an earlier version of this comment said otherwise and it cost a
+ * deadlock: a filing in `for_inspection` has NOT, by definition, finished every
+ * paperwork review. Since commit 5da4daa, afterReviewProgress books a visit and
+ * flips the filing on the FIRST office's approval, so `for_inspection` and
+ * "five offices have not started" are a normal pair. ReviewPage therefore shows
+ * this panel only to an office whose OWN review is done; see the branch there
+ * (INS-1). This component is handed every visit on the filing regardless, which
+ * is why each card has to say whose it is.
  *
  * The visit used to have a second home at /staff/inspections/{id}, but nothing
  * on the queue linked there, and an officer who clicks a For Inspection row in
@@ -236,11 +243,33 @@ function officeOf(item: Inspection): string {
   return item.department?.name ?? 'Inspecting office'
 }
 
+/*
+ * What one visit's result is called on the card (INS-4).
+ *
+ * `passed` read simply "Approved" and `failed` simply "Rejected", in 24px over
+ * a full-width green or red bar, on a panel that is handed EVERY office's
+ * visits on the filing. A sanitary officer opening a filing where Fire had
+ * passed its visit read a green bar saying "Approved" and reported that
+ * "ABCD Trading's For inspection for other offices too got approved as well".
+ * Nothing of the kind had happened — WorkflowService::recordInspection writes
+ * exactly one row, and the API would have 403'd a cross-department conduct —
+ * but the word on the screen said otherwise.
+ *
+ * "Approved" and "Rejected" are what the FILING gets called elsewhere in this
+ * product (ApplicationStatus, the review sheet's own header), which is exactly
+ * why they cannot also be what a single office's site visit is called. The
+ * wording now matches the API's own vocabulary for the field it is rendering,
+ * `inspections.result`: passed / failed / conditional.
+ *
+ * `pending` keeps "For Inspection" — it is the mock's word (updated-gui/82.png)
+ * and it is unambiguous, because no filing-level state is called that from an
+ * officer's seat while a visit is outstanding.
+ */
 const STATE = {
   pending: { bar: 'bg-s-yellow', label: 'For Inspection' },
-  passed: { bar: 'bg-s-green', label: 'Approved' },
-  failed: { bar: 'bg-s-red', label: 'Rejected' },
-  conditional: { bar: 'bg-s-orange', label: 'Conditional' },
+  passed: { bar: 'bg-s-green', label: 'Inspection passed' },
+  failed: { bar: 'bg-s-red', label: 'Inspection failed' },
+  conditional: { bar: 'bg-s-orange', label: 'Inspection conditional' },
 } as const
 
 /**
@@ -263,6 +292,7 @@ const STATE = {
  */
 export function InspectionDecisionCard({
   item,
+  mine,
   canAct,
   busy,
   onApprove,
@@ -271,6 +301,22 @@ export function InspectionDecisionCard({
   reschedule,
 }: {
   item: Inspection
+  /**
+   * Is this the READER'S OWN office's visit? (INS-4)
+   *
+   * Deliberately separate from `canAct`, which is a wider question — admin
+   * anywhere, the inspecting department, or the personally named inspector.
+   * This one is only ever "does the department badge on this card say me", and
+   * it is used for reading, never for gating: every control below is still
+   * drawn behind `canAct`.
+   *
+   * Two of them would drift into each other if this were folded in. An admin
+   * has `canAct` on every card and owns none of them, and an inspector moved
+   * between departments keeps `canAct` on their old office's open visits — in
+   * both cases "you may record this" is true and "this is your office's visit"
+   * is false, and the card has to say the second thing.
+   */
+  mine: boolean
   canAct: boolean
   busy: boolean
   onApprove: () => void
@@ -334,10 +380,27 @@ export function InspectionDecisionCard({
   const rescheduleLabel = `Reschedule the ${office} inspection`
 
   return (
-    <li className="overflow-hidden rounded-2xl bg-white shadow-card">
+    <li className="overflow-hidden rounded-2xl bg-white shadow-card" aria-label={`${office} inspection`}>
       <div className={`h-2.5 ${state.bar}`} />
       <div className="px-6 py-5">
-        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">{office}</p>
+        {/*
+         * Whose visit this is, said before the result rather than in 11px above
+         * it (INS-4). The office name was already here, but as an eyebrow over
+         * a 24px verdict, so the verdict is what the eye took and the
+         * attribution is what it skipped — and on a panel carrying every
+         * office's visits that is how one office's passed inspection came to be
+         * read as the whole filing being approved.
+         */}
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">{office}</p>
+          <span
+            className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+              mine ? 'bg-royal-tint text-royal' : 'bg-canvas text-ink-secondary'
+            }`}
+          >
+            {mine ? 'Your office' : 'Another office'}
+          </span>
+        </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-3">
           {done && item.result === 'passed' ? (
@@ -356,6 +419,22 @@ export function InspectionDecisionCard({
             : `Scheduled Date: ${formatDate(item.scheduled_at)}`}
           {!done && <CalendarIcon size={18} className="not-italic text-ink-secondary" />}
         </p>
+
+        {/*
+         * What a finished visit does and does not settle.
+         *
+         * The outstanding case already says whose visit it is, further down,
+         * because it has to explain a missing button. A CONDUCTED one said
+         * nothing at all — it was a coloured bar and a date — so this is the
+         * half that was silent when the client read it as everyone's approval.
+         */}
+        {done && (
+          <p className="mt-1.5 text-sm text-ink-secondary">
+            {mine
+              ? 'Your office recorded this result. It closes your visit; the filing is decided once every office’s clearance is in.'
+              : `${office} recorded this result on its own visit. It is not a decision on the filing, and it is not your office’s clearance.`}
+          </p>
+        )}
 
         {item.findings && (
           <div className="mt-3 rounded-lg bg-canvas px-4 py-3">
@@ -628,6 +707,25 @@ export function InspectionDecisionPanel({
     return item.inspector?.id === user.id
   }
 
+  /*
+   * Is this visit the reader's own office's? (INS-4)
+   *
+   * A narrower question than `canAct` and asked for a different purpose: this
+   * one only decides what the card SAYS, never what it offers. No admin
+   * exemption and no named-inspector disjunct, because neither makes a visit
+   * belong to the reader's office — an admin owns none of them, and an officer
+   * moved between departments is still not the office that booked the visit.
+   *
+   * Both codes must be present, never two absences: `undefined === undefined`
+   * would badge an unrouted visit "Your office", which is the exact misreading
+   * this is here to stop.
+   */
+  function isMine(item: Inspection): boolean {
+    const mineCode = user?.department?.code
+    const theirs = item.department?.code
+    return Boolean(mineCode && theirs && mineCode === theirs)
+  }
+
   /**
    * Is this visit still this office's CURRENT one, or has a later one replaced
    * it?
@@ -786,6 +884,7 @@ export function InspectionDecisionPanel({
           <InspectionDecisionCard
             key={item.id}
             item={item}
+            mine={isMine(item)}
             canAct={canAct(item)}
             busy={busyId === item.id}
             onApprove={() => conduct(item, 'passed')}

@@ -58,11 +58,46 @@ class DocumentController extends Controller
                 "The Mayor's / Business Permit is what this application is for, so it can’t be submitted as one you already hold."
             );
             /*
-             * This is the wizard's path, and the wizard only exists before the
-             * filing leaves the applicant. The post-payment clearance stage
-             * takes the same upload through ClearanceController, which has its
-             * own gate (the stage opens on payment) — so the two windows do not
-             * overlap and neither has to know about the other.
+             * When a certificate the applicant already holds may be uploaded
+             * here: while the filing is still theirs to edit.
+             *
+             * ── CLR-5 · what this comment used to claim ──────────────────
+             *
+             * It read: *"This is the wizard's path, and the wizard only exists
+             * before the filing leaves the applicant. The post-payment
+             * clearance stage takes the same upload through
+             * ClearanceController, which has its own gate (the stage opens on
+             * payment) — so the two windows do not overlap and neither has to
+             * know about the other."*
+             *
+             * Every clause of that is now false. `4fb2d54` moved the clearance
+             * stage from after payment to before submission, so
+             * ClearanceService::isUnlocked is `status === Draft` and its window
+             * is a SUBSET of this one, not a successor to it. On a draft both
+             * endpoints are open at once. The two windows fully overlap, and
+             * "neither has to know about the other" was the reasoning that let
+             * this path stay unguarded.
+             *
+             * What that costs, precisely: ClearanceController::storeHeld
+             * refuses to file a held copy while the same permit type is
+             * attached to the filing, because a clearance is either one the
+             * applicant holds or one they are asking us to issue, never both —
+             * the invariant HeldPermits is built on. This endpoint performs no
+             * such check, so a direct POST here with `permit_type_id` set can
+             * write the state that refusal exists to prevent.
+             *
+             * It is not reachable from the product: `documents.upload`'s
+             * optional `permitTypeId` (web/src/lib/resources.ts) is passed by
+             * nobody, and both wizard call sites send three arguments. Every
+             * held copy in the register arrived through ClearanceController.
+             * That is why this is a corrected comment and not a new guard —
+             * adding one means deciding what a Returned filing's held copy is
+             * worth (this path allows Returned, the clearance stage does not,
+             * and a copy filed on a returned filing can only be removed
+             * through a third endpoint the clearance UI never calls), and that
+             * is a rule about money and scope, not a docblock fix. Recorded
+             * here so the next person to give this parameter a caller knows
+             * they are the one who has to answer it.
              */
             abort_unless(
                 in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true),

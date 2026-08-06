@@ -52,6 +52,24 @@ return [
     | A request outside these combinations is computed locally and says so, which
     | is the honest outcome: adding a window here is what makes it R-backed.
     |
+    | THESE LISTS MIRROR THE WINDOW SELECTORS THE SCREENS ACTUALLY OFFER. That is
+    | the rule, and it is worth stating because the lists drifted away from it
+    | once already and the cost was not a wrong number — it was a warning.
+    |
+    | Only `dashboard: months=12` used to be here while the dashboard's Window
+    | dropdown offered five choices, so four of five picks missed the snapshot,
+    | fell to the PHP port and raised a fallback notice. The figures were right;
+    | the screen called correct, intended operation a degradation, on the
+    | majority of its own options. The fix is here, not in the copy: if a screen
+    | offers a window, this file precomputes it.
+    |
+    | So when a selector gains an option, it gains a line here in the same
+    | commit. If precomputing it is not wanted, the option should not be offered.
+    |
+    | The one selector that cannot follow the rule is Renewal Risk's — see the
+    | note on that dataset below. It is the reason the fallback notice can never
+    | be driven to zero and therefore must not be shaped like an alert.
+    |
     */
 
     'variants' => [
@@ -59,25 +77,53 @@ return [
             // Trailing window in months for the rate and mean panels. The KPI,
             // volume and decision-outcome panels are YTD / this-month whatever
             // this is set to — see DashboardAnalytics' note on windows.
-            ['months' => 12],
-        ],
-
-        'processing_time' => [
-            // weeks
-            ['weeks' => 26],
-            ['weeks' => 52],
-        ],
-
-        'business_growth' => [
-            // months
+            //
+            // Mirrors AnalyticsPage PERIOD_OPTIONS.
+            ['months' => 3],
+            ['months' => 6],
             ['months' => 12],
             ['months' => 24],
             ['months' => 36],
         ],
 
+        'processing_time' => [
+            // weeks — mirrors ProcessingTimePage WINDOW_OPTIONS.
+            ['weeks' => 13],
+            ['weeks' => 26],
+            ['weeks' => 52],
+            ['weeks' => 104],
+        ],
+
+        'business_growth' => [
+            // months — mirrors BusinessGrowthPage PERIOD_OPTIONS.
+            ['months' => 3],
+            ['months' => 6],
+            ['months' => 12],
+            ['months' => 24],
+            ['months' => 36],
+        ],
+
+        /*
+         * days ahead, rows in the watchlist table.
+         *
+         * The horizons mirror RenewalRiskPage HORIZON_OPTIONS. The row count
+         * does not, and cannot: the snapshot key carries the page size, the
+         * barangay / level / action filters and the pagination offset
+         * (AnalyticsController::renewalRisk), so the key space is the product of
+         * five horizons, three page sizes, every barangay, every risk level,
+         * every action and every offset. That is thousands of combinations, each
+         * a separate R round trip of up to ~1MB — precomputing them is not a
+         * bigger list, it is a different architecture.
+         *
+         * So this dataset precomputes the five horizons at the default, unfiltered
+         * first page, and everything else is answered by the PHP port. That is
+         * not a degradation and the screens must not present it as one.
+         */
         'renewal_risk' => [
-            // days ahead, rows in the watchlist table
+            ['days' => 30, 'limit' => 25],
+            ['days' => 60, 'limit' => 25],
             ['days' => 90, 'limit' => 25],
+            ['days' => 180, 'limit' => 25],
             ['days' => 365, 'limit' => 25],
         ],
     ],

@@ -23,34 +23,73 @@ namespace App\Support;
  * refilling stations are food *manufacturing* and get their own name, because
  * labelling a bakery "Foods & Beverages" would tell an applicant opening a café
  * that they have four food-service neighbours when they have none.
+ *
+ * ## No division shares a name with a bucket that excludes it
+ *
+ * Sixteen manufacturing divisions used to collapse into the single word
+ * `'Manufacturing'` — not as a design choice but as the leftover bucket for the
+ * divisions nobody had named. It produced the one defect a taxonomy must never
+ * produce, and a client found it on the first try:
+ *
+ *   An applicant filing PSIC 10500 *Manufacture of dairy products* read
+ *   "Most common line of business — Manufacturing (6 of 33)" directly above
+ *   "Similar businesses — 0", and reasonably concluded the count was broken.
+ *   It was not. Their division 10 is *Food & Beverage Manufacturing*; the six
+ *   were furniture, concrete and plastics. `'Manufacturing'` read as a superset
+ *   containing them while being a sibling that excluded them by construction.
+ *
+ * A residual bucket is fine. A residual bucket whose *name* is the parent term
+ * of the named buckets beside it is not, because there is no reading of the
+ * screen that recovers the truth. So every division below carries a name for
+ * what it actually makes, and no two buckets stand in a superset relation.
+ * `UNCLASSIFIED` is the only catch-all left, and it says "Other" — a word that
+ * claims to contain nothing.
+ *
+ * The names describe output, not process, because the reader is choosing a
+ * street corner and not filling in a census form: "Concrete, Glass & Ceramics"
+ * over PSIC's "Manufacture of other non-metallic mineral products".
  */
 final class PsicTaxonomy
 {
-    /** Division prefix (first 2 digits of the PSIC code) → plain-language category. */
+    /**
+     * Division prefix (first 2 digits of the PSIC code) → plain-language category.
+     *
+     * Every entry names its own trade. Adding a division here means choosing a
+     * name for it; it must never mean reaching for the nearest broad word, which
+     * is how `'Manufacturing'` came to cover sixteen unrelated divisions.
+     */
     private const DIVISIONS = [
         '10' => 'Food & Beverage Manufacturing',
         '11' => 'Food & Beverage Manufacturing',
-        '12' => 'Manufacturing',
+        '12' => 'Tobacco Products',
         '13' => 'Garments & Footwear',
         '14' => 'Garments & Footwear',
         '15' => 'Garments & Footwear',
         '16' => 'Wood, Paper & Printing',
         '17' => 'Wood, Paper & Printing',
         '18' => 'Wood, Paper & Printing',
-        '19' => 'Manufacturing',
-        '20' => 'Manufacturing',
-        '21' => 'Manufacturing',
-        '22' => 'Manufacturing',
-        '23' => 'Manufacturing',
-        '24' => 'Manufacturing',
-        '25' => 'Manufacturing',
-        '26' => 'Manufacturing',
-        '27' => 'Manufacturing',
-        '28' => 'Manufacturing',
-        '29' => 'Manufacturing',
-        '30' => 'Manufacturing',
-        '31' => 'Manufacturing',
-        '32' => 'Manufacturing',
+        '19' => 'Fuel & Petroleum Products',
+        '20' => 'Chemicals & Cleaning Products',
+        '21' => 'Medicines & Pharmaceuticals',
+        '22' => 'Rubber & Plastics',
+        '23' => 'Concrete, Glass & Ceramics',
+        '24' => 'Metal Production',
+        '25' => 'Metalwork & Machine Shops',
+        // 26 makes the devices; 58–63 below sell and service them. Distinct
+        // names, because a block full of electronics assemblers is not a block
+        // full of software firms.
+        '26' => 'Electronics Manufacturing',
+        '27' => 'Electrical Equipment',
+        '28' => 'Machinery & Equipment',
+        // 29 builds vehicles; 45 sells and repairs them. Same caution as 26.
+        '29' => 'Motor Vehicle Manufacturing',
+        '30' => 'Boats & Other Transport Equipment',
+        '31' => 'Furniture Manufacturing',
+        // PSIC's own residual class, not ours: division 32 is titled "Other
+        // manufacturing" in the standard and covers jewellery, musical
+        // instruments, toys and medical appliances. Naming what it actually
+        // holds beats inheriting the standard's shrug.
+        '32' => 'Jewellery, Toys & Small Goods',
         '33' => 'Repair Services',
         '35' => 'Water, Waste & Utilities',
         '36' => 'Water, Waste & Utilities',

@@ -201,12 +201,39 @@ class InspectionController extends Controller
         }
     }
 
+    /**
+     * A visit belongs to the office that booked it, or to the inspector named
+     * on it. The `admin` exemption that used to open this method was REMOVED
+     * rather than replaced with a permission check (INS-7).
+     *
+     * Same reasoning as AssignmentController::authorizeDepartment(), and the two
+     * must stay one rule — the client's model is that each office owns its own
+     * visit, and this method is where that is enforced for conduct, reschedule,
+     * reinspect and show. `admin` no longer holds `inspection.manage`, so the
+     * route gate refuses it first and this branch could never fire; what it did
+     * do was state, in code, that a role named `admin` may conduct any office's
+     * inspection. That is one seeder row away from being true, and nobody
+     * decided it.
+     *
+     * It is not replaced by `application.view_any_office`, because that is BPLO's
+     * cross-office READ and this is the authority to record an inspection RESULT
+     * against another office's premises visit.
+     *
+     * WorkflowReinspectionTest.php:258 asserts the super admin is refused a
+     * re-inspection, and its own comment notes it passes on the route gate
+     * without ever reaching this method. It keeps passing, and now for the
+     * reason it appears to be about.
+     *
+     * The `inspector_user_id` disjunct is deliberately kept and is deliberately
+     * not department-scoped — but note it survives a department transfer
+     * (INS-6): an officer moved between offices in the admin user editor keeps
+     * write access to their old office's open visits. leastLoadedInspector()
+     * only ever names a user from the booking department, so this is safe at
+     * booking time and is a separate, un-fixed finding.
+     */
     private function authorizeDepartment(Request $request, Inspection $inspection): void
     {
         $user = $request->user();
-        if ($user->hasRole('admin')) {
-            return;
-        }
         $ok = ($user->department_id && $inspection->department_id === $user->department_id)
             || $inspection->inspector_user_id === $user->id;
         abort_unless($ok, 403, 'This inspection belongs to another department.');
