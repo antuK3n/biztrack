@@ -7,7 +7,14 @@ import { RISK_ARC, RiskScoreDial } from '../../components/charts/RiskScoreDial'
 import { toApiError } from '../../lib/api'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { RenewalRiskReport, RenewalRiskRow, RiskAction, RiskBand } from '../../lib/types'
+import type {
+  PermitLifecycleRow,
+  PermitLifecycleState,
+  RenewalRiskReport,
+  RenewalRiskRow,
+  RiskAction,
+  RiskBand,
+} from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 
@@ -704,6 +711,162 @@ function Rulebook({ report }: { report: RenewalRiskReport }) {
   )
 }
 
+/* ── Permit Lifecycle ──────────────────────────────────────────────────── */
+
+/**
+ * Column headings for the lifecycle table, in the paper's words.
+ *
+ * Moved here with the panel. The register stores each permit type's legal name
+ * ("Fire Safety Inspection Certificate"), which is far too long for a table
+ * heading, so the code was shown instead — leaving the column reading "FSIC"
+ * where the paper reads "Fire". Officers know the codes; this panel is read by
+ * people who do not, and the full name stays available as the `title` tooltip.
+ *
+ * Unknown codes fall back to the code itself rather than to a guess, so a permit
+ * type added later is visibly unmapped instead of silently mislabelled.
+ */
+const PERMIT_TYPE_HEADINGS: Record<string, string> = {
+  BUSINESS: 'Bus.',
+  SANITARY: 'Sanitary',
+  FSIC: 'Fire',
+  ZONING: 'Zoning',
+  OCCUPANCY: 'Occupancy',
+  CEC: 'Environmental',
+  MARKET: 'Market',
+}
+
+/**
+ * The dot beside each state name, and the two rules it obeys.
+ *
+ * 1. **Near Expiry is never the error red.** DESIGN.md reserves #bd0000 / #c11212
+ *    for errors — something the reader did wrong or the system failed at — and a
+ *    permit with three weeks left is neither. It is amber, the same tone the
+ *    expiry badge in the table uses at that distance. Overdue takes the warning
+ *    orange rather than the error red for the same reason: a lapsed permit is a
+ *    genuine problem to act on, not a fault in the screen.
+ * 2. **Never Color Alone.** The dot is `aria-hidden` decoration on a label that
+ *    already spells the state out. Remove every colour on this page and the
+ *    table still reads correctly; the hue only says how hard to look.
+ *
+ * The ink pairs are the darkened variants: #12724a and #6b4e00 clear AA at the
+ * 12px this renders at, where the raw #22b573 and #f5c518 would not.
+ */
+const LIFECYCLE_TONE: Record<PermitLifecycleState, { dot: string; ink: string }> = {
+  active: { dot: 'bg-s-green', ink: 'text-[#12724a]' },
+  near_expiry: { dot: 'bg-s-yellow', ink: 'text-s-yellow-ink' },
+  pending_renewal: { dot: 'bg-royal', ink: 'text-royal' },
+  overdue: { dot: 'bg-s-orange', ink: 'text-s-orange-ink' },
+}
+
+/**
+ * Permits Approaching Expiry, moved here from the Analytics Dashboard and
+ * rebuilt around four named states.
+ *
+ * ── WHAT CHANGED, AND WHY IT IS NOT A RELABELLING ──────────────────────────
+ *
+ * The first column used to read "Next 30d / Next 60d / Next 90d / Expired", and
+ * the three forward windows were cumulative — a permit 20 days out was counted
+ * in all three. That is a pure TIME axis, and it cannot answer the question the
+ * officer reading this screen is actually asking. Two permits 12 days from
+ * expiry, one with a renewal already under review and one with nothing filed,
+ * sat in the same cell and are two entirely different mornings.
+ *
+ * The four states mix time with the state of the paperwork, and they partition:
+ * every permit on the watchlist is in exactly one, and the four totals add up to
+ * the permits scored. That is asserted server-side in RenewalRiskLifecycleTest,
+ * and it is what lets this table be read against the cards above it.
+ *
+ * ── STATE IS NOT RISK LEVEL, AND THE SCREEN HAS TO SAY SO ───────────────────
+ *
+ * The cards above count risk LEVEL — High / Moderate / Low, a weighted score
+ * banded. This counts permit STATE. They are two axes over the same population
+ * and a permit can be Low risk and Near Expiry at once. Both use a green and an
+ * amber, which is the confusion worth heading off, so three things keep them
+ * apart: the shapes differ (cards with accent bars against a table of states),
+ * the badge wording differs ("Low risk" against "Near Expiry"), and the footnote
+ * below says it outright rather than leaving the reader to work it out.
+ */
+function PermitLifecyclePanel({ report }: { report: RenewalRiskReport }) {
+  const { columns, rows, total, near_expiry_days, lapsed_grace_days } = report.lifecycle
+
+  return (
+    <ProtoCard className="overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-left">
+          <caption className="sr-only">
+            Permits on the renewal watchlist by state and permit type. Each permit is counted in
+            exactly one state, so the four totals add up to the {total.toLocaleString()} permits
+            scored.
+          </caption>
+          <thead>
+            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="px-5 py-2.5 font-semibold">
+                State
+              </th>
+              {columns.map((column) => (
+                <th
+                  key={column.code}
+                  scope="col"
+                  className="px-4 py-2.5 text-right font-semibold"
+                  title={column.label}
+                >
+                  {PERMIT_TYPE_HEADINGS[column.code] ?? column.code}
+                </th>
+              ))}
+              <th scope="col" className="px-5 py-2.5 text-right font-semibold">
+                Total
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row: PermitLifecycleRow) => {
+              const tone = LIFECYCLE_TONE[row.state]
+
+              return (
+                <tr key={row.state} className="border-b border-line/60 last:border-0">
+                  <th scope="row" className="px-5 py-2.5 text-[14px] font-normal text-ink">
+                    <span className="flex items-center gap-2">
+                      <span
+                        aria-hidden="true"
+                        className={`h-2 w-2 shrink-0 rounded-full ${tone.dot}`}
+                      />
+                      {row.label}
+                      <Info metric={`lifecycle.${row.state}`} />
+                    </span>
+                  </th>
+                  {columns.map((column) => (
+                    <td
+                      key={column.code}
+                      className="tnum px-4 py-2.5 text-right text-[14px] text-ink"
+                    >
+                      {(row.counts[column.code] ?? 0).toLocaleString()}
+                    </td>
+                  ))}
+                  <td className={`tnum px-5 py-2.5 text-right text-[14px] font-bold ${tone.ink}`}>
+                    {row.total.toLocaleString()}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/*
+        Three facts the table cannot show and a reader would otherwise assume
+        wrongly: that a permit is in one state only (the old columns overlapped,
+        so the habit is there); that "state" is not the risk level counted in the
+        cards above; and that Overdue does not reach back forever.
+      */}
+      <p className="border-t border-line px-5 py-2.5 text-[11px] leading-relaxed text-ink-muted">
+        Each permit is in one state only, so these add up to the{' '}
+        {total.toLocaleString()} scored. State is not risk level — a permit can be Low risk and Near
+        Expiry at once. Near Expiry starts {near_expiry_days} days out; Overdue covers permits that
+        lapsed within {lapsed_grace_days} days, after which they leave the watchlist.
+      </p>
+    </ProtoCard>
+  )
+}
+
 function LoadingState() {
   return (
     <div className="space-y-4">
@@ -942,6 +1105,18 @@ export function RenewalRiskPage() {
             */}
             <SummaryCard value={data.reminders_sent} label="Reminders sent" metric="reminders_sent" />
           </div>
+
+          {/*
+            Above the table rather than below it, and that is the reading order
+            rather than a layout preference: the cards say how bad the watchlist
+            is, this says what it is MADE OF, and only then does the table name
+            individual businesses. Put it underneath and an officer has to scroll
+            past twenty-five rows to find out how many permits there are.
+          */}
+          <section className="mt-5">
+            <SectionHeading metric="lifecycle">Permit Lifecycle</SectionHeading>
+            <PermitLifecyclePanel report={data} />
+          </section>
 
           <section className="mt-5">
             <SectionHeading metric="at_risk">Businesses Requiring Review</SectionHeading>

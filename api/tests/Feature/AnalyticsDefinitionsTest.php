@@ -51,11 +51,19 @@ function definitionTokenExists(mixed $haystack, string $needle): bool
 function analyticsDefinitionSubjects(): array
 {
     return [
+        /*
+         * `expiry` is on the dashboard payload and is deliberately NOT a panel
+         * here. "Permits Approaching Expiry" moved to Renewal Risk Prediction,
+         * rebuilt around four named states; the key stays because R computes it
+         * and the parity check reads both key sets (see the note where the
+         * definition used to be, in AnalyticsDefinitions::dashboard()). This list
+         * is the panels a READER sees, and nobody sees that one any more.
+         */
         AnalyticsDatasets::DASHBOARD => [
             'payload' => DashboardAnalytics::build(DashboardAnalytics::DEFAULT_WINDOW_MONTHS),
             'panels' => [
                 'kpis', 'volume', 'decisions', 'processing_tiers', 'stages', 'compliance',
-                'expiry', 'top_barangays', 'top_lines_of_business', 'organization_forms',
+                'top_barangays', 'top_lines_of_business', 'organization_forms',
                 'inspections', 'officer_activity', 'map',
             ],
         ],
@@ -70,10 +78,19 @@ function analyticsDefinitionSubjects(): array
             'panels' => ['departments', 'completed_reviews'],
         ],
 
+        /*
+         * `lifecycle` is spliced in the same way AnalyticsController splices it
+         * onto every renewal-risk response, and for the same reason: R does not
+         * compute it, so it cannot ride on compute()'s output without failing the
+         * parity check in both directions (RenewalRiskAnalytics::lifecycle()
+         * carries the argument). The payload this test walks has to be the
+         * payload the SCREEN gets, or a definition for a panel the reader sees
+         * would go unchecked here.
+         */
         AnalyticsDatasets::RENEWAL_RISK => [
-            'payload' => RenewalRiskAnalytics::build(),
+            'payload' => RenewalRiskAnalytics::build() + ['lifecycle' => RenewalRiskAnalytics::lifecycle()],
             'panels' => [
-                'at_risk', 'counts', 'reminders_sent', 'actions', 'rulebook',
+                'at_risk', 'counts', 'lifecycle', 'reminders_sent', 'actions', 'rulebook',
                 'scored_permits', 'methodology',
             ],
         ],

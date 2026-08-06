@@ -200,12 +200,29 @@ final class AnalyticsDefinitions
                 'why' => 'Whether businesses renew before lapsing. When too few renewals record which permit they replace it says it cannot be computed rather than 0%, because a gap in the register is not proof that nobody renewed.',
             ],
 
-            'expiry' => [
-                'label' => 'Permits Approaching Expiry',
-                'formula' => 'Permits counted by how long is left before they expire, per permit type. The forward columns overlap: the 60-day count includes the 30-day one. Expired permits are counted separately.',
-                'covers' => 'The register as it stands today. Revoked and suspended permits are left out; neither is waiting to be renewed.',
-                'why' => 'The forward workload, and the list reminders are sent from. It is split by clearance type because those are what expire and block a renewal.',
-            ],
+            /*
+             * There is deliberately no 'expiry' entry, and the dashboard payload
+             * still carries an `expiry` panel.
+             *
+             * The client moved "Permits Approaching Expiry" to Renewal Risk
+             * Prediction, where the officer who works that list already is, and
+             * asked for its first column to become four named states rather than
+             * three overlapping time windows. The panel is gone from this screen
+             * and its definition went with it — a definition for a figure nobody
+             * can see is the stalest kind.
+             *
+             * The KEY could not go. DashboardAnalytics::computeExpiry() is one
+             * half of a two-engine contract: r/R/service.R computes `expiry` in
+             * .dash_expiry() from `permit_type_columns`, `expiring_permits` and
+             * `expiry_windows`, and AnalyticsParityTest compares the two key sets
+             * in both directions. Dropping it from PHP alone would fail parity as
+             * "present in R, absent from PHP"; dropping it from both is an R
+             * change, which this one was not allowed to be. So the payload key
+             * stays, unread by any screen, and this comment is why.
+             *
+             * AnalyticsDefinitionsTest's panel list drops `expiry` to match. Do
+             * not add it back without a screen to put it on.
+             */
 
             'top_barangays' => [
                 'label' => 'Top Five Barangays by Active Businesses',
@@ -456,6 +473,55 @@ final class AnalyticsDefinitions
                 'formula' => 'Permits scoring under 25.',
                 'covers' => 'Every permit scored in the window. A permit not yet due with nothing else against it lands here: the progress rule is switched off entirely more than 30 days out, and without that the whole register would score at least Moderate.',
                 'why' => 'The band that makes the other two mean something. If nearly every permit is high risk, none of them is.',
+            ],
+
+            /*
+             * The panel the client moved off the Analytics Dashboard, with its
+             * first column rebuilt.
+             *
+             * Two things about this wording carry weight. First, it must not
+             * read as a fifth risk band — the cards above this table count risk
+             * LEVEL and this table counts permit STATE, they are different axes
+             * over the same permits, and `lifecycle.near_expiry` says so in as
+             * many words because that is the pair most easily confused. Second,
+             * `lifecycle.pending_renewal` is the entry that has to explain the
+             * axis change at all: it is the one state that is not a date, and it
+             * is the reason the client asked for named states instead of
+             * 30/60/90.
+             */
+            'lifecycle' => [
+                'label' => 'Permit Lifecycle',
+                'formula' => 'Every permit on the watchlist put into one of four states, counted per permit type. The first state that fits wins: lapsed, then renewal filed and undecided, then inside 30 days, then everything else.',
+                'covers' => 'The same permits the risk levels above are counted from, so the four totals add up to the number of permits scored. Each permit is in exactly one state.',
+                'why' => 'Who needs chasing today. A permit 12 days out with a renewal already lodged and one 12 days out with nothing filed used to share a column, and they are two different phone calls.',
+            ],
+
+            'lifecycle.active' => [
+                'label' => 'Active / Compliant',
+                'formula' => 'In force and more than 30 days from expiry — or already renewed, whatever the date.',
+                'covers' => 'Permits whose renewal has been approved are counted here: the replacement has been issued, so nothing is left to chase.',
+                'why' => 'The baseline the other three are read against. If almost every permit were near expiry, none of them would stand out.',
+            ],
+
+            'lifecycle.near_expiry' => [
+                'label' => 'Near Expiry',
+                'formula' => 'Expires within 30 days, with no renewal submitted against it.',
+                'covers' => 'Thirty days is the mark the first automatic reminder goes out on, and the same mark the score starts counting a missing renewal from. A renewal saved as a draft, or one that was rejected, counts as nothing submitted.',
+                'why' => 'The chase list. This is a different thing from the risk levels in the table above: those rank how much is wrong with a permit, this says where the permit stands.',
+            ],
+
+            'lifecycle.pending_renewal' => [
+                'label' => 'Pending Renewal',
+                'formula' => 'A renewal was submitted against the permit and no decision has been made on it. The expiry date does not come into this one.',
+                'covers' => 'Submitted filings, including ones returned to the applicant for corrections. A draft has never reached the LGU, so it is not counted. An approved renewal is a decision, so it moves to Active.',
+                'why' => 'These businesses are already being handled and do not need ringing. It is the only state here about the paperwork rather than the calendar, which is why the four states are more useful than three date ranges.',
+            ],
+
+            'lifecycle.overdue' => [
+                'label' => 'Overdue / Expired',
+                'formula' => 'The expiry date has passed. Counted here even when a renewal is under review.',
+                'covers' => 'Permits that lapsed within the last 60 days. Anything older has left the watchlist and is not in any of these four counts.',
+                'why' => 'The business is trading without cover today, and a filing in the queue does not give that cover back. That is why this state outranks the other three.',
             ],
 
             'reminders_sent' => [

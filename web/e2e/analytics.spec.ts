@@ -242,6 +242,87 @@ test.describe('the three BPLO analytics screens', () => {
     }
   })
 
+  /*
+   * ── The panel the client moved, and the column they rebuilt ────────────────
+   *
+   * "Permits approaching expiry, put it in renewal risk prediction. the first
+   * column, it wont be 30 60 90d, make it into active/compliant, near expiry,
+   * pending renewal, overdue expired."
+   *
+   * Two properties, and both are the kind that a passing unit test can still
+   * leave broken in the browser: the panel is on the screen the officer works
+   * from and NOT on the one it came from, and the four counts a reader can see
+   * add up to the population the same screen claims to cover. The arithmetic is
+   * pinned server-side in RenewalRiskLifecycleTest; what is pinned here is that
+   * the figures which reconcile are the figures actually rendered.
+   */
+  test('shows the four permit states on Renewal Risk and nowhere else', async ({ page }) => {
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    const panel = page.getByRole('table', { name: /permits on the renewal watchlist/i })
+    await expect(panel).toBeVisible()
+
+    /*
+     * The client's four states, in the client's order. Read as row headers so
+     * this fails if they are ever rendered as anything a reader cannot see —
+     * "Never Color Alone": every state has to survive with the colour removed.
+     */
+    const states = ['Active / Compliant', 'Near Expiry', 'Pending Renewal', 'Overdue / Expired']
+    const headers = await panel.locator('tbody th').allInnerTexts()
+
+    for (const [index, state] of states.entries()) {
+      expect(headers[index], 'the four states, in the order the client listed them')
+        .toContain(state)
+    }
+
+    /*
+     * Mutually exclusive and total, as the reader sees it: the four row totals
+     * add up to the "N permits scored" the table footer prints. If these ever
+     * disagree, one of the two panels is describing a different set of permits
+     * and nothing on the page says which.
+     *
+     * The footer count is pulled out by pattern rather than by selector because
+     * the number and its label are two text nodes in one paragraph that also
+     * carries the paging range and the window dates — reading the whole element
+     * and stripping non-digits would silently concatenate five figures.
+     */
+    const totals = await panel.locator('tbody tr td:last-child').allInnerTexts()
+    const summed = totals.reduce((run, cell) => run + Number(cell.replace(/[^0-9]/g, '')), 0)
+
+    const footer = (await page.getByText(/permits scored/).last().innerText()) ?? ''
+    const scored = /([\d,]+)\s+permits scored/.exec(footer)?.[1]
+
+    expect(scored, 'the footer no longer states how many permits were scored').toBeTruthy()
+    expect(summed).toBe(Number((scored ?? '').replace(/,/g, '')))
+
+    /* Never the error red for Near Expiry (DESIGN.md — red is for errors). */
+    const nearExpiryDot = panel
+      .locator('tbody tr')
+      .nth(1)
+      .locator('span[aria-hidden="true"]')
+      .first()
+    const dotColour = await nearExpiryDot.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(dotColour, 'Near Expiry must not use the error red').not.toMatch(
+      /rgb\(193, 18, 18\)|rgb\(189, 0, 0\)/,
+    )
+  })
+
+  test('the analytics dashboard no longer carries the expiry panel', async ({ page }) => {
+    await page.goto('/staff/analytics')
+    await waitForAnalytics(page, 'Analytics Dashboard')
+
+    // Moved, not duplicated. A heading left behind here is the failure this
+    // guards: two screens counting one population, drifting apart quietly.
+    await expect(page.getByRole('heading', { name: /permits approaching expiry/i })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: /permit lifecycle/i })).toHaveCount(0)
+
+    // And the banding that was rejected went with it, rather than surviving in
+    // a table that merely lost its heading.
+    const body = (await page.locator('body').textContent()) ?? ''
+    expect(body).not.toMatch(/Next 30d|Next 60d|Next 90d/)
+  })
+
   test('the renewal risk screen never calls its score a probability', async ({ page }) => {
     await page.goto('/staff/analytics/renewal-risk')
     await waitForAnalytics(page, 'Renewal Risk Prediction')
