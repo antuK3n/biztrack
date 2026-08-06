@@ -81,8 +81,8 @@ const PAYMENT_STATUSES = ['submitted', 'pending_payment'] as const
  */
 const APPROVAL_STATUSES = ['under_review', 'returned', 'for_inspection'] as const
 /**
- * Statuses on the inspection/approved side, for a filing this office has
- * already signed off.
+ * Statuses on the inspection side, for a filing this office has already signed
+ * off but which is not finished.
  *
  * `under_review` is in here as well as in APPROVAL_STATUSES, and that is not a
  * duplicate — see the note on OPEN_ASSIGNMENT_STATUSES below. The two lists are
@@ -90,8 +90,28 @@ const APPROVAL_STATUSES = ['under_review', 'returned', 'for_inspection'] as cons
  * between them those two filters partition this office's work with nothing
  * falling between. Same filing, same status, opposite sides of the partition
  * depending on whether the office reading it still owes a review.
+ *
+ * `approved` and `issued` were here and are gone. The reasoning had been that
+ * an inspector wants the approved filings still in view — but this is a QUEUE,
+ * and a decided filing is nobody's outstanding work. The client: "Those who are
+ * already done with the whole application process (accepted and all) is still
+ * displayed in the For inspection tab of the Track page of all admins."
+ *
+ * They pile up permanently, and they crowd out the thing the tab exists to
+ * show. The register holds over 1,400 approved filings against a handful in
+ * flight, so left here the tab converges on being a list of finished work with
+ * the live cases buried in it.
+ *
+ * Reaching a decided filing is a different question from working a queue, and
+ * it already has answers: search finds it by tracking ID or business name
+ * (server-side, over the whole queue), and the permit is on the business. If a
+ * "recently decided" view is ever wanted, it wants to be its own tab with its
+ * own ordering — not the inspection queue silently doubling as an archive.
+ *
+ * `rejected` and `cancelled` were never here, and belong out for the same
+ * reason.
  */
-const INSPECTION_STATUSES = ['under_review', 'for_inspection', 'approved', 'issued'] as const
+const INSPECTION_STATUSES = ['under_review', 'for_inspection'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   payment: PAYMENT_STATUSES,
