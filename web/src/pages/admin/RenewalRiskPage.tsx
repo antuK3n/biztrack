@@ -551,7 +551,21 @@ export function RenewalRiskPage() {
           </span>
         }
       >
-        Renewal Risk
+        {/*
+          The paper's §2 heading, in full: "Renewal Risk Prediction". The screen
+          said "Renewal Risk" while AnalyticsDatasets already sent the long form
+          as this dataset's label, so the page and its own payload disagreed —
+          the same drift the growth screen's name test exists to catch.
+
+          "Prediction" names the FEATURE, and changes nothing about what the
+          index claims. The number under it is still points out of 100 across
+          five rules, still not a fitted probability, and the ban on
+          probability/likelihood wording in AnalyticsDefinitions still holds. If
+          this title ever starts being read as a promise that the score is a
+          forecast, the fix is the title, not a softening of what sits beneath
+          it.
+        */}
+        Renewal Risk Prediction
       </PageTitle>
 
       <AnalyticsTabs />

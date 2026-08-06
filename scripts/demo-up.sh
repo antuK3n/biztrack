@@ -21,7 +21,12 @@ echo "Building the bundle testers will see…"
 
 # APP_DEBUG stays false: a stack trace on a public URL leaks paths and config.
 ( cd "$DEMO/api" && DB_DATABASE="$DB" APP_DEBUG=false nohup php artisan serve --port=8082 >"$LOGS/api.log" 2>&1 & )
-( cd "$DEMO/web" && VITE_API_TARGET=http://localhost:8082 nohup npx vite preview --port 5180 --strictPort >"$LOGS/web.log" 2>&1 & )
+# --host 127.0.0.1 is load-bearing, not tidiness. Left to itself `vite preview`
+# binds [::1] only, while cloudflared dials the origin over IPv4. The tunnel
+# then comes up, registers, prints a URL, and answers every request with a 502
+# — all while `curl http://[::1]:5180` locally returns 200. It reads as a
+# broken deploy and is a missing address family.
+( cd "$DEMO/web" && VITE_API_TARGET=http://localhost:8082 nohup npx vite preview --port 5180 --strictPort --host 127.0.0.1 >"$LOGS/web.log" 2>&1 & )
 
 for _ in $(seq 1 30); do curl -sf -o /dev/null http://localhost:5180/ && break; sleep 1; done
 
