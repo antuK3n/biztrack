@@ -150,7 +150,7 @@ class AnalyticsController extends Controller
         );
 
         return response()->json([
-            'data' => $this->decorateRenewalRisk($resolved['data'], $days),
+            'data' => $this->decorateRenewalRisk($resolved['data'], $days, $view['barangay']),
             'meta' => $resolved['meta'],
         ]);
     }
@@ -187,7 +187,7 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Two things the statistics payload cannot carry, added at serve time.
+     * Three things the statistics payload cannot carry, added at serve time.
      *
      *  - **The barangay menu.** A control's options are a register question,
      *    not a statistic, and they have to be there whichever engine answered.
@@ -196,6 +196,16 @@ class AnalyticsController extends Controller
      *    is that an officer sees a send they made a minute ago — and the
      *    snapshot is a nightly figure. Reading them off the payload would tell
      *    an officer they had not rung a business they rang this morning.
+     *  - **The permit lifecycle split.** A statistic R was never asked to
+     *    compute. It cannot go in the snapshot without failing the parity check
+     *    in both directions, and r/R/service.R is not ours to extend — see the
+     *    long note on RenewalRiskAnalytics::lifecycle().
+     *
+     * The barangay is passed down rather than read back off `$data['filters']`,
+     * because a snapshot served by R carries no filters at all and would
+     * silently give the whole city's lifecycle counts under a screen filtered to
+     * one barangay — where they would read as that barangay's, and would not sum
+     * to the `scored_permits` printed beside them.
      *
      * The paging fields are defaulted rather than computed here: a payload with
      * no `filters` is by definition an unfiltered one, so `matching` is
@@ -206,12 +216,13 @@ class AnalyticsController extends Controller
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
-    private function decorateRenewalRisk(array $data, int $days): array
+    private function decorateRenewalRisk(array $data, int $days, ?string $barangay = null): array
     {
         $data['filters'] ??= ['barangay' => null, 'band' => null, 'action' => null];
         $data['matching'] ??= (int) ($data['scored_permits'] ?? 0);
         $data['offset'] ??= 0;
         $data['barangays'] = RenewalRiskAnalytics::barangaysInScope($days);
+        $data['lifecycle'] = RenewalRiskAnalytics::lifecycle($days, $barangay);
 
         $rows = $data['at_risk'] ?? [];
         $manual = RenewalRiskAnalytics::manualRemindersByPermit(
@@ -449,10 +460,16 @@ class AnalyticsController extends Controller
     /** Printable Renewal Risk report. */
     public function renewalRiskReport(Request $request): Response
     {
+        $days = $this->horizonDays($request);
+
         $resolved = $this->resolve(AnalyticsDatasets::RENEWAL_RISK, [
-            'days' => $this->horizonDays($request),
+            'days' => $days,
             'limit' => $this->limit($request),
         ]);
+
+        // Unfiltered on purpose, matching the rest of this PDF: the report
+        // covers the whole watchlist and the screen says so beside the filter.
+        $resolved['data']['lifecycle'] = RenewalRiskAnalytics::lifecycle($days);
 
         $pdf = Pdf::loadView('pdf.renewal-risk-report', [
             'report' => $resolved['data'],

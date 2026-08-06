@@ -1034,21 +1034,6 @@ export interface ComplianceIndicator {
   unavailable_reason: string | null
 }
 
-export interface ExpiryColumn {
-  code: string
-  label: string
-}
-
-/** Windows are cumulative: 30d ⊂ 60d ⊂ 90d. `expired` is disjoint from all three. */
-export interface ExpiryRow {
-  window: string
-  label: string
-  days: number | null
-  expired: boolean
-  counts: Record<string, number>
-  total: number
-}
-
 export interface RankedShareRow {
   rank: number
   count: number
@@ -1137,7 +1122,18 @@ export interface DashboardReport {
     bottleneck: StageBottleneck | null
   }
   compliance: ComplianceIndicator[]
-  expiry: { columns: ExpiryColumn[]; rows: ExpiryRow[] }
+  /*
+   * No `expiry`, and the payload still carries one — same reasoning as the three
+   * meetings fields on OfficerActivity above.
+   *
+   * "Permits Approaching Expiry" moved to Renewal Risk Prediction and its first
+   * column became four named states (see PermitLifecycle below). The dashboard
+   * key could not go with it: r/R/service.R computes `expiry` in .dash_expiry()
+   * and AnalyticsParityTest reads both engines' key sets in both directions, so
+   * dropping it from PHP alone fails parity and dropping it from both is an R
+   * change. Leaving it off this type is what stops a screen reading a panel that
+   * is no longer anywhere in the design — the compiler refuses it.
+   */
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
   top_lines_of_business: { rows: LineOfBusinessRow[]; total: number; groups: number }
   organization_forms: {
@@ -1321,6 +1317,46 @@ export interface RenewalRiskFilters {
   action: RiskAction | null
 }
 
+/**
+ * The four states a watchlisted permit can be in, in reading order.
+ *
+ * These are NOT risk bands and the screen has to keep saying so. `RiskBand`
+ * above ranks how much is wrong with a permit; this says where the permit
+ * stands. A permit can be `low` risk and `near_expiry`, or `high` risk and
+ * `pending_renewal` — two axes over one population.
+ */
+export type PermitLifecycleState = 'active' | 'near_expiry' | 'pending_renewal' | 'overdue'
+
+export interface PermitLifecycleRow {
+  state: PermitLifecycleState
+  label: string
+  /** Keyed by permit type code, one key per column. */
+  counts: Record<string, number>
+  total: number
+}
+
+/**
+ * Permits Approaching Expiry, as the client asked for it: four named states in
+ * the first column instead of three overlapping 30/60/90 day windows.
+ *
+ * The states partition the watchlist — every permit is in exactly one, and
+ * `total` equals the report's `scored_permits`, which is what lets this table
+ * and the risk-level cards above it be read against each other.
+ *
+ * Added by the server at serve time rather than by either analytics engine; R
+ * does not compute it. See RenewalRiskAnalytics::lifecycle().
+ */
+export interface PermitLifecycle {
+  columns: { code: string; label: string }[]
+  rows: PermitLifecycleRow[]
+  /** Equals `scored_permits` for the same filter. */
+  total: number
+  /** Days before expiry at which a permit becomes Near Expiry. */
+  near_expiry_days: number
+  /** How far back Overdue reaches before a permit leaves the watchlist. */
+  lapsed_grace_days: number
+}
+
 export interface RenewalRiskReport {
   generated_at: string
   horizon_days: number
@@ -1347,6 +1383,8 @@ export interface RenewalRiskReport {
   /** The barangays the filter may offer: those with a permit in the window. */
   barangays: string[]
   at_risk: RenewalRiskRow[]
+  /** The same permits as `scored_permits`, split four ways by state. */
+  lifecycle: PermitLifecycle
   actions: { action: RiskAction; label: string; band: RiskBand; count: number }[]
   rulebook: RiskRule[]
   thresholds: { high: number; moderate: number }

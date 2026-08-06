@@ -24,7 +24,6 @@ import type {
   BarangayShareRow,
   ComplianceIndicator,
   DashboardReport,
-  ExpiryRow,
   LineOfBusinessRow,
   MapPoint,
   RankedShareRow,
@@ -696,98 +695,24 @@ function CompliancePanel({ report }: { report: DashboardReport }) {
   )
 }
 
-/* ── Permits Approaching Expiry ────────────────────────────────────────── */
-
-/**
- * Column headings for the expiry table, in the paper's words.
+/*
+ * ── "Permits Approaching Expiry" is not on this screen any more ─────────────
  *
- * The register stores each permit type's legal name ("Fire Safety Inspection
- * Certificate"), which is far too long for a table heading, so the code was
- * shown instead — leaving the column reading "FSIC" where the paper reads
- * "Fire". Officers know the codes; the panel this appears in is read by people
- * who do not, and the full name stays available as the `title` tooltip.
+ * It moved to Renewal Risk Prediction (web/src/pages/admin/RenewalRiskPage.tsx,
+ * PermitLifecyclePanel), where the client asked for it, and its first column
+ * became four named states — Active / Compliant, Near Expiry, Pending Renewal,
+ * Overdue / Expired — instead of three overlapping 30/60/90 day windows.
  *
- * Unknown codes fall back to the code itself rather than to a guess, so a
- * permit type added later is visibly unmapped instead of silently mislabelled.
+ * The move is the right one and it is worth saying why, because this is the sort
+ * of panel that drifts back. This screen is about volumes, processing times and
+ * where the city's businesses are; the expiry table is a WORKLIST, read by the
+ * officer chasing renewals, and that officer already has a screen which is
+ * nothing but permits running out. Two screens were describing one population.
+ *
+ * The dashboard payload still carries an `expiry` key. It is not read here and
+ * it is not on the DashboardReport type — see the note there for why R's copy of
+ * it cannot be removed without editing r/R/service.R.
  */
-const PERMIT_TYPE_HEADINGS: Record<string, string> = {
-  BUSINESS: 'Bus.',
-  SANITARY: 'Sanitary',
-  FSIC: 'Fire',
-  ZONING: 'Zoning',
-  OCCUPANCY: 'Occupancy',
-  CEC: 'Environmental',
-  MARKET: 'Market',
-}
-
-function shortPermitType(code: string, _label: string): string {
-  return PERMIT_TYPE_HEADINGS[code] ?? code
-}
-
-function ExpiryPanel({ report }: { report: DashboardReport }) {
-  const { columns, rows } = report.expiry
-
-  return (
-    <ProtoCard className="overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-left">
-          <caption className="sr-only">
-            Permits approaching expiry by permit type. The 30, 60 and 90 day columns overlap, so a
-            permit counted in the 30 day column is counted in the other two as well.
-          </caption>
-          <thead>
-            <tr className="border-b border-line text-[11px] uppercase tracking-wide text-ink-muted">
-              <th scope="col" className="px-5 py-2.5 font-semibold">
-                Window
-              </th>
-              {columns.map((column) => (
-                <th
-                  key={column.code}
-                  scope="col"
-                  className="px-4 py-2.5 text-right font-semibold"
-                  title={column.label}
-                >
-                  {shortPermitType(column.code, column.label)}
-                </th>
-              ))}
-              <th scope="col" className="px-5 py-2.5 text-right font-semibold">
-                Total
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row: ExpiryRow) => (
-              <tr
-                key={row.window}
-                className={`border-b border-line/60 last:border-0 ${row.expired ? 'bg-canvas' : ''}`}
-              >
-                <th
-                  scope="row"
-                  className={`px-5 py-2.5 text-[14px] text-ink ${row.expired ? 'font-bold' : 'font-normal'}`}
-                >
-                  {row.label}
-                </th>
-                {columns.map((column) => (
-                  <td key={column.code} className="tnum px-4 py-2.5 text-right text-[14px] text-ink">
-                    {num(row.counts[column.code] ?? 0)}
-                  </td>
-                ))}
-                <td
-                  className={`tnum px-5 py-2.5 text-right text-[14px] font-bold ${row.expired ? 'text-ink' : 'text-royal'}`}
-                >
-                  {num(row.total)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="border-t border-line px-5 py-2.5 text-[11px] text-ink-muted">
-        Forward windows overlap: a permit expiring in 20 days is in all three. Expired is separate.
-      </p>
-    </ProtoCard>
-  )
-}
 
 /* ── Ranked panels ─────────────────────────────────────────────────────── */
 
@@ -1456,12 +1381,17 @@ export function AnalyticsPage() {
             <CompliancePanel report={data} />
           </section>
 
-          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
-            <section>
-              <SectionHeading note={asOf} metric="expiry">Permits Approaching Expiry</SectionHeading>
-              <ExpiryPanel report={data} />
-            </section>
+          {/*
+            Five sections in a two-column grid, not six.
 
+            "Permits Approaching Expiry" used to lead this block and moved to
+            Renewal Risk Prediction. Nothing was left in its place and nothing
+            needs to be: this is a plain two-column grid, so the five remaining
+            sections reflow and the last one runs to the full width. The
+            alternative — a spacer, or a panel promoted out of order to keep the
+            count even — is how a layout ends up with a hole in it.
+          */}
+          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
             <section>
               {/* Same as Decision Outcomes above: the pass-rate info button
                   already sits beside the pass rate inside the panel. */}

@@ -120,6 +120,88 @@ final class RenewalRiskAnalytics
     /** @var list<string> */
     public const ACTIONS = ['immediate_follow_up', 'send_reminder', 'monitor'];
 
+    /**
+     * The four permit lifecycle states, in the order an officer reads them.
+     *
+     * These replaced the dashboard's "Permits Approaching Expiry" table, whose
+     * first column was 30d / 60d / 90d — three cumulative time windows. The
+     * client asked for named states instead, and the axis change is the whole
+     * point rather than a relabelling: the old bands answered "when does this
+     * expire", these answer "what is the position of this permit", which is the
+     * question that decides whether anyone needs to be rung today. A permit 12
+     * days out with a renewal already under review and one 12 days out with
+     * nothing filed sat in the same 30d cell and are two different mornings.
+     *
+     * The panel moved here at the same time, and that was overdue. It was on the
+     * Analytics Dashboard — a screen about volumes and processing times — while
+     * this screen is already the list of permits running out, read by the officer
+     * who chases them. Two screens were describing the same population.
+     *
+     * ── THE RULES, AND WHY EACH ONE IS WHERE THE CUT IS ─────────────────────
+     *
+     * Evaluated in the order below; the first that matches wins. They are total
+     * (the last is unconditional) and mutually exclusive (first match wins), so
+     * every permit on the watchlist lands in exactly one and the counts sum to
+     * `scored_permits`. RenewalRiskLifecycleTest asserts both.
+     *
+     *  1. **Overdue / Expired — the expiry date has passed.** This wins over
+     *     everything, including a renewal in the queue. A lapsed permit means a
+     *     business is trading without cover TODAY; a filing under review does not
+     *     restore that cover, and the officer's next move is an enforcement
+     *     question rather than a follow-up one. Ranking the renewal above the
+     *     lapse would let the most serious row on the register hide inside the
+     *     calmest bucket.
+     *  2. **Pending Renewal — a renewal was filed and has not been decided.**
+     *     Date-independent, exactly as the client specified: a renewal under
+     *     review 200 days out and one 5 days out are both "we are handling it".
+     *     "Filed" is the register's own event — `applications.submitted_at` —
+     *     which is why a DRAFT is not counted here. A draft renewal has never
+     *     reached the LGU, nobody has anything to decide, and marking that permit
+     *     as handled on the strength of a form nobody has received is the one
+     *     failure mode this column can have. The scorer already reads it the same
+     *     way: a draft costs 20 of the 25 progress points against 25 for nothing
+     *     at all (RenewalRiskScoring::PROGRESS_POINTS).
+     *  3. **Near Expiry — inside the reminder window with nothing on file.**
+     *     Reached only when rules 1 and 2 did not match, so "no renewal filed
+     *     yet" is already true by construction. An APPROVED renewal therefore
+     *     never lands here: it was filed and it was granted, so the successor
+     *     permit exists and there is nobody to chase. It falls through to Active.
+     *  4. **Active / Compliant — everything else.** In force, and either more
+     *     than the reminder window away or already renewed.
+     *
+     * @var list<array{state: string, label: string}>
+     */
+    public const LIFECYCLE_STATES = [
+        ['state' => 'active', 'label' => 'Active / Compliant'],
+        ['state' => 'near_expiry', 'label' => 'Near Expiry'],
+        ['state' => 'pending_renewal', 'label' => 'Pending Renewal'],
+        ['state' => 'overdue', 'label' => 'Overdue / Expired'],
+    ];
+
+    /**
+     * The renewal stages that count as "filed, not yet decided".
+     *
+     * Read against the stages RenewalRiskAnalytics::stageFor() produces, which is
+     * the ONE place an application status becomes a renewal stage. There is no
+     * second definition of "a renewal is in progress" in this codebase and there
+     * must not be — the scoring rule and this column have to agree about the same
+     * filing or the table contradicts itself row by row.
+     *
+     *  - `in_progress` covers submitted, pending payment, under review and for
+     *    inspection: the filing is with the LGU.
+     *  - `returned` is a filing the LGU reviewed and sent back for corrections.
+     *    It is still open and still awaiting a decision, so it is still pending —
+     *    the chase is "finish what you started", not "you have not started".
+     *
+     * Not here, and each for a stated reason: `draft` was never submitted (see
+     * rule 2 above), `approved` and `rejected` are decisions, and a cancelled
+     * filing leaves nothing standing at all — stageFor() returns null for it and
+     * the permit reads `none`.
+     *
+     * @var list<string>
+     */
+    public const PENDING_RENEWAL_STAGES = ['in_progress', 'returned'];
+
     /** Drivers shown per row before the rest are folded away. */
     private const DRIVERS_PER_ROW = 3;
 
@@ -220,6 +302,147 @@ final class RenewalRiskAnalytics
         }
 
         return $frame + ['reminders_sent' => array_sum($noticeCounts), 'permits' => $rows];
+    }
+
+    /**
+     * Which of the four lifecycle states one permit is in.
+     *
+     * The whole state machine, in one place, so the screen, the PDF and the test
+     * cannot each have their own reading of it. See LIFECYCLE_STATES for why the
+     * cuts are where they are; the order of the branches below IS the precedence
+     * and changing it changes the answer.
+     *
+     * @param  int  $daysToExpiry  signed — negative once the permit has lapsed
+     * @param  string  $renewalStage  as produced by stageFor(), or 'none'
+     */
+    public static function lifecycleState(int $daysToExpiry, string $renewalStage): string
+    {
+        return match (true) {
+            // The permit has lapsed. Beats a renewal in the queue: cover is gone
+            // today and a pending filing does not give it back.
+            $daysToExpiry < 0 => 'overdue',
+            // Filed and undecided, whatever the date.
+            in_array($renewalStage, self::PENDING_RENEWAL_STAGES, true) => 'pending_renewal',
+            // An approved renewal is a filing that was made and granted, so this
+            // is never the "nothing filed yet" case however close the date is.
+            $renewalStage === 'approved' => 'active',
+            $daysToExpiry <= RenewalRiskScoring::RENEWAL_DUE_WITHIN_DAYS => 'near_expiry',
+            default => 'active',
+        };
+    }
+
+    /**
+     * The Permit Lifecycle panel: the watchlist split four ways, by permit type.
+     *
+     * ── WHY THIS IS NOT PART OF compute() ───────────────────────────────────
+     *
+     * It cannot be. compute() is the PHP half of a two-engine contract:
+     * AnalyticsParityTest walks R's golden output against compute()'s key for
+     * key, in BOTH directions, and reports any key present in one and absent
+     * from the other. R does not compute lifecycle states, r/R/service.R is out
+     * of bounds for this change, and a new key on compute() would therefore fail
+     * parity on the first run — the exact "passes locally, forks the engines"
+     * outcome that test exists to prevent.
+     *
+     * So it is a serve-time decoration, joining the two that are already there
+     * for the same class of reason (see AnalyticsController::decorateRenewalRisk):
+     * the barangay menu, which is a register question rather than a statistic,
+     * and the officer follow-up marks, which are live state rather than a nightly
+     * figure. This one is a third kind — a statistic R was never asked for — and
+     * it is honest about that rather than smuggled into the snapshot.
+     *
+     * ── WHY THE POPULATION IS THE WATCHLIST, EXACTLY ───────────────────────
+     *
+     * The same permitsInScope() call the scored table is drawn from, narrowed by
+     * the same barangay filter compute() applies before it counts. That is not
+     * tidiness: it is what makes `total` identical to `scored_permits`, so the
+     * four states are a partition of the very permits the three risk cards
+     * describe and the two panels cannot disagree about how many permits exist.
+     * Re-deriving the window here with a second `where` clause is how that would
+     * quietly stop being true.
+     *
+     * Consequence worth stating on screen, and stated in the definitions:
+     * "Overdue / Expired" is bounded by LAPSED_GRACE_DAYS. A permit that lapsed
+     * four months ago has fallen off the watchlist and is not counted here.
+     *
+     * ── COST ────────────────────────────────────────────────────────────────
+     *
+     * Two bulk queries, not five: the state needs only the expiry date and the
+     * renewal stage, so the punctuality, findings and fee lookups a full
+     * dataset() pays for are not run. Both are queries this endpoint's own
+     * snapshot path already runs shapes of, and neither is per row.
+     *
+     * @return array{
+     *     columns: list<array{code: string, label: string}>,
+     *     rows: list<array{state: string, label: string, counts: array<string, int>, total: int}>,
+     *     total: int,
+     *     near_expiry_days: int,
+     *     lapsed_grace_days: int,
+     * }
+     */
+    public static function lifecycle(int $horizonDays = self::DEFAULT_HORIZON_DAYS, ?string $barangay = null): array
+    {
+        $today = CarbonImmutable::now()->startOfDay();
+        $permits = self::permitsInScope($today->subDays(self::LAPSED_GRACE_DAYS), $today->addDays($horizonDays));
+
+        if ($barangay !== null && $barangay !== '') {
+            $permits = array_values(array_filter(
+                $permits,
+                static fn (array $permit): bool => $permit['barangay'] === $barangay,
+            ));
+        }
+
+        $renewals = $permits === []
+            ? []
+            : self::renewalsByPriorPermit(array_column($permits, 'id'));
+
+        /*
+         * Columns are read off the permits actually on the watchlist rather than
+         * off the permit_types table, for the reason the dashboard panel gave
+         * for reading them off the register: a column of zeros for a type this
+         * LGU has never issued is noise, and a type it has issued must never be
+         * silently absent. Ordered by code so the columns do not reshuffle
+         * between refreshes.
+         */
+        $columns = [];
+        foreach ($permits as $permit) {
+            $columns[$permit['permit_type_code']] = $permit['permit_type'];
+        }
+        ksort($columns);
+
+        $blank = array_fill_keys(array_keys($columns), 0);
+
+        $rows = [];
+        foreach (self::LIFECYCLE_STATES as $state) {
+            $rows[$state['state']] = $state + ['counts' => $blank, 'total' => 0];
+        }
+
+        foreach ($permits as $permit) {
+            $validUntil = CarbonImmutable::parse($permit['valid_until'])->startOfDay();
+
+            $state = self::lifecycleState(
+                (int) $today->diffInDays($validUntil, false),
+                $renewals[$permit['id']]['stage'] ?? 'none',
+            );
+
+            // One increment per permit, into one row. That single statement is
+            // what makes the buckets mutually exclusive and total, and it is why
+            // lifecycleState() returns a state rather than a list of matches.
+            $rows[$state]['counts'][$permit['permit_type_code']]++;
+            $rows[$state]['total']++;
+        }
+
+        return [
+            'columns' => array_map(
+                static fn (string $code, string $label): array => ['code' => $code, 'label' => $label],
+                array_keys($columns),
+                array_values($columns),
+            ),
+            'rows' => array_values($rows),
+            'total' => count($permits),
+            'near_expiry_days' => RenewalRiskScoring::RENEWAL_DUE_WITHIN_DAYS,
+            'lapsed_grace_days' => self::LAPSED_GRACE_DAYS,
+        ];
     }
 
     /**
@@ -494,7 +717,14 @@ final class RenewalRiskAnalytics
      * Permits whose expiry falls in the window, with the business and barangay
      * the table needs.
      *
-     * @return list<array{id: int, permit_number: string, business_id: int, business: string, barangay: string|null, permit_type: string, valid_until: string}>
+     * `permit_type_code` is carried for the lifecycle panel's columns and is
+     * deliberately NOT copied onto the dataset rows in dataset(): those rows are
+     * the payload pushed to R, and a field R was never sent is a field the parity
+     * check would report as PHP-only. The scored table shows the type's full
+     * name; only the lifecycle table, whose headings are four characters wide,
+     * needs the code.
+     *
+     * @return list<array{id: int, permit_number: string, business_id: int, business: string, barangay: string|null, permit_type: string, permit_type_code: string, valid_until: string}>
      */
     private static function permitsInScope(CarbonImmutable $from, CarbonImmutable $to): array
     {
@@ -519,6 +749,7 @@ final class RenewalRiskAnalytics
                 'businesses.name as business',
                 'barangays.name as barangay',
                 'permit_types.name as permit_type',
+                'permit_types.code as permit_type_code',
             ]);
 
         $permits = [];
@@ -537,6 +768,7 @@ final class RenewalRiskAnalytics
                 'business' => (string) $row->business,
                 'barangay' => $row->barangay === null ? null : (string) $row->barangay,
                 'permit_type' => (string) $row->permit_type,
+                'permit_type_code' => (string) $row->permit_type_code,
                 'valid_until' => (string) $row->valid_until,
             ];
         }

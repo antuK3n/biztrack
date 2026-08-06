@@ -213,25 +213,20 @@
         @endforeach
     </table>
 
-    <h2>Permits approaching expiry <span class="window">(as of {{ $report['today'] }}; 30/60/90 are cumulative)</span></h2>
-    <table>
-        <tr>
-            <th>Window</th>
-            @foreach ($report['expiry']['columns'] as $column)
-                <th class="num">{{ $column['code'] }}</th>
-            @endforeach
-            <th class="num">Total</th>
-        </tr>
-        @foreach ($report['expiry']['rows'] as $row)
-            <tr @if ($row['expired']) class="total" @endif>
-                <td>{{ $row['label'] }}</td>
-                @foreach ($report['expiry']['columns'] as $column)
-                    <td class="num">{{ number_format($row['counts'][$column['code']] ?? 0) }}</td>
-                @endforeach
-                <td class="num">{{ number_format($row['total']) }}</td>
-            </tr>
-        @endforeach
-    </table>
+    {{--
+        "Permits approaching expiry" is deliberately not in this report any more.
+
+        The client moved the panel to Renewal Risk Prediction and asked for its
+        first column to become four named states instead of three overlapping
+        30/60/90 day windows. It is printed by the Renewal Risk report, under
+        "Permit lifecycle", from RenewalRiskAnalytics::lifecycle(). Leaving a
+        30/60/90 copy here would put two different answers to one question in two
+        PDFs an officer files side by side.
+
+        `$report['expiry']` is still on the payload — R computes it and the
+        parity check reads both engines' key sets. See the note where its
+        definition used to be in AnalyticsDefinitions::dashboard().
+    --}}
 
     <h2>Top barangays <span class="window">(active businesses, as of {{ $report['today'] }})</span></h2>
     @if (count($report['top_barangays']['rows']) === 0)

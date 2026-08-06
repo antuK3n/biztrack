@@ -15,7 +15,11 @@
         table { width: 100%; border-collapse: collapse; margin-bottom: 6px; }
         th { background: #f0f2ff; text-align: left; padding: 5px 7px; font-size: 9.5px; border-bottom: 2px solid #0025cc; }
         td { padding: 5px 7px; font-size: 10px; border-bottom: 1px solid #eee; }
-        td.num { text-align: right; }
+        {{-- th.num as well as td.num: the lifecycle table's permit-type columns
+             are numeric, and a left-aligned heading over right-aligned figures
+             reads as two different columns. --}}
+        td.num, th.num { text-align: right; }
+        .window { font-size: 8.5px; color: #888; font-weight: normal; }
         .headline td { border-bottom: none; padding: 3px 7px; }
         .headline td.label { color: #666; width: 34%; }
         .empty { font-size: 10px; color: #666; font-style: italic; padding: 6px 0; }
@@ -66,6 +70,48 @@
         </tr>
         <tr><td class="label">Permits scored</td><td>{{ number_format($report['scored_permits']) }}</td></tr>
     </table>
+
+    {{--
+        The panel the client moved off the Analytics Dashboard report, with its
+        first column rebuilt: four named states rather than three overlapping
+        30/60/90 day windows. It sits between the headline counts and the rule
+        book because it answers the question in between them — the counts say how
+        bad the watchlist is, this says what it is made of.
+
+        States and risk levels are two axes over the same permits, and a printed
+        page has no hover to explain that, so the caption says it outright.
+    --}}
+    <h2>Permit lifecycle <span class="window">(each permit in exactly one state)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>State</th>
+                @foreach ($report['lifecycle']['columns'] as $column)
+                    <th class="num">{{ $column['code'] }}</th>
+                @endforeach
+                <th class="num">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($report['lifecycle']['rows'] as $row)
+                <tr>
+                    <td>{{ $row['label'] }}</td>
+                    @foreach ($report['lifecycle']['columns'] as $column)
+                        <td class="num">{{ number_format($row['counts'][$column['code']] ?? 0) }}</td>
+                    @endforeach
+                    <td class="num">{{ number_format($row['total']) }}</td>
+                </tr>
+            @endforeach
+        </tbody>
+    </table>
+    <div class="note">
+        These add up to the {{ number_format($report['lifecycle']['total']) }} permits scored, because
+        each permit is in one state only. State is not risk level &mdash; a permit can be Low risk and
+        Near Expiry at once. Near Expiry starts {{ $report['lifecycle']['near_expiry_days'] }} days
+        before expiry with no renewal submitted; Pending Renewal means a renewal was submitted and
+        has not been decided, whatever the date; Overdue covers permits that lapsed within
+        {{ $report['lifecycle']['lapsed_grace_days'] }} days and outranks the other three.
+    </div>
 
     <h2>How the score is built</h2>
     <table>
