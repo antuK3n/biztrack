@@ -82,6 +82,36 @@ test.use({ storageState: 'e2e/.auth/zoning.json' })
 const ADMIN_REVIEW_SHEET = 'Business Information & Registration'
 
 /**
+ * The disclosure that sheet now lives behind, and the two states it has.
+ *
+ * Third position on this sheet: rendered flat, then deleted for the office
+ * that had finished, now collapsed-by-default wherever it renders at all. The
+ * long form of that history is in ReviewPage.tsx at `application-as-filed`.
+ *
+ * A prefix match, not the whole label — the accessible name also carries the
+ * summary of what is inside ("business registration and address, ... 8 uploaded
+ * requirements, ..."), which is built from the payload and therefore differs per
+ * filing. The summary is asserted for its own sake in the collapse test below;
+ * pinning it here would make every other test fixture-sensitive.
+ */
+const SHOW_SHEET = /^Show the application as filed/
+const HIDE_SHEET = /^Hide the application as filed/
+
+/**
+ * Is the filed sheet ON THE PAGE, however it is folded?
+ *
+ * `includeHidden` is the load-bearing half. Playwright's role engine skips
+ * anything hidden from the accessibility tree by default, so a plain
+ * `getByRole` cannot tell "collapsed" from "deleted" — the two states this file
+ * exists to keep apart, and the two the product has swung between twice. Every
+ * assertion below about the sheet's PRESENCE goes through this; assertions
+ * about whether it is on SCREEN use the ordinary visible query.
+ */
+function filedSheet(page: Page) {
+  return page.getByRole('heading', { name: ADMIN_REVIEW_SHEET, includeHidden: true })
+}
+
+/**
  * This office's OWN queue rather than a hardcoded id, or the register.
  *
  * Two separate things make anything else wrong here, and both of them present
@@ -290,8 +320,18 @@ test('an office that has FINISHED its review opens on the decision box, not the 
    * Still unconditional, and still correct: this office HAS finished. That is
    * what the helper's `status=completed` now guarantees and what the old
    * version of this test never checked.
+   *
+   * `filedSheet()` searches the hidden DOM too, which STRENGTHENS this rather
+   * than relaxing it. The sheet is now collapsed-by-default everywhere it
+   * renders, so a plain visible-only query would have been satisfied by the
+   * whole sheet sitting here folded — exactly the outcome the client rejected
+   * by name. Nothing short of real absence passes this line.
+   *
+   * And the disclosure itself must not be here either: a control offering to
+   * unfold the application is the application details, one click away.
    */
-  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
+  await expect(filedSheet(page)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: SHOW_SHEET })).toHaveCount(0)
   await expect(page.locator('details')).toHaveCount(0)
 
   // "but the progress thingy is cool, keep that".
@@ -308,8 +348,28 @@ test('an office that still OWES a review can reach its decision on a For Inspect
    * The review sheet, not the compact box. The filing's status says
    * `for_inspection`; this office's assignment does not, and the assignment is
    * what this screen answers to.
+   *
+   * PRESENT, not visible — and that difference is the whole of the third
+   * position on this sheet, so it is worth being exact about what is and is
+   * not being conceded here.
+   *
+   * The deadlock this test was written for was never about the sheet being on
+   * screen. It was about an office having no Approve and no Return anywhere in
+   * the product, so `scheduleInspectionFor` never fired, `isFullyCleared` never
+   * passed, and the permits on that filing could not be issued by any action
+   * the product offered. Five offices sat there on BIZ-2026-00958. That is what
+   * the block below asserts, and it is unchanged.
+   *
+   * What HAS changed is that the sheet arrives folded — "this form, when
+   * approving something, is like something they can collapse. by default it
+   * should be collapsed". Collapsed is not deleted: the officer who needs the
+   * barangay before approving is one click away from it, which the deleted
+   * version could not offer at any price. So this asserts it is on the page,
+   * through the hidden-inclusive query, and the test below asserts the click
+   * opens it. Do not relax this to "the disclosure button exists" — the button
+   * could be wired to nothing.
    */
-  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toBeVisible()
+  await expect(filedSheet(page)).toHaveCount(1)
   await expect(page.locator('section[aria-label="Application status"]')).toHaveCount(0)
 
   /*
@@ -324,6 +384,128 @@ test('an office that still OWES a review can reach its decision on a For Inspect
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Return with remarks' })).toBeVisible()
+})
+
+test('the application as filed starts collapsed and opens on one click', async ({ page }) => {
+  /*
+   * The client's third and current instruction on this sheet, asserted as
+   * three separate facts because each one has been got wrong on its own:
+   *
+   *   "this form, when approving something, is like something they can
+   *    collapse. by default it should be collapsed, then with a click it can
+   *    be expanded. they dont need this form exactly."
+   *
+   * Run from the seat the client was in — an office that still owes a review
+   * on a For Inspection filing, which is CENRO on BIZ-2026-00958 in the
+   * screenshot and CPDO here.
+   */
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  /* 1. By default it is collapsed. On the page, off the screen. */
+  await expect(filedSheet(page)).toHaveCount(1)
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
+
+  /*
+   * 2. The control is a real disclosure, and it is never shut.
+   *
+   * `aria-expanded` on a <button>, not a <details> — <details> was the shape of
+   * the rejected second pass and the test above still forbids one anywhere on
+   * this screen. `disabled` is checked for on the attribute itself rather than
+   * through toBeDisabled(), which treats `disabled` and `aria-disabled` as the
+   * same thing and would pass either way: there is no state in which the only
+   * route to the application should be dropped out of the tab order.
+   */
+  const toggle = page.getByRole('button', { name: SHOW_SHEET })
+  await expect(toggle).toBeVisible()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).not.toHaveAttribute('disabled', /.*/)
+
+  /*
+   * 3. It says what is inside. A collapsed region whose label is "Show more"
+   * is a mystery box, and an officer hunting for the barangay or the uploaded
+   * requirements has no reason to think this is where they are. The summary is
+   * built from the payload, so this checks the shape rather than a literal.
+   */
+  await expect(toggle).toContainText('Sections A–E')
+  await expect(toggle).toContainText(/uploaded requirement/)
+
+  /*
+   * 4. One click opens it — the actual sheet, not just a state flip. The
+   * hidden-inclusive query above would keep passing on a disclosure wired to
+   * nothing, so the assertion here is the ordinary VISIBLE one.
+   */
+  await toggle.click()
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toBeVisible()
+  await expect(page.getByRole('button', { name: HIDE_SHEET })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+
+  /*
+   * `aria-controls` has to name the region that actually moved, or a screen
+   * reader is told about a relationship the page does not have.
+   */
+  const controls = await page
+    .getByRole('button', { name: HIDE_SHEET })
+    .getAttribute('aria-controls')
+  expect(controls, 'the disclosure names the region it opens').toBeTruthy()
+  await expect(page.locator(`#${controls}`)).toBeVisible()
+
+  // And it folds back up, so this is a disclosure rather than a one-way reveal.
+  await page.getByRole('button', { name: HIDE_SHEET }).click()
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
+})
+
+test('collapsing the sheet does not fold away the work the officer came to do', async ({
+  page,
+}) => {
+  /*
+   * The counterweight to the test above, and the reason the collapse is drawn
+   * where it is rather than around the whole white card.
+   *
+   * What collapses is the APPLICANT'S filed sheet — the part the client says
+   * "they dont need this form exactly". What must not is anything the officer
+   * has to type or press: the decision buttons, this office's own clearance
+   * panel, and FOR OFFICE USE ONLY, which is where Evaluator Remarks and the
+   * assessed fee are recorded. Folding any of those away would re-create the
+   * deadlock this file was written for by a different route — the controls
+   * would exist, and nobody would find them.
+   *
+   * Every assertion here is a VISIBLE query, taken with the sheet still shut.
+   */
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  await expect(page.getByRole('button', { name: SHOW_SHEET })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Return with remarks' })).toBeVisible()
+
+  // The panel this office records into, reachable without expanding anything.
+  await expect(page.locator('#for-office-use')).toBeVisible()
+  /*
+   * Regex, not the literal. The <label> wraps the input AND the sentence
+   * explaining where the remark travels, so the computed accessible name is
+   * the whole paragraph — an exact match would fail on correct markup.
+   */
+  await expect(page.getByLabel(/^Evaluator Remarks/)).toBeVisible()
+
+  /*
+   * And the office's own clearance, which is the sheet it is actually
+   * deciding. Null when this filing carries no form for this office — BPLO's
+   * BUSINESS permit type has none at all — which is a fixture gap, not a
+   * defect, so it is checked only when one is there.
+   */
+  const ownForm = page.locator('section[aria-label^="Your office"]')
+  if ((await ownForm.count()) > 0) await expect(ownForm.first()).toBeVisible()
+
+  // Still shut. Nothing above quietly opened it.
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
 })
 
 test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
@@ -565,7 +747,25 @@ test('a filing that is not for inspection still opens on the full review sheet',
   await page.goto(`/staff/queue/${assignmentId}`)
   await page.waitForLoadState('networkidle')
 
-  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toBeVisible()
+  /*
+   * Present, and collapsed — the same shape as every other status that renders
+   * the sheet.
+   *
+   * The collapse is deliberately NOT gated on whether this office is deciding.
+   * The client's objection is to the sheet being the thing on screen, and it is
+   * the thing on screen in every status that draws it; a closed record reads no
+   * differently from an open review at arm's length. Gating it would also mean
+   * the page changed shape underneath an officer at the moment they approved,
+   * which is the worst possible moment for it to move. So this asserts the
+   * collapsed state here too rather than treating `under_review` as an
+   * exception — if a future change makes the collapse conditional, this goes
+   * red on purpose.
+   */
+  await expect(filedSheet(page)).toHaveCount(1)
+  await expect(page.getByRole('button', { name: SHOW_SHEET })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  )
   await expect(page.locator('section[aria-label="Application status"]')).toHaveCount(0)
 
   /*
