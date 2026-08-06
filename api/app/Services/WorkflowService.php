@@ -182,7 +182,7 @@ class WorkflowService
             'completed_at' => now(),
         ]);
         Audit::log('assignment.approved', $assignment);
-        $this->afterReviewProgress($assignment->application);
+        $this->afterReviewProgress($assignment->application, $assignment);
     }
 
     /** Officer returns the application for revision (applicant fixes → under_review). */
@@ -212,59 +212,197 @@ class WorkflowService
         });
     }
 
-    /** After each approval: all done → inspection (if required) or approval. */
-    private function afterReviewProgress(Application $app): void
+    /**
+     * After an office signs off its review: book THAT office's visit, now.
+     *
+     * This used to open with `every assignment is completed, or return` and do
+     * nothing whatsoever until the last office had finished reading. That was
+     * defensible while SANITARY and FSIC were the only inspected clearances —
+     * two offices, and the visits were the tail of the process. All six
+     * supporting clearances are inspected now (ReferenceSeeder), and the same
+     * line then means City Health cannot visit a premises it has already
+     * cleared on paper because the Market Office has not opened its form yet.
+     * Six offices moving at the pace of the slowest, which is the client's
+     * question: "when I approved a sanitary permit, why did it not
+     * automatically go to inspection?"
+     *
+     * So the unit of progress is the OFFICE, not the filing. Approving the
+     * sanitary review books CHO's visit; approving the fire review books BFP's;
+     * neither waits for the other, and an office with no inspection of its own
+     * (BPLO, today the only one) simply completes and blocks nothing.
+     *
+     * Which office it was is the fact this needed and did not have — hence the
+     * assignment argument. Deriving it from "the assignment that changed most
+     * recently" would be the same guess with a race in it.
+     */
+    private function afterReviewProgress(Application $app, ApplicationAssignment $approved): void
     {
-        $app->loadMissing('assignments', 'permitTypes');
-        $allDone = $app->assignments->every(
-            fn ($a) => $a->status === AssignmentStatus::Completed
-        );
-        if (! $allDone) {
+        $visit = $this->scheduleInspectionFor($app, $approved->department_id);
+
+        /*
+         * GUARD 1 of 2 (the other is in recordInspection). Reviews and visits
+         * now finish in any order, so the last review can land after every
+         * visit has already passed — that filing is complete and must issue
+         * here, not sit waiting for an inspection event that will never come
+         * again.
+         */
+        if ($this->isFullyCleared($app)) {
+            $this->approveAndIssue($app);
+
             return;
         }
 
-        $needsInspection = $app->permitTypes->contains(fn ($pt) => $pt->requires_inspection);
-        if ($needsInspection) {
-            $this->scheduleInspections($app);
-            $this->transition($app, ApplicationStatus::ForInspection, 'Reviews complete. Inspection scheduled.');
-        } else {
-            $this->approveAndIssue($app);
+        /*
+         * Nothing booked and nothing outstanding: an office that does not
+         * inspect has approved and other offices are still reading. The filing
+         * stays `under_review`, which is what it is.
+         */
+        if (! $app->inspections()->currentPerDepartment()->exists()) {
+            return;
         }
+
+        /*
+         * "review complete", not "review approved", and that is not a
+         * preference. The word Approved inside a `status_change` body is how the
+         * applicant ends up with something that reads like a decision on the
+         * filing while four offices are still reading it — EndStateNotifications
+         * pins that the approval end state is announced once, by
+         * applicationApproved(), and nothing else may sound like it.
+         */
+        $approved->loadMissing('department');
+        $note = $visit !== null
+            ? ($approved->department?->name ?? 'The office').' review is complete. Site inspection scheduled for '
+                .$visit->scheduled_at->format('d M Y').'.'
+            : 'Review complete. The filing is still waiting on a site inspection.';
+
+        if ($app->status === ApplicationStatus::ForInspection) {
+            /*
+             * Already there, because an earlier office booked first. Going
+             * through transition() would correctly refuse to write a
+             * for_inspection → for_inspection history row — movement that did
+             * not happen, the same reason scheduleReinspection() stays away
+             * from it — but it would silently drop the message with it, and the
+             * applicant should still be told the second office's visit is
+             * booked. So say it directly, through the channel every other
+             * movement on the filing uses.
+             */
+            if ($visit !== null) {
+                $this->notify->applicationStatus($app, ApplicationStatus::ForInspection, $note);
+            }
+
+            return;
+        }
+
+        $this->transition($app, ApplicationStatus::ForInspection, $note);
     }
 
     /**
-     * Auto-schedule an inspection per inspecting department (least-loaded inspector).
+     * Is the filing clear to issue? BOTH halves, in one place.
      *
-     * This was `Inspection::firstOrCreate(['application_id', 'department_id'])`,
-     * which encoded an assumption that stopped being true the moment failed
-     * visits started being kept: ONE inspection per (filing, office). With
-     * history on the table that lookup matches the OLDEST row for the pair —
-     * a visit conducted and closed weeks ago — and calls it the office's
-     * inspection. It happened to be harmless here only because the return value
-     * was thrown away.
+     * Read this as the invariant the parallel change had to buy back. While
+     * every review had to finish before a single visit could be booked,
+     * reaching `for_inspection` at all IMPLIED the paperwork was done, so
+     * recordInspection() could release permits on the visits alone and be
+     * right. Booking per office removes that implication: a filing whose only
+     * inspecting office finished early would otherwise be handed its permits
+     * while another office's review was still open — a Mayor's Permit issued
+     * over an unread clearance application, which is the one failure this whole
+     * change could cause and the one it must not.
      *
-     * An office is skipped when it already has a CURRENT visit, and that word is
-     * `Inspection::scopeCurrentPerDepartment()` — the same predicate
-     * recordInspection() uses to decide the filing has cleared, on purpose.
-     * Note what the skip covers: a current visit that was conducted and FAILED
-     * also counts as "has one", so re-running this never books a replacement
-     * visit behind anyone's back. A re-inspection is a decision an officer takes
-     * on a date they choose (scheduleReinspection below); quietly booking one
-     * two weekdays out would pre-empt that and leave no record of who decided.
+     * `load()` rather than `loadMissing()` on purpose: both callers have just
+     * written to the very rows being counted, and a relation cached before that
+     * write is exactly how this returns true one approval too early.
+     *
+     * "Current" visit is `Inspection::scopeCurrentPerDepartment()`, the same
+     * predicate the scheduler uses, for the reason written on the scope: a
+     * failed visit is kept forever, and a kept failure must not veto the
+     * re-inspection that replaced it.
      */
-    public function scheduleInspections(Application $app): void
+    private function isFullyCleared(Application $app): bool
     {
-        $app->loadMissing('permitTypes.department');
-        foreach ($app->permitTypes->where('requires_inspection', true) as $pt) {
-            $alreadyHasVisit = $app->inspections()
-                ->currentPerDepartment()
-                ->where('department_id', $pt->issuing_department_id)
-                ->exists();
-            if ($alreadyHasVisit) {
-                continue;
-            }
-            $this->openInspection($app, $pt->issuing_department_id, now()->addWeekdays(2));
+        $app->load('assignments');
+
+        $everyReviewDone = $app->assignments->every(
+            fn ($a) => $a->status === AssignmentStatus::Completed
+        );
+        if (! $everyReviewDone) {
+            return false;
         }
+
+        return $app->inspections()
+            ->currentPerDepartment()
+            ->get()
+            ->every(fn ($i) => $i->status === InspectionStatus::Completed
+                && $i->result?->progresses());
+    }
+
+    /**
+     * Auto-schedule ONE office's visit, two working days out, least-loaded
+     * inspector. Returns the booking, or null when there was nothing to book.
+     *
+     * This was `scheduleInspections($app)`, a loop over every inspecting permit
+     * type on the filing, called once when the last review landed. The loop is
+     * gone rather than kept alongside this: it was the only shape in which the
+     * six offices could be booked in one go, and leaving a second, whole-filing
+     * booking path in the service is how the "everyone waits for the slowest
+     * office" behaviour would find its way back in. One office, one call, one
+     * decision — afterReviewProgress() makes it as each review is approved.
+     *
+     * Two conditions, and a department that fails either gets nothing:
+     *
+     * - the office must actually inspect ON THIS FILING. It is not enough that
+     *   the office has an assignment; the permit type it issues here has to
+     *   carry `requires_inspection`. BPLO is the live case — it issues the
+     *   Mayor's Permit on the strength of the six clearances, so a visit of its
+     *   own would be one nobody performs and would stall issuance behind it
+     *   forever.
+     * - the office must not already hold a CURRENT visit, and that word is
+     *   `Inspection::scopeCurrentPerDepartment()` — the same predicate
+     *   isFullyCleared() uses to decide the filing has cleared, on purpose.
+     *   Note what the skip covers: a current visit that was conducted and
+     *   FAILED also counts as "has one", so a returned filing coming back
+     *   through review never books a replacement visit behind anyone's back. A
+     *   re-inspection is a decision an officer takes on a date they choose
+     *   (scheduleReinspection below); quietly booking one two weekdays out
+     *   would pre-empt that and leave no record of who decided.
+     *
+     * The lookup is deliberately not `Inspection::firstOrCreate(['application_id',
+     * 'department_id'])`, which is what it once was: that encoded ONE inspection
+     * per (filing, office), an assumption that stopped being true the moment
+     * failed visits started being kept, and with history on the table it matches
+     * the OLDEST row for the pair — a visit closed weeks ago — and calls it the
+     * office's inspection.
+     */
+    public function scheduleInspectionFor(Application $app, int $departmentId): ?Inspection
+    {
+        $app->loadMissing('permitTypes');
+
+        $officeInspects = $app->permitTypes->contains(
+            fn ($pt) => $pt->requires_inspection && $pt->issuing_department_id === $departmentId
+        );
+        if (! $officeInspects) {
+            return null;
+        }
+
+        $alreadyHasVisit = $app->inspections()
+            ->currentPerDepartment()
+            ->where('department_id', $departmentId)
+            ->exists();
+        if ($alreadyHasVisit) {
+            return null;
+        }
+
+        $visit = $this->openInspection($app, $departmentId, now()->addWeekdays(2));
+
+        // Audited like the hand-scheduled re-inspection below, because it is the
+        // same kind of fact: who booked a visit against this filing, and for
+        // when. An automatic booking is still somebody's approval.
+        Audit::log('inspection.scheduled', $visit, [
+            'department_id' => $departmentId,
+            'scheduled_at' => (string) $visit->scheduled_at,
+        ]);
+
+        return $visit;
     }
 
     /**
@@ -381,24 +519,25 @@ class WorkflowService
         $app = $inspection->application;
 
         /*
-         * CURRENT visits only — `$app->inspections()->get()` was the whole set.
+         * GUARD 2 of 2 (the other is in afterReviewProgress).
          *
-         * That was correct while a department could only ever have one row, and
-         * became a permanent block the moment failed visits started being kept:
-         * the failed row stays on the filing for good, so a re-inspection could
-         * pass and this would still find a `failed` in the set and refuse to
-         * approve. The office's standing is its LATEST visit; the earlier ones
-         * are history, and history is not a veto.
+         * This used to test the visits alone — every CURRENT inspection passed,
+         * and issue — and that was sound only because of something that is no
+         * longer true: a filing could not reach `for_inspection` at all until
+         * every office had signed off, so "the visits have passed" quietly
+         * carried "and the paperwork was done". Visits are booked per office as
+         * each review is approved now, so the very first office to approve and
+         * pass its own inspection would arrive here with every CURRENT visit
+         * passing while three other offices had not read a page. Left as it was,
+         * that issues the permits.
          *
-         * Same predicate the scheduler uses, from the model, for the reason
-         * written on it there.
+         * isFullyCleared() is both halves and the only statement of them. The
+         * CURRENT-visits-only part of the old test lives on inside it, for the
+         * reason it was written: the failed row stays on the filing for good, so
+         * asking the whole set would let a kept failure veto the re-inspection
+         * that replaced it.
          */
-        $allPassed = $app->inspections()
-            ->currentPerDepartment()
-            ->get()
-            ->every(fn ($i) => $i->status === InspectionStatus::Completed
-                && $i->result?->progresses());
-        if ($allPassed) {
+        if ($this->isFullyCleared($app)) {
             $this->approveAndIssue($app);
         }
     }

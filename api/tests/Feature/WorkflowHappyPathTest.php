@@ -60,8 +60,21 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
             ->assertOk();
     }
 
-    // 6. All reviews done -> for_inspection; conduct each inspection (passed).
+    /*
+     * 6. For inspection, and it got there on the FIRST inspecting office's
+     * approval rather than the last review.
+     *
+     * The loop above no longer describes a phase. afterReviewProgress books
+     * each office's visit as that office signs off, so whichever of CHO and BFP
+     * approved first moved the filing here and the other joined it in place —
+     * six offices used to wait on the slowest, which is what the client hit
+     * ("when I approved a sanitary permit, why did it not automatically go to
+     * inspection?"). What the end of the loop still guarantees, and why this
+     * line is still exactly this line, is that every review is in AND every
+     * booked visit is outstanding: no permit may exist yet.
+     */
     expect(Application::find($appId)->status->value)->toBe('for_inspection');
+    expect(Permit::where('application_id', $appId)->count())->toBe(0);
     foreach (Inspection::where('application_id', $appId)->with('department')->get() as $inspection) {
         $officer = authAs($deptEmail[$inspection->department->code]);
         $this->withHeaders($officer)

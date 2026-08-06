@@ -743,6 +743,10 @@ function LinesStep({
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const box = useRef<HTMLDivElement>(null)
+  // The "Change" control below the box reopens the picker, so it needs to put
+  // the caret where the applicant is about to type. Opening the list without
+  // moving focus would leave a keyboard user staring at a list they are not in.
+  const search = useRef<HTMLInputElement>(null)
 
   /*
    * "Other (not listed)" is deliberately not offered.
@@ -838,10 +842,26 @@ function LinesStep({
    * Barely used in practice either: of 733 registered businesses, 728 declare
    * one line and 5 declare two.
    *
-   * `lines` stays an array so the payload, the API and `lines[0]` readers are
-   * untouched — it just never holds more than one now. Choosing a different
-   * trade replaces the current one rather than adding to it, and clearing is
-   * the Remove control below, which is the only place removal should live.
+   * ── The array is NOT the bug. Do not "fix" it. ──────────────────────────
+   *
+   * `lines` stays an array, and so do `business.lines` and the
+   * `business_lines` table — one row per PSIC code — because the paper form
+   * genuinely has a multi-line table and 5 of the 733 registered businesses
+   * really do declare two trades. It is only THIS WIZARD that is held to one,
+   * on the client's instruction ("for our zoning that will fuck it up"), and
+   * only because every reader on this step — the conformity verdict, the
+   * carried-over business block, the Location Insights lookup — takes
+   * `lines[0]` and ignores the rest.
+   *
+   * So the array is the data model being honest about the domain, not a
+   * leftover from the multi-select. Collapsing it to a single `psic_code_id`
+   * would break the payload, the API and the officer's review sheet in order
+   * to match a restriction that lives in one component's copy.
+   *
+   * Choosing a different trade replaces the current one rather than adding to
+   * it, and the Change / Clear controls below are the only way out of a
+   * choice — deliberately not called "Remove", which is the vocabulary of a
+   * list you are pruning.
    */
   function toggle(code: PsicCode) {
     const already = lines[0]?.psic_code_id === code.id
@@ -851,21 +871,38 @@ function LinesStep({
   }
 
   /*
-   * Named, not counted. "Selected (2)" confirms that something happened; it
-   * does not confirm that the RIGHT thing happened, and the two sari-sari rows
-   * in this list differ only by the words in their brackets.
+   * Named, never counted. A count is the multi-select's vocabulary: "Selected
+   * (1)" answers "how many?", which is a question this step does not ask and
+   * must not appear to. It also confirms nothing useful — the two sari-sari
+   * rows in this list differ only by the words in their brackets, so the only
+   * confirmation worth showing is the trade's name.
    */
+  const chosenCode = lines.length > 0 ? codes.find((c) => c.id === lines[0].psic_code_id) : undefined
   const selectedTitles = lines
     .map((l) => codes.find((c) => c.id === l.psic_code_id)?.title)
     .filter(Boolean)
     .join(', ')
+
+  /** Reopen the picker on the applicant's own terms, caret already in the box. */
+  function reopen() {
+    setQuery('')
+    setOpen(true)
+    search.current?.focus()
+  }
 
   return (
     <div className="space-y-4">
       {/* relative: the results hang over what follows instead of shoving it down. */}
       <div ref={box} className="relative">
         <label htmlFor="psic-search" className="block">
-          <FieldLabel required>Search your line of business</FieldLabel>
+          {/*
+            * "Search for the ONE line" — the instruction is in the field's own
+            * name, where it cannot be scrolled past, rather than only in help
+            * text above it. This is the label a screen reader announces when
+            * the applicant arrives in the box, so it is the last chance to say
+            * how many answers the question takes before they give one.
+            */}
+          <FieldLabel required>Search for the one line of business you are registering</FieldLabel>
         </label>
         <div className="relative">
           <SearchIcon
@@ -874,6 +911,7 @@ function LinesStep({
           />
           <input
             id="psic-search"
+            ref={search}
             role="combobox"
             aria-expanded={open}
             aria-controls="psic-results"
@@ -918,16 +956,23 @@ function LinesStep({
               * because it is part of it, and it needs no scrolling because it
               * is directly under the box being typed in.
               *
-              * The panel below keeps its job (removing a line, describing its
-              * products) and takes over the moment the list closes.
+              * The panel below takes over the moment the list closes.
+              *
+              * It reads "Your line of business is X" and NOT "Selected (1)":
+              * a running count is what a shopping basket says, and the only
+              * reason to print one is that the number can change. It cannot.
+              * Reopening this list to pick again is a correction, and the
+              * wording says so — "picking another replaces it" — so nobody
+              * arrives at a second trade expecting it to be added.
               */}
-            {lines.length > 0 && (
+            {chosenCode && (
               <p className="border-b border-line bg-royal-tint px-4 py-2.5 text-xs font-semibold text-royal">
                 <span className="mr-1.5 inline-flex h-4 w-4 translate-y-0.5 items-center justify-center rounded-sm bg-royal text-white">
                   <CheckIcon size={11} />
                 </span>
-                Selected ({lines.length}):{' '}
-                <span className="font-normal text-ink">{selectedTitles}</span>
+                Your line of business is{' '}
+                <span className="font-normal text-ink">{chosenCode.title}</span>
+                <span className="font-normal text-ink-secondary"> — picking another replaces it.</span>
               </p>
             )}
 
@@ -1024,15 +1069,41 @@ function LinesStep({
         * The same confirmation for somebody who cannot see the panel at all.
         * Always mounted, so the region exists before it has anything to say —
         * a live region created together with its text is frequently missed.
+        *
+        * Announced as a sentence, not as "Selected 1: X". A count read aloud
+        * is the strongest possible hint that a second answer is expected, and
+        * it is the hint a screen-reader user has least chance of correcting
+        * from the rest of the screen.
         */}
       <p aria-live="polite" className="sr-only">
-        {lines.length > 0 ? `Selected ${lines.length}: ${selectedTitles}` : 'No line of business selected'}
+        {lines.length > 0
+          ? `Your line of business is ${selectedTitles}`
+          : 'No line of business chosen yet'}
       </p>
 
       {lines.length > 0 && (
         <div className="rounded-lg border border-input-border bg-royal-tint p-4">
-          <p className="mb-3 text-sm font-bold text-ink">Selected ({lines.length})</p>
-          <div className="space-y-3">
+          {/*
+            * One answer, presented as one answer.
+            *
+            * This was a "Selected (1)" panel with a Remove link, which is the
+            * furniture of a list you are building: a count implies a number
+            * that can go up, and "Remove" implies something left behind when
+            * it does. The applicant reported exactly that reading — the step
+            * looked like it wanted more than one — while the picker had
+            * already been single-select for weeks.
+            *
+            * So it is headed like a field, not like a basket, and the way out
+            * is "Change" (pick a different trade) beside "Clear" (answer it
+            * later). Both stay: an applicant who has picked the wrong trade
+            * and an applicant who wants the box empty again are different
+            * people, and a step where the only escape is picking something
+            * else is a trap.
+            */}
+          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+            Your line of business
+          </p>
+          <div className="mt-2 space-y-3">
             {lines.map((line) => {
               const code = codes.find((c) => c.id === line.psic_code_id)
               /*
@@ -1041,7 +1112,7 @@ function LinesStep({
                * arrive holding one. Those keep their typed text, shown as the
                * line's name and no longer editable, because the answer cannot
                * be improved in place: what it needs is a real PSIC code, which
-               * means removing the row and picking one.
+               * means changing it for one off the list.
                */
               const isOther = code?.code === OTHER_PSIC_CODE
               const needsText = isOther && !line.line_of_business.trim()
@@ -1068,21 +1139,58 @@ function LinesStep({
                             {line.line_of_business.trim() || 'Unclassified line'}
                           </p>
                           <p className="mt-0.5 text-xs text-s-red">
-                            Not on the PSIC list, so this line cannot be assessed. Remove it and
-                            search for the closest trade.
+                            Not on the PSIC list, so this line cannot be assessed. Change it for the
+                            closest trade on the list.
                           </p>
                         </div>
                       ) : (
-                        <p className="truncate text-sm text-ink">{code?.title}</p>
+                        <div>
+                          <p className="truncate text-sm font-semibold text-ink">{code?.title}</p>
+                          <p className="tnum mt-0.5 text-xs text-ink-secondary">
+                            PSIC {code?.code}
+                          </p>
+                        </div>
                       )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onChange(lines.filter((l) => l.psic_code_id !== line.psic_code_id))}
-                      className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2"
-                    >
-                      Remove
-                    </button>
+                    {/*
+                      * Royal and ink, never #bd0000.
+                      *
+                      * "Remove" used to be in the error red, and the clearance
+                      * card had to be un-reddened for the same reason
+                      * (checklist item 107 — "This should not look like a
+                      * warning message"). DESIGN.md keeps #bd0000 for errors
+                      * and destructive actions; changing your mind about a
+                      * trade before the filing is even submitted is neither.
+                      * Painting it red tells an applicant they have done
+                      * something wrong at the exact moment they are trying to
+                      * put something right.
+                      *
+                      * Change leads, because correcting the trade is the far
+                      * likelier intent and it keeps the step answered. The
+                      * accessible names carry the noun the visible words leave
+                      * to context, and both start with the visible word so the
+                      * name still contains the label (WCAG 2.1 AA 2.5.3).
+                      */}
+                    <div className="flex shrink-0 items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={reopen}
+                        aria-label="Change line of business"
+                        className="text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                      >
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onChange(lines.filter((l) => l.psic_code_id !== line.psic_code_id))
+                        }
+                        aria-label="Clear line of business"
+                        className="text-sm text-ink-secondary underline underline-offset-2 hover:text-ink"
+                      >
+                        Clear
+                      </button>
+                    </div>
                   </div>
                   {needsText && (
                     <p className="mt-1 text-xs font-medium text-s-red">
@@ -1109,6 +1217,21 @@ function LinesStep({
               )
             })}
           </div>
+          {/*
+            * A filing carried over from before the picker was held to one can
+            * still arrive with two rows — the renewal path rebuilds `lines`
+            * from the previous filing's `business.lines`, which is a real
+            * multi-row table. The panel above is headed in the singular, so
+            * two rows under it would read as a rendering fault rather than as
+            * history. Named rather than hidden, and it says what will happen
+            * to the extras the moment the applicant touches the picker.
+            */}
+          {lines.length > 1 && (
+            <p className="mt-3 text-xs text-ink-secondary">
+              Carried over from an earlier filing, which declared {lines.length} lines. A filing
+              declares one now — picking a trade above replaces all of these with the one you pick.
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -4515,21 +4638,36 @@ export function ApplyWizard() {
             * survives in a <select>.
             *
             * Full width above the map rather than squeezed into the address
-            * column beside it — each selected line needs a title, a capital box
-            * and a Remove control on one row, and the picker's own search
-            * results are the widest thing on the step.
+            * column beside it — the chosen trade needs its title, its PSIC
+            * code and the Change / Clear controls on one row, and the picker's
+            * own search results are the widest thing on the step.
             */}
           <div className="mb-7 rounded-2xl bg-white px-5 py-5 shadow-card sm:px-6">
+            {/*
+              * Singular, and the helper text says the quantity out loud.
+              *
+              * It read "Add every line you trade in — each one is assessed
+              * separately", which was true of the multi-select and survived it
+              * by months. The client sent a screenshot: the step still "kinda
+              * say[s] hey you should be able to select more". Copy that
+              * contradicts the control is worse than no copy — the applicant
+              * believes the sentence and blames themselves for the control.
+              *
+              * The heading loses its plural too: "Line of Business", not
+              * "Lines". Keep both singular if this is ever reworded.
+              */}
             <FieldLabel required>Line of Business</FieldLabel>
             <p className="mb-3 text-xs text-ink-secondary">
-              What this location will be used for. Add every line you trade in — each one is
-              assessed separately.
+              What this location will be used for. Choose one trade — the zoning verdict is given
+              against a single line of business, so a filing declares one.
             </p>
             <LinesStep codes={psic} lines={form.lines} onChange={(lines) => update('lines', lines)} />
             {form.lines.length === 0 && (
               <p className="mt-2.5 text-xs font-medium text-s-red">
-                Required: choose at least one line of business. The zoning verdict is about a trade,
-                not a coordinate.
+                {/* "at least one" was the multi-select's phrasing and implied a
+                    minimum with no maximum. There is exactly one. */}
+                Required: choose your line of business. The zoning verdict is about a trade, not a
+                coordinate.
               </p>
             )}
           </div>

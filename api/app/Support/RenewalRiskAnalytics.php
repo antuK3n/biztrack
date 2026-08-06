@@ -44,6 +44,39 @@ use Illuminate\Support\Facades\DB;
  *    with no renewal filed owes nothing yet, so it scores `settled` on that rule
  *    and carries its risk on the progress rule instead. Scoring it twice would
  *    double-count one fact.
+ *
+ * WHICH SLICE YOU ARE LOOKING AT IS NOT A STATISTIC
+ *
+ * The watchlist is ranked worst first and cut at `limit`, which is right for a
+ * follow-up screen and wrong as the ONLY reachable state: this register scores
+ * 2,060 permits Low, and not one of them is in the leading 25, so the green
+ * badge the spec asks for could never be drawn. Raising `limit` does not fix
+ * that — it moves the cut further down the same ranking.
+ *
+ * So compute() takes a `$view`: a barangay, a band, an action, and an offset.
+ * Two different kinds of narrowing, and the difference is the whole reason the
+ * counts stay trustworthy:
+ *
+ *  - **Barangay is a POPULATION filter.** It is applied before scoring, so
+ *    `counts`, `scored_permits` and `actions` all describe the same set of
+ *    permits the table is drawn from. Ask for Tonsuya and every figure on the
+ *    screen is about Tonsuya.
+ *  - **Band and action are VIEW filters.** They are applied after the counting,
+ *    so the three summary cards keep describing every scored permit in the
+ *    population — which is what makes them the legend for this control. The
+ *    card says "Low risk 2,060"; pick Low and there are exactly 2,060 rows to
+ *    page through. The cards and the table cannot disagree, because the card IS
+ *    the row count.
+ *
+ * `matching` is that row count, and it is what the table's footer states. It is
+ * deliberately NOT `scored_permits`: one is "how many rows this filter has",
+ * the other is "how many permits the bands are out of", and conflating them is
+ * how a footer starts lying about a filtered table.
+ *
+ * An empty `$view` reproduces the previous behaviour exactly — same ranking,
+ * same slice, same keys — which is what lets the R engine keep serving the
+ * default screen unchanged. See AnalyticsController::renewalRisk() for why a
+ * filtered request is computed locally instead.
  */
 final class RenewalRiskAnalytics
 {
@@ -63,6 +96,29 @@ final class RenewalRiskAnalytics
 
     /** Rows in the "Businesses at Risk" table. */
     public const DEFAULT_LIMIT = 25;
+
+    /**
+     * The bands and actions a caller may filter on.
+     *
+     * Read from here rather than written out at the controller, so a rename in
+     * RenewalRiskScoring cannot leave a filter quietly accepting a value the
+     * scorer no longer produces — which would present as an always-empty table
+     * rather than as an error.
+     *
+     * Note that the action set is one-to-one with the band set: the action is a
+     * direct function of the band and not a second judgement (see
+     * RenewalRiskScoring::score()). Both filters exist because the client asked
+     * for both, and an officer who thinks in "who do I chase today" should not
+     * have to translate that into a band first. Combining them is allowed and
+     * is an intersection, so Moderate + Immediate follow-up is legitimately
+     * empty rather than an error.
+     *
+     * @var list<string>
+     */
+    public const BANDS = ['high', 'moderate', 'low'];
+
+    /** @var list<string> */
+    public const ACTIONS = ['immediate_follow_up', 'send_reminder', 'monitor'];
 
     /** Drivers shown per row before the rest are folded away. */
     private const DRIVERS_PER_ROW = 3;
@@ -167,11 +223,65 @@ final class RenewalRiskAnalytics
     }
 
     /**
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
      * @return array<string, mixed>
      */
-    public static function build(int $horizonDays = self::DEFAULT_HORIZON_DAYS, int $limit = self::DEFAULT_LIMIT): array
+    public static function build(
+        int $horizonDays = self::DEFAULT_HORIZON_DAYS,
+        int $limit = self::DEFAULT_LIMIT,
+        array $view = [],
+    ): array {
+        return self::compute(self::dataset($horizonDays, $limit), $view);
+    }
+
+    /**
+     * The barangays the filter may offer, for a given horizon.
+     *
+     * Read from the register rather than from the reference table, because the
+     * two answer different questions: `barangays` lists every barangay in
+     * Malabon, and this lists the ones with a permit on the watchlist. Offering
+     * a barangay that can only ever return an empty table is offering a broken
+     * control.
+     *
+     * Deliberately computed against the UNFILTERED window, so choosing a
+     * barangay does not collapse the menu to the one already chosen — a filter
+     * you cannot back out of is a filter that has trapped its reader.
+     *
+     * The shape is not arbitrary. Written the obvious way — one join from
+     * permits through businesses and addresses to barangays, DISTINCT on the
+     * name — this took 2.8 SECONDS on the seeded register, on every page load,
+     * to produce twenty-one strings. Narrowing to the business ids first and
+     * then asking the address table takes about fifteen milliseconds, because
+     * the second half is then a lookup over hundreds of rows instead of a
+     * distinct sort over a five-thousand-row join. Kept as a subquery rather
+     * than two round trips so a register with more businesses than SQLite will
+     * bind parameters for does not quietly stop working.
+     *
+     * @return list<string>
+     */
+    public static function barangaysInScope(int $horizonDays = self::DEFAULT_HORIZON_DAYS): array
     {
-        return self::compute(self::dataset($horizonDays, $limit));
+        $today = CarbonImmutable::now()->startOfDay();
+        $from = $today->subDays(self::LAPSED_GRACE_DAYS)->toDateString();
+        $to = $today->addDays($horizonDays)->toDateString();
+
+        $names = DB::table('business_addresses')
+            ->join('barangays', 'barangays.id', '=', 'business_addresses.barangay_id')
+            ->where('business_addresses.address_type', '=', 'business_location')
+            ->whereIn('business_addresses.business_id', static function ($query) use ($from, $to) {
+                $query->from('permits')
+                    ->join('businesses', 'businesses.id', '=', 'permits.business_id')
+                    ->whereNull('businesses.deleted_at')
+                    ->whereIn('permits.status', [PermitStatus::Active->value, PermitStatus::Expired->value])
+                    ->whereDate('permits.valid_until', '>=', $from)
+                    ->whereDate('permits.valid_until', '<=', $to)
+                    ->select('permits.business_id');
+            })
+            ->distinct()
+            ->orderBy('barangays.name')
+            ->pluck('barangays.name');
+
+        return array_values(array_map(static fn ($name): string => (string) $name, $names->all()));
     }
 
     /**
@@ -181,20 +291,39 @@ final class RenewalRiskAnalytics
      * numbers must agree — AnalyticsParityTest is what enforces that, and without
      * it the fallback would quietly become a second, divergent rule set.
      *
+     * The `$view` argument is NOT pushed to R and R is never asked for a
+     * filtered watchlist: `analytics:refresh` only ever sends the unfiltered
+     * variants in config/analytics.php, and a request carrying filters keys to
+     * a snapshot that cannot exist, so it lands here. That is the reason the
+     * two engines cannot drift over filtering — only one of them does any.
+     *
      * @param  array<string, mixed>  $dataset  as returned by dataset()
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
      * @return array<string, mixed>
      */
-    public static function compute(array $dataset): array
+    public static function compute(array $dataset, array $view = []): array
     {
         // Echoed, not re-parsed: see the note in ProcessingTimeAnalytics::compute().
         $now = (string) $dataset['now'];
         $limit = (int) $dataset['params']['limit'];
         $driversPerRow = (int) ($dataset['drivers_per_row'] ?? self::DRIVERS_PER_ROW);
+        $filters = self::normaliseView($view);
 
         $rows = [];
         $counts = ['high' => 0, 'moderate' => 0, 'low' => 0];
 
         foreach ($dataset['permits'] as $permit) {
+            /*
+             * The population filter, and the only one applied before the count.
+             * Everything downstream — counts, scored_permits, the action panel
+             * — therefore describes exactly the permits the table is drawn
+             * from. Move this below the counting and the summary cards start
+             * describing the whole city while the table shows one barangay.
+             */
+            if ($filters['barangay'] !== null && ($permit['barangay'] ?? null) !== $filters['barangay']) {
+                continue;
+            }
+
             $facts = [
                 'days_to_expiry' => (int) $permit['days_to_expiry'],
                 'renewal_stage' => (string) $permit['renewal_stage'],
@@ -238,7 +367,62 @@ final class RenewalRiskAnalytics
         // score are not equally urgent.
         usort($rows, static fn (array $a, array $b) => [$b['score'], $a['days_to_expiry']] <=> [$a['score'], $b['days_to_expiry']]);
 
-        return [
+        /*
+         * The view filters, applied after the counting. `$matching` is the
+         * length of the filtered list and is what the table's footer states —
+         * never `scored_permits`, which is the denominator the bands are out
+         * of and is a larger number the moment any band is selected.
+         */
+        $matching = $filters['band'] === null && $filters['action'] === null
+            ? $rows
+            : array_values(array_filter($rows, static fn (array $row): bool => (
+                ($filters['band'] === null || $row['band'] === $filters['band'])
+                && ($filters['action'] === null || $row['action'] === $filters['action'])
+            )));
+
+        $perPage = max(1, $limit);
+        $offset = self::pageStart($filters['offset'], count($matching), $perPage);
+
+        /*
+         * The three view fields are added ONLY when a view was actually asked
+         * for, and that is not tidiness — it is what keeps AnalyticsParityTest
+         * meaningful.
+         *
+         * That test compares this function's output against R's, key for key,
+         * over a shared fixture. R does no filtering and never will (it is only
+         * ever handed the whole watchlist), so emitting `filters`, `matching`
+         * and `offset` unconditionally makes the two schemas differ on every
+         * run and the parity check has to be loosened to accommodate keys it
+         * was written to catch. An unfiltered compute is therefore byte-for-key
+         * identical to R's, which is exactly the claim parity exists to make;
+         * a filtered one is a shape R was never asked to produce.
+         *
+         * AnalyticsController fills the same three in for an R-served payload,
+         * with the values that are true of an unfiltered result by definition.
+         */
+        $view = $filters['barangay'] !== null || $filters['band'] !== null
+            || $filters['action'] !== null || $filters['offset'] > 0
+            ? [
+                /*
+                 * What was actually applied, echoed rather than assumed.
+                 * Unknown band or action values are dropped instead of rejected
+                 * (a stray query string should not 500 a dashboard), and
+                 * dropping them silently would leave the screen labelled "Low
+                 * risk" over an unfiltered table. The echo is what makes the
+                 * leniency honest — the client renders these, not what it
+                 * asked for.
+                 */
+                'filters' => [
+                    'barangay' => $filters['barangay'],
+                    'band' => $filters['band'],
+                    'action' => $filters['action'],
+                ],
+                'matching' => count($matching),
+                'offset' => $offset,
+            ]
+            : [];
+
+        return $view + [
             'generated_at' => $now,
             'horizon_days' => (int) $dataset['params']['days'],
             'lapsed_grace_days' => (int) $dataset['lapsed_grace_days'],
@@ -247,7 +431,7 @@ final class RenewalRiskAnalytics
             'scored_permits' => count($rows),
             'counts' => $counts,
             'reminders_sent' => (int) $dataset['reminders_sent'],
-            'at_risk' => array_slice($rows, 0, max(1, $limit)),
+            'at_risk' => array_slice($matching, $offset, $perPage),
             'actions' => self::actionTotals($counts),
             'rulebook' => RenewalRiskScoring::rulebook(),
             'thresholds' => [
@@ -256,6 +440,54 @@ final class RenewalRiskAnalytics
             ],
             'methodology' => (string) ($dataset['methodology'] ?? self::METHODOLOGY),
         ];
+    }
+
+    /**
+     * A caller's `$view` reduced to the four things compute() acts on.
+     *
+     * Blank strings and the sentinel "all" both mean "no filter": the screen's
+     * selects carry an "All" option and posting its value must not be a
+     * barangay named "all". Unknown bands and actions are dropped for the
+     * reason given where `filters` is echoed.
+     *
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
+     * @return array{barangay: string|null, band: string|null, action: string|null, offset: int}
+     */
+    private static function normaliseView(array $view): array
+    {
+        $clean = static function (mixed $value): ?string {
+            $value = is_string($value) ? trim($value) : null;
+
+            return ($value === null || $value === '' || $value === 'all') ? null : $value;
+        };
+
+        $band = $clean($view['band'] ?? null);
+        $action = $clean($view['action'] ?? null);
+
+        return [
+            'barangay' => $clean($view['barangay'] ?? null),
+            'band' => in_array($band, self::BANDS, true) ? $band : null,
+            'action' => in_array($action, self::ACTIONS, true) ? $action : null,
+            'offset' => max(0, (int) ($view['offset'] ?? 0)),
+        ];
+    }
+
+    /**
+     * The first row of the page to return, snapped onto a page boundary.
+     *
+     * An offset past the end is not an error — it is what a reader who was on
+     * page four of High risk gets the moment they switch to Moderate, of which
+     * there are fewer. Returning nothing would read as "no moderate-risk
+     * permits", which is false, so the last populated page is returned
+     * instead and the footer's "showing 51–60 of 60" says where they landed.
+     */
+    private static function pageStart(int $offset, int $total, int $perPage): int
+    {
+        if ($total === 0 || $offset < $total) {
+            return $total === 0 ? 0 : $offset;
+        }
+
+        return intdiv($total - 1, $perPage) * $perPage;
     }
 
     /**
@@ -528,6 +760,14 @@ final class RenewalRiskAnalytics
      * says so rather than substituting a count of permits that were merely
      * eligible for a reminder.
      *
+     * The `manual_*` kinds an officer's Send Reminder button writes are NOT
+     * pooled in here, and that is a decision rather than an oversight. This
+     * figure's published definition (AnalyticsDefinitions, `reminders_sent`)
+     * names the scheduled buckets and says the count "reads zero until the
+     * nightly permit scan has run"; folding officer-initiated follow-ups into
+     * it would make that sentence false while leaving it on screen. They are
+     * surfaced beside it instead — see manualRemindersByPermit().
+     *
      * @param  list<int>  $permitIds
      * @return array<int, int>
      */
@@ -545,6 +785,108 @@ final class RenewalRiskAnalytics
         $out = [];
         foreach ($rows as $row) {
             $out[(int) $row->permit_id] = (int) $row->notices;
+        }
+
+        return $out;
+    }
+
+    /**
+     * The band one permit scores, or null if it is not on the watchlist at all.
+     *
+     * The Send Reminder button needs two answers about the permit under it —
+     * "may this be followed up?" and "how urgently?" — and they must not be
+     * able to disagree with the row the officer pressed. So both come from one
+     * pass through the same facts and the same scorer the table was drawn
+     * from. Restating the window as a second `where` clause on the controller
+     * was the alternative, and it is the shape where a permit the screen lists
+     * gets refused by the endpoint for a reason nobody can see.
+     *
+     * Null means "not in scope": wrong status, or an expiry outside the
+     * lapsed-grace-to-horizon window, or a closed business. Every one of those
+     * is a permit the screen does not show, so it is a permit with no button.
+     *
+     * This costs the five bulk queries a page load costs, which is why it is a
+     * POST-time call and not something to reach for in a loop.
+     */
+    public static function bandForPermit(int $permitId, int $horizonDays = self::DEFAULT_HORIZON_DAYS): ?string
+    {
+        foreach (self::dataset($horizonDays)['permits'] as $permit) {
+            if ((int) $permit['permit_id'] !== $permitId) {
+                continue;
+            }
+
+            return RenewalRiskScoring::score([
+                'days_to_expiry' => (int) $permit['days_to_expiry'],
+                'renewal_stage' => (string) $permit['renewal_stage'],
+                'prior_renewals' => (int) $permit['prior_renewals'],
+                'late_renewals' => (int) $permit['late_renewals'],
+                'open_findings' => (int) $permit['open_findings'],
+                'fee_state' => (string) $permit['fee_state'],
+            ])['band'];
+        }
+
+        return null;
+    }
+
+    /**
+     * The ledger kind an officer-initiated follow-up claims, one per permit per
+     * day.
+     *
+     * `permit_expiry_notices` carries a unique index on (permit_id,
+     * notice_kind) and the insert is the permission to send — that is the
+     * property ScanPermits is built on, and reusing it is what makes a manual
+     * send idempotent without a second mechanism or a migration. Putting the
+     * date IN the kind is what sets the grain:
+     *
+     *  - a bare `manual` would be one follow-up per permit FOREVER, so an
+     *    officer chasing the same business again next quarter would silently
+     *    send nothing;
+     *  - no ledger row at all would make a double-click two messages to a real
+     *    business owner.
+     *
+     * One a day is the answer to both. A second press the same day is refused
+     * by the database rather than by a flag in the browser, so it holds across
+     * two officers, two tabs and a replayed request.
+     */
+    public static function manualNoticeKind(?CarbonImmutable $day = null): string
+    {
+        return 'manual_'.($day ?? CarbonImmutable::now())->toDateString();
+    }
+
+    /**
+     * Officer-initiated follow-ups per permit: how many, and the last one.
+     *
+     * Read live at serve time rather than carried on the analytics snapshot,
+     * because the snapshot is a nightly statistic and this is the state of an
+     * action taken minutes ago. A "sent" mark read from last night's figures
+     * would tell an officer they had not contacted a business they contacted
+     * after breakfast — which is precisely the mistake the button exists to
+     * prevent.
+     *
+     * @param  list<int>  $permitIds
+     * @return array<int, array{count: int, last_at: string}>
+     */
+    public static function manualRemindersByPermit(array $permitIds): array
+    {
+        if ($permitIds === []) {
+            return [];
+        }
+
+        $rows = DB::table('permit_expiry_notices')
+            ->whereIn('permit_id', $permitIds)
+            // `_` is a single-character wildcard here rather than a literal, the
+            // same slight looseness `threshold_%` above already carries. No other
+            // kind begins "manual", so the pattern selects exactly this ledger.
+            ->where('notice_kind', 'like', 'manual_%')
+            ->groupBy('permit_id')
+            ->get(['permit_id', DB::raw('count(*) as sends'), DB::raw('max(created_at) as last_at')]);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $out[(int) $row->permit_id] = [
+                'count' => (int) $row->sends,
+                'last_at' => CarbonImmutable::parse($row->last_at)->toISOString(),
+            ];
         }
 
         return $out;

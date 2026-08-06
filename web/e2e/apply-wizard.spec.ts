@@ -163,7 +163,7 @@ test('line of business is asked once, and the one ask is the searchable picker',
 
   // Search is the thing a <select> cannot do, and it is why this is the
   // control that was kept.
-  const search = page.getByLabel(/search your line of business/i)
+  const search = page.getByLabel(/search for the one line of business/i)
   await expect(search).toBeVisible()
 
   /*
@@ -208,7 +208,7 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
 
-  const search = page.getByLabel(/search your line of business/i)
+  const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
   await search.fill('sari-sari')
   // The footer names the query it counted, so waiting on it is waiting for the
@@ -238,11 +238,18 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
    * What is still asserted is the thing item 104a was about: at the moment of
    * the click, the applicant can SEE which trade they picked, named rather
    * than counted. Two rows in this list differ only by the words in their
-   * brackets, so "Selected (1)" alone confirms nothing.
+   * brackets, so a count alone confirms nothing.
+   *
+   * The panel used to be headed "Selected (1)" and this test matched on that
+   * string. The heading is now "Your line of business", because a running
+   * count is the vocabulary of a list you are adding to and the client read it
+   * as exactly that. The assertion is the same one — the confirmation is
+   * visible, on top, and names the trade — against the wording that replaced
+   * it, and the count is now something the test forbids rather than expects.
    */
   await expect(results).toBeHidden()
 
-  const confirmation = page.getByText(/^Selected \(1\)/)
+  const confirmation = page.getByText(/^Your line of business$/)
   await expect(confirmation).toBeVisible()
   await expect(page.getByText(trade, { exact: false }).first()).toBeVisible()
 
@@ -254,11 +261,246 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
     const el = document.elementFromPoint(b!.x + 8, b!.y + b!.height / 2)
     return el?.textContent?.trim() ?? null
   }, box)
-  expect(onTop, 'something is covering the selection confirmation').toContain('Selected (1)')
+  expect(onTop, 'something is covering the selection confirmation').toContain(
+    'Your line of business',
+  )
 
-  // And the same fact for somebody who cannot see it at all.
-  const announced = page.locator('[aria-live="polite"]', { hasText: /^Selected 1:/ })
+  // And the same fact for somebody who cannot see it at all — a sentence, not
+  // "Selected 1", which read aloud is a strong hint that a second is expected.
+  const announced = page.locator('[aria-live="polite"]', { hasText: /^Your line of business is / })
   await expect(announced).toHaveCount(1)
+})
+
+test('the line of business step reads as one choice, and changing it is not an error', async ({
+  page,
+}) => {
+  /*
+   * The client, with a screenshot: "even though we made this to be just 1, the
+   * checklist still kinda say that hey you should be able to select more".
+   *
+   * The behaviour had been single-select for weeks — picking a second trade
+   * replaces the first — but the copy and the layout never caught up. The step
+   * still said "Add every line you trade in — each one is assessed
+   * separately", still counted the answer in a "Selected (1)" panel, and still
+   * offered "Remove" in the error red. Every one of those is a promise the
+   * control does not keep, and copy that contradicts a control loses: the
+   * applicant believes the sentence and blames themselves for the control.
+   *
+   * Three separate things are held here, because they failed separately:
+   * the words, the styling of the way out, and the radio semantics underneath.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  // 1. Nothing on the step invites a second trade.
+  await expect(page.getByText(/add every line you trade in/i)).toHaveCount(0)
+  await expect(page.getByText(/each one is assessed separately/i)).toHaveCount(0)
+  await expect(page.getByText(/at least one line of business/i)).toHaveCount(0)
+
+  const search = page.getByLabel(/search for the one line of business/i)
+  await search.click()
+  await search.fill('sari-sari')
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+
+  /*
+   * 2. The radio semantics are load-bearing and stay. They are the only thing
+   * telling a screen-reader user that this is one-of-many rather than a pile
+   * of independent checkboxes, and they are easy to lose in a copy rewrite —
+   * which is what this test is guarding against.
+   */
+  const group = page.locator('#psic-results')
+  await expect(group).toHaveAttribute('role', 'radiogroup')
+  await expect(group).toHaveAttribute('aria-label', /line of business/i)
+  const rows = group.getByRole('radio')
+  expect(await rows.count()).toBeGreaterThan(0)
+  await expect(rows.first()).toHaveAttribute('aria-checked', 'false')
+  const trade = ((await rows.first().textContent()) ?? '').replace(/PSIC\s*\d+$/, '').trim()
+  await rows.first().click()
+  await expect(group).toBeHidden()
+  await expect(page.getByText(trade, { exact: false }).first()).toBeVisible()
+
+  /*
+   * 3. Changing your mind is not an error. "Remove" was #bd0000, which
+   * DESIGN.md reserves for errors and destructive actions; the clearance card
+   * had to be un-reddened for the same reason (checklist item 107 — "This
+   * should not look like a warning message or something"). The escape hatch
+   * survives, in ink and royal, under words that describe a correction.
+   */
+  const change = page.getByRole('button', { name: /^change line of business$/i })
+  const clear = page.getByRole('button', { name: /^clear line of business$/i })
+  await expect(change).toBeVisible()
+  await expect(clear).toBeVisible()
+  await expect(page.getByRole('button', { name: /^remove$/i })).toHaveCount(0)
+
+  for (const control of [change, clear]) {
+    const colour = await control.evaluate((el) => getComputedStyle(el).color)
+    // #bd0000 and its neighbours. Parsed rather than string-matched so a
+    // different-but-still-red token cannot slip through.
+    const [r, g, b] = (colour.match(/\d+/g) ?? []).map(Number)
+    expect(
+      r > 120 && g < 80 && b < 80,
+      `a way out of a choice is painted error red (${colour})`,
+    ).toBe(false)
+  }
+
+  // Change puts the applicant back in the picker rather than emptying the
+  // answer, and Clear is still there for somebody who wants the box empty.
+  await change.click()
+  await expect(page.locator('#psic-results')).toBeVisible()
+  await expect(search).toBeFocused()
+  await page.keyboard.press('Escape')
+  await clear.click()
+  await expect(page.getByText(/^Your line of business$/)).toHaveCount(0)
+  await expect(page.getByText(/required: choose your line of business/i)).toBeVisible()
+})
+
+/*
+ * The 30 Revenue Code category slugs the applicant is offered, pinned.
+ *
+ * These are not labels and they are not free to change. FeeCalculator::matches()
+ * (api/app/Services/FeeCalculator.php) does an `array_intersect` of a fee rule's
+ * `business_category` against the stored string, and 35 of the 36 business-tax
+ * rules turn on it. A slug that drifts matches no rule, and nothing complains:
+ * the applicant gets a Tax Order of Payment that is quietly too small and the
+ * city loses the tax. That failure is invisible to `tsc`, invisible on screen
+ * and invisible in the API suite, which is why it is nailed down here.
+ *
+ * Rewording a LABEL is fine and needs no change to this list. Adding a category
+ * means adding its slug here and to the API's fee rules together.
+ */
+const REVENUE_CODE_SLUGS = [
+  'retailer',
+  'essential_retailer',
+  'wholesaler',
+  'carinderia',
+  'restaurant',
+  'cafe_cafeteria',
+  'fastfood_chain',
+  'food_peddler',
+  'manufacturer',
+  'small_scale_manufacturing',
+  'contractor',
+  'service_establishment',
+  'franchise_holder',
+  'gasoline_station',
+  'water_refilling_station',
+  'internet_cafe',
+  'barber_shop',
+  'tailor_dress_shop',
+  'laundry_dry_cleaning',
+  'vulcanizing_shop',
+  'vehicle_repair_shop',
+  'junkshop',
+  'lessor',
+  'hotel',
+  'pawnshop',
+  'bank',
+  'private_hospital',
+  'medical_clinic',
+  'dental_clinic',
+  'printing_publication',
+]
+
+test('the Revenue Code category shows words and stores the slug the fee engine matches on', async ({
+  page,
+}) => {
+  /*
+   * The client: "revenue code categoery, is still lower case lol."
+   *
+   * The datalist offered raw API slugs — `tailor_dress_shop`,
+   * `water_refilling_station` — so the applicant was shown one and, on picking
+   * it, got it verbatim in the box. The obvious fix is the option's `label`
+   * attribute, and it does not work: Chromium renders a datalist row that has
+   * a label as two lines, the value ABOVE the label, so the slug stays on
+   * screen (measured — see the comment on the datalist in FeeProfileStep.tsx).
+   * Firefox does substitute the label, which is what makes the attribute look
+   * like the answer.
+   *
+   * So the words are the option's VALUE, and the slug is recovered from them
+   * by normalizeCategory on the way into the draft. That trade is only safe if
+   * the recovery is exact, which is what this test is for. It runs against the
+   * module itself rather than the rendered step: the category box lives on
+   * part 5 of 7 behind a map pin, and a test that has to fill four steps to
+   * reach an assertion fails for four reasons that are not the assertion.
+   *
+   * The dev server transforms the .tsx on request, so the browser can import
+   * it directly. The specifier is a variable so that `tsc` does not try to
+   * resolve a server path against the filesystem.
+   */
+  const spec = '/src/pages/applicant/FeeProfileStep.tsx'
+  const found = await page.evaluate(async (path) => {
+    const mod = (await import(/* @vite-ignore */ path)) as {
+      FEE_CATEGORIES: { slug: string; label: string }[]
+      EMPTY_FEE_PROFILE: Record<string, unknown>
+      normalizeCategory: (text: string) => string
+      buildFeeProfile: (
+        draft: unknown,
+        opts: { applicationType: string; permitCodes: string[]; lineIds: number[] },
+      ) => { lines?: { category: string }[] }
+    }
+    const { FEE_CATEGORIES, EMPTY_FEE_PROFILE, normalizeCategory, buildFeeProfile } = mod
+
+    // What the payload actually carries when the applicant takes each offered
+    // row: the label goes into the box, so the label is what is normalised.
+    const stored = FEE_CATEGORIES.map((c) => {
+      const draft = {
+        ...EMPTY_FEE_PROFILE,
+        categories: { 7: { category: normalizeCategory(c.label), gross_sales: '', capitalization: '' } },
+      }
+      const profile = buildFeeProfile(draft, {
+        applicationType: 'new',
+        permitCodes: ['BUSINESS'],
+        lineIds: [7],
+      })
+
+      return profile.lines?.[0]?.category ?? null
+    })
+
+    return {
+      labels: FEE_CATEGORIES.map((c) => c.label),
+      slugs: FEE_CATEGORIES.map((c) => c.slug),
+      stored,
+      // A trade that is not on the list — the field is free text on purpose,
+      // because the Revenue Code has 273 categories and 30 are offered here.
+      freeTyped: normalizeCategory('Sari-sari store'),
+      accented: normalizeCategory('Piña colada bar'),
+      // Idempotent, because buildFeeProfile normalises again at the boundary
+      // and a draft saved before this change already holds a slug.
+      alreadySlug: normalizeCategory('tailor_dress_shop'),
+      messy: normalizeCategory('  Tailor  /  Dress   Shop  '),
+    }
+  }, spec)
+
+  // 1. The offered slugs are still exactly the ones the fee rules match on.
+  expect(found.slugs).toEqual(REVENUE_CODE_SLUGS)
+
+  /*
+   * 2. And picking any of them stores the slug, not the words. This is the
+   * assertion the whole change hangs on: get it wrong and the box looks nicer
+   * while the business tax silently stops being assessed.
+   */
+  expect(found.stored).toEqual(REVENUE_CODE_SLUGS)
+
+  // 3. What the applicant is offered is readable. No underscores anywhere, and
+  // the words are the ones a shop owner would use for the trade.
+  for (const label of found.labels) {
+    expect(label, `“${label}” still reads like a slug`).not.toMatch(/_/)
+    expect(label, `“${label}” is not capitalised like a name`).toMatch(/^[A-Z]/)
+  }
+  expect(found.labels).toContain('Tailor / dress shop')
+  expect(found.labels).toContain('Water refilling station')
+
+  /*
+   * 4. And a trade the applicant typed themselves survives. Turning
+   * "Sari-sari store" into `sari_sari_store` is the intended outcome — the
+   * officer reads it either way — but losing it, or dropping the ñ out of a
+   * name, would be the normalisation doing harm to answer nobody offered.
+   */
+  expect(found.freeTyped).toBe('sari_sari_store')
+  expect(found.accented).toBe('piña_colada_bar')
+  expect(found.alreadySlug).toBe('tailor_dress_shop')
+  expect(found.messy).toBe('tailor_dress_shop')
 })
 
 test('every line of business is reachable, and the count is stated', async ({ page }) => {
@@ -293,7 +535,7 @@ test('every line of business is reachable, and the count is stated', async ({ pa
   })
   expect(total).toBeGreaterThan(100)
 
-  const search = page.getByLabel(/search your line of business/i)
+  const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
   const results = page.locator('#psic-results')
 
@@ -407,7 +649,7 @@ async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
 
-  const search = page.getByLabel(/search your line of business/i)
+  const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
   await search.fill('sari-sari')
   /*

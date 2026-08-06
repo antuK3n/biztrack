@@ -46,7 +46,15 @@ import { useAuth } from '../../stores/auth'
  * what catches that.
  */
 const TABS = [
-  { to: '/staff/analytics', label: 'Overview', end: true, permission: 'analytics.view' },
+  /*
+   * "Analytics Dashboard", not "Overview" — the paper's §1 name, and the h1
+   * this tab leads to. It was the last short label on the strip: the other two
+   * became "Renewal Risk Prediction" and "Business Growth Analysis" when the
+   * client asked for the paper's terms, and leaving this one as "Overview"
+   * meant the strip named three screens in two vocabularies, one of which
+   * appears nowhere in the spec.
+   */
+  { to: '/staff/analytics', label: 'Analytics Dashboard', end: true, permission: 'analytics.view' },
   {
     to: '/staff/analytics/renewal-risk',
     // The paper's §2 name in full, matching the screen's own h1 and the label

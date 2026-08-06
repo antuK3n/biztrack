@@ -201,6 +201,175 @@ test.describe('the three BPLO analytics screens', () => {
     await expect(page.getByText(/\/\s*100/).first()).toBeVisible()
   })
 
+  /*
+   * ── The three things the client asked this screen to grow ──────────────────
+   *
+   * "Add filter by barangay, risk level, and action", "it should also display
+   * other levels of risk", and "the table should have its own scroll down
+   * button, for it not to expand the whole page".
+   *
+   * The first two are one failure, and it is worth being precise about it: the
+   * endpoint returns the leading rows BY SCORE, and this register scores over
+   * two thousand permits Low without one of them reaching the top 25. So the
+   * green badge the spec asks for was not merely rare, it was UNREACHABLE — no
+   * page size and no scrolling could have shown it, and only a filter applied
+   * before the ranking is cut can. That is why the test below asserts on the
+   * badge rather than on the select having moved.
+   *
+   * The send itself is not pressed here. It puts a real notification in a real
+   * business owner's list and writes a ledger row that would then make a rerun
+   * assert something different, so delivery, the audit row and the refusal to
+   * send twice are pinned server-side in RenewalRiskFollowUpTest. What has to
+   * hold in the browser is that the control is reachable, operable and
+   * distinguishable, which is what is checked.
+   */
+
+  /** Set one of the Renewal Risk filter menu's selects and wait for the refetch. */
+  async function setRiskFilter(
+    page: import('@playwright/test').Page,
+    label: string,
+    option: string,
+  ) {
+    await page.getByRole('button', { name: 'Filter renewal risk' }).click()
+    const panel = page.getByRole('dialog', { name: 'Filter renewal risk' })
+    await panel.getByLabel(label).selectOption({ label: option })
+    // The panel is a click-outside dismissal, so it stays open while the fetch
+    // runs; closing it is what puts the table back under the pointer.
+    await page.getByRole('button', { name: 'Close filter' }).click()
+  }
+
+  test('the risk level filter reaches rows the ranking alone never shows', async ({ page }) => {
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    const table = page.getByRole('region', { name: /businesses requiring review/i })
+
+    // The default is worst-first, which is right for a follow-up screen: the
+    // top of an unfiltered watchlist is High risk and nothing else.
+    await expect(table.getByText('High risk').first()).toBeVisible()
+
+    await setRiskFilter(page, 'Risk level', 'Low risk')
+
+    /*
+     * The badge states its level in text (DESIGN.md, Never Color Alone), so
+     * this asserts the words rather than the colour — and it is the same
+     * assertion a colour-blind officer's reading depends on.
+     */
+    await expect(table.getByText('Low risk').first()).toBeVisible({ timeout: 30_000 })
+    await expect(table.getByText('High risk')).toHaveCount(0)
+
+    // The summary cards keep describing every scored permit, not the page, so
+    // the count on the Low card is the size of the set just filtered to.
+    await expect(page.getByText(/showing 1–\d+ of [\d,]+/i)).toBeVisible()
+  })
+
+  test('the action filter is offered for all three recommended actions', async ({ page }) => {
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    await page.getByRole('button', { name: 'Filter renewal risk' }).click()
+    const panel = page.getByRole('dialog', { name: 'Filter renewal risk' })
+
+    // Every filter the client named, each a labelled select rather than an
+    // unnamed glyph — a control you cannot name is a control a screen-reader
+    // user cannot operate.
+    for (const label of ['Window', 'Barangay', 'Risk level', 'Recommended action', 'Rows per page']) {
+      await expect(panel.getByLabel(label)).toBeVisible()
+    }
+
+    const actions = panel.getByLabel('Recommended action')
+    for (const option of ['Immediate follow-up', 'Send reminder', 'Monitor']) {
+      await expect(actions.getByRole('option', { name: option })).toHaveCount(1)
+    }
+
+    // And barangay is a real list off the register, not a placeholder.
+    const barangays = await panel.getByLabel('Barangay').getByRole('option').count()
+    expect(barangays, 'the barangay filter offers nothing to filter by').toBeGreaterThan(1)
+  })
+
+  test('the table scrolls itself, and a keyboard can scroll it', async ({ page }) => {
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    const table = page.getByRole('region', { name: /businesses requiring review/i })
+    await expect(table).toBeVisible()
+
+    /*
+     * A scrollable box that is not focusable cannot be scrolled from the
+     * keyboard at all — the arrow keys act on the page behind it — so an
+     * officer working without a mouse would simply never reach the rows below
+     * the fold. tabindex="0" plus a name is the whole fix, and it is invisible
+     * unless something asserts it.
+     */
+    await expect(table).toHaveAttribute('tabindex', '0')
+    await table.focus()
+    await expect(table).toBeFocused()
+
+    // It is bounded, which is the client's actual complaint: the page must not
+    // grow with the row count.
+    const box = await table.boundingBox()
+    expect(box, 'the table has no box').not.toBeNull()
+    expect(box!.height, 'the table is not capped, so the page grows with it').toBeLessThan(700)
+
+    const scrolled = await table.evaluate((el) => {
+      const before = el.scrollTop
+      el.scrollTop = 200
+      return { before, after: el.scrollTop }
+    })
+    expect(scrolled.after, 'the region does not scroll its own content').toBeGreaterThan(
+      scrolled.before,
+    )
+
+    // The header has to survive the scroll, or a column of numbers thirty rows
+    // down is a column of numbers with no name.
+    await expect(page.locator('th[aria-label="Risk index"]')).toBeInViewport()
+  })
+
+  test('a follow-up button names the business it would contact', async ({ page }) => {
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    const table = page.getByRole('region', { name: /businesses requiring review/i })
+    const buttons = table.getByRole('button', { name: /notify .+ about permit/i })
+
+    await expect(buttons.first()).toBeVisible()
+
+    /*
+     * The names must differ. A business commonly holds its business, sanitary
+     * and fire permits with the same expiry, so a name built from the business
+     * alone announces three identical buttons in three adjacent rows — the same
+     * fault this screen already fixed once for the "Why" disclosures.
+     */
+    const names = await buttons.evaluateAll((els) =>
+      els.map((el) => el.getAttribute('aria-label') ?? ''),
+    )
+    expect(names.length).toBeGreaterThan(1)
+    expect(new Set(names).size, `repeated button names: ${names.join(' | ')}`).toBe(names.length)
+
+    // Reachable and operable, not a decoration. `disabled` would drop it out of
+    // the tab order (DESIGN.md); this asserts it did not.
+    await expect(buttons.first()).toHaveAttribute('aria-disabled', 'false')
+    await expect(buttons.first()).toHaveAttribute('aria-describedby', /reminder-note/)
+  })
+
+  test('the screen does not scroll sideways on a 390px phone', async ({ page }) => {
+    /*
+     * The growth screen learned this one the hard way: an `sr-only` table left
+     * the whole page scrolling horizontally. Here the risk is the same table,
+     * six columns wide — which is why the horizontal overflow is INSIDE the
+     * scroll region rather than on the document.
+     */
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/staff/analytics/renewal-risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    // A pixel or two is sub-pixel rounding; a column's worth is a bug.
+    expect(overflow, 'the page scrolls sideways at 390px').toBeLessThanOrEqual(2)
+  })
+
   test('every BPLO analytics screen states where its numbers came from', async ({ page }) => {
     for (const screen of BPLO_SCREENS) {
       await page.goto(screen.path)
@@ -241,7 +410,16 @@ test.describe('the three BPLO analytics screens', () => {
         path: '/staff/analytics/business-growth',
         heading: /business growth analysis/i,
       },
-      { label: 'Overview', path: '/staff/analytics', heading: /analytics dashboard/i },
+      {
+        // Renamed from "Overview" for the same reason "Lifecycle" was renamed:
+        // the paper's §1 term, and the h1 this tab actually leads to. It was
+        // the last short label on a strip whose other two carry their full
+        // names. The heading regex did not have to change, which is the tell
+        // that the label had drifted from the screen rather than the reverse.
+        label: 'Analytics Dashboard',
+        path: '/staff/analytics',
+        heading: /analytics dashboard/i,
+      },
     ]
 
     await page.goto('/staff/analytics')
@@ -253,8 +431,11 @@ test.describe('the three BPLO analytics screens', () => {
       page.getByRole('link', { name: 'Processing Time', exact: true }),
       'BPLO was offered the super admin’s tab',
     ).toHaveCount(0)
-    // And the old label is gone with it.
+    // And the old labels are gone with it. Both renames were the same fix —
+    // the tab and the screen it leads to have to be called the same thing —
+    // so a half-applied one leaves the short label sitting beside the long ones.
     await expect(page.getByRole('link', { name: 'Lifecycle', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: 'Overview', exact: true })).toHaveCount(0)
 
     for (const tab of TABS) {
       await page.getByRole('link', { name: tab.label, exact: true }).first().click()

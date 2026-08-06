@@ -1224,9 +1224,32 @@ export interface RenewalRiskRow {
   action_label: string
   renewal_stage: string
   renewal_tracking_id: string | null
+  /**
+   * Scheduled expiry notices only — the nightly scan's reminders and the
+   * renewal-due nudge. Officer-initiated follow-ups are deliberately not pooled
+   * in; see `manual_reminders`.
+   */
   reminders_sent: number
+  /** Follow-ups an officer sent from this screen. At most one per day. */
+  manual_reminders: number
+  /** When the last one went, ISO-8601. Null when none has. */
+  manual_reminder_at: string | null
   /** Only the rules that cost points, heaviest first. */
   drivers: RiskDriver[]
+}
+
+/**
+ * What the server actually filtered on — its answer, not the request.
+ *
+ * Rendered rather than the state the selects hold, because the two can differ:
+ * an unknown band is dropped server-side rather than rejected, and a screen
+ * that labelled an unfiltered table with the filter it failed to apply would be
+ * worse than one that had 500'd.
+ */
+export interface RenewalRiskFilters {
+  barangay: string | null
+  band: RiskBand | null
+  action: RiskAction | null
 }
 
 export interface RenewalRiskReport {
@@ -1235,16 +1258,45 @@ export interface RenewalRiskReport {
   lapsed_grace_days: number
   window_start: string
   window_end: string
+  /**
+   * Every permit scored in the window. The denominator the three band counts
+   * are out of — NOT the number of rows the current filter has, which is
+   * `matching`. Conflating the two is how a table footer starts lying.
+   */
   scored_permits: number
   counts: Record<RiskBand, number>
-  /** Real sends from the expiry-notice ledger, not an estimate. */
+  /**
+   * Real sends from the expiry-notice ledger, not an estimate. Scheduled
+   * notices only — see `RenewalRiskRow.reminders_sent`.
+   */
   reminders_sent: number
+  /** Rows the current filter has, of which `at_risk` is one page. */
+  matching: number
+  /** Where that page starts. */
+  offset: number
+  filters: RenewalRiskFilters
+  /** The barangays the filter may offer: those with a permit in the window. */
+  barangays: string[]
   at_risk: RenewalRiskRow[]
   actions: { action: RiskAction; label: string; band: RiskBand; count: number }[]
   rulebook: RiskRule[]
   thresholds: { high: number; moderate: number }
   /** The honesty statement. Rendered verbatim; never paraphrased on screen. */
   methodology: string
+}
+
+/**
+ * What came back from pressing Send reminder.
+ *
+ * `already_sent` is a success, not a failure: the officer's intent — this owner
+ * should have been told — is satisfied either way, and what they need to know
+ * is when it happened rather than that their press did nothing.
+ */
+export interface RenewalReminderResult {
+  permit_id: number
+  already_sent: boolean
+  sent_at: string | null
+  message: string
 }
 
 /*

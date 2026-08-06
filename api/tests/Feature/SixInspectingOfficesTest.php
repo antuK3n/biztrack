@@ -16,8 +16,9 @@ use App\Models\User;
  * BUSINESS. That is one flag, but it is really a pair of facts that have to
  * agree, and for a long time they did not:
  *
- *   1. the workflow books a visit per inspecting office, so a filing carrying
- *      all six clearances gets SIX inspections, not the two it used to; and
+ *   1. the workflow books a visit per inspecting office — one each, at the
+ *      moment that office approves its own review — so a filing carrying all
+ *      six clearances gets SIX inspections, not the two it used to; and
  *   2. somebody in each of those six offices has to be able to close one.
  *
  * (2) is the half that had been missing. `inspection.manage` was on
@@ -25,8 +26,8 @@ use App\Models\User;
  * is behind it, so OBO, CENRO, CPDO and the Market Office could not even see a
  * visit booked against their own office — the client's report, verbatim: "OBO,
  * CENRO, Market, and Zoning admins cannot approve inspection. Only Sanitary and
- * Fire has it." Because WorkflowService::recordInspection issues only once
- * EVERY inspection on the file has passed, turning the flag on without the
+ * Fire has it." Because WorkflowService issues only once every review is
+ * complete AND every current visit has passed, turning the flag on without the
  * permission would not have improved anything; it would have parked every
  * clearance filing in `for_inspection` with nobody but the super admin able to
  * move it.
@@ -48,6 +49,12 @@ const OFFICE_INSPECTOR = [
  * A paid filing asking for the business permit and all six clearances, with
  * every office assignment approved — so the workflow has booked its visits and
  * the filing is waiting on them.
+ *
+ * Each visit was booked by its own office's sign-off, in the order the loop
+ * happens to take them, not in one batch at the end. Approving all seven here
+ * is what makes the fixture SETTLED rather than what triggers the booking: with
+ * every review in, the only thing between this filing and its permits is the
+ * six site visits, which is the state each case below wants to start from.
  */
 function filingWithEveryClearance(): Application
 {
@@ -159,9 +166,11 @@ it('holds the filing until the last of the six visits passes', function () {
 
     /*
      * The point of the six is that they are six. Five passes must issue
-     * nothing — recordInspection releases the permits only when no inspection
-     * on the file is still outstanding, and an off-by-one there would hand an
-     * applicant a Mayor's Permit while an office was still on its way out.
+     * nothing — recordInspection releases the permits only when no CURRENT
+     * inspection on the file is still outstanding (and, since visits are booked
+     * per office as each review lands, only when every review is in too), and
+     * an off-by-one there would hand an applicant a Mayor's Permit while an
+     * office was still on its way out.
      */
     foreach ($inspections->slice(0, 5) as $inspection) {
         authAs(OFFICE_INSPECTOR[$inspection->department->code]);
