@@ -27,6 +27,7 @@ import type {
   FeeAssessment,
   FeeLineItem,
   FeeProfile,
+  HeldClearance,
   Inspection,
   InspectionResult,
   Message,
@@ -606,6 +607,19 @@ export const permits = {
   /** Same list, keeping the page meta. */
   page: (params: PageParams = {}) => unwrapPaged<Permit>(api.get('/permits', { params })),
   get: (id: number) => unwrap<Permit>(api.get(`/permits/${id}`)),
+  /**
+   * The clearances this applicant submitted a COPY of, across every filing.
+   *
+   * Unpaged on purpose, unlike `list` above: this is bounded at six clearances
+   * per filing and only ever holds the caller's own uploads, so there is no
+   * 4,122-row case to defend against. Self-scoped server-side — an officer
+   * calling it gets their own uploads, which is nothing.
+   *
+   * The rows are NOT permits. See `HeldClearance` for why they carry no number,
+   * no validity and no verify link, and why rendering them like the issued list
+   * would be a claim the City never made.
+   */
+  held: () => unwrap<HeldClearance[]>(api.get('/permits/held')),
   verify: (permitNumber: string) =>
     unwrap<import('./types').VerifyResult>(api.get(`/verify/${permitNumber}`)),
   /** Download the rendered permit certificate PDF (Bearer blob; v2). */

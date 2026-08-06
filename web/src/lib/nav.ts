@@ -8,7 +8,6 @@ import {
   HomeIcon,
   InboxIcon,
   MailIcon,
-  SearchIcon,
   ShieldCheckIcon,
   TrackIcon,
   UsersIcon,
@@ -65,7 +64,9 @@ export interface NavItem {
 /*
  * Prototype rail registry (docs/rehaul-spec.md §2).
  * Owner rail (PDF p5): Home · Track · Drafts · Payment History.
- * Staff rail (p61): Home · Track (verification) · Inspections · Other Requirements.
+ * Staff rail (p61): Home · Track (verification) · Other Requirements. The PDF
+ * draws an Inspections entry beside Track; it is gone on purpose — the client
+ * had the two screens merged into Track's For Inspection tab. See below.
  * Super-admin rail (p93): Officer Assignment · Business Owner Status (+ Analytics).
  * Notifications live behind the bell; Profile/Settings behind the avatar flyout.
  */
@@ -79,7 +80,21 @@ const NAV_ITEMS: NavItem[] = [
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
   { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
-  { label: 'Inspections', icon: SearchIcon, to: '/inspections', permission: 'inspection.manage', mobile: true },
+  /*
+   * There is no Inspections entry any more, and its absence is the feature.
+   *
+   * It pointed at /staff/inspections — a register-wide list of every visit,
+   * gated on `inspection.manage`, whose detail page decided a visit exactly the
+   * way Track's For Inspection tab already does. The client: "The Track page ->
+   * For Inspection is redundant with the Inspections page. Remove the
+   * Inspections page. All inspections will happen in The Track page -> For
+   * Inspection."
+   *
+   * The six clearance offices are the only holders of `inspection.manage`, and
+   * every one of them also holds `application.review`, so removing this entry
+   * takes nothing off their rail that Track above does not already reach. BPLO
+   * and the super admin never had it.
+   */
   { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
   // Admin
   /*
