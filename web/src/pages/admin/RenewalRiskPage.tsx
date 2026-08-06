@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
-import { RenewalModelPanel } from '../../components/analytics/RenewalModelPanel'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
@@ -684,8 +683,28 @@ function RecommendedActions({ report }: { report: RenewalRiskReport }) {
  * weight table, which is the part that gets read.
  */
 function Rulebook({ report }: { report: RenewalRiskReport }) {
+  /*
+   * Summed from the weights the server sent, never typed as a literal.
+   *
+   * This line is the client's actual request — "can't it be simplified, the
+   * computation on how the index was computed?" Five collapsed rows reading
+   * "30 pts · Time to expiry" tell a reader what counts but never once say the
+   * five are added together, what they add up to, or where the cuts between
+   * Low, Moderate and High fall. That arithmetic was only ever in the code.
+   *
+   * Deriving the total means a weight changing in RenewalRiskScoring changes
+   * this sentence too. Hard-coding "100" would leave the screen quietly lying
+   * the first time someone rebalances the rules.
+   */
+  const total = report.rulebook.reduce((sum, rule) => sum + rule.max, 0)
+
   return (
     <ProtoCard className="px-4 py-4">
+      <p className="mb-3 text-[11px] leading-relaxed text-ink-secondary">
+        Each rule below adds points. Added up, they give the permit a score out of{' '}
+        <span className="tnum font-semibold text-ink">{total}</span>.
+      </p>
+
       <ul className="space-y-1.5">
         {report.rulebook.map((rule) => (
           <li key={rule.rule}>
@@ -708,11 +727,21 @@ function Rulebook({ report }: { report: RenewalRiskReport }) {
           </li>
         ))}
       </ul>
+
+      {/*
+        The band cuts, from the server's thresholds — the second half of "how
+        was this computed". Without them the score is a number with no meaning:
+        the table above says how a permit reaches 58, this says why 58 is High.
+      */}
+      <p className="tnum mt-3 border-t border-line pt-2.5 text-[11px] text-ink-muted">
+        {report.thresholds.high}+ is High · {report.thresholds.moderate}–
+        {report.thresholds.high - 1} Moderate · under {report.thresholds.moderate} Low
+      </p>
     </ProtoCard>
   )
 }
 
-/* ── Permit Lifecycle ──────────────────────────────────────────────────── */
+/* ── Permits Approaching Expiry ────────────────────────────────────────── */
 
 /**
  * Column headings for the lifecycle table, in the paper's words.
@@ -1084,7 +1113,8 @@ export function RenewalRiskPage() {
             Three bare numbers with colour bars read as a KPI row — the same
             shape the dashboard uses for unrelated totals — so nothing said the
             three belong to one scale and sum to the scored population. It also
-            keeps them apart from the Permit Lifecycle table below, which counts
+            keeps them apart from the Permits Approaching Expiry table below,
+            which counts
             the SAME permits on a different axis: a permit can be Low risk and
             Near Expiry at once. Two unlabelled groups of coloured counts on one
             screen invite exactly that conflation.
@@ -1129,7 +1159,7 @@ export function RenewalRiskPage() {
             past twenty-five rows to find out how many permits there are.
           */}
           <section className="mt-5">
-            <SectionHeading metric="lifecycle">Permit Lifecycle</SectionHeading>
+            <SectionHeading metric="lifecycle">Permits Approaching Expiry</SectionHeading>
             <PermitLifecyclePanel report={data} />
           </section>
 
@@ -1266,16 +1296,20 @@ export function RenewalRiskPage() {
               <Rulebook report={data} />
             </section>
           </div>
-
           {/*
-            The fitted model sits below the rule score rather than replacing it.
-            Two different claims: the index above is a published rulebook anyone
-            can recompute by hand, this is a regression fitted on the register's
-            own renewal history. Keeping both visible is the point — the panel
-            states its own AUC and says whether it is calibrated, so a reader can
-            see how much the fit actually adds over the rule.
+            The screen ends here, at the client's instruction: "remove EVERYTHING
+            below Recommended Actions and What drives the index; they are
+            unnecessary."
+
+            What sat below was RenewalModelPanel — the fitted logistic model,
+            with its AUC, coefficients and calibration. The component and its
+            whole server side (RenewalModelAnalytics, the `renewal_model`
+            dataset, R's /renewal-model) are deliberately LEFT IN PLACE and
+            still refresh on schedule; only the mount is gone. Deleting them
+            would throw away the one thing on this product that can support the
+            word "prediction", and re-mounting is a one-line change if the
+            answer to "why is it called prediction" is ever wanted on screen.
           */}
-          <RenewalModelPanel />
         </MetricDefinitions>
       ) : null}
     </div>

@@ -738,6 +738,203 @@ export function ReviewPage() {
   const owesReview = !decided
 
   /*
+   * ── The RA 11032 processing category ──────────────────────────────────────
+   *
+   * The client: "In the average processing time, since it categorizes
+   * applications into simple, complex, and highly technical, allow all office
+   * admins to set the application category during their edit mode when trying
+   * to approve the application." And then: "On the admin side, choosing the
+   * Application category must be required. The admin must not approve the
+   * application unless an Application category is chosen."
+   *
+   * ── Why this is computed HERE, above the For Inspection early return ───────
+   *
+   * Because both branches of this screen need it now. It used to live beside
+   * the office-use panel, several hundred lines below the `for_inspection`
+   * return, which was fine while the category was optional. It is not fine
+   * once approveAndIssue() refuses an uncategorised filing: a filing whose
+   * reviews are all in gets the compact inspection box and nothing else, so if
+   * the picker only existed on the full sheet, an uncategorised filing in that
+   * state would have no control anywhere in the product and no way to ever
+   * issue. `const` bindings are in the temporal dead zone above their
+   * declaration, so "needed by both branches" means "declared above both".
+   *
+   * ── What is and is not editable, which is the older half of this ──────────
+   *
+   * The DEADLINES are statute. RA 11032 gives an office three working days for
+   * a simple transaction, seven for a complex one, twenty for a highly
+   * technical one, and no LGU may grant itself a fourth tier or a longer count.
+   * That is why the options come off the payload (`ra.tiers`) rather than being
+   * written down in this file: the browser cannot offer what the API did not,
+   * and the API reads `Ra11032::TIERS`, which is the law.
+   *
+   * WHICH TIER a given filing belongs to is not statute — the statute requires
+   * the LGU to publish that in its Citizen's Charter, and Malabon has not told
+   * us theirs (open question A10). Every tier in the register was therefore
+   * assigned by a rule this project invented, which is precisely why the
+   * provenance line below is not decoration: an officer has to be able to see
+   * they are overruling a guess rather than filling in a blank.
+   */
+  const ra = app.ra11032 ?? null
+  const tierOptions = ra?.tiers ?? []
+  /*
+   * The server's word on whether this filing may be reclassified at all, not
+   * a second opinion computed here. A decided filing is refused by
+   * WorkflowService::classify (`ApplicationStatus::isTerminal`), and a screen
+   * that disagreed with it would draw a control the API answers 422 to.
+   * `tierOptions.length` covers the other case — a payload from before this
+   * field existed, where there is nothing to choose between.
+   */
+  const canSetTier = Boolean(ra?.editable) && tierOptions.length > 0
+  const tierValue = tierInput ?? ra?.tier ?? ''
+  const tierChanged = tierValue !== '' && tierValue !== (ra?.tier ?? '')
+
+  /**
+   * The filing has no category, so it may not be approved — the client's rule,
+   * mirrored from WorkflowService::requireProcessingCategory.
+   *
+   * `ra !== null` is doing real work and is not defensive noise. `ra11032` is
+   * optional on the Application type precisely because a payload built before
+   * that block existed does not carry it, and reading "no category" off a
+   * payload that never mentions categories would shut Approve on every filing
+   * with no control anywhere to reopen it. Absent means UNKNOWN, and unknown
+   * defers to the server, which refuses for real. Present-and-null is the only
+   * thing this screen is entitled to call missing.
+   */
+  const categoryMissing = ra !== null && ra.tier === null
+
+  /**
+   * Who set the tier this filing currently carries — the sentence that makes
+   * the control safe to hand an officer.
+   *
+   * "Set automatically" is deliberately not phrased as a reassurance. It is
+   * our own rule, unapproved by BPLO, and the officer reading this sheet is
+   * usually better placed than it is.
+   */
+  const tierProvenance =
+    ra?.source === 'officer'
+      ? `Category set by ${ra.set_by?.name ?? 'a reviewing officer'}${
+          ra.set_at ? ` on ${formatDate(ra.set_at)}` : ''
+        }.`
+      : ra?.source === 'automatic'
+        ? 'Category assigned automatically from the filing type and the declared capital. No one has checked it against the Citizen’s Charter — change it if this filing is not what the system assumed.'
+        : 'This filing has not been categorised yet, so it has no RA 11032 deadline and cannot be approved until one is chosen.'
+
+  async function saveTier() {
+    // Guarded here as well as on the button, because the button is shut with
+    // `aria-disabled` and an aria-disabled control is still clickable.
+    if (!tierChanged || tierSaving || !canSetTier) return
+    setTierSaving(true)
+    setTierNote(null)
+    setActionError(null)
+    try {
+      const updated = await assignments.classify(assignmentId, tierValue)
+      const days = updated.ra11032?.statutory_working_days
+      /*
+       * The note states the DEADLINE, not just the category, because the
+       * deadline is the thing that actually moved. It is recomputed from the
+       * filing date rather than from today — RA 11032's clock runs from when
+       * the applicant filed, not from when an office got round to categorising
+       * — so reclassifying can leave a filing immediately overdue, and an
+       * officer must not learn that from the queue tomorrow.
+       */
+      setTierNote(
+        updated.deadline_at
+          ? `Category saved${days ? ` at ${days} working days` : ''}. The RA 11032 deadline is now ${formatDate(updated.deadline_at)}, counted from the date this was filed.`
+          : 'Category saved.',
+      )
+      // Local choice dropped so the reloaded record is what the select shows.
+      setTierInput(null)
+      reload()
+    } catch (err) {
+      setActionError(toApiError(err).message)
+    } finally {
+      setTierSaving(false)
+    }
+  }
+
+  /**
+   * The picker itself, in one place because two screens draw it.
+   *
+   * A plain function rather than a component: it closes over the same state
+   * both call sites already share, and a nested component declaration would be
+   * remounted on every render, which is how a `<select>` loses focus mid-choice.
+   */
+  function tierPicker() {
+    return (
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,22rem)_auto] sm:items-end">
+        <div className="block">
+          {/*
+           * `htmlFor` rather than a <label> WRAPPING the select, which
+           * is how every other field on the office panel is written.
+           *
+           * The difference is not cosmetic for a select. An implicit
+           * label's accessible name is computed from its whole
+           * subtree, and the subtree includes the control — so a
+           * wrapping label makes this field announce itself as
+           * "Application category Complex — 7 working days", the
+           * label and the current value run together, changing every
+           * time the officer moves the select. Explicit association
+           * leaves the name as the question and the value as the
+           * answer, which is what a screen reader expects to read
+           * back. (Same trap as the Evaluator Remarks label further
+           * up, where the explanatory sentence lands in the name.)
+           */}
+          <label htmlFor="ra11032-tier">
+            <FieldLabel>Application category</FieldLabel>
+          </label>
+          <select
+            id="ra11032-tier"
+            className={officeInput}
+            aria-describedby="ra11032-note"
+            value={tierValue}
+            onChange={(e) => setTierInput(e.target.value)}
+          >
+            {/*
+             * Offered only while the filing genuinely has no
+             * category. Once one is set there is no way back to
+             * "uncategorised" — un-setting it would delete the
+             * filing's deadline, and a filing with no RA 11032
+             * clock is invisible to the compliance panel and, since
+             * the client's rule, unapprovable.
+             */}
+            {!ra?.tier && <option value="">Not yet categorised</option>}
+            {tierOptions.map((tier) => (
+              <option key={tier.value} value={tier.value}>
+                {tier.label} — {tier.statutory_working_days} working days
+              </option>
+            ))}
+          </select>
+        </div>
+        <span className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={saveTier}
+            aria-disabled={!tierChanged || tierSaving}
+            aria-describedby={tierChanged ? undefined : 'ra11032-save-why'}
+            className={`rounded-md px-3 py-2 text-xs font-semibold text-white ${
+              tierChanged && !tierSaving ? 'bg-royal hover:bg-royal-hover' : 'bg-royal/50'
+            }`}
+          >
+            {tierSaving ? 'Saving…' : 'Save category'}
+          </button>
+          {/*
+           * It says why instead of vanishing. Same rule as the
+           * renewal modal's Confirm and the inspection decision
+           * buttons: a shut control that explains itself is the
+           * only kind a keyboard user can make sense of.
+           */}
+          {!tierChanged && !tierSaving && (
+            <span id="ra11032-save-why" className="text-xs text-ink-muted">
+              {ra?.tier ? 'Pick a different category to save a change.' : 'Pick a category to save.'}
+            </span>
+          )}
+        </span>
+      </div>
+    )
+  }
+
+  /*
    * ── The For Inspection screen ─────────────────────────────────────────────
    *
    * A filing waiting on a site visit gets its own, much smaller page, and
@@ -821,6 +1018,54 @@ export function ReviewPage() {
           </p>
 
           <h2 className="display-serif mb-6 mt-4 text-center text-3xl text-ink">Application Status</h2>
+
+          {/*
+           * ── The one control this box carries beyond the visits ────────────
+           *
+           * Drawn only when the filing has no processing category, which on a
+           * filing this far along means it predates the category being set at
+           * submission. It is here because the alternative is a dead filing:
+           * approveAndIssue() refuses an uncategorised application, so the last
+           * inspector's Pass cannot release the permits, and this office has
+           * already completed its review — the full sheet, and with it the
+           * usual picker in For Office Use Only, is gone from this screen by
+           * design ("I can still see the application details. Please remove
+           * this"). No category, no control, no way out.
+           *
+           * Saving it here does not merely record a tier. WorkflowService::
+           * classify() re-tests whether the filing is complete, so on a filing
+           * whose reviews are all in and whose visits have all passed, this is
+           * the press that issues the permits — which is why the copy says so
+           * rather than letting an approval arrive unannounced.
+           *
+           * It disappears for good once set, and never appears at all on a
+           * filing created since the gate.
+           */}
+          {categoryMissing && canSetTier && (
+            <div className="mb-6 rounded-lg border-l-4 border-s-orange bg-s-orange-tint px-4 py-4">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
+                RA 11032 · Processing Category
+              </p>
+              <p id="ra11032-note" className="mt-1 max-w-prose text-xs text-ink-secondary">
+                This filing has never been categorised, so it has no RA 11032 deadline and cannot be
+                approved. Any reviewing office may set it. The three categories and their day counts
+                are fixed by RA 11032; the deadline is counted from the date the application was
+                filed, not from today. If every review and inspection on this filing is already
+                complete, saving a category is what issues the permits.
+              </p>
+              <div className="mt-3">{tierPicker()}</div>
+              {tierNote && <p className="mt-2 text-xs font-medium text-s-green">{tierNote}</p>}
+              {/*
+               * saveTier() writes failures to `actionError`, and this branch
+               * renders none of the review sheet that normally displays it —
+               * without this line a refused save is completely silent on the
+               * only screen from which this filing can be rescued.
+               */}
+              {actionError && (
+                <p className="mt-2 text-xs font-medium text-s-red">{actionError}</p>
+              )}
+            </div>
+          )}
 
           {/*
            * `reload`, not a local patch of the card. Recording the last
@@ -912,95 +1157,6 @@ export function ReviewPage() {
       }
     })
 
-  /*
-   * ── The RA 11032 processing category ──────────────────────────────────────
-   *
-   * The client: "In the average processing time, since it categorizes
-   * applications into simple, complex, and highly technical, allow all office
-   * admins to set the application category during their edit mode when trying
-   * to approve the application."
-   *
-   * Worth being exact about what is and is not editable here, because the two
-   * halves look alike and only one of them is anyone's to change.
-   *
-   * The DEADLINES are statute. RA 11032 gives an office three working days for
-   * a simple transaction, seven for a complex one, twenty for a highly
-   * technical one, and no LGU may grant itself a fourth tier or a longer count.
-   * That is why the options come off the payload (`ra.tiers`) rather than being
-   * written down in this file: the browser cannot offer what the API did not,
-   * and the API reads `Ra11032::TIERS`, which is the law.
-   *
-   * WHICH TIER a given filing belongs to is not statute — the statute requires
-   * the LGU to publish that in its Citizen's Charter, and Malabon has not told
-   * us theirs (open question A10). Every tier in the register was therefore
-   * assigned by a rule this project invented, which is precisely why the
-   * provenance line below is not decoration: an officer has to be able to see
-   * they are overruling a guess rather than filling in a blank.
-   */
-  const ra = app.ra11032 ?? null
-  const tierOptions = ra?.tiers ?? []
-  /*
-   * The server's word on whether this filing may be reclassified at all, not
-   * a second opinion computed here. A decided filing is refused by
-   * WorkflowService::classify (`ApplicationStatus::isTerminal`), and a screen
-   * that disagreed with it would draw a control the API answers 422 to.
-   * `tierOptions.length` covers the other case — a payload from before this
-   * field existed, where there is nothing to choose between.
-   */
-  const canSetTier = Boolean(ra?.editable) && tierOptions.length > 0
-  const tierValue = tierInput ?? ra?.tier ?? ''
-  const tierChanged = tierValue !== '' && tierValue !== (ra?.tier ?? '')
-
-  /**
-   * Who set the tier this filing currently carries — the sentence that makes
-   * the control safe to hand an officer.
-   *
-   * "Set automatically" is deliberately not phrased as a reassurance. It is
-   * our own rule, unapproved by BPLO, and the officer reading this sheet is
-   * usually better placed than it is.
-   */
-  const tierProvenance =
-    ra?.source === 'officer'
-      ? `Category set by ${ra.set_by?.name ?? 'a reviewing officer'}${
-          ra.set_at ? ` on ${formatDate(ra.set_at)}` : ''
-        }.`
-      : ra?.source === 'automatic'
-        ? 'Category assigned automatically from the filing type and the declared capital. No one has checked it against the Citizen’s Charter — change it if this filing is not what the system assumed.'
-        : 'This filing has not been categorised yet, so no RA 11032 deadline applies to it.'
-
-  async function saveTier() {
-    // Guarded here as well as on the button, because the button is shut with
-    // `aria-disabled` and an aria-disabled control is still clickable.
-    if (!tierChanged || tierSaving || !canSetTier) return
-    setTierSaving(true)
-    setTierNote(null)
-    setActionError(null)
-    try {
-      const updated = await assignments.classify(assignmentId, tierValue)
-      const days = updated.ra11032?.statutory_working_days
-      /*
-       * The note states the DEADLINE, not just the category, because the
-       * deadline is the thing that actually moved. It is recomputed from the
-       * filing date rather than from today — RA 11032's clock runs from when
-       * the applicant filed, not from when an office got round to categorising
-       * — so reclassifying can leave a filing immediately overdue, and an
-       * officer must not learn that from the queue tomorrow.
-       */
-      setTierNote(
-        updated.deadline_at
-          ? `Category saved${days ? ` at ${days} working days` : ''}. The RA 11032 deadline is now ${formatDate(updated.deadline_at)}, counted from the date this was filed.`
-          : 'Category saved.',
-      )
-      // Local choice dropped so the reloaded record is what the select shows.
-      setTierInput(null)
-      reload()
-    } catch (err) {
-      setActionError(toApiError(err).message)
-    } finally {
-      setTierSaving(false)
-    }
-  }
-
   async function saveIssuedDates(group: (typeof issuedGroups)[number]) {
     setIssuedSavingCode(group.code)
     setIssuedNote(null)
@@ -1018,6 +1174,24 @@ export function ReviewPage() {
   }
 
   async function approve() {
+    /*
+     * The same refusal the API makes, made before the request rather than
+     * after it. Guarded here as well as on the button because Approve is shut
+     * with `aria-disabled`, and an aria-disabled control is still clickable —
+     * the whole reason it is written that way is that a control removed from
+     * the tab order takes the sentence explaining itself with it.
+     *
+     * Not an early `return` into silence: an officer who got here has already
+     * pressed the button, so say why. `#for-office-use` is where the fix is
+     * and the banner above the sheet links to it.
+     */
+    if (categoryMissing) {
+      setActionError(
+        'Choose this application’s processing category under For Office Use Only before approving it.',
+      )
+
+      return
+    }
     setBusy(true)
     setActionError(null)
     try {
@@ -1335,11 +1509,41 @@ export function ReviewPage() {
                 >
                   Return with remarks
                 </button>
+                {/*
+                 * ── Approve is shut until the filing has a category ────────
+                 *
+                 * The client: "The admin must not approve the application
+                 * unless an Application category is chosen." The server refuses
+                 * it for real (WorkflowService::requireProcessingCategory);
+                 * this is so the officer learns it before pressing rather than
+                 * from a red bar afterwards.
+                 *
+                 * `aria-disabled`, not `disabled`, and the distinction is the
+                 * accessibility of the rule rather than a style choice. A
+                 * `disabled` button leaves the tab order, so a keyboard or
+                 * screen-reader user meets a control that is simply not there
+                 * and no explanation of why — `aria-describedby` on a control
+                 * nobody can reach announces nothing. Shut-but-focusable keeps
+                 * the button, its state and its reason together, which is the
+                 * same pattern as Save category below and the inspection
+                 * decision buttons. `disabled={busy}` stays: an in-flight
+                 * request is a transient the officer must not double-fire, not
+                 * a rule they need read to them.
+                 *
+                 * Only Approve. Return with remarks and Reject are untouched on
+                 * purpose — a filing that is being sent back or refused never
+                 * enters a processing clock, so demanding a tier first would
+                 * block an officer for a field nothing will ever measure.
+                 */}
                 <button
                   type="button"
                   onClick={approve}
                   disabled={busy}
-                  className="rounded-md bg-s-green px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                  aria-disabled={categoryMissing}
+                  aria-describedby={categoryMissing ? 'approve-blocked-why' : undefined}
+                  className={`rounded-md px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card disabled:opacity-60 ${
+                    categoryMissing ? 'bg-s-green/50' : 'bg-s-green hover:brightness-110'
+                  }`}
                 >
                   Approve
                 </button>
@@ -1386,6 +1590,43 @@ export function ReviewPage() {
           )}
         </span>
       </p>
+
+      {/*
+       * Why Approve is shut, said in the page rather than only in the button's
+       * accessible description.
+       *
+       * `id` is what the Approve button points `aria-describedby` at, so the
+       * sentence is announced with the control for a screen reader and read
+       * beside it by everyone else — one string, two audiences, no duplicate
+       * copy to drift apart (WCAG 2.1 AA is the product's target and 3.3.2 is
+       * the clause: identify what is required, not merely that something is
+       * wrong).
+       *
+       * Rendered only when Approve is actually on screen and actually shut,
+       * i.e. `editing`. In view mode there is no Approve to explain, and the
+       * For Office Use panel is showing a read-only category readout the
+       * officer cannot act on — pointing them at it would be a dead end.
+       *
+       * Amber, not red: nothing has failed. This is a precondition of an action
+       * not yet taken, which is the same register as Return with remarks.
+       */}
+      {editing && categoryMissing && (
+        <p
+          id="approve-blocked-why"
+          className="mb-4 rounded-lg border-l-4 border-s-orange bg-s-orange-tint px-4 py-3 text-sm text-ink"
+        >
+          This application has no processing category, so it cannot be approved yet. Choose Simple,
+          Complex or Highly technical under{' '}
+          <a
+            href="#for-office-use"
+            className="font-semibold text-royal underline underline-offset-2 hover:no-underline"
+          >
+            For Office Use Only
+          </a>{' '}
+          and save it — that is what sets the RA 11032 deadline this filing is measured against.
+          Return with remarks and Reject do not need one.
+        </p>
+      )}
 
       {actionError && (
         <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{actionError}</p>
@@ -2135,50 +2376,9 @@ export function ReviewPage() {
                   </>
                 )}
               </p>
-              <div className="mt-3 grid gap-4 sm:grid-cols-[minmax(0,22rem)_auto] sm:items-end">
+              <div className="mt-3">
                 {editing && canSetTier ? (
-                  <div className="block">
-                    {/*
-                     * `htmlFor` rather than a <label> WRAPPING the select, which
-                     * is how every other field on this panel is written.
-                     *
-                     * The difference is not cosmetic for a select. An implicit
-                     * label's accessible name is computed from its whole
-                     * subtree, and the subtree includes the control — so a
-                     * wrapping label makes this field announce itself as
-                     * "Application category Complex — 7 working days", the
-                     * label and the current value run together, changing every
-                     * time the officer moves the select. Explicit association
-                     * leaves the name as the question and the value as the
-                     * answer, which is what a screen reader expects to read
-                     * back. (Same trap as the Evaluator Remarks label further
-                     * up, where the explanatory sentence lands in the name.)
-                     */}
-                    <label htmlFor="ra11032-tier">
-                      <FieldLabel>Application category</FieldLabel>
-                    </label>
-                    <select
-                      id="ra11032-tier"
-                      className={officeInput}
-                      aria-describedby="ra11032-note"
-                      value={tierValue}
-                      onChange={(e) => setTierInput(e.target.value)}
-                    >
-                      {/*
-                       * Offered only while the filing genuinely has no
-                       * category. Once one is set there is no way back to
-                       * "uncategorised" — un-setting it would delete the
-                       * filing's deadline, and a filing with no RA 11032
-                       * clock is invisible to the compliance panel.
-                       */}
-                      {!ra?.tier && <option value="">Not yet categorised</option>}
-                      {tierOptions.map((tier) => (
-                        <option key={tier.value} value={tier.value}>
-                          {tier.label} — {tier.statutory_working_days} working days
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  tierPicker()
                 ) : (
                   <OfficeReadout
                     label="Application category"
@@ -2188,36 +2388,6 @@ export function ReviewPage() {
                         : ''
                     }
                   />
-                )}
-                {editing && canSetTier && (
-                  <span className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={saveTier}
-                      aria-disabled={!tierChanged || tierSaving}
-                      aria-describedby={tierChanged ? undefined : 'ra11032-save-why'}
-                      className={`rounded-md px-3 py-2 text-xs font-semibold text-white ${
-                        tierChanged && !tierSaving
-                          ? 'bg-royal hover:bg-royal-hover'
-                          : 'bg-royal/50'
-                      }`}
-                    >
-                      {tierSaving ? 'Saving…' : 'Save category'}
-                    </button>
-                    {/*
-                     * It says why instead of vanishing. Same rule as the
-                     * renewal modal's Confirm and the inspection decision
-                     * buttons: a shut control that explains itself is the
-                     * only kind a keyboard user can make sense of.
-                     */}
-                    {!tierChanged && !tierSaving && (
-                      <span id="ra11032-save-why" className="text-xs text-ink-muted">
-                        {ra?.tier
-                          ? 'Pick a different category to save a change.'
-                          : 'Pick a category to save.'}
-                      </span>
-                    )}
-                  </span>
                 )}
               </div>
               {tierNote && <p className="mt-2 text-xs font-medium text-s-green">{tierNote}</p>}

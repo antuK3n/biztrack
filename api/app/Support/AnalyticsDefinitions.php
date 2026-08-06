@@ -491,7 +491,7 @@ final class AnalyticsDefinitions
              * 30/60/90.
              */
             'lifecycle' => [
-                'label' => 'Permit Lifecycle',
+                'label' => 'Permits Approaching Expiry',
                 'formula' => 'Every permit on the watchlist put into one of four states, counted per permit type. The first state that fits wins: lapsed, then renewal filed and undecided, then inside 30 days, then everything else.',
                 'covers' => 'The same permits the risk levels above are counted from, so the four totals add up to the number of permits scored. Each permit is in exactly one state.',
                 'why' => 'Who needs chasing today. A permit 12 days out with a renewal already lodged and one 12 days out with nothing filed used to share a column, and they are two different phone calls.',

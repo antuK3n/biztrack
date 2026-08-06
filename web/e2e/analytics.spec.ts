@@ -721,7 +721,7 @@ test.describe('the three BPLO analytics screens', () => {
      */
     await expect(
       page.locator('p[aria-live="polite"]', {
-        hasText: /at least \d+ businesses on record are ranked/,
+        hasText: /fewer than \d+ businesses are too small to rank — \d+ of \d+ are left out/,
       }),
     ).toBeVisible()
 
