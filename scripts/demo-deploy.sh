@@ -35,9 +35,39 @@ mkdir -p "$LOGS"
 
 listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 
+# Which port the RUNNING tunnel points at — the only honest answer to "which
+# slot is live", because the live slot is by definition the one testers reach.
+#
+# `ps`, not `pgrep -af`: BSD pgrep has no -a, so on macOS that prints bare PIDs
+# and every grep for a port silently finds nothing. A detector that always
+# answers "no tunnel" would send this script straight back to the guesswork
+# below, which is the failure it exists to prevent.
+tunnelled() {
+  ps -eo pid,command 2>/dev/null | grep "[c]loudflared tunnel --url" \
+    | grep -oE '127\.0\.0\.1:(5180|5181)' | grep -oE '5180|5181' | head -1
+}
+
 # Which slot is serving now? Default to B when nothing is up, so a cold start
 # and a swap take the same path and the script has one behaviour, not two.
-if listening 5180; then
+#
+# ── Why this asks the tunnel and not the port ────────────────────────────────
+#
+# This used to be `if listening 5180`, and that took the demo down on
+# 2026-08-07. A `vite preview` from an earlier run was still holding 5180 after
+# its slot had been retired — the kill at the end of a deploy does not always
+# take, and nothing notices, because a stray preview serving the same dist
+# looks exactly like a live one. So the script read the leftover as the live
+# stack, picked the genuinely-live 5181 as its "free" slot, and killed the very
+# tunnel testers were holding as a "leftover from a half-finished run".
+#
+# A listening port cannot distinguish those two cases. The cloudflared process
+# can: there is one, it names its origin, and that origin is what the public URL
+# resolves to. If no tunnel is running, nothing is live and either slot will do.
+LIVE_WEB="$(tunnelled)"
+if [ -z "$LIVE_WEB" ]; then
+  LIVE_WEB=$(listening 5180 && echo 5180 || echo 5181)
+fi
+if [ "$LIVE_WEB" = "5180" ]; then
   OLD_WEB=5180; OLD_API=8082; NEW_WEB=5181; NEW_API=8083; OLD_SLOT=A; NEW_SLOT=B
 else
   OLD_WEB=5181; OLD_API=8083; NEW_WEB=5180; NEW_API=8082; OLD_SLOT=B; NEW_SLOT=A
@@ -87,9 +117,34 @@ done
 # takes a moment to resolve, and the old link must not be cut before the new one
 # genuinely answers. This is the whole point of the script, so it is a hard gate
 # rather than a courtesy wait.
+#
+# ── "Cannot resolve" is not "not serving" ────────────────────────────────────
+#
+# The gate below asks curl, and curl asks whatever resolver this shell happens
+# to have. On 2026-08-07 that resolver could not see *.trycloudflare.com at all
+# — curl exited 6 in a millisecond while `dig` answered the same name instantly
+# and the site was up the whole time. The gate read the silence as a dead
+# tunnel and tore down a perfectly good deploy.
+#
+# So a resolution failure now falls back to pinning the address from dig. That
+# tests the thing actually in question — can this origin be reached through
+# Cloudflare — instead of testing the local resolver, which is not part of the
+# deploy and not what testers will use. If dig cannot resolve it either, the
+# hostname genuinely is not up yet and the loop keeps waiting.
+HOST="${URL#https://}"
+reachable() {
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/" --max-time 10)" = "200" ] && return 0
+
+  local ip
+  ip=$(dig +short "$HOST" 2>/dev/null | grep -oE '^[0-9.]+$' | head -1)
+  [ -n "$ip" ] || return 1
+
+  [ "$(curl -s --resolve "$HOST:443:$ip" -o /dev/null -w '%{http_code}' "$URL/" --max-time 10)" = "200" ]
+}
+
 served=""
 for _ in $(seq 1 40); do
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/" --max-time 10)" = "200" ] && { served=1; break; }
+  reachable && { served=1; break; }
   sleep 5
 done
 if [ -z "$served" ]; then
