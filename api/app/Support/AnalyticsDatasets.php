@@ -26,6 +26,17 @@ final class AnalyticsDatasets
     public const BUSINESS_GROWTH = 'business_growth';
 
     /**
+     * The fitted companion to RENEWAL_RISK, kept as its own dataset.
+     *
+     * Not extra keys on the renewal-risk payload, for the three reasons set out
+     * in RenewalModelAnalytics' docblock — the short one being that
+     * AnalyticsParityTest compares that payload against R's key for key in both
+     * directions, and this is the one dataset R computes that PHP deliberately
+     * does not port.
+     */
+    public const RENEWAL_MODEL = 'renewal_model';
+
+    /**
      * @return array<string, array{
      *     label: string,
      *     endpoint: string|null,
@@ -75,6 +86,32 @@ final class AnalyticsDatasets
                 'defaults' => [
                     'days' => RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
                     'limit' => RenewalRiskAnalytics::DEFAULT_LIMIT,
+                ],
+            ],
+
+            self::RENEWAL_MODEL => [
+                'label' => 'Renewal Risk — fitted model',
+                'endpoint' => RenewalModelAnalytics::R_ENDPOINT,
+                'dataset' => static fn (array $p): array => RenewalModelAnalytics::dataset(
+                    $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
+                    $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
+                ),
+                /*
+                 * The only `local` in this registry that does not compute the
+                 * statistics, because there is no honest way for it to. Fitting a
+                 * generalised linear model a second time in PHP so the two copies
+                 * can disagree is not a fallback, and reporting the rule score
+                 * under a probability heading when R is down would be the one
+                 * outright lie this feature is capable of telling. It returns the
+                 * same keys with `available => false` and a reason instead.
+                 */
+                'local' => static fn (array $p): array => RenewalModelAnalytics::build(
+                    $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
+                    $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
+                ),
+                'defaults' => [
+                    'days' => RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
+                    'limit' => RenewalModelAnalytics::DEFAULT_LIMIT,
                 ],
             ],
 

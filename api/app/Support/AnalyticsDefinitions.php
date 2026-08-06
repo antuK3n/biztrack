@@ -75,6 +75,7 @@ final class AnalyticsDefinitions
             AnalyticsDatasets::DASHBOARD => self::dashboard(),
             AnalyticsDatasets::PROCESSING_TIME => self::processingTime(),
             AnalyticsDatasets::RENEWAL_RISK => self::renewalRisk(),
+            AnalyticsDatasets::RENEWAL_MODEL => self::renewalModel(),
             AnalyticsDatasets::BUSINESS_GROWTH => self::businessGrowth(),
             default => [],
         };
@@ -643,11 +644,176 @@ final class AnalyticsDefinitions
                 'why' => 'One period\'s closure count cannot say whether closures are rising. The month-by-month shape can.',
             ],
 
+            /*
+             * One definition for one panel, and the lens toggle does not get a
+             * second. The three lenses are three orderings of the same figures
+             * over the same six slots — swapping the ranking does not change
+             * what a point on the chart means — and a second info button beside
+             * the first would announce a near-identical explanation to a
+             * screen-reader user for no gain. The same reasoning already keeps
+             * the Top Growing Barangay summary card from carrying one; see the
+             * note in BusinessGrowthPage.tsx.
+             *
+             * What DID have to change is the text: the criterion for appearing
+             * on this chart is the whole of the question this panel was asked,
+             * so it is now stated here as well as on the screen.
+             */
             'industry_growth' => [
                 'label' => 'Business Industry Growth Trend',
-                'formula' => 'Lines of business on record, grouped by PSIC code — the national numbering for industries — with this period\'s new registrations against the period before.',
-                'covers' => 'Counted per declared line, not per business: one declaring three lines appears under all three. Businesses removed from the register are left out here, unlike the registration and barangay figures, because this panel describes what is trading now.',
-                'why' => 'What kind of city this is becoming. Height is how many businesses carry a line; the growing or declining word beside it is about the change, so the tallest line is not necessarily the fastest growing.',
+                'formula' => 'Lines of business on record, grouped by PSIC code — the national numbering for industries — with this period\'s new registrations against the period before. Six lines are drawn, chosen by the lens above the chart: Largest ranks by how many businesses carry the line today, Fastest growing and Fastest declining rank by the change between the two periods.',
+                'covers' => 'Counted per declared line, not per business: one declaring three lines appears under all three. Businesses removed from the register are left out here, unlike the registration and barangay figures, because this panel describes what is trading now. The two change lenses rank only lines carrying at least '.BusinessGrowthAnalytics::INDUSTRY_LENS_MIN_BUSINESSES.' businesses — below that a single filing swings the figure more than a real trend would, and the count left out is printed under the chart. Where fewer than six lines qualify, fewer are drawn and the chart says so rather than making the number up.',
+                'why' => 'What kind of city this is becoming. Six is a limit, not a shortlist: the register holds 135 PSIC codes and no palette keeps that many series apart, so the honest move is to let the reader pick which six. The biggest lines and the fastest-moving ones are different questions and the same chart could only ever answer one of them at a time.',
+            ],
+        ];
+    }
+
+    /**
+     * The fitted model that sits beside the rule score.
+     *
+     * ── THE ONE PLACE THE WORD "PROBABILITY" IS ALLOWED, AND WHY ────────────
+     *
+     * renewalRisk() above may not use it. AnalyticsDefinitionsTest fails the
+     * build on probability, probable, likelihood, predict, forecast or
+     * confidence appearing anywhere in those definitions, and that ban is not
+     * lifted, not loosened and not scoped away — it still covers every word of
+     * every renewal-risk definition, because the rule score is still a weighted
+     * rule score with nothing fitted behind it and an officer who reads "88%" as
+     * a rate will act on it as one.
+     *
+     * These definitions describe a different object, and the difference is not a
+     * matter of tone. The figure here is fitted to outcomes recovered from
+     * permit history (RenewalOutcomes), evaluated on a period of the register the
+     * fit never saw, and reported with the AUC, Brier score and calibration
+     * reading that say how far it can be trusted. That is what earns a figure the
+     * name, and the test now enforces the earning: this dataset may use the word
+     * only in entries that also carry the evidence, and only while the payload
+     * ships metrics beside it.
+     *
+     * Two claims are therefore made carefully and never merged:
+     *
+     *  - it IS a probability in the ordinary sense — a fitted estimate of how
+     *    often permits in this position turned out to be renewed late;
+     *  - it is NOT yet a well calibrated one. The evaluation says the figures run
+     *    high and the worst decile is out by 22 points, so `metrics.calibrated`
+     *    is false and the screen says in plain words that the number should be
+     *    read as a ranking with a scale rather than as a rate. When that flag
+     *    turns true the wording on screen changes with it.
+     *
+     * And the sentence that outranks all of it, which is why `training_data` has
+     * an entry of its own here: the history this was fitted on was generated by
+     * the analytics seeder, so what the coefficients describe is the seeder.
+     *
+     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     */
+    private static function renewalModel(): array
+    {
+        return [
+            'training_data' => [
+                'label' => 'What this model was trained on',
+                'formula' => 'Renewal outcomes recovered from the permit table: a renewal counts as late when the '
+                    .'next permit of the same type began more than a day after the previous one lapsed.',
+                'covers' => 'The renewal history in this register was generated for testing rather than loaded from '
+                    .'the city, so every figure on this panel measures the method against generated behaviour. It is '
+                    .'the first thing to know about the numbers below and it is stated above them, not here.',
+                'why' => 'A model is only ever as good as what it was fitted to. Quoting an accuracy figure without '
+                    .'saying whose behaviour it was measured on is the easiest way to mislead a reader who is doing '
+                    .'nothing wrong.',
+            ],
+
+            'estimates' => [
+                'label' => 'Estimated chance of a late renewal',
+                'formula' => 'The fitted probability that the next permit begins more than a day after this one '
+                    .'lapses, from a logistic regression over five signals: time to expiry, renewal progress, this '
+                    .'business\'s earlier renewals, open compliance findings and unsettled fees.',
+                'covers' => 'Only permits where there is still something to estimate. A permit that has already '
+                    .'lapsed is late — a fact, not an estimate — and one whose renewal is already approved has '
+                    .'nothing left to wait for; both are listed with the reason in place of a number. The figure is '
+                    .'conditional on no renewal having been granted yet, which is the position of every permit an '
+                    .'officer would be chasing.',
+                'why' => 'The rule score beside it ranks permits by warning signs and is unchanged. This one answers '
+                    .'a different question — how often permits in this position actually turned out late — and it '
+                    .'can be wrong in a way the rule score cannot, which is why the accuracy figures are on the same '
+                    .'screen rather than in a report nobody opens.',
+            ],
+
+            'metrics.auc' => [
+                'label' => 'AUC',
+                'formula' => 'The chance that a cycle which turned out late was scored above one that did not, '
+                    .'measured on the newer cycles the model was not fitted on. 0.5 is a coin toss; 1.0 is perfect '
+                    .'separation.',
+                'covers' => 'Pooled across every lead time, which flatters it: permits closer to expiry are far more '
+                    .'often late, so a model that knew nothing but the date would still score well here. The '
+                    .'per-horizon table below removes the date from the comparison and is the honest reading of what '
+                    .'the other four signals add.',
+                'why' => 'It says whether the ordering is any good. It says nothing about whether the numbers '
+                    .'themselves are right — that is what the Brier score and the calibration reading are for.',
+            ],
+
+            'metrics.brier' => [
+                'label' => 'Brier score',
+                'formula' => 'The average squared distance between the figure given and what happened, over the '
+                    .'evaluation period. Lower is better; 0 is perfect.',
+                'covers' => 'Shown against the score for always guessing the training period\'s own late rate, so '
+                    .'the improvement over knowing nothing is visible rather than implied.',
+                'why' => 'Unlike AUC this punishes being confident and wrong, which is the failure an officer would '
+                    .'actually feel — a business rung twice about a renewal that was never at risk.',
+            ],
+
+            'calibration' => [
+                'label' => 'Calibration',
+                'formula' => 'The evaluation cycles sorted into ten equal groups by the figure they were given, with '
+                    .'the rate that actually turned out late in each. The two columns match when the figures can be '
+                    .'read as rates.',
+                'covers' => 'The newer cycles only, never the ones the model was fitted on. The sentence above the '
+                    .'table states the finding, including when the finding is that the figures are out.',
+                'why' => 'A model can rank perfectly and still be wrong about the numbers — saying 90% where it '
+                    .'means 40% would leave the AUC untouched and every staffing decision made from the figure '
+                    .'wrong. This is the check that catches it.',
+            ],
+
+            'coefficients' => [
+                'label' => 'What the model learned',
+                'formula' => 'One row per signal, with the direction and size of its effect on the odds of a late '
+                    .'renewal, holding the others still. Above 1 raises the chance, below 1 lowers it.',
+                'covers' => 'Only signals that varied enough in the training period to be estimated. A signal that '
+                    .'was the same on every training row, or one whose cases all went the same way, is named in the '
+                    .'list of what was left out rather than shown with a figure that would be meaningless.',
+                'why' => 'This is why the model is a regression and not something stronger. An officer can read a '
+                    .'row here, disagree with it, and be right — which is not possible with a method whose reasoning '
+                    .'cannot be printed.',
+            ],
+
+            'horizon_auc' => [
+                'label' => 'Accuracy by time to expiry',
+                'formula' => 'AUC recomputed within each lead time separately, so every permit in the comparison is '
+                    .'the same distance from expiry.',
+                'covers' => 'The evaluation cycles, split by how far out they were measured. The last row is blank '
+                    .'where every cycle at that distance turned out late, because there is nothing left to separate.',
+                'why' => 'The single most useful check on this screen. Holding the date still removes the one signal '
+                    .'nobody needed a model for; whatever separation is left is what the other four signals '
+                    .'contribute, and if these sat at 0.5 the model would be the calendar wearing a coat.',
+            ],
+
+            'split' => [
+                'label' => 'How the data was split',
+                'formula' => 'Cycles are ordered by the expiry date of the permit being renewed; the older 70% train '
+                    .'the model and the newer 30% test it. Never a random split.',
+                'covers' => 'Every measurement of one cycle stays on the same side of the cut, so nothing about a '
+                    .'business can be learned and then tested on itself.',
+                'why' => 'A random split would let the model see 2026 while being marked on 2025 — the future '
+                    .'explaining the past. Every accuracy figure that comes out of one is too good, and the amount '
+                    .'it is too good by cannot be measured afterwards.',
+            ],
+
+            'training' => [
+                'label' => 'Cycles fitted',
+                'formula' => 'Completed renewal cycles in the training period, each measured at up to seven points '
+                    .'before its permit expired.',
+                'covers' => 'Only cycles whose outcome had settled: a permit still in force, or one that lapsed too '
+                    .'recently for a late renewal to have shown up yet, is left out rather than counted as punctual. '
+                    .'The count of what was left out is shown beside it.',
+                'why' => 'The sample size behind everything else on the screen. A reader told how many cycles were '
+                    .'used and not how many were dropped has been handed a number with no denominator.',
             ],
         ];
     }

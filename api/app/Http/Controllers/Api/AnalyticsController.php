@@ -21,6 +21,7 @@ use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
 use App\Support\PdfFile;
 use App\Support\ProcessingTimeAnalytics;
+use App\Support\RenewalModelAnalytics;
 use App\Support\RenewalRiskAnalytics;
 use App\Support\Spc;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -75,9 +76,51 @@ class AnalyticsController extends Controller
         return PdfFile::render($pdf)->download('processing-time-monitoring.pdf');
     }
 
+    /**
+     * Business Growth Analysis, plus the one thing the snapshot cannot carry.
+     *
+     * ── Why `industry_lenses` is spliced on here ────────────────────────────
+     *
+     * The Business Industry Growth Trend panel now offers the reader three
+     * questions over the same six slots — Largest, Fastest growing, Fastest
+     * declining — because a panel titled "Growth Trend" that ranks by size
+     * cannot show a small trade that doubled and will happily show a large one
+     * that shrank. The argument for the three lenses, the minimum business
+     * count they impose and why Largest stays the default all live on
+     * BusinessGrowthAnalytics::industryLenses(); this note is only about where
+     * the computation is allowed to happen.
+     *
+     * It cannot be part of the dataset. `industry_growth` is computed by
+     * r/R/service.R as well as by PHP, AnalyticsParityTest compares the two key
+     * sets in BOTH directions byte-strict, and AnalyticsResolver serves R's
+     * stored snapshot verbatim whenever one exists. So a re-ranking or a new key
+     * added in PHP alone would fail parity and would never reach the browser
+     * anyway — the screen would keep drawing last night's six-by-count rows. R
+     * is not ours to change.
+     *
+     * That leaves serve time, which is the same door the renewal-risk barangay
+     * menu and permit-lifecycle split come through, for the same reason. The
+     * splice is purely additive: `industry_growth` is left exactly as the engine
+     * produced it, so the PDF report, the parity fixture and any older client
+     * keep reading the payload they already read.
+     *
+     * The register is read live here, which is a real (small) inconsistency with
+     * the `computed_at` the screen prints — and it is the lesser of the two
+     * available ones. The floor's caption ("7 of 30 lines carry fewer than 10
+     * businesses") can only come from the whole fact table, and a live caption
+     * printed over snapshot rows would put two vintages in one panel where the
+     * reader would have no way to tell them apart.
+     */
     public function businessGrowth(Request $request): JsonResponse
     {
-        return $this->serve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $this->months($request)]);
+        $months = $this->months($request);
+        $resolved = $this->resolve(AnalyticsDatasets::BUSINESS_GROWTH, ['months' => $months]);
+        $resolved['data']['industry_lenses'] = BusinessGrowthAnalytics::industryLenses($months);
+
+        return response()->json([
+            'data' => $resolved['data'],
+            'meta' => $resolved['meta'],
+        ]);
     }
 
     public function businessGrowthReport(Request $request): Response
@@ -153,6 +196,39 @@ class AnalyticsController extends Controller
             'data' => $this->decorateRenewalRisk($resolved['data'], $days, $view['barangay']),
             'meta' => $resolved['meta'],
         ]);
+    }
+
+    /**
+     * The fitted model that sits beside the rule score.
+     *
+     * Its own endpoint rather than more keys on renewalRisk(), for the reasons
+     * in RenewalModelAnalytics' docblock. Two consequences show up right here
+     * and both are deliberate:
+     *
+     *  - **It takes no filters.** The barangay, level and action controls narrow
+     *    a watchlist; they do not refit a regression. Accepting them would key
+     *    to snapshots that can never exist and serve the "no model" fallback for
+     *    every filtered view, which a reader would correctly read as an outage.
+     *  - **The horizon is pinned to the precomputed one.** The screen's horizon
+     *    selector changes which permits are estimated, not which cycles the fit
+     *    was trained on, and the single precomputed variant already carries the
+     *    full year — a superset of every shorter horizon. Passing the caller's
+     *    horizon through would miss the snapshot on four choices in five and
+     *    fall back to "model unavailable" for no reason anyone could act on.
+     *
+     * The fallback here is not a second implementation of the statistics. It is
+     * their honest absence: `available => false` with a reason, same keys.
+     */
+    public function renewalModel(): JsonResponse
+    {
+        $days = RenewalModelAnalytics::DEFAULT_HORIZON_DAYS;
+        $limit = RenewalModelAnalytics::DEFAULT_LIMIT;
+
+        return response()->json(AnalyticsResolver::resolve(
+            AnalyticsDatasets::RENEWAL_MODEL,
+            ['days' => $days, 'limit' => $limit],
+            static fn (): array => RenewalModelAnalytics::build($days, $limit),
+        ));
     }
 
     /**
