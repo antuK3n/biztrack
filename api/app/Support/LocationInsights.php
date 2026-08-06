@@ -87,6 +87,7 @@ final class LocationInsights
             'concentration' => self::concentration($nearby),
             'similar' => self::similar($nearby, $psicCode),
             'common_type' => self::commonType($nearby),
+            'your_line' => self::yourLine($nearby, $psicCode),
         ];
     }
 
@@ -246,6 +247,59 @@ final class LocationInsights
             'average_distance_m' => $matches->isEmpty()
                 ? null
                 : (int) round($matches->avg('distance_m')),
+        ];
+    }
+
+    /**
+     * The applicant's own category, and how many neighbours share it.
+     *
+     * ## Why this exists: two rows, two different keys
+     *
+     * `similar` counts on the 3-digit PSIC **group**; `common_type` names the
+     * mode of the 2-digit **division**. Both are right, and the difference is
+     * deliberate — widening `similar` to the division would make a coffee shop
+     * "similar" to a canteen, which is the confusion PsicTaxonomy's docblock
+     * exists to prevent. But the two figures render as adjacent rows of one
+     * table, and a reader has every reason to assume adjacent rows share a
+     * definition.
+     *
+     * A client filing PSIC 10500 *Manufacture of dairy products* read
+     * "Similar businesses: 0" above "Most common: Manufacturing, 6 of 33" and
+     * filed a bug. The 0 was correct: no neighbour was in group 105. The six
+     * were furniture, concrete and plastics — nothing to do with dairy at either
+     * level. Nothing on screen let them find that out, because the applicant's
+     * own division was the one quantity the payload never carried.
+     *
+     * So it carries it now. With "your line is in Food & Beverage Manufacturing
+     * — 2 nearby" on screen beside the mode, the mismatch stops being a
+     * contradiction and becomes the ordinary fact it always was: the block has
+     * few of your trade and many of someone else's. That is the answer the
+     * applicant came for, and it is why this is a figure rather than a footnote
+     * explaining that the rows are computed differently. A caveat asks the
+     * reader to reconcile the rows themselves; a third number does it for them.
+     *
+     * `available: false` for the catch-all 00000 for the same reason `group()`
+     * returns null for it: "Other" is not a trade, and counting the block's
+     * other unclassifiable businesses as the applicant's own kind would invent a
+     * neighbourhood out of the absence of data.
+     *
+     * @param  Collection<int, array{distance_m: float, psic_code: string|null}>  $nearby
+     * @return array<string, mixed>
+     */
+    private static function yourLine(Collection $nearby, ?string $psicCode): array
+    {
+        $category = $psicCode === null ? null : PsicTaxonomy::category($psicCode);
+
+        if ($category === null || $category === PsicTaxonomy::UNCLASSIFIED) {
+            return ['available' => false, 'category' => null, 'count' => null];
+        }
+
+        return [
+            'available' => true,
+            'category' => $category,
+            'count' => $nearby
+                ->filter(fn (array $row) => PsicTaxonomy::category($row['psic_code']) === $category)
+                ->count(),
         ];
     }
 

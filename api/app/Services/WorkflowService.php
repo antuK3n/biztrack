@@ -7,6 +7,7 @@ use App\Enums\AssignmentStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\PermitStatus;
+use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationStatusHistory;
@@ -30,12 +31,29 @@ class WorkflowService
 {
     public function __construct(private NotificationService $notify) {}
 
-    /** Record a status transition + history row + notification to the applicant. */
+    /**
+     * Record a status transition + history row + notification to the applicant.
+     *
+     * The legality check is the last line of defence and is meant to be
+     * unreachable: every caller above should already know whether the move it
+     * is about to ask for makes sense. It is here anyway because this is the
+     * ONLY write path for `applications.status` — every other guard in this
+     * service protects one route, and a new route added next year gets this one
+     * for free. `ApplicationStatus::allowedNext()` carries the reasoning for
+     * each edge; do not restate it at a call site.
+     *
+     * A null `$from` is allowed through: a filing with no status yet has no
+     * transition to be illegal, and refusing it would break the row's first
+     * move rather than protect anything.
+     */
     public function transition(Application $app, ApplicationStatus $to, ?string $note = null): void
     {
         $from = $app->status;
         if ($from === $to) {
             return;
+        }
+        if ($from !== null && ! $from->canTransitionTo($to)) {
+            throw IllegalTransitionException::refuse($from, $to);
         }
         $app->update(['status' => $to]);
         ApplicationStatusHistory::create([
@@ -173,9 +191,33 @@ class WorkflowService
      * nothing behind to delete.
      */
 
-    /** Officer approves their department's review. */
+    /**
+     * Officer approves their department's review.
+     *
+     * The guard is on the FILING, not on the assignment, and that distinction
+     * is the bug (INS-5). An open assignment is not permission to act when the
+     * filing underneath it is dead: rejecting an application deliberately does
+     * not touch assignments — `rejectApplication()` sets the filing's status and
+     * the rejection reason and stops — so every office that had not yet
+     * finished reading keeps a `pending` row forever. That row is a record of
+     * what was outstanding when the decision came, not a live task. 101
+     * rejected filings in the register carry one, and each was a still-pressable
+     * Approve.
+     *
+     * Refusing here rather than only in transition() so nothing is written at
+     * all: without this the assignment is marked `completed` with a
+     * `completed_at`, and only then does the status change blow up — leaving a
+     * rejected filing carrying a freshly-approved review that no officer
+     * intended and no rollback removes. The write and the refusal must not be
+     * in that order.
+     */
     public function approveAssignment(ApplicationAssignment $assignment, ?string $remarks = null): void
     {
+        $app = $assignment->application;
+        if ($app->status?->isTerminal()) {
+            throw IllegalTransitionException::refuse($app->status, ApplicationStatus::ForInspection);
+        }
+
         $assignment->update([
             'status' => AssignmentStatus::Completed,
             'remarks' => $remarks,
@@ -237,6 +279,34 @@ class WorkflowService
      */
     private function afterReviewProgress(Application $app, ApplicationAssignment $approved): void
     {
+        /*
+         * Review progress only means anything while the filing is IN review.
+         *
+         * `returned` is the case that matters and the one that was reachable
+         * through the UI. Office A returns the filing for revision; office B
+         * opens the same filing, is offered a live Approve — its own assignment
+         * really is pending — presses it, and before this guard existed the
+         * filing went `returned → for_inspection`. The applicant's revision
+         * request vanished with no message and no history of anyone cancelling
+         * it, and the only thing that restores a returned assignment is
+         * `resubmit()`, which the applicant can no longer reach because their
+         * Resubmit button renders on a returned filing.
+         *
+         * Nothing is booked either, deliberately. Sending an inspector to
+         * premises whose filing is mid-revision books a visit against documents
+         * that are about to change; the visit is booked when the office
+         * approves a filing that is actually under review, which is what
+         * happens after `resubmit()`.
+         *
+         * The office's own approval is still RECORDED — approveAssignment() has
+         * already written it and that is not undone here. Its reading of the
+         * paperwork genuinely is finished; what it does not do is move a filing
+         * that is in someone else's hands.
+         */
+        if (! in_array($app->status, [ApplicationStatus::UnderReview, ApplicationStatus::ForInspection], true)) {
+            return;
+        }
+
         $visit = $this->scheduleInspectionFor($app, $approved->department_id);
 
         /*
@@ -320,6 +390,32 @@ class WorkflowService
      */
     private function isFullyCleared(Application $app): bool
     {
+        /*
+         * Clear to ISSUE, which is a stronger claim than "the work is done".
+         *
+         * Both callers turn a true here straight into approveAndIssue(), and
+         * that mints permits and writes `decided_at` BEFORE transition() is
+         * reached — so a filing that may not legally become Approved has to be
+         * stopped here, not there. Two live cases:
+         *
+         *  - `returned`. Every office happens to have completed and a visit
+         *    passes while the applicant is revising: without this the permits
+         *    are issued against the version they are in the middle of
+         *    replacing.
+         *  - `approved`. recordInspection() on a filing already issued —
+         *    a re-inspection conducted after the fact — would run
+         *    approveAndIssue() a second time and create a DUPLICATE permit row
+         *    per permit type. transition() would then no-op on Approved →
+         *    Approved and hide it. The permits would be real and numbered.
+         *
+         * Asking the legality table rather than listing statuses here keeps one
+         * statement of the machine. If Approved ever becomes reachable from
+         * somewhere new, this follows automatically.
+         */
+        if (! $app->status?->canTransitionTo(ApplicationStatus::Approved)) {
+            return false;
+        }
+
         $app->load('assignments');
 
         $everyReviewDone = $app->assignments->every(
