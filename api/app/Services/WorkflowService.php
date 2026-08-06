@@ -213,7 +213,7 @@ class WorkflowService
             return $app;
         }
 
-        return DB::transaction(function () use ($app, $tier, $by, $from) {
+        $app = DB::transaction(function () use ($app, $tier, $by, $from) {
             $deadlineBefore = $app->deadline_at;
             $deadlineAfter = $app->submitted_at
                 ? Ra11032::deadlineFor($app->submitted_at, $tier)
@@ -247,6 +247,33 @@ class WorkflowService
 
             return $app->fresh();
         });
+
+        /*
+         * GUARD 3 of 3, and the one that keeps the approval gate from being a
+         * trap (the other two are in afterReviewProgress and recordInspection).
+         *
+         * approveAndIssue() now refuses an uncategorised filing. Every event
+         * that can leave a filing "everything done except the category" must
+         * therefore re-test whether it is complete once the category arrives,
+         * or the filing has no remaining event to release it: its reviews are
+         * all in, its visits have all passed, and nothing will call
+         * afterReviewProgress or recordInspection on it again. That state is
+         * not hypothetical — it is what the pre-gate rows in the register look
+         * like, and BIZ-2026-00462 is sitting in it right now.
+         *
+         * Unreachable for a filing that still owes anybody anything, which is
+         * every filing created since the gate: isFullyCleared() is the same
+         * both-halves test the other two guards use, so an office that has not
+         * read the papers or an inspector who has not visited still blocks it.
+         * Categorising is not a shortcut past either.
+         */
+        if ($this->isFullyCleared($app)) {
+            $this->approveAndIssue($app);
+
+            return $app->fresh();
+        }
+
+        return $app;
     }
 
     /**
@@ -312,6 +339,57 @@ class WorkflowService
      */
 
     /**
+     * A filing may not be approved until somebody has said which tier it is.
+     *
+     * The client: "On the admin side, choosing the Application category must be
+     * required. The admin must not approve the application unless an
+     * Application category is chosen."
+     *
+     * ── Why a null tier is the thing being refused ────────────────────────────
+     *
+     * `complexity` is a column on the APPLICATION — one value per filing,
+     * shared by every office on it — not a per-office field. So this is not a
+     * task each of the seven offices has to repeat: whichever office fills the
+     * blank first satisfies it for all of them, and the second office through
+     * finds it already set and is not blocked by a field it cannot see a reason
+     * to touch. There is also no way back to null — `classify()` only accepts a
+     * real tier — so a filing that clears this once clears it forever.
+     *
+     * `submit()` seeds a tier from `Ra11032::tierFor()`, so filings created
+     * through the product arrive here already non-null and this gate is quiet
+     * on them. It is not therefore decorative. Null is reachable three ways
+     * that matter: rows that predate submission-time classification (the
+     * register holds live ones — a `for_inspection` filing and two under
+     * review), anything seeded or fixtured without the column, and any future
+     * path that stops guessing a tier at submission — which is the direction
+     * open question A10 with BPLO points, since our guess is not the LGU's
+     * published classification. This gate is what makes removing the guess safe
+     * rather than silently issuing permits with no statutory clock on them.
+     *
+     * ── Approval only. Rejection is deliberately not gated ───────────────────
+     *
+     * A rejected filing never enters a processing clock, so demanding a tier
+     * before `rejectApplication()` would stop an officer saying no for the sake
+     * of a field that will never be measured. Returning for revision is
+     * likewise untouched: the filing stays alive and can be categorised later.
+     *
+     * ValidationException so the officer gets a 422 carrying a sentence they
+     * can act on, rather than IllegalTransitionException's status-machine
+     * phrasing — nothing about the filing's STATUS is wrong here, and the fix
+     * is a control on the screen they are already looking at.
+     */
+    private function requireProcessingCategory(Application $app): void
+    {
+        if (Ra11032::isTier($app->complexity)) {
+            return;
+        }
+
+        throw ValidationException::withMessages([
+            'complexity' => ['Choose this application’s processing category before approving it. RA 11032 needs to know whether the filing is simple, complex or highly technical to say which deadline it was due under. Set it under For Office Use Only, then approve.'],
+        ]);
+    }
+
+    /**
      * Officer approves their department's review.
      *
      * The guard is on the FILING, not on the assignment, and that distinction
@@ -330,6 +408,9 @@ class WorkflowService
      * rejected filing carrying a freshly-approved review that no officer
      * intended and no rollback removes. The write and the refusal must not be
      * in that order.
+     *
+     * The processing-category gate is here for the same reason and in the same
+     * position — before any write. See requireProcessingCategory().
      */
     public function approveAssignment(ApplicationAssignment $assignment, ?string $remarks = null): void
     {
@@ -337,6 +418,8 @@ class WorkflowService
         if ($app->status?->isTerminal()) {
             throw IllegalTransitionException::refuse($app->status, ApplicationStatus::ForInspection);
         }
+
+        $this->requireProcessingCategory($app);
 
         $assignment->update([
             'status' => AssignmentStatus::Completed,
@@ -802,9 +885,34 @@ class WorkflowService
      * adjusting the assessment upward after payment — which is a conversation
      * with the applicant, not a reason to withhold a permit the offices have
      * already approved.
+     *
+     * ── The processing-category gate, restated at the till ────────────────────
+     *
+     * This is the only place an application actually becomes Approved, and both
+     * routes to it — the last office's review (afterReviewProgress) and the
+     * last passing inspection (recordInspection) — come through here, so the
+     * client's rule is enforced here as well as on the officer's Approve.
+     *
+     * It is not redundant with the gate on approveAssignment(). isFullyCleared()
+     * requires every assignment `completed`, and after this change no assignment
+     * can be completed on an uncategorised filing — but assignments completed
+     * BEFORE this change are already in the register, and one of them is a
+     * `for_inspection` filing with all seven reviews in and no category. The
+     * approval path that filing will take is the inspection one, which never
+     * touches approveAssignment. Without this, the last inspector's Pass mints
+     * seven permits on a filing carrying no statutory deadline at all.
+     *
+     * The refusal reaches an inspector, not the officer who can fix it, and
+     * that is the honest cost of the gate rather than an oversight: any office
+     * on the filing can still set the category through
+     * `POST /assignments/{id}/classification`, and the review sheet offers that
+     * control on a filing in this state (see ReviewPage's For Inspection box,
+     * which draws it precisely when the category is missing).
      */
     public function approveAndIssue(Application $app): void
     {
+        $this->requireProcessingCategory($app);
+
         DB::transaction(function () use ($app) {
             $app->loadMissing('permitTypes');
             foreach ($app->permitTypes as $pt) {

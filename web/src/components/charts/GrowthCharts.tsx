@@ -437,22 +437,35 @@ function lensCaption(lens: IndustryLens, lenses: IndustryLenses): string {
   const below = lenses.lines_on_record - lenses.above_floor
 
   if (lens.key === 'largest') {
-    const basis = `Ranked by how many businesses carry the line today; all ${lenses.lines_on_record} lines of business on the register are eligible.`
+    const basis = `The ${drawn} lines of business with the most businesses registered.`
     return drawn < lenses.slots
-      ? `${basis} Only ${lenses.lines_on_record} ${lenses.lines_on_record === 1 ? 'line is' : 'lines are'} on record, so the chart draws ${drawn}.`
-      : `${basis} The other ${lenses.lines_on_record - drawn} are smaller.`
+      ? `${basis} That is every line on the register.`
+      : `${basis} ${lenses.lines_on_record - drawn} smaller lines are not shown.`
   }
 
+  const moved = lens.key === 'growing' ? 'gained the most' : 'lost the most'
   const verb = lens.key === 'growing' ? 'grew' : 'declined'
-  const basis =
-    `Ranked by the change between the two periods. Only industries with at least ` +
-    `${lenses.min_businesses} businesses on record are ranked` +
-    (below > 0
-      ? ` — ${below} of ${lenses.lines_on_record} lines fall below that and are left out.`
-      : `; every line on the register clears that.`)
+
+  /*
+   * One idea per sentence, at the client's request: the old caption opened on
+   * "Ranked by the change between the two periods. Only industries with at
+   * least 10 businesses on record are ranked — 7 of 30 lines fall below that
+   * and are left out." — three separate facts fused into a clause a reader has
+   * to unpick before learning what they are looking at.
+   *
+   * So: what the chart shows, then who was excluded, then why fewer than six
+   * lines are drawn when that happens. The exclusion count is still printed —
+   * "why isn't my trade on here" is the question this panel actually gets, and
+   * a floor a reader cannot see is indistinguishable from a bug.
+   */
+  const basis = `The ${drawn === 1 ? 'industry' : `${drawn} industries`} that ${moved} businesses this period.`
+  const floor =
+    below > 0
+      ? ` Lines with fewer than ${lenses.min_businesses} businesses are too small to rank — ${below} of ${lenses.lines_on_record} are left out.`
+      : ` Every line on the register has at least ${lenses.min_businesses} businesses, so none are left out.`
 
   if (drawn === 0) {
-    return `${basis} No industry above that size ${verb} in this period, so there is nothing to plot.`
+    return `No industry large enough to rank ${verb} this period, so there is nothing to plot.${floor}`
   }
 
   const noun = lens.qualifying === 1 ? 'industry' : 'industries'
@@ -460,14 +473,14 @@ function lensCaption(lens: IndustryLens, lenses: IndustryLenses): string {
   // Said out loud rather than left to the reader to count. A chart with four
   // lines where the other panels have six reads as a chart that lost two.
   if (lens.qualifying < lenses.slots) {
-    return `${basis} Only ${lens.qualifying} ${noun} ${verb}, so the chart draws ${drawn} ${drawn === 1 ? 'line' : 'lines'} rather than ${lenses.slots}.`
+    return `${basis}${floor} Only ${lens.qualifying} ${noun} ${verb} at all, so there are ${drawn} ${drawn === 1 ? 'line' : 'lines'} instead of ${lenses.slots}.`
   }
 
   if (lens.qualifying === lenses.slots) {
-    return `${basis} ${lens.qualifying} ${noun} ${verb}, and all of them are drawn.`
+    return `${basis}${floor} Exactly ${lens.qualifying} ${noun} ${verb}, and all of them are here.`
   }
 
-  return `${basis} ${lens.qualifying} ${noun} ${verb}; the ${lenses.slots} that moved most are drawn.`
+  return `${basis}${floor} ${lens.qualifying} ${noun} ${verb} in total.`
 }
 
 /**

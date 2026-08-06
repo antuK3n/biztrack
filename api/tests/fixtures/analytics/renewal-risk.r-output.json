@@ -1081,31 +1081,31 @@
       "rule": "expiry",
       "label": "Time to expiry",
       "max": 30,
-      "description": "Stepped on the expiry-monitoring marks \u2014 30, 15, 7 and 1 day out. Full weight once the permit has lapsed or expires tomorrow, nothing beyond 90 days out."
+      "description": "The nearer the expiry date, the more points. Nothing at all beyond 90 days out, then steps up at 30, 15, 7 and 1 day, and the full 30 once the permit has lapsed."
     },
     {
       "rule": "progress",
       "label": "Renewal progress",
       "max": 25,
-      "description": "Full weight when a renewal is due within 30 days and none has been filed, or when one was rejected and must be refiled. A permit not yet due scores nothing here, and neither does one already renewed."
+      "description": "All 25 points if the permit expires within 30 days and no renewal has been filed \u2014 or if one was filed and rejected, so it still has to be done again. Nothing if the renewal is not due yet, and nothing once it has been approved."
     },
     {
       "rule": "punctuality",
       "label": "Past punctuality",
       "max": 20,
-      "description": "The share of this business's earlier renewals filed after the old permit expired. A first renewal cycle has no record and takes half weight."
+      "description": "How often this business has renewed late before. Every past renewal late scores the full 20; none late scores 0; half of them late scores half. A business renewing for the first time has no record to go on and takes 10."
     },
     {
       "rule": "findings",
       "label": "Open compliance findings",
       "max": 15,
-      "description": "Unticked requirements and failed or conditional inspections that would block issuance even on a punctual filing."
+      "description": "Requirements still unticked, and inspections that came back failed or conditional. These would hold up the permit even if the renewal were filed on time."
     },
     {
       "rule": "fees",
       "label": "Unsettled fees",
       "max": 10,
-      "description": "An assessed fee with no completed payment against it."
+      "description": "A fee has been assessed against the renewal and not yet paid in full."
     }
   ],
   "thresholds": {

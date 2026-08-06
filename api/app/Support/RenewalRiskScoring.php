@@ -110,6 +110,24 @@ final class RenewalRiskScoring
         ];
     }
 
+    /**
+     * The five rules, in plain words, at the client's request: "can't it be
+     * simplified, the computation on how the index was computed?"
+     *
+     * The complaint was not that the rules were wrong but that reading all five
+     * still left you unable to say how a permit got its number. So each
+     * description now leads with the arithmetic — how many points, on what
+     * condition — and the qualifications follow. The edge cases that used to
+     * open each sentence ("stepped on the expiry-monitoring marks", "the share
+     * of this business's earlier renewals") are true and are still here; they
+     * are just no longer the first thing between a reader and the rule.
+     *
+     * What the descriptions deliberately do NOT do is state the totals or the
+     * band cuts. Those come from WEIGHTS and the two thresholds and are printed
+     * by the screen from those same constants, so the sum on screen cannot
+     * drift from the sum the scorer actually uses — which is exactly what would
+     * happen if a number like "100" were typed into a sentence here.
+     */
     public static function rulebook(): array
     {
         return [
@@ -117,36 +135,40 @@ final class RenewalRiskScoring
                 'rule' => 'expiry',
                 'label' => 'Time to expiry',
                 'max' => self::WEIGHTS['expiry'],
-                'description' => 'Stepped on the expiry-monitoring marks — 30, 15, 7 and 1 day out. Full '
-                    .'weight once the permit has lapsed or expires tomorrow, nothing beyond 90 days out.',
+                'description' => 'The nearer the expiry date, the more points. Nothing at all beyond 90 days '
+                    .'out, then steps up at 30, 15, 7 and 1 day, and the full '.self::WEIGHTS['expiry']
+                    .' once the permit has lapsed.',
             ],
             [
                 'rule' => 'progress',
                 'label' => 'Renewal progress',
                 'max' => self::WEIGHTS['progress'],
-                'description' => 'Full weight when a renewal is due within '.self::RENEWAL_DUE_WITHIN_DAYS
-                    .' days and none has been filed, or when one was rejected and must be refiled. A permit not '
-                    .'yet due scores nothing here, and neither does one already renewed.',
+                'description' => 'All '.self::WEIGHTS['progress'].' points if the permit expires within '
+                    .self::RENEWAL_DUE_WITHIN_DAYS.' days and no renewal has been filed — or if one was filed '
+                    .'and rejected, so it still has to be done again. Nothing if the renewal is not due yet, '
+                    .'and nothing once it has been approved.',
             ],
             [
                 'rule' => 'punctuality',
                 'label' => 'Past punctuality',
                 'max' => self::WEIGHTS['punctuality'],
-                'description' => 'The share of this business\'s earlier renewals filed after the old permit expired. '
-                    .'A first renewal cycle has no record and takes half weight.',
+                'description' => 'How often this business has renewed late before. Every past renewal late '
+                    .'scores the full '.self::WEIGHTS['punctuality'].'; none late scores 0; half of them late '
+                    .'scores half. A business renewing for the first time has no record to go on and takes '
+                    .self::PUNCTUALITY_UNKNOWN.'.',
             ],
             [
                 'rule' => 'findings',
                 'label' => 'Open compliance findings',
                 'max' => self::WEIGHTS['findings'],
-                'description' => 'Unticked requirements and failed or conditional inspections that would block '
-                    .'issuance even on a punctual filing.',
+                'description' => 'Requirements still unticked, and inspections that came back failed or '
+                    .'conditional. These would hold up the permit even if the renewal were filed on time.',
             ],
             [
                 'rule' => 'fees',
                 'label' => 'Unsettled fees',
                 'max' => self::WEIGHTS['fees'],
-                'description' => 'An assessed fee with no completed payment against it.',
+                'description' => 'A fee has been assessed against the renewal and not yet paid in full.',
             ],
         ];
     }
