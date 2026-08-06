@@ -90,6 +90,23 @@ export function ShareChart({
         <PieChart margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
           <Tooltip
             formatter={(value, name) => [Number(value).toLocaleString(), String(name)]}
+            /*
+             * On a donut, the tooltip is pinned to the top of the plot instead of
+             * following the pointer.
+             *
+             * recharts places it AT the pointer, and on a ring the pointer is by
+             * definition somewhere around the hole — so the box lands squarely on
+             * the headline figure the hole exists to show, and neither one can be
+             * read. recharts resolves `position` per axis, so giving it only `y`
+             * still lets the box track the pointer sideways; it just stops
+             * climbing into the middle. The cost is that it covers the top of the
+             * ring, which is a shape, not a number.
+             *
+             * Hiding the centre figure on hover was the alternative and is worse:
+             * the whole point of the hole is that the part and the total are
+             * legible at the same time.
+             */
+            position={variant === 'donut' ? { y: 0 } : undefined}
             {...CHART_TOOLTIP}
           />
           <Pie
