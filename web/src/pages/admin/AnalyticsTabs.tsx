@@ -49,7 +49,9 @@ const TABS = [
   { to: '/staff/analytics', label: 'Overview', end: true, permission: 'analytics.view' },
   {
     to: '/staff/analytics/renewal-risk',
-    label: 'Renewal Risk',
+    // The paper's §2 name in full, matching the screen's own h1 and the label
+    // AnalyticsDatasets sends back for this dataset.
+    label: 'Renewal Risk Prediction',
     end: false,
     permission: 'analytics.view',
   },

@@ -44,7 +44,7 @@ const SUPER_ADMIN_SESSION = 'e2e/.auth/admin.json'
 /** §1, §2 and §4 of the spec — all headed "(Admin - BPLO)". */
 const BPLO_SCREENS = [
   { path: '/staff/analytics', title: 'Analytics Dashboard' },
-  { path: '/staff/analytics/renewal-risk', title: 'Renewal Risk' },
+  { path: '/staff/analytics/renewal-risk', title: 'Renewal Risk Prediction' },
   { path: '/staff/analytics/business-growth', title: 'Business Growth Analysis' },
 ] as const
 
@@ -110,7 +110,7 @@ test.describe('the three BPLO analytics screens', () => {
 
   test('an info panel opens on click, on keyboard focus, and closes on Escape', async ({ page }) => {
     await page.goto('/staff/analytics/renewal-risk')
-    await waitForAnalytics(page, 'Renewal Risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
 
     const button = page.locator('button[aria-label^="How "]').first()
     await expect(button).toHaveAttribute('aria-expanded', 'false')
@@ -150,7 +150,7 @@ test.describe('the three BPLO analytics screens', () => {
 
   test('column headers do not fold the info button into their announced name', async ({ page }) => {
     await page.goto('/staff/analytics/renewal-risk')
-    await waitForAnalytics(page, 'Renewal Risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
 
     /*
      * A header cell takes its accessible name from its contents, and that name
@@ -167,7 +167,7 @@ test.describe('the three BPLO analytics screens', () => {
 
   test('the renewal risk screen never calls its score a probability', async ({ page }) => {
     await page.goto('/staff/analytics/renewal-risk')
-    await waitForAnalytics(page, 'Renewal Risk')
+    await waitForAnalytics(page, 'Renewal Risk Prediction')
 
     /*
      * The paper and the mockup both labelled this column "PROB. DELAYED" with
@@ -177,6 +177,20 @@ test.describe('the three BPLO analytics screens', () => {
      *
      * Read from the rendered page rather than the source, because the words can
      * arrive from the server at runtime and a source grep would miss that.
+     */
+    /*
+     * "predicted", NOT "prediction" — and the difference is the whole point,
+     * so do not tidy this list by adding the shorter stem.
+     *
+     * The screen is titled "Renewal Risk Prediction" because that is the
+     * paper's §2 name for the FEATURE, and the client asked for the paper's
+     * terms. Naming a feature is not a claim about a number. "Predicted",
+     * "probability" and "prob." are claims about the number, and the number is
+     * a weighted sum of five rules with no fitted model behind it and no
+     * recorded outcome to have fitted against.
+     *
+     * Banning the stem would force the screen to contradict the paper to pass
+     * its own honesty test, which is the wrong trade in both directions.
      */
     const body = ((await page.locator('body').textContent()) ?? '').toLowerCase()
     for (const word of ['probability', 'likelihood', 'prob.', 'predicted']) {
@@ -218,7 +232,7 @@ test.describe('the three BPLO analytics screens', () => {
      * the routes resolved to the same component.
      */
     const TABS = [
-      { label: 'Renewal Risk', path: '/staff/analytics/renewal-risk', heading: /renewal risk/i },
+      { label: 'Renewal Risk Prediction', path: '/staff/analytics/renewal-risk', heading: /renewal risk/i },
       {
         // Renamed from "Lifecycle": the client asked for the spec's §4 term,
         // "Business Growth Analysis". The route did not move, and the page
