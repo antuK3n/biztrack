@@ -21,6 +21,7 @@ use App\Support\Numbering;
 use App\Support\Ra11032;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The permit-lifecycle state machine (master plan §6.2). Every transition goes
@@ -116,6 +117,16 @@ class WorkflowService
             $tier = Ra11032::tierFor($app);
             $submittedAt = now();
 
+            /*
+             * `complexity_set_by_user_id` is deliberately left null here.
+             *
+             * Null means "classified automatically", and that is exactly what
+             * this is — `tierFor()` is our rule, not the LGU's published one
+             * (A10). The review sheet reads this to tell an officer whether
+             * they are overriding a guess or filling in a blank, so writing
+             * the applicant's id here would claim a human decision that nobody
+             * made. `classify()` below is the only writer of that column.
+             */
             $app->update([
                 'submitted_at' => $submittedAt,
                 'complexity' => $tier,
@@ -124,6 +135,115 @@ class WorkflowService
             $this->transition($app, ApplicationStatus::Submitted);
             $this->assessFees($app);
             $this->transition($app, ApplicationStatus::PendingPayment, 'Fee assessment ready. Awaiting payment.');
+
+            return $app->fresh();
+        });
+    }
+
+    /**
+     * A reviewing office sets which RA 11032 tier this filing belongs to.
+     *
+     * ── Why this is settable at all ───────────────────────────────────────────
+     *
+     * RA 11032 fixes the DEADLINES — three working days simple, seven complex,
+     * twenty highly technical — and fixes nothing about which filing is which.
+     * That classification is the LGU's, published in its Citizen's Charter.
+     * Malabon has not given us theirs (open question A10), so until now every
+     * filing was tiered by `Ra11032::tierFor()`, a rule we wrote and nobody at
+     * BPLO approved, and the dashboard's compliance rate was measured against
+     * it. The client asked for the obvious remedy: let the office that is
+     * actually reading the filing say which tier it is.
+     *
+     * The tiers themselves stay untouchable. `$tier` is checked against
+     * `Ra11032::TIERS` here as well as by the controller's validation rule,
+     * because this is the one write path for a statutory clock and it should
+     * not depend on a caller having remembered to validate.
+     *
+     * ── The deadline follows, and it is recomputed from the FILING DATE ───────
+     *
+     * This is the decision worth reading twice. `deadline_at` was computed at
+     * submission from the tier at submission, so reclassifying without touching
+     * it would leave a filing labelled "Simple · 3 working days" carrying a
+     * seven-day deadline — a row that contradicts itself and a compliance
+     * figure that is quietly wrong in whichever direction the officer moved.
+     *
+     * Of the two honest options, the clock is restarted from `submitted_at`,
+     * not from today. RA 11032 counts from the filing, not from the moment an
+     * office got round to categorising it; recomputing from `now()` would hand
+     * the LGU a fresh three weeks by reclassifying on day nineteen, which is
+     * the one behaviour a compliance feature must not have. It cuts both ways
+     * and is meant to: reclassifying a filing DOWN to simple on day five can
+     * put it immediately past its deadline, and that is the true statement —
+     * a simple transaction filed five working days ago IS late.
+     *
+     * A filing with no `submitted_at` has no clock to run, so it keeps a null
+     * deadline rather than acquiring one dated from nothing. In practice this
+     * cannot be reached from the review sheet (an unsubmitted filing has no
+     * assignment), and it is here so that a later caller cannot make it true.
+     *
+     * ── What may not be reclassified ──────────────────────────────────────────
+     *
+     * A terminal filing. Approved, rejected and cancelled are decisions with
+     * `decided_at` already written and, for approvals, permits already issued;
+     * moving the tier under one of those rewrites whether the LGU met its
+     * statutory deadline on a case that is closed. Same rule and same reason as
+     * `ApplicationStatus::isTerminal()` guarding the transition table.
+     *
+     * Returns the application whether or not anything changed. Setting the tier
+     * it already has is a no-op on purpose — no audit row, no deadline churn —
+     * because an officer pressing Save on an unchanged select has not made a
+     * decision about a statutory clock.
+     */
+    public function classify(Application $app, string $tier, User $by): Application
+    {
+        if (! Ra11032::isTier($tier)) {
+            throw ValidationException::withMessages([
+                'tier' => ['RA 11032 recognises only simple, complex and highly technical transactions.'],
+            ]);
+        }
+
+        if ($app->status?->isTerminal()) {
+            throw ValidationException::withMessages([
+                'tier' => ['This application has been decided. Its processing category can no longer be changed.'],
+            ]);
+        }
+
+        $from = $app->complexity;
+        if ($from === $tier) {
+            return $app;
+        }
+
+        return DB::transaction(function () use ($app, $tier, $by, $from) {
+            $deadlineBefore = $app->deadline_at;
+            $deadlineAfter = $app->submitted_at
+                ? Ra11032::deadlineFor($app->submitted_at, $tier)
+                : null;
+
+            $app->update([
+                'complexity' => $tier,
+                'complexity_set_by_user_id' => $by->id,
+                'complexity_set_at' => now(),
+                'deadline_at' => $deadlineAfter,
+            ]);
+
+            /*
+             * Audited because this moves a statutory deadline, which is the
+             * sort of change an LGU has to be able to account for afterwards.
+             * Both the tier and both deadlines are recorded: "simple → complex"
+             * alone does not tell an auditor how many days the office gained or
+             * lost, and that is the number the compliance rate is built from.
+             */
+            Audit::log('application.reclassified', $app, [
+                'from' => $from,
+                'to' => $tier,
+                'from_working_days' => $from === null ? null : Ra11032::statutoryWorkingDays($from),
+                'to_working_days' => Ra11032::statutoryWorkingDays($tier),
+                'deadline_from' => $deadlineBefore?->toISOString(),
+                'deadline_to' => $deadlineAfter?->toISOString(),
+                // Which office, not only which person: the client's request is
+                // that every office may do this, so "who" has two halves.
+                'department_id' => $by->department_id,
+            ]);
 
             return $app->fresh();
         });

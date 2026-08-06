@@ -144,6 +144,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
+        /*
+         * The filing's RA 11032 processing category, set by the office reading
+         * it. In this group on purpose: `application.review` is what every one
+         * of the seven offices holds and no applicant does, which is exactly
+         * the client's "all office admins" and no wider. Which office may set
+         * it on WHICH filing is AssignmentController::authorizeDepartment's
+         * decision, the same as approve and return above.
+         */
+        Route::post('assignments/{assignment}/classification', [AssignmentController::class, 'classify']);
     });
     /*
      * Rejecting the whole application is not a per-office power. Each office

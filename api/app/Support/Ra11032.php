@@ -25,6 +25,23 @@ use Carbon\CarbonInterface;
  * The tier rule is deliberately the same one AnalyticsHistorySeeder applies, and
  * reads the same two applicant-declared facts, so seeded and real filings are
  * classified alike and the panel is not comparing two different definitions.
+ *
+ * ── What is statute here, and what is ours ────────────────────────────────────
+ *
+ * TIERS is STATUTE. Three tiers, three day counts, and nothing in this product
+ * may add a fourth or edit a count — an LGU cannot legislate itself a longer
+ * deadline, and a control that let it would be a compliance defect rather than
+ * a feature.
+ *
+ * `tierFor()` is NOT statute. It is our guess at which tier a given filing
+ * belongs to, and RA 11032 does not answer that question — it requires the LGU
+ * to publish its own classification in its Citizen's Charter. Malabon has not
+ * told us theirs (open question A10 in docs/questions-for-malabon.md), so the
+ * reviewing office can now overrule this rule per filing; see
+ * WorkflowService::classify(). What `tierFor()` does is SEED an unclassified
+ * filing at submission, which is why it must not be deleted: a filing nobody
+ * has looked at still needs a deadline, and a null tier is invisible to the
+ * compliance panel entirely.
  */
 final class Ra11032
 {
@@ -88,6 +105,50 @@ final class Ra11032
         }
 
         return 'complex';
+    }
+
+    /**
+     * The tier keys, in statutory order — the only values anyone may set.
+     *
+     * Read off TIERS rather than written out again, so the validation rule on
+     * the reclassification endpoint and the options on the review sheet cannot
+     * drift from the statute they are supposed to be quoting. A fourth tier
+     * cannot be invented without editing TIERS, and TIERS is the law.
+     *
+     * @return list<string>
+     */
+    public static function tierKeys(): array
+    {
+        return array_keys(self::TIERS);
+    }
+
+    /** Is this a tier the statute recognises? Anything else is not a tier. */
+    public static function isTier(mixed $tier): bool
+    {
+        return is_string($tier) && array_key_exists($tier, self::TIERS);
+    }
+
+    /** The statute's own name for a tier ("Simple"), or null for an unknown one. */
+    public static function label(?string $tier): ?string
+    {
+        return self::TIERS[$tier]['label'] ?? null;
+    }
+
+    /**
+     * The three tiers as an ordered list, for a caller that has to OFFER them.
+     *
+     * Shaped for the wire: the review sheet draws exactly these options and
+     * nothing else, so the browser never holds its own copy of the day counts
+     * and cannot show an officer a deadline the statute does not give.
+     *
+     * @return list<array{value: string, label: string, statutory_working_days: int}>
+     */
+    public static function tierOptions(): array
+    {
+        return array_values(array_map(
+            fn (string $key) => ['value' => $key] + self::TIERS[$key],
+            self::tierKeys(),
+        ));
     }
 
     /** Working days the statute allows a tier. Unknown tiers fall back to complex. */
