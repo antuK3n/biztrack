@@ -65,39 +65,103 @@ const STRUCTURES = [
   { value: 'cooperative', label: 'Cooperative' },
 ]
 
-/** Common revenue-code category slugs the API recognizes (datalist hints). */
-const COMMON_CATEGORIES = [
-  'retailer',
-  'essential_retailer',
-  'wholesaler',
-  'carinderia',
-  'restaurant',
-  'cafe_cafeteria',
-  'fastfood_chain',
-  'food_peddler',
-  'manufacturer',
-  'small_scale_manufacturing',
-  'contractor',
-  'service_establishment',
-  'franchise_holder',
-  'gasoline_station',
-  'water_refilling_station',
-  'internet_cafe',
-  'barber_shop',
-  'tailor_dress_shop',
-  'laundry_dry_cleaning',
-  'vulcanizing_shop',
-  'vehicle_repair_shop',
-  'junkshop',
-  'lessor',
-  'hotel',
-  'pawnshop',
-  'bank',
-  'private_hospital',
-  'medical_clinic',
-  'dental_clinic',
-  'printing_publication',
+/*
+ * The common Revenue Code categories, each in the words a shop owner would
+ * actually use for it.
+ *
+ * `slug` is what gets STORED and it is not cosmetic. FeeCalculator::matches()
+ * (api/app/Services/FeeCalculator.php) does an `array_intersect` of a rule's
+ * `business_category` against this exact string, and 35 of the 36 business-tax
+ * rules turn on it. Store anything else and the line matches no rule: no
+ * error, no warning, just a Tax Order of Payment that is quietly too small.
+ * That is why the applicant used to be shown `tailor_dress_shop` — the slug
+ * was the only thing safe to put in the box, so it was put in the box.
+ *
+ * `label` is what the applicant reads and is free to reword, subject to one
+ * INVARIANT: normalizeCategory(label) === slug, for every row.
+ *
+ * That invariant is the whole fix. It is what lets the datalist offer the
+ * LABEL as the option value — see the datalist in the render for the browser
+ * evidence on why the `label` attribute could not be used instead — and still
+ * end up storing the slug. e2e/apply-wizard.spec.ts asserts it over every row
+ * here, so a new category whose label does not round-trip fails a test rather
+ * than silently costing the city a business tax.
+ */
+const CATEGORIES: { slug: string; label: string }[] = [
+  { slug: 'retailer', label: 'Retailer' },
+  { slug: 'essential_retailer', label: 'Essential retailer' },
+  { slug: 'wholesaler', label: 'Wholesaler' },
+  { slug: 'carinderia', label: 'Carinderia' },
+  { slug: 'restaurant', label: 'Restaurant' },
+  { slug: 'cafe_cafeteria', label: 'Cafe / cafeteria' },
+  { slug: 'fastfood_chain', label: 'Fastfood chain' },
+  { slug: 'food_peddler', label: 'Food peddler' },
+  { slug: 'manufacturer', label: 'Manufacturer' },
+  { slug: 'small_scale_manufacturing', label: 'Small-scale manufacturing' },
+  { slug: 'contractor', label: 'Contractor' },
+  { slug: 'service_establishment', label: 'Service establishment' },
+  { slug: 'franchise_holder', label: 'Franchise holder' },
+  { slug: 'gasoline_station', label: 'Gasoline station' },
+  { slug: 'water_refilling_station', label: 'Water refilling station' },
+  { slug: 'internet_cafe', label: 'Internet cafe' },
+  { slug: 'barber_shop', label: 'Barber shop' },
+  { slug: 'tailor_dress_shop', label: 'Tailor / dress shop' },
+  { slug: 'laundry_dry_cleaning', label: 'Laundry / dry cleaning' },
+  { slug: 'vulcanizing_shop', label: 'Vulcanizing shop' },
+  { slug: 'vehicle_repair_shop', label: 'Vehicle repair shop' },
+  { slug: 'junkshop', label: 'Junkshop' },
+  { slug: 'lessor', label: 'Lessor' },
+  { slug: 'hotel', label: 'Hotel' },
+  { slug: 'pawnshop', label: 'Pawnshop' },
+  { slug: 'bank', label: 'Bank' },
+  { slug: 'private_hospital', label: 'Private hospital' },
+  { slug: 'medical_clinic', label: 'Medical clinic' },
+  { slug: 'dental_clinic', label: 'Dental clinic' },
+  { slug: 'printing_publication', label: 'Printing & publication' },
 ]
+
+/** Exported for the test that holds the label→slug round-trip to account. */
+export const FEE_CATEGORIES = CATEGORIES
+
+const CATEGORY_LABEL_BY_SLUG = new Map(CATEGORIES.map((c) => [c.slug, c.label]))
+
+/**
+ * Human words in, the slug the fee engine matches on out.
+ *
+ * "Tailor / dress shop" → "tailor_dress_shop". The field is free text on
+ * purpose — the Revenue Code has 273 categories against the 30 offered here,
+ * and the reviewing officer checks what was typed — so this has to be kind to
+ * an answer that is not on the list: "Sari-sari store" → "sari_sari_store" is
+ * the right outcome, an empty box is not.
+ *
+ * Letters and digits are kept as letters and digits, hence \p{L}\p{N} rather
+ * than [a-z0-9]: with the ASCII class "Piña" would come out "pi_a", which
+ * throws away a letter the officer needs to read the answer back. Nothing in
+ * the reference list is non-ASCII, so this only ever affects free text, where
+ * preserving what was typed matters more than looking like the seeded slugs.
+ */
+export function normalizeCategory(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+/**
+ * The other direction, for what the input SHOWS. A known slug reads back as
+ * its label; anything else — a free-typed trade, or a draft saved before this
+ * screen offered labels at all — reads back as itself with the underscores
+ * opened out, because showing a reopened draft `sari_sari_store` would be the
+ * bug this fix is about, one step removed.
+ */
+function categoryDisplayText(slug: string): string {
+  if (!slug) return ''
+  const known = CATEGORY_LABEL_BY_SLUG.get(slug)
+  if (known) return known
+  const words = slug.replace(/_+/g, ' ').trim()
+
+  return words.charAt(0).toUpperCase() + words.slice(1)
+}
 
 const OCCUPANCY_GROUPS: { value: string; label: string }[] = [
   { value: 'a1', label: 'Group A-1: Residential, single dwelling' },
@@ -302,7 +366,11 @@ export function feeProfileIssues(
         // Named as the field is named, or the "Still needed" line sends the
         // applicant looking for a "Category" the step no longer calls that.
         label: `Revenue Code category for ${line.title}`,
-        message: 'Type the closest Revenue Code category, for example retailer.',
+        // Cased as the applicant now sees it in the list. It said "for example
+        // retailer" while the box offered `retailer`, so the two matched; with
+        // the box offering "Retailer" a lower-case example would be the only
+        // slug left on the screen.
+        message: 'Choose or type the closest Revenue Code category, for example Retailer.',
       })
     }
     if (isRenewal && !draft.no_gross_sales) {
@@ -545,7 +613,15 @@ export function buildFeeProfile(
       // psic_code_id keys the line back to the Location & Zoning selection so a reopened
       // draft restores each category onto the right line of business.
       psic_code_id: id,
-      category: cat.category.trim(),
+      /*
+       * Normalised again at the boundary, deliberately, even though the step
+       * already stores slugs. This is the last line of code before the value
+       * reaches FeeCalculator, and the draft can arrive from somewhere the
+       * step never touched — feeProfileToDraft rehydrating a filing saved
+       * before this screen offered labels, holding whatever was typed then.
+       * Idempotent, so a value that is already a slug passes through unchanged.
+       */
+      category: normalizeCategory(cat.category),
       ...(isRenewal ? { gross_sales: toNumber(cat.gross_sales) } : {}),
       ...(isNew ? { capitalization: toNumber(cat.capitalization) } : {}),
     })
@@ -819,6 +895,27 @@ export function FeeProfileStep({
     set('categories', { ...value.categories, [id]: { ...current, ...patch } })
   }
 
+  /*
+   * What the category box SHOWS, which is not what it stores.
+   *
+   * The draft holds the slug — that is the contract with FeeCalculator — so
+   * the input cannot be bound straight to it or the applicant would watch
+   * "Tailor / dress shop" turn into `tailor_dress_shop` under the cursor, and
+   * would not be able to type a space. The typed text lives here instead and
+   * the slug is derived from it on every keystroke.
+   *
+   * Absent means "not typed into on this visit", and the box falls back to
+   * reading the stored slug back out — which is how a reopened draft shows
+   * words rather than a slug. Keyed by psic_code_id, same as the draft.
+   */
+  const [categoryText, setCategoryText] = useState<Record<number, string>>({})
+  const categoryShown = (id: number, slug: string) =>
+    categoryText[id] ?? categoryDisplayText(slug)
+  function typeCategory(id: number, typed: string) {
+    setCategoryText((t) => ({ ...t, [id]: typed }))
+    setCategory(id, { category: normalizeCategory(typed) })
+  }
+
   function toggleFlag(flag: string) {
     set(
       'flags',
@@ -928,12 +1025,44 @@ export function FeeProfileStep({
             <FieldLabel required>Tax Classification (Malabon Revenue Code)</FieldLabel>
             <p id="fee-category-help" className="mb-3 text-xs text-ink-secondary">
               Not the line of business again — the Revenue Code bracket it is taxed under. A carinderia
-              and a franchised fast-food branch are both food, at different rates. Type the closest
-              match; the reviewing officer checks it.
+              and a franchised fast-food branch are both food, at different rates. Start typing to
+              pick the closest match from the list; the reviewing officer checks it.
             </p>
+            {/*
+              * The list offers the LABEL as the option value, and the slug is
+              * recovered from it by normalizeCategory when the answer is
+              * stored. This looks like the wrong way round — `<option
+              * value={slug} label={human}>` is the attribute pair that exists
+              * for exactly this — so here is why it is not used, measured in
+              * Chrome for Testing 1xx on macOS rather than assumed.
+              *
+              * Chromium renders a datalist row that has a `label` as TWO
+              * lines: the value and the label, one above the other. The popup
+              * is a separate OS window and sizes itself to what it paints, so
+              * it can be measured even though it cannot be screenshotted — one
+              * option, one typed character, popup window geometry read back:
+              *
+              *   value "x",    no label      -> 164 x 58   (one line)
+              *   value "x",    label 41 ch   -> 413 x 74   (two lines)
+              *   value 41 ch,  label "x"     -> 459 x 74   (two lines, and the
+              *                                  width is the VALUE's width)
+              *
+              * The row grows by a line the moment a label exists, and a long
+              * value still drives the popup wide. So `label` does not replace
+              * the value on screen in Chromium, it is printed underneath it —
+              * the applicant would still read `tailor_dress_shop`, which is
+              * the entire complaint. Firefox does substitute the label, which
+              * is what makes the attribute look like it works; a fix that only
+              * works in one engine is not a fix.
+              *
+              * Putting the words in `value` is the one thing every engine
+              * agrees on: the option's value is what the browser puts in the
+              * box, so the applicant sees words everywhere, and the slug is
+              * this file's job rather than the browser's.
+              */}
             <datalist id="fee-categories">
-              {COMMON_CATEGORIES.map((c) => (
-                <option key={c} value={c} />
+              {CATEGORIES.map((c) => (
+                <option key={c.slug} value={c.label} />
               ))}
             </datalist>
             <div className="space-y-3">
@@ -968,10 +1097,10 @@ export function FeeProfileStep({
                         <input
                           id={`fee-category-${line.id}`}
                           list="fee-categories"
-                          value={cat.category}
-                          onChange={(e) => setCategory(line.id, { category: e.target.value })}
+                          value={categoryShown(line.id, cat.category)}
+                          onChange={(e) => typeCategory(line.id, e.target.value)}
                           onBlur={() => touch(`line:${line.id}:category`)}
-                          placeholder="e.g. retailer"
+                          placeholder="e.g. Retailer"
                           className={inputCls}
                           aria-invalid={Boolean(errorFor(`line:${line.id}:category`, cat.category))}
                           aria-describedby={
