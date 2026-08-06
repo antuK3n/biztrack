@@ -148,6 +148,83 @@ test.describe('the three BPLO analytics screens', () => {
     await expect(button).toHaveAttribute('aria-expanded', 'true')
   })
 
+  /*
+   * Two client reports on the dashboard, checked on the rendered screen because
+   * that is where both were reported from:
+   *
+   *   "The offices listed in the Inspections are missing; should be all 6 (no BPLO)"
+   *   "Do not put YTD only; it should be the full term"
+   *
+   * The first was a hard-coded three-office list in DashboardAnalytics that
+   * silently discarded every OBO, CENRO and Market inspection in the register.
+   * Nothing failed and nothing looked wrong — the panel simply drew three
+   * confident bars, which is why the check lives at this level too.
+   *
+   * IF THIS FAILS WITH THREE OFFICES, THE SNAPSHOT IS OLDER THAN THE FIX.
+   * Dashboard figures are served from the row `analytics:refresh` persists, not
+   * computed per request (AnalyticsResolver), so a change to the panel's
+   * membership does not reach any screen until a refresh has run against that
+   * stack's database — `DB_DATABASE=database/e2e.sqlite php artisan
+   * analytics:refresh` for this one. That is the designed behaviour and this
+   * test is right to fail while it is untrue: the screen really is showing
+   * three offices.
+   */
+  test('the inspections panel names all six inspecting offices, and no BPLO', async ({ page }) => {
+    await page.goto('/staff/analytics')
+    await waitForAnalytics(page, 'Analytics Dashboard')
+
+    /*
+     * The sr-only table rather than the bars: it holds one row per office and
+     * it is the reading a screen reader gets, so an office missing from it is
+     * missing for everyone. Row order is the register's and is deliberately not
+     * asserted — it is a display choice, and pinning it here would make a
+     * reseed look like a regression.
+     */
+    const inspections = page.getByRole('table', {
+      name: /Inspection outcomes by inspecting office/,
+    })
+    const offices = (await inspections.locator('tbody th').allInnerTexts())
+      .map((office) => office.trim())
+      .sort()
+
+    expect(offices).toEqual([
+      'Environmental',
+      'Fire Safety',
+      'Market',
+      'Occupancy',
+      'Sanitary',
+      'Zoning',
+    ])
+
+    // The Mayor's Permit is issued on the strength of the six clearances, not
+    // on a visit of its own. "no BPLO" was the client's own qualifier.
+    expect(offices).not.toContain('BPLO')
+  })
+
+  test('the workload KPI is stated over the full term, not the year to date', async ({ page }) => {
+    await page.goto('/staff/analytics')
+    await waitForAnalytics(page, 'Analytics Dashboard')
+
+    await expect(page.getByText('Applications (all time)').first()).toBeVisible()
+    await expect(page.getByText('every filing on record').first()).toBeVisible()
+
+    /*
+     * The card, its sub-line and its info popover have to agree. A number
+     * quietly changed under a popover still explaining a 1-January cutoff would
+     * be worse than not changing it at all, so the old wording is asserted gone
+     * from the whole screen rather than just from the card.
+     */
+    await expect(page.getByText(/Applications YTD/)).toHaveCount(0)
+    await expect(page.getByText(/since 1 January this year/i)).toHaveCount(0)
+
+    const info = page.locator('button[aria-label="How Applications (all time) is measured"]')
+    await info.click()
+    const panel = page.getByRole('note').first()
+    await expect(panel).toContainText(/every filing on record/i)
+    await expect(panel).toContainText(/whole register/i)
+    await expect(panel).not.toContainText(/1 January/i)
+  })
+
   test('column headers do not fold the info button into their announced name', async ({ page }) => {
     await page.goto('/staff/analytics/renewal-risk')
     await waitForAnalytics(page, 'Renewal Risk Prediction')

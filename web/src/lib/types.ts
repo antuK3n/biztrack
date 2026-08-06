@@ -584,6 +584,53 @@ export interface HeldClearance {
   application: { id: number; tracking_id: string | null; status: ApplicationStatus } | null
 }
 
+/**
+ * One of the three tiers RA 11032 recognises, as the API offers it.
+ *
+ * The day count travels WITH the option and is never written down here. The
+ * three tiers and their deadlines are statute — 3 working days simple, 7
+ * complex, 20 highly technical — and a browser holding its own copy could
+ * drift into captioning "Simple" with the wrong number, or into offering a
+ * fourth tier that no LGU is entitled to grant itself. `Ra11032::TIERS` on the
+ * API is the single source; this shape only carries it.
+ */
+export interface Ra11032Tier {
+  value: string
+  label: string
+  statutory_working_days: number
+}
+
+/**
+ * Where a filing stands under RA 11032, and — the point of this block — WHO
+ * decided that.
+ *
+ * The statute fixes the deadlines and says nothing about which filing belongs
+ * to which tier; that classification is the LGU's, published in its Citizen's
+ * Charter, and Malabon has not given us theirs (open question A10). So every
+ * tier in the register was assigned by a rule this project invented, and an
+ * officer about to override one is entitled to know that is what they are
+ * doing. `source` is the field that says it.
+ */
+export interface Ra11032Standing {
+  /** null when the filing has never been classified at all. */
+  tier: string | null
+  /** The statute's own name for the tier ("Highly technical"), or null. */
+  label: string | null
+  statutory_working_days: number | null
+  /**
+   * `automatic` — our rule guessed it at submission and nobody has looked.
+   * `officer`   — a named person decided it; `set_by` says who.
+   * `null`      — never classified.
+   */
+  source: 'automatic' | 'officer' | null
+  set_by: { id: number; name: string } | null
+  set_at: string | null
+  /** False on a decided filing: a closed case's statutory clock is not editable. */
+  editable: boolean
+  /** The only tiers anyone may choose between. */
+  tiers: Ra11032Tier[]
+}
+
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
@@ -603,6 +650,12 @@ export interface Application extends ApplicationListItem {
   inspections: Inspection[]
   permits: Permit[]
   rejection_reason: string | null
+  /**
+   * The RA 11032 tier, its provenance, and the tiers an office may choose
+   * between. Optional so a payload built before this existed still type-checks
+   * — every reader has to cope with its absence rather than assume it.
+   */
+  ra11032?: Ra11032Standing
   /**
    * The full record knows which permit types will actually be inspected; the
    * list resource does not send the flag, hence the narrowing override.

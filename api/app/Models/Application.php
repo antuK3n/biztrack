@@ -22,6 +22,15 @@ class Application extends Model
         // assignment drops the tier in silence, and the RA 11032 panel — which
         // requires a non-null complexity — cannot see the filing at all.
         'complexity',
+        /*
+         * WHO set the tier, and when. Null means it came from
+         * `Support\Ra11032::tierFor()` — our rule, not the LGU's published
+         * classification (open question A10) — which is what the review sheet
+         * shows an officer so they know they are overriding a guess rather
+         * than filling in a blank. WorkflowService::classify() is the only
+         * writer; see the migration for the whole argument.
+         */
+        'complexity_set_by_user_id', 'complexity_set_at',
         'rejection_reason', 'fee_profile', 'payment_mode',
         /*
          * The paper BPLO form's "Amendment from:" block (checklist items 82/84).
@@ -46,6 +55,7 @@ class Application extends Model
         'submitted_at' => 'datetime',
         'deadline_at' => 'datetime',
         'decided_at' => 'datetime',
+        'complexity_set_at' => 'datetime',
         'fee_profile' => 'array',
         // Without these, SQLite hands back 0/1 and the JSON payload says
         // `"amendment_ownership": 1`, which the officer screen renders as a
@@ -82,6 +92,21 @@ class Application extends Model
     public function applicant(): BelongsTo
     {
         return $this->belongsTo(User::class, 'applicant_user_id');
+    }
+
+    /**
+     * The officer who set the RA 11032 tier, if a person set it at all.
+     *
+     * Null is the ordinary case and means the tier was classified
+     * automatically at submission. `withTrashed` is deliberate: `User`
+     * soft-deletes and its filings outlive it, and a reclassification whose
+     * author has since left the LGU is still a reclassification a person made
+     * — resolving to null there would silently relabel it as automatic, which
+     * is the one thing this relation exists to prevent.
+     */
+    public function complexitySetBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'complexity_set_by_user_id')->withTrashed();
     }
 
     public function permitTypes(): BelongsToMany
