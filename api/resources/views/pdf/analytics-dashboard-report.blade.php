@@ -352,19 +352,17 @@
                 @endif
             </td>
         </tr>
-        <tr>
-            <td>Meeting participation</td>
-            <td>
-                @if ($report['officer_activity']['meetings_scheduled'] === 0)
-                    <span class="unavailable">No meeting has been scheduled in this window, so there is no participation to report</span>
-                @else
-                    {{ number_format($report['officer_activity']['meetings_attended']) }} of
-                    {{ number_format($report['officer_activity']['meetings_scheduled']) }} scheduled meetings
-                    had a recorded response
-                    ({{ number_format($report['officer_activity']['meetings_attended_rate'], 1) }}%)
-                @endif
-            </td>
-        </tr>
+        {{--
+            Two rows, where the client's paper asks for three. The third was
+            "meeting participation", and it is gone from this report for the same
+            reason it is gone from the dashboard: BizTrack has no meetings
+            feature, so the figure reported nothing anyone had done. A printed
+            report is the worst place to leave one — it gets filed and quoted
+            months later by a reader who cannot ask what it was counting. See
+            OfficerPanel in web/src/pages/admin/AnalyticsPage.tsx and the note on
+            DashboardAnalytics::officerActivityFacts(). Restore alongside the
+            card, if a meetings feature is ever built.
+        --}}
     </table>
 
     <h2>GIS mapping</h2>

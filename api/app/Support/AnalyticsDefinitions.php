@@ -259,12 +259,24 @@ final class AnalyticsDefinitions
                 'why' => 'Whether asking an applicant for something actually closes. Many raised and few fulfilled means filings are stalling on paperwork rather than on review.',
             ],
 
-            'officer_activity.meetings_attended_rate' => [
-                'label' => 'Meeting participation',
-                'formula' => 'Meetings with a recorded applicant response ÷ meetings scheduled × 100.',
-                'covers' => 'Meetings scheduled in the months set by the filter. Nothing records who turned up, so a recorded reply stands in for attendance.',
-                'why' => 'Whether scheduling a meeting achieves anything. It is called participation, not attendance, because a reply is what the register holds.',
-            ],
+            /*
+             * There is deliberately no 'officer_activity.meetings_attended_rate'
+             * entry here, and the paper asks for one.
+             *
+             * The client's paper lists a third Officer Activity figure, "meeting
+             * participation". BizTrack has no meetings feature — nothing in the
+             * product schedules one, and nothing records attendance — so the
+             * figure described nothing an officer had done, and the card has
+             * been removed from the dashboard. The reasoning in full is in
+             * OfficerPanel, web/src/pages/admin/AnalyticsPage.tsx.
+             *
+             * A definition is the sentence a reader is handed when they ask what
+             * a number in front of them means. With no number in front of them
+             * there is nothing to explain, and shipping the explanation anyway
+             * would keep "meeting participation" travelling to the client in
+             * meta.definitions after the screen had stopped saying it. Restore
+             * this entry only alongside the card.
+             */
 
             'map' => [
                 'label' => 'Business locations',
