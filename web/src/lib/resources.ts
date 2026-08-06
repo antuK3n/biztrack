@@ -45,6 +45,7 @@ import type {
   ProcessingTimeReport,
   PsicCode,
   RenewalReminderResult,
+  RenewalModelReport,
   RenewalRiskReport,
   RequestType,
   RiskAction,
@@ -746,6 +747,22 @@ export const analytics = {
     ),
   renewalRiskReport: (days: number) =>
     downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
+
+  /**
+   * The fitted model shown beside that watchlist.
+   *
+   * Takes no arguments, and that is deliberate rather than an omission. The
+   * horizon and the filters narrow which permits a reader is looking at; they do
+   * not refit a regression, and the training set is the whole of permit history
+   * either way. Passing them through would key to snapshots that can never exist
+   * and serve the "no model" fallback for every filtered view, which a reader
+   * would correctly read as an outage. See AnalyticsController::renewalModel().
+   *
+   * Resolves to `available: false` with a reason when R is down or the register
+   * holds too little settled history to fit on. The screen renders that state
+   * rather than a number, because there is no honest number to render.
+   */
+  renewalModel: () => unwrapComputed<RenewalModelReport>(api.get('/analytics/renewal-model')),
 
   /**
    * Send one renewal follow-up to a business owner, now.

@@ -50,6 +50,46 @@ final class BusinessGrowthAnalytics
     private const TOP_N = 6;
 
     /**
+     * The smallest a line of business may be and still be RANKED BY CHANGE.
+     *
+     * ── What this protects against ──────────────────────────────────────────
+     *
+     * "Fastest growing" is a ranking over a difference, and a difference taken
+     * on a handful of filings is mostly noise. On today's register, six PSIC
+     * lines carry exactly one business each and every one of them was
+     * registered inside the current period, so each scores a clean +1 from
+     * nothing. "Other (not listed)" — the catch-all a clerk picks when no code
+     * fits — carries seven businesses, all of them new, and scores +7. Rank the
+     * whole register by change over a three-month window and that bucket takes
+     * SECOND PLACE, ahead of every real trade in the city, on the strength of
+     * seven filings nobody classified. A reader would leave the screen believing
+     * the fastest-growing thing in the LGU is a data-entry default.
+     *
+     * ── Why ten, and why measured on `count` ────────────────────────────────
+     *
+     * `count` is how many live businesses carry the line TODAY. It is the
+     * stable denominator: registrations move with the window, the register does
+     * not. Below ten, a single filing moves the line by a tenth or more, which
+     * is larger than the real year-on-year movement of most of the register — so
+     * the ranking would be reporting arithmetic on individual filings rather
+     * than a trend.
+     *
+     * The register agrees with the round number by a wide margin. The 30 lines
+     * in use split 23 at twenty businesses or more and 7 at seven or fewer;
+     * there is simply nothing between 8 and 19. So any floor in that gap
+     * partitions today's data identically, and ten is chosen because it is the
+     * one a reader can hold in their head and check — "at least 10 businesses"
+     * is printed on the screen beside the chart, which is the point. The
+     * exclusion is stated, never silent.
+     *
+     * The floor does NOT apply to the Largest lens. That lens ranks by `count`
+     * itself, so its top six are above any floor by construction, and applying
+     * one there would only be able to remove rows from a list that is already
+     * answering "which lines are biggest".
+     */
+    public const INDUSTRY_LENS_MIN_BUSINESSES = 10;
+
+    /**
      * Days after a permit expires before a missing renewal counts as a lapse.
      *
      * Without a grace period every business whose permit expired yesterday would
@@ -115,9 +155,7 @@ final class BusinessGrowthAnalytics
      */
     public static function dataset(int $periodMonths = self::DEFAULT_PERIOD_MONTHS): array
     {
-        $now = CarbonImmutable::now();
-        $periodStart = $now->subMonths($periodMonths)->startOfDay();
-        $priorStart = $periodStart->subMonths($periodMonths)->startOfDay();
+        [$periodStart, $priorStart, $now] = self::periodBounds($periodMonths);
 
         return [
             'params' => ['months' => $periodMonths],
@@ -182,6 +220,211 @@ final class BusinessGrowthAnalytics
             'top_barangays' => self::computeBarangays($dataset['barangays'], $topN),
             'closure_trend' => self::computeClosureTrend($dataset['closure_months']),
             'industry_growth' => self::computeIndustries($dataset['industries'], $topN),
+        ];
+    }
+
+    /**
+     * The three dates every figure on this screen is measured between.
+     *
+     * Extracted so the lens decoration below cannot drift from dataset(): both
+     * have to read "this period" and "the period before it" the same way, or
+     * the toggle would rank one window while the panel around it describes
+     * another.
+     *
+     * @return array{0: CarbonImmutable, 1: CarbonImmutable, 2: CarbonImmutable}
+     *                                                                           period start, prior-period start, now
+     */
+    private static function periodBounds(int $periodMonths): array
+    {
+        $now = CarbonImmutable::now();
+        $periodStart = $now->subMonths($periodMonths)->startOfDay();
+
+        return [$periodStart, $periodStart->subMonths($periodMonths)->startOfDay(), $now];
+    }
+
+    /* ── the industry lenses ───────────────────────────────────────────── */
+
+    /**
+     * Three answers to "which six lines of business belong on the chart?".
+     *
+     * ── The question this exists to answer ──────────────────────────────────
+     *
+     * A panelist asked it in these words: is there a criterion for which line
+     * of business appears in the Business Industry Growth Trend, and what
+     * happens if all of them do? The honest answer to the second half is that
+     * the register holds 135 PSIC codes and drawing them all is not a styling
+     * problem — six is already the ceiling the palette can keep distinguishable
+     * without colour (see GrowthChartFrame's GROWTH_SERIES). The first half had
+     * a weaker answer: the panel titled "Growth Trend" was ranked by SIZE, so a
+     * line that doubled from 3 to 6 never appeared and two of the six on screen
+     * were declining.
+     *
+     * Six slots stay. What changes is that the reader chooses the question:
+     *
+     *  - **Largest** — most businesses carrying the line today. This is the
+     *    behaviour that shipped, and it stays the DEFAULT because it is the only
+     *    one of the three that is true of the register rather than of a window:
+     *    it answers "what is this city made of", needs no floor, no prior
+     *    period and no comparison to be meaningful, and is the same six lines
+     *    whichever window is selected. Opening on a change ranking would open on
+     *    the noisiest of the three views.
+     *  - **Fastest growing** — biggest increase in new registrations between the
+     *    two periods.
+     *  - **Fastest declining** — biggest decrease.
+     *
+     * Growing and declining rank on `delta`, the net change in registrations,
+     * and not on a percentage. Same rule as computeBarangays() above, for the
+     * same reason, plus one more that only bites here: a percentage of a prior
+     * period of zero is not a number, and six of today's lines have exactly
+     * that. Ranked by rate they would all tie at infinity.
+     *
+     * ── Why this is not on compute() ────────────────────────────────────────
+     *
+     * `industry_growth` is computed by r/R/service.R as well, and
+     * AnalyticsParityTest compares the two engines' key sets in both directions,
+     * byte-strict. R sorts that panel by count and slices to six; a re-ranking
+     * done in PHP alone would fail parity, and a new key on compute()'s output
+     * would fail it too. AnalyticsResolver serves R's stored snapshot verbatim
+     * when one exists, so a PHP-only change would not even reach the browser.
+     * r/R/service.R is not ours to change.
+     *
+     * So this is spliced onto the response at serve time by
+     * AnalyticsController, exactly as the renewal-risk barangay menu and
+     * permit-lifecycle split are. `industry_growth` is left untouched: the PDF
+     * report and the parity fixture still read it, and it is still the Largest
+     * lens' answer.
+     *
+     * ── Why all three lenses are computed here, live ────────────────────────
+     *
+     * Not just the two new ones. The floor needs the WHOLE fact table to say
+     * how many lines it excluded, and a caption reading "7 of 30 lines are
+     * below the floor" computed from today's register, printed above six rows
+     * lifted from last night's snapshot, would be two vintages in one panel.
+     * One read, one vintage, one internally consistent panel — and the Largest
+     * lens reproduces `industry_growth`'s ranking rule exactly, so on an
+     * unchanged register the two agree row for row.
+     *
+     * @return array<string, mixed>
+     */
+    public static function industryLenses(int $periodMonths = self::DEFAULT_PERIOD_MONTHS): array
+    {
+        [$periodStart, $priorStart, $now] = self::periodBounds($periodMonths);
+
+        return self::computeIndustryLenses(
+            self::industryCounts($periodStart, $priorStart, $now),
+            self::TOP_N,
+            self::INDUSTRY_LENS_MIN_BUSINESSES,
+        );
+    }
+
+    /**
+     * The ranking itself: facts in, three lenses out, no database.
+     *
+     * Split from industryLenses() so the rules that decide what a reader sees —
+     * the floor, the three orderings, and the refusal to pad — can be tested
+     * against a register built by hand rather than by seeding one.
+     *
+     * `qualifying` is how many lines the lens could have drawn, before the six
+     * slots cut it. The screen prints it whenever it is under six, because a
+     * chart with four lines on it and no explanation reads as a chart that lost
+     * two. Nothing is padded to fill the slots: a steady line has not declined,
+     * and putting it in the declining lens to make the count come out at six
+     * would be inventing a finding.
+     *
+     * @param  list<array{industry: string, psic_code: string, count: int, registrations: int, prior: int}>  $facts
+     * @return array<string, mixed>
+     */
+    public static function computeIndustryLenses(array $facts, int $slots, int $minBusinesses): array
+    {
+        $rows = [];
+        foreach ($facts as $fact) {
+            $current = (int) $fact['registrations'];
+            $prior = (int) $fact['prior'];
+            $delta = $current - $prior;
+
+            $rows[] = [
+                'industry' => (string) $fact['industry'],
+                'psic_code' => (string) $fact['psic_code'],
+                'count' => (int) $fact['count'],
+                'registrations' => $current,
+                'prior' => $prior,
+                'delta' => $delta,
+                'direction' => match (true) {
+                    $delta > 0 => 'growing',
+                    $delta < 0 => 'declining',
+                    default => 'steady',
+                },
+            ];
+        }
+
+        $aboveFloor = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['count'] >= $minBusinesses,
+        ));
+
+        // Identical to computeIndustries() and to R's `order(-count, -delta,
+        // codes)`: count, then change, then PSIC code so ties hold a stable
+        // order across engines and across reloads.
+        $largest = $rows;
+        usort(
+            $largest,
+            static fn (array $a, array $b) => [$b['count'], $b['delta'], $a['psic_code']]
+                <=> [$a['count'], $a['delta'], $b['psic_code']],
+        );
+
+        $growing = array_values(array_filter(
+            $aboveFloor,
+            static fn (array $row): bool => $row['delta'] > 0,
+        ));
+        usort(
+            $growing,
+            static fn (array $a, array $b) => [$b['delta'], $b['count'], $a['psic_code']]
+                <=> [$a['delta'], $a['count'], $b['psic_code']],
+        );
+
+        $declining = array_values(array_filter(
+            $aboveFloor,
+            static fn (array $row): bool => $row['delta'] < 0,
+        ));
+        // Ascending on delta: -5 is a bigger decline than -1. Then count
+        // descending, so where two lines both lost one registration the larger
+        // trade is the more notable loss.
+        usort(
+            $declining,
+            static fn (array $a, array $b) => [$a['delta'], $b['count'], $a['psic_code']]
+                <=> [$b['delta'], $a['count'], $b['psic_code']],
+        );
+
+        return [
+            'slots' => $slots,
+            'min_businesses' => $minBusinesses,
+            'lines_on_record' => count($rows),
+            'above_floor' => count($aboveFloor),
+            'lenses' => [
+                [
+                    'key' => 'largest',
+                    'label' => 'Largest',
+                    // No floor: this lens ranks by the very number a floor would
+                    // test, so every row it can draw already clears one.
+                    'floored' => false,
+                    'qualifying' => count($rows),
+                    'rows' => array_slice($largest, 0, $slots),
+                ],
+                [
+                    'key' => 'growing',
+                    'label' => 'Fastest growing',
+                    'floored' => true,
+                    'qualifying' => count($growing),
+                    'rows' => array_slice($growing, 0, $slots),
+                ],
+                [
+                    'key' => 'declining',
+                    'label' => 'Fastest declining',
+                    'floored' => true,
+                    'qualifying' => count($declining),
+                    'rows' => array_slice($declining, 0, $slots),
+                ],
+            ],
         ];
     }
 

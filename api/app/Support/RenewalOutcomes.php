@@ -87,6 +87,33 @@ use Illuminate\Support\Facades\DB;
  * "will this business renew at all". Those are different questions and the second
  * one is not answerable from this table: the register cannot distinguish a
  * business that vanished from one that has not got round to it yet.
+ *
+ * ── AND IT IS A RISK SET, WHICH CHANGES WHAT THE ROWS MEAN ──────────────────
+ *
+ * Because no observation may be taken once the answer is on file (rule 2 in
+ * labelled()), a cycle stops producing rows the moment its renewal is granted.
+ * This register grants them early — the successor permit is on file a median of
+ * 136 days before the old one lapses — so punctual cycles leave the sample long
+ * before expiry while late ones stay in it to the last day. Every late cycle
+ * contributes a row at every lead; on-time cycles contribute fewer and fewer as
+ * expiry approaches.
+ *
+ * That is not a defect to be corrected. It is what "not renewed yet" means, and
+ * it is the population the follow-up screen is actually looking at. But it makes
+ * the observed rate climb with proximity — 41% of still-open cycles 180 days
+ * out, 99.6% one day out — and that climb is the hazard of the population, not a
+ * finding about any one business. Three consequences follow, and all three are
+ * carried through to the screen rather than left in this file:
+ *
+ *  - The fitted figure is CONDITIONAL: the chance of a late renewal GIVEN that
+ *    none has been granted yet. For a permit whose renewal is already approved
+ *    there is no estimate, because there is no longer a question.
+ *  - Pooled discrimination is flattered by that hazard. A model that knew only
+ *    the date would score well on it. The figure worth reading is discrimination
+ *    WITHIN a lead time — what the other four signals add once the date is held
+ *    fixed — and RenewalModelAnalytics reports it separately for that reason.
+ *  - Rows within one cycle are repeated measures of one business. The fitted
+ *    standard errors are therefore optimistic, and are labelled as such.
  */
 final class RenewalOutcomes
 {
@@ -104,15 +131,31 @@ final class RenewalOutcomes
     /**
      * How long after a permit lapses before its cycle is called settled.
      *
-     * The administrative close described in case 4 above. Six months: 63% of the
-     * late renewals in the register arrived within 90 days and 64% within 180,
-     * so this catches the great majority of them while still leaving roughly
-     * eighteen months of usable history. It is a trade and it is stated on
-     * screen — a renewal that turns up 200 days late inside the settle window is
-     * recorded as late, but one attached to a cycle closed before it arrived is
-     * simply missing, and the sample under-counts lateness by that much.
+     * The administrative close described in case 4 above.
+     *
+     * Set from the register's own arithmetic rather than picked: measured over
+     * the 593 late renewals on file, 64% had arrived within 180 days, 76% within
+     * 270 and 85% within a year. Nine months is the point at which roughly three
+     * quarters of the late cases have shown up, and that is the rule — wait long
+     * enough for three in four, then close the books.
+     *
+     * It is a trade in both directions and both are stated on screen. Waiting
+     * longer would catch more of the tail and cost history: a year of settle
+     * leaves 1,073 usable cycles against 1,322 at nine months. Waiting less
+     * leaves the newest cycles looking punctual because their late renewals have
+     * not turned up yet, which is case 4 all over again. What is NOT recoverable
+     * either way is the last quarter: a renewal that arrives 400 days late,
+     * attached to a cycle closed before it landed, is recorded as punctual. The
+     * sample under-counts lateness by about that much and the screen says so.
+     *
+     * Worth being plain about the risk in choosing this number: three windows
+     * were compared and the evaluation metrics differ between them, so it would
+     * be easy to pick the window that flatters the model. The rule above is a
+     * property of the gap distribution alone and was applied without reference
+     * to the metrics, which is the only version of this choice that is worth
+     * anything.
      */
-    public const SETTLE_DAYS = 180;
+    public const SETTLE_DAYS = 270;
 
     /**
      * The lead times an outcome is observed at, in days before the permit lapses.

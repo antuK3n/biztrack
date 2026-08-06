@@ -5,6 +5,7 @@ use App\Support\AnalyticsDefinitions;
 use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
 use App\Support\ProcessingTimeAnalytics;
+use App\Support\RenewalModelAnalytics;
 use App\Support\RenewalRiskAnalytics;
 
 /*
@@ -92,6 +93,26 @@ function analyticsDefinitionSubjects(): array
             'panels' => [
                 'at_risk', 'counts', 'lifecycle', 'reminders_sent', 'actions', 'rulebook',
                 'scored_permits', 'methodology',
+            ],
+        ],
+
+        /*
+         * The fitted model, walked through its UNAVAILABLE shape — which is what
+         * RenewalModelAnalytics::build() returns, because PHP does not fit a
+         * regression and deliberately does not pretend to.
+         *
+         * That is the right payload to check here rather than a shortcoming of
+         * the fixture. The fallback and the fitted answer carry the same keys by
+         * contract (RenewalModelKeyParityTest holds R to it), so a definition
+         * that survives this walk names a panel that exists in both states. The
+         * list panels are empty in this shape, so their sub-figures are reported
+         * as unverified above rather than silently passing.
+         */
+        AnalyticsDatasets::RENEWAL_MODEL => [
+            'payload' => RenewalModelAnalytics::build(),
+            'panels' => [
+                'estimates', 'metrics', 'calibration', 'coefficients',
+                'horizon_auc', 'split', 'training', 'training_data',
             ],
         ],
 
@@ -225,6 +246,106 @@ it('never describes the renewal risk score as a prediction', function () {
             }
         }
     }
+});
+
+/*
+ * ── THE OTHER HALF OF THE BAN ───────────────────────────────────────────────
+ *
+ * The test above is unchanged and stays unchanged. It guards the RULE SCORE, and
+ * the rule score is still a weighted rule score with nothing fitted behind it.
+ *
+ * What has changed is that the register now yields a second figure. The renewal
+ * outcome was never a column, but it was always implied by the permit dates —
+ * see App\Support\RenewalOutcomes — so there is now a logistic regression fitted
+ * to 1,300-odd recovered cycles, evaluated on a period of the register it never
+ * saw, and reported with AUC, a Brier score and a calibration reading. That
+ * figure may honestly be called a probability.
+ *
+ * The ban was therefore SCOPED, not lifted. `renewal_risk` remains exactly as
+ * constrained as it was; `renewal_model` may use the word — and this test is
+ * what stops that licence becoming a loophole. Three conditions, all enforced:
+ *
+ *  1. The evidence has to travel with the word. If a definition on the fitted
+ *     dataset says "probability", the payload must carry the metrics that back
+ *     it. A probability with no calibration figure beside it is the exact claim
+ *     the original ban existed to prevent, and moving it to a new dataset would
+ *     not make it true.
+ *  2. `predict`, `forecast` and `confidence` stay banned EVERYWHERE, including
+ *     here. A fitted conditional estimate of how often permits in this position
+ *     turned out late is a probability; it is not a prediction of what one
+ *     business will do, and "confidence" means something specific in statistics
+ *     that this figure does not report.
+ *  3. The old claim is still caught on the old figure. The renewal-risk
+ *     methodology sentence must still deny it in as many words, so a future
+ *     edit that quietly upgrades the rule score fails here rather than shipping.
+ */
+it('lets only the fitted figure be called a probability, and only with its evidence', function () {
+    $definitions = AnalyticsDefinitions::for(AnalyticsDatasets::RENEWAL_MODEL);
+
+    expect($definitions)->not->toBeEmpty('The fitted dataset ships no definitions at all.');
+
+    // Condition 2 — the words that claim more than a fitted estimate can support.
+    // `probability` is deliberately absent from this list, and only here.
+    $forbidden = ['predict', 'forecast', 'confidence'];
+
+    foreach ($definitions as $key => $definition) {
+        foreach ($definition as $field => $text) {
+            foreach ($forbidden as $word) {
+                expect(str_contains(mb_strtolower($text), $word))->toBeFalse(
+                    "Definition [renewal_model.{$key}] uses [{$word}] in [{$field}]. A fitted, calibrated estimate "
+                    .'may be called a probability; it may not be called a prediction, a forecast, or a confidence.',
+                );
+            }
+        }
+    }
+
+    // Condition 1 — where the word is used, the evidence must be on the payload.
+    $usesTheWord = collect($definitions)->contains(
+        static fn (array $definition): bool => collect($definition)->contains(
+            static fn (string $text): bool => str_contains(mb_strtolower($text), 'probability'),
+        ),
+    );
+
+    expect($usesTheWord)->toBeTrue(
+        'No definition on the fitted dataset calls the figure a probability. The scoped exemption exists to be '
+        .'used deliberately; if the figure is not being described as one, the exemption should not exist.',
+    );
+
+    $payload = RenewalModelAnalytics::build();
+
+    foreach (['auc', 'brier', 'calibration_slope', 'calibrated'] as $metric) {
+        expect(array_key_exists($metric, $payload['metrics']))->toBeTrue(
+            "The fitted payload calls its figure a probability but does not carry [metrics.{$metric}]. "
+            .'The word is licensed by the evidence travelling with it, not by the dataset it sits on.',
+        );
+    }
+
+    expect(array_key_exists('calibration', $payload))->toBeTrue();
+    expect(array_key_exists('notice', $payload['training_data']))->toBeTrue(
+        'The fitted payload must carry the training-data notice on every response, fitted or not.',
+    );
+});
+
+it('still denies the claim on the figure the ban was written for', function () {
+    /*
+     * The rule score's own sentence, shown on its screen and carried into every
+     * export. It has to keep denying the claim in words a reader sees — either
+     * phrasing will do, since the constant has been reworded once already, but
+     * one of them must be there. If this ever goes quiet, the scoped exemption
+     * above has leaked back onto the figure the ban was written for.
+     */
+    $methodology = mb_strtolower(RenewalRiskAnalytics::METHODOLOGY);
+
+    expect(str_contains($methodology, 'not a prediction') || str_contains($methodology, 'not a probability'))
+        ->toBeTrue('The rule score no longer denies being a prediction anywhere in its own methodology statement.');
+
+    // And the fitted dataset must not be quietly serving the rule score under a
+    // fitted heading when there is no fit: the fallback says so in its own field.
+    $fallback = RenewalModelAnalytics::build();
+    expect($fallback['available'])->toBeFalse();
+    expect($fallback['unavailable_reason'])->not->toBeNull();
+    expect($fallback['estimates'])->toBe([]);
+    expect($fallback['metrics']['auc'])->toBeNull();
 });
 
 it('ships the definitions in meta, beside the engine rather than inside the figures', function () {

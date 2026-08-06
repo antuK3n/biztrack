@@ -11,6 +11,7 @@ import {
   GrowthStatusDonut,
 } from '../../components/charts/GrowthCharts'
 import { GROWTH_DOWN, GROWTH_FLAT, GROWTH_UP } from '../../components/charts/GrowthChartFrame'
+import type { IndustryLenses } from '../../lib/types'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { AnalyticsTabs } from './AnalyticsTabs'
@@ -243,6 +244,38 @@ export function BusinessGrowthPage() {
   const renewal = data?.cohort_survival
   const lastPoint = renewal?.points[renewal.points.length - 1]
 
+  /*
+   * The industry panel's three lenses, or the one ranking a payload from before
+   * the splice can offer.
+   *
+   * `industry_lenses` is added to the response by AnalyticsController at serve
+   * time and is not part of the dataset R computes — the long argument is on
+   * that controller method, but the short of it is that R also computes
+   * `industry_growth` and the parity check reads both engines' key sets in both
+   * directions, so the toggle's rankings could not live there.
+   *
+   * The fallback is deliberately a ONE-lens object rather than three lenses with
+   * two of them empty. `industry_growth` is exactly the Largest ranking, and
+   * nothing in it can answer "what grew fastest" — offering the reader two
+   * buttons that draw nothing would be worse than offering no choice at all, and
+   * GrowthIndustryTrend hides the toggle when there is only one lens to pick.
+   */
+  const industryLenses: IndustryLenses = data?.industry_lenses ?? {
+    slots: data?.industry_growth.length ?? 0,
+    min_businesses: 0,
+    lines_on_record: data?.industry_growth.length ?? 0,
+    above_floor: data?.industry_growth.length ?? 0,
+    lenses: [
+      {
+        key: 'largest',
+        label: 'Largest',
+        floored: false,
+        qualifying: data?.industry_growth.length ?? 0,
+        rows: data?.industry_growth ?? [],
+      },
+    ],
+  }
+
   return (
     <div>
       <PageTitle
@@ -388,9 +421,9 @@ export function BusinessGrowthPage() {
               metric="industry_growth"
               className="lg:col-span-2"
             >
-              {data.industry_growth.length > 0 ? (
+              {industryLenses.lines_on_record > 0 ? (
                 <GrowthIndustryTrend
-                  rows={data.industry_growth}
+                  lenses={industryLenses}
                   priorLabel={`${monthYear(data.prior_period_start)} – ${monthYear(data.period_start)}`}
                   currentLabel={`${monthYear(data.period_start)} – ${monthYear(data.period_end)}`}
                 />

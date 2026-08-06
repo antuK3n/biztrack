@@ -239,6 +239,13 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
         Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
         /*
+         * The fitted model shown beside that watchlist. Same permission and the
+         * same reader, deliberately: it is the same screen, and a reader trusted
+         * with the rule score is the reader who needs to see how far the fitted
+         * figure beside it can be trusted.
+         */
+        Route::get('analytics/renewal-model', [AnalyticsController::class, 'renewalModel']);
+        /*
          * The Send Reminder / Immediate Follow-up button on that screen. The
          * only route in this file that sends a message to a citizen on an
          * officer's say-so, which is why three things are true of it:

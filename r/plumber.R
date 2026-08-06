@@ -5,6 +5,7 @@ library(jsonlite)
 source("config.R")
 source("R/spc.R")
 source("R/service.R")
+source("R/renewal_model.R")
 
 #* @apiTitle BizTrack R Analytics
 #* @apiDescription Pure compute endpoints. Laravel POSTs register rows; R returns
@@ -31,7 +32,8 @@ function() {
     status    = "ok",
     r_version = as.character(getRversion()),
     qcc       = as.character(utils::packageVersion("qcc")),
-    endpoints = c("/dashboard", "/growth/lifecycle", "/spc/processing-time", "/renewal-risk")
+    endpoints = c("/dashboard", "/growth/lifecycle", "/spc/processing-time",
+                  "/renewal-risk", "/renewal-model")
   )
 }
 
@@ -96,6 +98,31 @@ function(req, res) {
 #* @serializer json list(auto_unbox = FALSE, null = "null", na = "null")
 function(req, res) {
   .compute(req, res, service_renewal_risk)
+}
+
+#* Renewal Risk — the fitted model that sits beside the rule score.
+#*
+#* Accepts labelled renewal cycles recovered from permit history, each measured
+#* at several points before its permit expired using only what the register knew
+#* at that point, plus the permits on the watchlist now. Fits
+#* `glm(family = binomial)` on the cycles that expired before the split date and
+#* evaluates it on the ones after — a split by time, never at random, because a
+#* random one lets the future explain the past and inflates every figure that
+#* comes out of it.
+#*
+#* Returns coefficients, AUC, a Brier score and a calibration reading, and an
+#* estimated probability per still-open permit. Unlike /renewal-risk, THIS figure
+#* is a probability: it is fitted to recorded outcomes and it ships with the
+#* calibration that says how far to trust it. The rule score is unchanged and is
+#* still not one.
+#*
+#* Whether it is worth trusting at all is a separate question the payload answers
+#* in plain words — see the training-data notice. Almost every outcome fitted
+#* here was written by the analytics seeder.
+#* @post /renewal-model
+#* @serializer json list(auto_unbox = FALSE, null = "null", na = "null")
+function(req, res) {
+  .compute(req, res, service_renewal_model)
 }
 
 .compute <- function(req, res, fn) {

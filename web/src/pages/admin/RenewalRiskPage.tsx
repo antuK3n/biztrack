@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { RenewalModelPanel } from '../../components/analytics/RenewalModelPanel'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
 import { FilterMenu, PageTitle, ProtoCard } from '../../components/ui/Proto'
@@ -1265,6 +1266,16 @@ export function RenewalRiskPage() {
               <Rulebook report={data} />
             </section>
           </div>
+
+          {/*
+            The fitted model sits below the rule score rather than replacing it.
+            Two different claims: the index above is a published rulebook anyone
+            can recompute by hand, this is a regression fitted on the register's
+            own renewal history. Keeping both visible is the point — the panel
+            states its own AUC and says whether it is calibrated, so a reader can
+            see how much the fit actually adds over the rule.
+          */}
+          <RenewalModelPanel />
         </MetricDefinitions>
       ) : null}
     </div>

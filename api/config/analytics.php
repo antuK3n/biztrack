@@ -119,6 +119,26 @@ return [
          * first page, and everything else is answered by the PHP port. That is
          * not a degradation and the screens must not present it as one.
          */
+        /*
+         * The fitted model. ONE variant, and that is the whole list.
+         *
+         * The horizon selector on the screen changes which permits get an
+         * estimate, not which cycles the model is fitted to — the training set
+         * is the whole of permit history and does not move when a reader picks
+         * 30 days instead of 365. Precomputing five horizons would therefore
+         * refit the same regression five times over the same rows to produce
+         * five identical coefficient tables, at roughly two seconds and 2.4MB of
+         * JSON each.
+         *
+         * So the snapshot is the model at the default horizon, and the screen
+         * reads that snapshot whatever the watchlist beside it is showing. The
+         * estimates it carries cover the full year, which is a superset of every
+         * shorter horizon a reader can choose.
+         */
+        'renewal_model' => [
+            ['days' => 365, 'limit' => 25],
+        ],
+
         'renewal_risk' => [
             ['days' => 30, 'limit' => 25],
             ['days' => 60, 'limit' => 25],

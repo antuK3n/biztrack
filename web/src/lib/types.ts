@@ -1183,6 +1183,41 @@ export interface IndustryGrowthRow {
   direction: 'growing' | 'declining' | 'steady'
 }
 
+/**
+ * One of the three questions the Business Industry Growth Trend can answer.
+ *
+ * Six slots, three rankings. The register holds 135 PSIC codes and the chart's
+ * palette keeps six series apart without relying on colour, so six is a ceiling
+ * rather than a shortlist — which makes "which six" the whole question, and the
+ * reason the reader is given the choice instead of being handed one answer.
+ */
+export interface IndustryLens {
+  key: 'largest' | 'growing' | 'declining'
+  label: string
+  /**
+   * Whether `min_businesses` was applied. False only for `largest`, which ranks
+   * by the very count a floor would test.
+   */
+  floored: boolean
+  /**
+   * How many lines this lens COULD have drawn, before the six slots cut it.
+   * Under six means fewer lines are drawn, and the screen must say so — the
+   * server does not pad, because a steady line has not declined.
+   */
+  qualifying: number
+  rows: IndustryGrowthRow[]
+}
+
+export interface IndustryLenses {
+  slots: number
+  /** Minimum businesses on record before a line may be ranked by change. */
+  min_businesses: number
+  lines_on_record: number
+  /** Lines at or above `min_businesses`: the pool the change lenses rank. */
+  above_floor: number
+  lenses: IndustryLens[]
+}
+
 /** One point on a Kaplan-Meier curve, at one renewal cycle. */
 export interface SurvivalPoint {
   cycle: number
@@ -1238,6 +1273,17 @@ export interface BusinessGrowthReport {
   top_barangays: BarangayGrowthRow[]
   closure_trend: { month: string; closures: number }[]
   industry_growth: IndustryGrowthRow[]
+  /**
+   * The lens toggle's three rankings, spliced on by AnalyticsController at serve
+   * time rather than computed into the dataset — R computes `industry_growth`
+   * too and the parity check reads both key sets, so a new key on the dataset
+   * would fail it. See the note on that controller method.
+   *
+   * Optional because `industry_growth` is what the engines actually produce, and
+   * a client reading a payload from before the splice must still draw the panel.
+   * The page falls back to it, which is exactly the Largest lens.
+   */
+  industry_lenses?: IndustryLenses
 }
 
 /*
@@ -1404,6 +1450,164 @@ export interface RenewalReminderResult {
   already_sent: boolean
   sent_at: string | null
   message: string
+}
+
+/* ── The fitted model that sits beside the rule score ──────────────────────── */
+
+/**
+ * One signal's fitted effect. `odds_ratio` above 1 raises the chance of a late
+ * renewal, below 1 lowers it; `interpretation` is that sentence written out by
+ * the engine, because the wording depends on the sign and a template here would
+ * be wrong for half the rows.
+ */
+export interface RenewalModelCoefficient {
+  term: string
+  label: string
+  estimate: number
+  std_error: number
+  z_value: number
+  p_value: number
+  odds_ratio: number
+  significant: boolean
+  interpretation: string
+}
+
+/** A signal that could not be estimated, and why. Shown, never swallowed. */
+export interface RenewalModelDropped {
+  term: string
+  label: string
+  reason: string
+}
+
+/**
+ * Why a permit has no figure. Only `open` gets one — a lapsed permit's renewal
+ * IS late (a fact, not an estimate) and an approved renewal has nothing left to
+ * wait for.
+ */
+export type RenewalModelState = 'open' | 'lapsed' | 'renewed'
+
+export interface RenewalModelEstimate {
+  permit_id: number
+  business: string
+  permit_type: string
+  barangay: string | null
+  valid_until: string
+  days_to_expiry: number
+  renewal_stage: string
+  /** Null wherever `state` is not 'open'. */
+  probability: number | null
+  state: RenewalModelState
+  state_label: string
+  /**
+   * The rule score for the same permit, from the same facts at the same moment.
+   * Carried on this payload rather than joined in the browser so the two numbers
+   * shown side by side cannot end up describing different permits or days.
+   */
+  rule_score: number
+  rule_band: RiskBand
+  rule_band_label: string
+}
+
+export interface RenewalModelMetrics {
+  /** Ordering quality on the held-out period. Pooled, so read `horizon_auc` too. */
+  auc: number | null
+  /** Mean squared error of the figures themselves. Lower is better. */
+  brier: number | null
+  /** The same, for always guessing the training period's own late rate. */
+  baseline_brier: number | null
+  skill_score: number | null
+  calibration_intercept: number | null
+  /** 1.00 is ideal. Below it the figures are spread too wide. */
+  calibration_slope: number | null
+  /**
+   * Whether the figures can currently be read as rates. When false the screen
+   * stops calling them probabilities and calls them a ranking, which is what an
+   * uncalibrated score is.
+   */
+  calibrated: boolean
+  observations: number
+  unfitted_levels: number
+}
+
+/** Discrimination with the clock held still — see `horizon_auc` on the screen. */
+export interface RenewalModelHorizon {
+  days_to_expiry: number
+  observations: number
+  late: number
+  late_rate: number
+  /** Null where every cycle at that distance went the same way. */
+  auc: number | null
+}
+
+export interface RenewalModelCalibrationBin {
+  bin: number
+  observations: number
+  predicted: number
+  observed: number
+  lower: number
+  upper: number
+}
+
+export interface RenewalModelPeriod {
+  cycles: number
+  observations: number
+  late: number
+  late_rate: number | null
+}
+
+export interface RenewalModelReport {
+  /** False when no model could be fitted, or when R was not reachable. */
+  available: boolean
+  unavailable_reason: string | null
+  generated_at: string
+  engine: string
+
+  label: {
+    definition: string
+    grace_days: number
+    settle_days: number
+    lead_days: number[]
+  }
+  split: {
+    cutoff: string | null
+    basis: string
+    train_from: string | null
+    train_to: string | null
+    test_from: string | null
+    test_to: string | null
+    /** Always false. A random split would let the future explain the past. */
+    random: boolean
+  }
+  training: RenewalModelPeriod
+  evaluation: RenewalModelPeriod
+  counts: {
+    businesses: number
+    cycles_found: number
+    cycles_unsettled: number
+    cycles_labelled: number
+    late: number
+    late_rate: number
+    observations: number
+    train_observations: number
+    test_observations: number
+  }
+
+  coefficients: RenewalModelCoefficient[]
+  dropped: RenewalModelDropped[]
+  metrics: RenewalModelMetrics
+  horizon_auc: RenewalModelHorizon[]
+  calibration: RenewalModelCalibrationBin[]
+  /** The calibration finding in a sentence. Rendered verbatim. */
+  calibration_statement: string
+  estimates: RenewalModelEstimate[]
+  estimate_note: string
+
+  /**
+   * The sentence that outranks every figure on the panel. Rendered above them,
+   * in plain sight, never in a tooltip.
+   */
+  training_data: { synthetic: boolean; notice: string }
+  methodology: string
 }
 
 /*

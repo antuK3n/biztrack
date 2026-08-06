@@ -643,6 +643,109 @@ test.describe('the three BPLO analytics screens', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Business Growth Analysis')
   })
 
+  test('the industry chart lets the reader choose which six, and says what it left out', async ({
+    page,
+  }) => {
+    /*
+     * A panelist asked whether there is any criterion for which line of business
+     * appears in the Business Industry Growth Trend, and what happens if all of
+     * them do. The register holds 135 PSIC codes; six series is what the palette
+     * can keep apart without colour. So the answer is a lens toggle over the
+     * same six slots — and the honesty of it is a browser fact, which is why it
+     * is tested here and not only in pest:
+     *
+     *  - the toggle is a real control with an accessible name, not three loose
+     *    words above a chart;
+     *  - the exclusion the growth floor makes is ON SCREEN, in a number;
+     *  - the chart, its legend and the hidden table all move together, because
+     *    the hidden table is the only copy of this data a screen reader gets and
+     *    a stale one is worse than none.
+     */
+    await page.goto('/staff/analytics/business-growth')
+    await waitForAnalytics(page, 'Business Growth Analysis')
+
+    const lenses = page.getByRole('group', { name: 'Which six industries' })
+    await expect(lenses).toBeVisible()
+
+    const largest = lenses.getByRole('button', { name: 'Largest' })
+    const growing = lenses.getByRole('button', { name: 'Fastest growing' })
+    const declining = lenses.getByRole('button', { name: 'Fastest declining' })
+
+    // Largest is what shipped, so it is what opens — nobody's saved reading of
+    // this screen changes underneath them.
+    await expect(largest).toHaveAttribute('aria-pressed', 'true')
+    await expect(growing).toHaveAttribute('aria-pressed', 'false')
+
+    /*
+     * Never the native `disabled` attribute, not even on a lens with nothing to
+     * draw: it takes the button out of the tab order and most screen readers
+     * walk straight past, so a reader working the strip by keyboard would meet
+     * two lenses and conclude the chart offers two questions. `aria-disabled`
+     * is the one that may appear. Same rule as the thin-office cards on
+     * Processing Time. Asserted on the DOM property rather than through
+     * `toBeDisabled`, which treats the two as the same thing — and the whole
+     * point here is that they are not.
+     */
+    for (const lens of [largest, growing, declining]) {
+      expect(await lens.evaluate((el: HTMLButtonElement) => el.disabled)).toBe(false)
+    }
+
+    /*
+     * The hidden table, which is the only copy of this data a screen reader
+     * gets. `textContent` rather than `innerText`: it is deliberately clipped to
+     * a 1px box, and asserting on rendered text would be asserting on the
+     * clipping.
+     */
+    const table = page.getByRole('table', { name: 'Business Industry Growth Trend' })
+    const figcaption = page.locator('figure', { has: table }).locator('figcaption')
+
+    await expect(figcaption).toContainText('Largest')
+
+    await growing.click()
+    await expect(growing).toHaveAttribute('aria-pressed', 'true')
+    await expect(largest).toHaveAttribute('aria-pressed', 'false')
+    // The figure's accessible name moved with the toggle, so a screen reader is
+    // not still being told it is looking at the largest six.
+    await expect(figcaption).toContainText('Fastest growing')
+
+    /*
+     * The floor, stated. "Industries with at least N businesses" has to be a
+     * number a reader can check, not a rule applied quietly — "why isn't my
+     * trade on here" is the question this panel gets asked, and an exclusion
+     * nobody can see is indistinguishable from a bug.
+     *
+     * Located on the live region rather than by text, because the sentence
+     * deliberately appears twice — once for the eye and once inside the
+     * figure's accessible name for a screen reader, which is the pairing this
+     * whole panel is built on. Matching on text alone finds both.
+     */
+    await expect(
+      page.locator('p[aria-live="polite"]', {
+        hasText: /at least \d+ businesses on record are ranked/,
+      }),
+    ).toBeVisible()
+
+    // Every line drawn under a change lens actually moved that way. Nothing
+    // steady is padded in to make the count come out at six.
+    for (const row of (await table.getByRole('row').allTextContents()).slice(1)) {
+      expect(row).toContain('growing')
+    }
+
+    await declining.click()
+    await expect(figcaption).toContainText('Fastest declining')
+    for (const row of (await table.getByRole('row').allTextContents()).slice(1)) {
+      expect(row).toContain('declining')
+    }
+
+    // Six is a ceiling, never exceeded: a seventh series would have to repeat a
+    // colour and a dash pattern, and "Never Color Alone" only holds while those
+    // pairs are unique. The header row is not one of the six.
+    for (const lens of [largest, growing, declining]) {
+      await lens.click()
+      expect((await table.getByRole('row').count()) - 1).toBeLessThanOrEqual(6)
+    }
+  })
+
   test('the rail sends BPLO to the dashboard, addressing the staff site directly', async ({
     page,
   }) => {

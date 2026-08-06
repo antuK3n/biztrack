@@ -13,10 +13,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { useId, useState } from 'react'
 import type {
   BarangayGrowthRow,
   BusinessStatusRow,
-  IndustryGrowthRow,
+  IndustryLens,
+  IndustryLenses,
   SurvivalPoint,
 } from '../../lib/types'
 import {
@@ -109,6 +111,25 @@ export function GrowthStatusDonut({ rows }: { rows: BusinessStatusRow[] }) {
           <Tooltip
             {...GROWTH_TOOLTIP}
             formatter={(value, name) => [`${Number(value).toLocaleString()} businesses`, name]}
+            /*
+             * Pinned to the top of the plot, and only on the vertical axis.
+             *
+             * A tooltip that follows the pointer lands in the hole, because the
+             * pointer is on the ring and the hole is the nearest empty space —
+             * so hovering a segment covered the total with the segment's own
+             * count and neither was readable. The hole is not empty: the figure
+             * in it is the reason the chart is a donut rather than a pie.
+             *
+             * recharts resolves `position` one axis at a time
+             * (getTooltipTranslateXY returns position[key] early only for the
+             * key it was handed), so giving it `y` alone stops the box climbing
+             * into the centre while leaving the horizontal pointer-follow that
+             * tells the reader which segment they are on. It now covers the top
+             * of the ring instead — a shape, not a number.
+             *
+             * Same fix as ShareChart.tsx, for the same reason.
+             */
+            position={{ y: 0 }}
           />
         </PieChart>
       </GrowthChartFrame>
@@ -319,6 +340,136 @@ export function GrowthClosureTrend({
 
 /* ── Business Industry Growth Trend — one line per industry ────────────── */
 
+/*
+ * ── The lens toggle, and the question it answers ────────────────────────────
+ *
+ * A panelist asked whether there is any criterion for which line of business
+ * shows up on this chart, and what happens if all of them do. Both halves are
+ * fair. The register holds 135 PSIC codes; the palette above keeps six series
+ * apart WITHOUT colour (six hues, six dash patterns, a named legend and a hidden
+ * table), and a seventh would have to repeat one of them. So six is a hard
+ * ceiling, not an editorial shortlist — which makes "which six" the entire
+ * question.
+ *
+ * It used to be answered once, by size, on a panel titled Growth Trend. A trade
+ * that went from three businesses to six never appeared; two of the six on
+ * screen were shrinking. Same six slots now, three questions, reader's choice.
+ *
+ * Largest is the default. It is the only one of the three that describes the
+ * register rather than a window — it needs no prior period, no floor and no
+ * comparison to mean something, and it is the ranking that shipped, so nobody's
+ * saved reading of this screen changes underneath them.
+ */
+
+/** The lens picker: three exclusive answers to one question about the chart. */
+function IndustryLensToggle({
+  lenses,
+  active,
+  onSelect,
+  labelId,
+}: {
+  lenses: IndustryLens[]
+  active: string
+  onSelect: (key: IndustryLens['key']) => void
+  labelId: string
+}) {
+  return (
+    <div
+      /*
+       * `role="group"` with `aria-pressed` buttons rather than a radiogroup.
+       * These are three views of one chart, not three answers being submitted —
+       * the same reading that puts `aria-pressed` on the office cards in
+       * ProcessingTimePage and a radiogroup on the wizard's registration type.
+       *
+       * A lens with nothing to draw is NOT `disabled`. The native attribute
+       * takes it out of the tab order and most screen readers walk straight
+       * past, so a reader working the strip by keyboard would meet two lenses
+       * and conclude the chart offers two. `aria-disabled` announces it and
+       * keeps it reachable, and pressing it lands on the panel's own sentence
+       * explaining that nothing declined — which is the answer they came for.
+       */
+      role="group"
+      aria-labelledby={labelId}
+      // royal-tint as the track, so the unselected lenses read as one control
+      // rather than as three loose buttons on the card's white.
+      className="inline-flex flex-wrap gap-1 rounded-full bg-royal-tint p-1"
+    >
+      {lenses.map((lens) => {
+        const isActive = lens.key === active
+        const empty = lens.rows.length === 0
+
+        return (
+          <button
+            key={lens.key}
+            type="button"
+            aria-pressed={isActive}
+            aria-disabled={empty ? true : undefined}
+            onClick={() => onSelect(lens.key)}
+            className={`rounded-full px-3 py-1 text-[12px] font-semibold transition ${
+              isActive
+                ? 'bg-white text-royal shadow-card ring-1 ring-royal'
+                : // An empty lens is still a lens: muted, never removed. It is
+                  // the answer to "did anything decline?" and the reader has to
+                  // be able to ask.
+                  empty
+                  ? 'text-ink-muted hover:bg-white/60'
+                  : 'text-ink-secondary hover:bg-white/70 hover:text-ink'
+            }`}
+          >
+            {lens.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * How this lens chose its six, in one sentence the reader can check.
+ *
+ * The exclusion is never silent. If a floor kept 7 of 30 lines out of the
+ * ranking, the number is on the screen — a reader who cannot see what was left
+ * out has no way to tell a considered cut from a bug, and "why isn't my trade on
+ * here" is precisely the question this panel gets asked.
+ */
+function lensCaption(lens: IndustryLens, lenses: IndustryLenses): string {
+  const drawn = lens.rows.length
+  const below = lenses.lines_on_record - lenses.above_floor
+
+  if (lens.key === 'largest') {
+    const basis = `Ranked by how many businesses carry the line today; all ${lenses.lines_on_record} lines of business on the register are eligible.`
+    return drawn < lenses.slots
+      ? `${basis} Only ${lenses.lines_on_record} ${lenses.lines_on_record === 1 ? 'line is' : 'lines are'} on record, so the chart draws ${drawn}.`
+      : `${basis} The other ${lenses.lines_on_record - drawn} are smaller.`
+  }
+
+  const verb = lens.key === 'growing' ? 'grew' : 'declined'
+  const basis =
+    `Ranked by the change between the two periods. Only industries with at least ` +
+    `${lenses.min_businesses} businesses on record are ranked` +
+    (below > 0
+      ? ` — ${below} of ${lenses.lines_on_record} lines fall below that and are left out.`
+      : `; every line on the register clears that.`)
+
+  if (drawn === 0) {
+    return `${basis} No industry above that size ${verb} in this period, so there is nothing to plot.`
+  }
+
+  const noun = lens.qualifying === 1 ? 'industry' : 'industries'
+
+  // Said out loud rather than left to the reader to count. A chart with four
+  // lines where the other panels have six reads as a chart that lost two.
+  if (lens.qualifying < lenses.slots) {
+    return `${basis} Only ${lens.qualifying} ${noun} ${verb}, so the chart draws ${drawn} ${drawn === 1 ? 'line' : 'lines'} rather than ${lenses.slots}.`
+  }
+
+  if (lens.qualifying === lenses.slots) {
+    return `${basis} ${lens.qualifying} ${noun} ${verb}, and all of them are drawn.`
+  }
+
+  return `${basis} ${lens.qualifying} ${noun} ${verb}; the ${lenses.slots} that moved most are drawn.`
+}
+
 /**
  * A line per industry, colour-coded and named, exactly as the spec asks.
  *
@@ -335,16 +486,30 @@ export function GrowthClosureTrend({
  * The dataKey is the PSIC code because two lines of business can share a name
  * in the register; the code cannot collide. It is digits only, so recharts
  * reads it as a plain key rather than as a nested path.
+ *
+ * The lens lives in this component rather than on the page because everything it
+ * changes lives here too: the series, the legend, the hidden table and the
+ * caption all have to move together or the chart and the sentence under it stop
+ * describing the same six industries.
  */
 export function GrowthIndustryTrend({
-  rows,
+  lenses,
   priorLabel,
   currentLabel,
 }: {
-  rows: IndustryGrowthRow[]
+  lenses: IndustryLenses
   priorLabel: string
   currentLabel: string
 }) {
+  const [lensKey, setLensKey] = useState<IndustryLens['key']>('largest')
+  const labelId = useId()
+
+  // Falls back to the first lens the server sent rather than assuming
+  // 'largest' exists: a payload from before the splice carries only one.
+  const lens = lenses.lenses.find((candidate) => candidate.key === lensKey) ?? lenses.lenses[0]
+  const rows = lens?.rows ?? []
+  const caption = lens ? lensCaption(lens, lenses) : ''
+
   const series = rows.map((row, i) => ({
     row,
     ...GROWTH_SERIES[i % GROWTH_SERIES.length],
@@ -358,73 +523,119 @@ export function GrowthIndustryTrend({
   }
 
   return (
-    <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-center">
-      <GrowthChartFrame
-        label="Business Industry Growth Trend"
-        summary={`New registrations per industry, ${priorLabel} against ${currentLabel}`}
-        columns={['Industry', 'PSIC code', priorLabel, currentLabel, 'Change', 'On record today']}
-        rows={rows.map((row) => ({
-          cells: [
-            row.industry,
-            row.psic_code,
-            row.prior,
-            row.registrations,
-            `${signed(row.delta)} (${row.direction})`,
-            row.count,
-          ],
-        }))}
-        height={190}
-      >
-        <LineChart
-          data={[priorPoint, currentPoint]}
-          margin={{ top: 8, right: 16, bottom: 4, left: 0 }}
-        >
-          <CartesianGrid stroke={GROWTH_GRID} strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            dataKey="period"
-            interval={0}
-            padding={{ left: 56, right: 56 }}
-            tick={GROWTH_AXIS_TICK}
-            tickLine={false}
-            axisLine={{ stroke: GROWTH_GRID }}
+    <div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        {/*
+          A real label for the group, visible rather than sr-only. The control
+          is a question ("which six?") and the answer buttons are terse enough
+          that without it "Largest" beside a chart could be read as a legend.
+        */}
+        <span id={labelId} className="text-[12px] font-semibold text-ink-secondary">
+          Which six industries
+        </span>
+        {/* One lens is not a choice — see the fallback note in BusinessGrowthPage. */}
+        {lenses.lenses.length > 1 && (
+          <IndustryLensToggle
+            lenses={lenses.lenses}
+            active={lens?.key ?? ''}
+            onSelect={setLensKey}
+            labelId={labelId}
           />
-          <YAxis
-            tick={GROWTH_AXIS_TICK}
-            tickLine={false}
-            axisLine={false}
-            allowDecimals={false}
-            width={34}
-          />
-          <Tooltip
-            {...GROWTH_TOOLTIP}
-            formatter={(value, name) => [`${Number(value)} new`, name]}
-          />
-          {series.map(({ row, color, dash }) => (
-            <Line
-              key={row.psic_code}
-              type="linear"
-              dataKey={row.psic_code}
-              name={row.industry}
-              stroke={color}
-              strokeWidth={2.5}
-              strokeDasharray={dash}
-              dot={{ r: 3, fill: color, strokeWidth: 0 }}
-              activeDot={{ r: 5 }}
-              isAnimationActive={false}
-            />
-          ))}
-        </LineChart>
-      </GrowthChartFrame>
+        )}
+      </div>
 
-      <GrowthLegend
-        variant="line"
-        items={series.map(({ row, color, dash }) => ({
-          color,
-          dash,
-          label: row.industry,
-          value: `${signed(row.delta)} · ${row.direction}`,
-        }))}
-      />
+      {/*
+        aria-live so a lens change is announced. The chart itself is an
+        aria-hidden SVG and the hidden table below it re-renders silently, so
+        without this a screen-reader user presses "Fastest declining" and is
+        told nothing at all happened. The caption names the lens' rule and its
+        exclusions, which is the most useful thing to hear.
+      */}
+      <p aria-live="polite" className="mb-3 text-[11px] leading-snug text-ink-muted">
+        {caption}
+      </p>
+
+      {rows.length === 0 ? (
+        <p className="px-1 py-8 text-center text-[13px] text-ink-secondary">
+          Nothing to plot under this lens. The caption above says why.
+        </p>
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-center">
+          <GrowthChartFrame
+            label="Business Industry Growth Trend"
+            summary={`${lens?.label ?? ''}. ${caption} New registrations per industry, ${priorLabel} against ${currentLabel}`}
+            columns={[
+              'Industry',
+              'PSIC code',
+              priorLabel,
+              currentLabel,
+              'Change',
+              'On record today',
+            ]}
+            rows={rows.map((row) => ({
+              cells: [
+                row.industry,
+                row.psic_code,
+                row.prior,
+                row.registrations,
+                `${signed(row.delta)} (${row.direction})`,
+                row.count,
+              ],
+            }))}
+            height={190}
+          >
+            <LineChart
+              data={[priorPoint, currentPoint]}
+              margin={{ top: 8, right: 16, bottom: 4, left: 0 }}
+            >
+              <CartesianGrid stroke={GROWTH_GRID} strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="period"
+                interval={0}
+                padding={{ left: 56, right: 56 }}
+                tick={GROWTH_AXIS_TICK}
+                tickLine={false}
+                axisLine={{ stroke: GROWTH_GRID }}
+              />
+              <YAxis
+                tick={GROWTH_AXIS_TICK}
+                tickLine={false}
+                axisLine={false}
+                allowDecimals={false}
+                width={34}
+              />
+              <Tooltip
+                {...GROWTH_TOOLTIP}
+                formatter={(value, name) => [`${Number(value)} new`, name]}
+              />
+              {series.map(({ row, color, dash }) => (
+                <Line
+                  key={row.psic_code}
+                  type="linear"
+                  dataKey={row.psic_code}
+                  name={row.industry}
+                  stroke={color}
+                  strokeWidth={2.5}
+                  strokeDasharray={dash}
+                  dot={{ r: 3, fill: color, strokeWidth: 0 }}
+                  activeDot={{ r: 5 }}
+                  isAnimationActive={false}
+                />
+              ))}
+            </LineChart>
+          </GrowthChartFrame>
+
+          <GrowthLegend
+            variant="line"
+            items={series.map(({ row, color, dash }) => ({
+              color,
+              dash,
+              label: row.industry,
+              value: `${signed(row.delta)} · ${row.direction}`,
+            }))}
+          />
+        </div>
+      )}
     </div>
   )
 }
