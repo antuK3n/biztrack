@@ -539,6 +539,51 @@ export interface Permit {
   verify_url: string
 }
 
+/**
+ * A clearance the applicant already held and submitted a COPY of, instead of
+ * asking the office to issue it (`GET /permits/held`).
+ *
+ * This is NOT a Permit and must never be rendered as one. Nothing in the
+ * register issued it: it is a file the applicant uploaded, stored as an
+ * ordinary application document carrying a `permit_type_id`
+ * (App\Support\HeldPermits), and no Permit row is ever written for it —
+ * WorkflowService::approveAndIssue only issues the permit types on the filing,
+ * and submitting a copy is precisely the act of leaving one off.
+ *
+ * That is why this shape has no `permit_number`, no `valid_from` / `valid_until`
+ * and no `verify_url`. The absence is the point. The City recorded no number,
+ * no validity and no verification for a document it did not issue, so a screen
+ * has nothing honest to print in those slots and must not invent one.
+ *
+ * `id` is the document id. It keys /documents/{id}/download, NOT /permits/{id}.
+ */
+export interface HeldClearance {
+  id: number
+  /** Which of the six this is a copy of. Null only if the type row is gone. */
+  permit_type: { code: string; name: string } | null
+  /** The applicant's own filename, as uploaded. */
+  filename: string
+  size_bytes: number
+  /** When the applicant uploaded it — not an issue date. */
+  submitted_at: string | null
+  download_url: string
+  /**
+   * Null when the business has been removed from the register. `Business`
+   * soft-deletes while its filings stay, so this is a real state and readers
+   * must run it through `businessName()` rather than reading `.name`.
+   */
+  business: { id: number; name: string } | null
+  /**
+   * The filing the copy was uploaded to.
+   *
+   * `tracking_id` is nullable and means it: a copy can only be uploaded while
+   * the filing is a draft (ClearanceService::isUnlocked), and a draft has not
+   * been given a tracking ID yet. So the common case for a freshly submitted
+   * copy is null, not a string.
+   */
+  application: { id: number; tracking_id: string | null; status: ApplicationStatus } | null
+}
+
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */

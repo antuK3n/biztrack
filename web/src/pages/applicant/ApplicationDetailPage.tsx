@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   CalendarIcon,
+  CheckCircleIcon,
   DownloadIcon,
   EyeIcon,
   XCircleIcon,
@@ -74,6 +75,119 @@ function MessageIcon({ size = 26 }: { size?: number }) {
       <circle cx="12" cy="11" r="1" fill="currentColor" />
       <circle cx="15.5" cy="11" r="1" fill="currentColor" />
     </svg>
+  )
+}
+
+/**
+ * Where each office has got to, one row per office (the client's first request).
+ *
+ * "Once a sub-permit is already approved/done for inspection for a business,
+ * but the other sub-permits are not yet approved/done, still display those that
+ * are approved/done already." The tracking list answers that with a chip per
+ * permit type; this is where the detail behind the chip has to live, because
+ * the status card above can only ever describe the filing as a whole and the
+ * filing as a whole is exactly what is NOT finished.
+ *
+ * Two things this section is careful about.
+ *
+ * It shows the CURRENT visit per office and no other. A failed visit is kept on
+ * the record rather than overwritten, so an office awaiting a re-inspection has
+ * two rows on this payload and only the newer one is its standing —
+ * Inspection::scopeCurrentPerDepartment on the API means the same thing by the
+ * word, and it is the predicate recordInspection() uses to decide the filing
+ * has cleared. Listing both would show an applicant a failure the office has
+ * already moved past.
+ *
+ * And it never says "issued". Every label here is the API's own
+ * (`result_label`, `status_label`), which describes a VISIT: Passed, Failed,
+ * Passed with conditions, Scheduled. No permit exists until every office's
+ * current visit has passed and approveAndIssue() writes them, and this list
+ * sits under a sentence that says so rather than leaving an applicant to infer
+ * it from four green rows and a fifth that is still pending.
+ */
+function OfficeVisits({ app }: { app: Application }) {
+  /*
+   * Highest id per department. `reduce` rather than a sort, because the payload
+   * carries no ordering guarantee for this relation and taking `[0]` of a
+   * filtered list is how the status card above once ended up announcing a
+   * scheduled date that had already passed.
+   */
+  const current = new Map<string, Application['inspections'][number]>()
+  for (const visit of app.inspections) {
+    const code = visit.department?.code
+    // No department on the row means the response was not asked to load it,
+    // and a visit that cannot say whose it is has nothing to contribute to a
+    // list whose entire structure is "one row per office".
+    if (!code) continue
+    const held = current.get(code)
+    if (!held || visit.id > held.id) current.set(code, visit)
+  }
+
+  const visits = [...current.values()].sort((a, b) =>
+    (a.department?.name ?? '').localeCompare(b.department?.name ?? ''),
+  )
+  if (visits.length === 0) return null
+
+  const outstanding = visits.filter((v) => !v.conducted_at || !v.result).length
+
+  return (
+    <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
+      <h2 className="text-lg font-bold text-ink">Inspections by office</h2>
+      <p className="mt-1 text-sm text-ink-secondary">
+        {outstanding === 0
+          ? 'Every office has been. Your permits are issued once the last result is recorded.'
+          : `An office passing its visit does not issue a permit — ${
+              outstanding === 1 ? 'one office has' : `${outstanding} offices have`
+            } still to inspect, and the permits are issued only when all of them have passed.`}
+      </p>
+      <ul className="mt-4 space-y-2">
+        {visits.map((visit) => {
+          /*
+           * The API's words, not ours. `result_label` already distinguishes
+           * "Passed" from "Passed with conditions", and a second vocabulary
+           * written here would drift from the officer's screen the first time
+           * the enum gained a case.
+           */
+          const done = Boolean(visit.conducted_at && visit.result)
+          const failed = visit.result === 'failed'
+          const label = done ? (visit.result_label ?? 'Recorded') : visit.status_label
+          const when = done ? visit.conducted_at : visit.scheduled_at
+
+          return (
+            <li
+              key={visit.id}
+              className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line px-4 py-3"
+            >
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
+                {visit.department?.name ?? 'Inspecting office'}
+              </span>
+              <span className="shrink-0 text-xs italic text-ink-muted">
+                {done ? 'Visited' : 'Scheduled'} {formatDateTime(when)}
+              </span>
+              {/* Icon plus word: the three outcomes must not rest on colour. */}
+              <span
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ${
+                  failed
+                    ? 'bg-s-red-tint text-s-red'
+                    : done
+                      ? 'bg-s-green-tint text-s-green'
+                      : 'bg-s-yellow-tint text-amber-800'
+                }`}
+              >
+                {failed ? (
+                  <XCircleIcon size={14} strokeWidth={2} />
+                ) : done ? (
+                  <CheckCircleIcon size={14} />
+                ) : (
+                  <CalendarIcon size={14} />
+                )}
+                {label}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -454,6 +568,18 @@ export function ApplicationDetailPage() {
             <MessageIcon />
           </div>
         )}
+
+        {/* ── Per-office inspection progress ────────────────────────────
+          *
+          * Not gated on `status === 'for_inspection'`. It renders whenever the
+          * filing has visits on it, which is the honest condition: the client
+          * asked to see the offices that are done while others are not, and the
+          * moment the last one passes the filing flips to approved — gating on
+          * the status would make the completed record vanish at exactly the
+          * point somebody wants to check what happened. It also keeps the
+          * outcome of a failed visit on screen while a re-inspection is booked.
+          */}
+        {status !== 'draft' && <OfficeVisits app={app} />}
 
         {/* ── LGU Clearances · what this filing asked for ────────────────
           *

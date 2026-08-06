@@ -1,5 +1,4 @@
 import { useId, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { CalendarIcon, CheckCircleFilledIcon, XCircleIcon, XIcon } from './icons'
 import { ProtoModal } from './ui/Proto'
 import { toApiError } from '../lib/api'
@@ -22,25 +21,42 @@ import type { Inspection } from '../lib/types'
  * approved or rejected. The officer's own words: "there's no thing to approve
  * something that's for inspection".
  *
- * The visit already had a home at /staff/inspections/{id}, but nothing on the
- * queue linked there, and an officer who clicks a For Inspection row in
+ * The visit used to have a second home at /staff/inspections/{id}, but nothing
+ * on the queue linked there, and an officer who clicks a For Inspection row in
  * Application Verification lands on the review sheet, not there.
  *
- * ── Why it is its own file ──────────────────────────────────────────────────
+ * ── The screen this replaced ────────────────────────────────────────────────
  *
- * InspectionsPage renders the same decision — the same red remarks glyph, the
- * same green Approve, the same REMARKS FOR REJECTION modal (updated-gui/82.png
- * and 83.png), the same re-inspection booking — from its own private copies of
- * this markup.
+ * There WERE two screens doing this job. `pages/officer/InspectionsPage.tsx`
+ * held a register-wide list at /staff/inspections and a per-visit detail page
+ * under it, both from private copies of this markup, and the client called the
+ * duplication out: "The Track page -> For Inspection is redundant with the
+ * Inspections page. Remove the Inspections page. All inspections will happen in
+ * The Track page -> For Inspection". That file is deleted; this component is
+ * now the only place a site visit is decided, so everything the old detail page
+ * could do had to arrive here first:
  *
- * TODO: fold InspectionsPage's detail view onto these components. It is NOT
- * done here on purpose: that file is being edited concurrently, and two agents
- * rewriting the same 800 lines is how a merge eats one of them. When it is
- * folded in, the pieces to delete there are `MagnifierGlyph`, `DocGlyph`,
- * `FailModal` and the status-card block around line 586 — they are the same
- * shapes as `MagnifierGlyph`, `RejectGlyph`, `InspectionRemarksModal` and
- * `InspectionDecisionCard` below. If the two drift apart before then, this
- * file is the one that matches the mock; check it first.
+ *  - Approve, and Reject through the REMARKS FOR REJECTION dialog — already
+ *    here, and in a better shape (see `InspectionRemarksModal` on why Proceed
+ *    stays reachable rather than `disabled`).
+ *  - Findings, the scheduled/finished date, the inspector's name with the
+ *    department fallback — already on the card below.
+ *  - "Schedule re-inspection", the way out of a failed visit — here, and the
+ *    gate that kept it invisible on this payload is fixed in `canReinspect`.
+ *  - "Reschedule this inspection", moving a visit that has not happened yet —
+ *    MOVED here as the `reschedule` prop. It existed nowhere else, so deleting
+ *    that page without it would have taken a working control off the product.
+ *
+ * One thing was deliberately NOT brought across: the old page's "Application
+ * Details" card, the filing's particulars restated under the decision. The
+ * client asked for that to go in the same breath as the box itself — "In
+ * reviewing the inspections (admin side), I can still see the application
+ * details. Please remove this." — so reinstating it on the screen that survived
+ * would be undoing a fix, not preserving a feature. The officer still reaches
+ * every one of those fields from the filing itself.
+ *
+ * The old register-wide LIST is not replaced either, on purpose. Track's For
+ * Inspection tab is the list now; that is what the client asked for.
  *
  * ── Deliberately NOT a copy of the inspection detail page ───────────────────
  *
@@ -252,6 +268,7 @@ export function InspectionDecisionCard({
   onApprove,
   onReject,
   reinspect,
+  reschedule,
 }: {
   item: Inspection
   canAct: boolean
@@ -266,6 +283,25 @@ export function InspectionDecisionCard({
     onClose: () => void
     onChange: (value: string) => void
     onBook: () => void
+  }
+  /**
+   * Moving a visit that has not happened yet. Absent when it is not on offer —
+   * a conducted visit cannot be moved, and another office's cannot be touched.
+   *
+   * Deliberately a separate prop from `reinspect` even though the two render
+   * near-identical date pickers, because they are opposite acts on the record:
+   * this OVERWRITES `scheduled_at` on a visit with nothing yet to lose, and
+   * that one adds a second row and leaves the failure standing. Sharing one
+   * control between them is how "reschedule the failed visit" gets written by
+   * accident, which erases the exact fact the client asked to keep.
+   */
+  reschedule?: {
+    open: boolean
+    value: string
+    onOpen: () => void
+    onClose: () => void
+    onChange: (value: string) => void
+    onSave: () => void
   }
 }) {
   const done = inspectionDone(item)
@@ -295,6 +331,7 @@ export function InspectionDecisionCard({
    */
   const approveLabel = `Approve the ${office} inspection`
   const rejectLabel = `Reject the ${office} inspection with remarks`
+  const rescheduleLabel = `Reschedule the ${office} inspection`
 
   return (
     <li className="overflow-hidden rounded-2xl bg-white shadow-card">
@@ -397,8 +434,15 @@ export function InspectionDecisionCard({
                   >
                     Book this visit
                   </button>
+                  {/*
+                    Named, like every other repeated control on this card. Two
+                    bare "Never mind"s can now be on one filing — this one, and
+                    the reschedule picker's below — and a screen-reader user
+                    moving by button would meet them as the same word twice.
+                  */}
                   <button
                     type="button"
+                    aria-label={`Cancel booking the new ${office} visit`}
                     onClick={reinspect.onClose}
                     className="text-sm font-semibold text-ink-muted underline underline-offset-2"
                   >
@@ -418,22 +462,22 @@ export function InspectionDecisionCard({
             </div>
           ) : (
             /*
-             * A conducted visit with no action left here still has a record
-             * worth opening — photos, the reschedule history, the particulars
-             * the officer verified — and on a FAILED visit that record is also
-             * where the way out lives when this payload could not work out
-             * whether to offer it (see `canReinspect` below). So the link is on
-             * every card rather than conditioned on a flag: it is never wrong,
-             * and it means a failure is never a dead end on this screen even
-             * when the flag is unavailable.
+             * A conducted visit with nothing left to do on it.
+             *
+             * This used to be a link reading "Open the inspection record",
+             * pointing at /staff/inspections/{id} — the escape hatch for a
+             * failure whose re-inspection flag this payload could not work out.
+             * That page is gone (see the note at the top of this file), and the
+             * flag is worked out here now, so the hatch has nothing left to
+             * escape to and nothing left to escape from. The card already shows
+             * every field that page did: the result, the date, the findings and
+             * the inspector.
+             *
+             * An empty span rather than nothing, so the inspector's name stays
+             * pinned to the right of a `justify-between` row instead of sliding
+             * across to the left on conducted visits only.
              */
-            <Link
-              to={`/staff/inspections/${item.id}`}
-              aria-label={`Open the ${office} inspection record`}
-              className="text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
-            >
-              Open the inspection record
-            </Link>
+            <span />
           )}
 
           {/*
@@ -465,6 +509,56 @@ export function InspectionDecisionCard({
             own.
           </p>
         )}
+
+        {reschedule && (
+          /*
+           * Moving the appointment, which is not a decision about it.
+           *
+           * Kept visually quieter than Approve and Reject — a text link until
+           * it is opened — because it is the secondary act on an outstanding
+           * visit and the mock gives the two decision buttons the weight. It
+           * sat in exactly this relationship on the page this replaced.
+           */
+          <div className="mt-4">
+            {reschedule.open ? (
+              <div className="flex flex-wrap items-center gap-2.5">
+                <input
+                  type="datetime-local"
+                  value={reschedule.value}
+                  onChange={(e) => reschedule.onChange(e.target.value)}
+                  aria-label={`New date and time for the ${office} inspection`}
+                  className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+                />
+                <button
+                  type="button"
+                  aria-label={`Save the new ${office} inspection date`}
+                  aria-disabled={busy || !reschedule.value}
+                  onClick={() => busy || !reschedule.value || reschedule.onSave()}
+                  className="rounded-full bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover aria-disabled:opacity-60"
+                >
+                  Save new date
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Leave the ${office} inspection where it is`}
+                  onClick={reschedule.onClose}
+                  className="text-sm font-semibold text-ink-muted underline underline-offset-2"
+                >
+                  Never mind
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                aria-label={rescheduleLabel}
+                onClick={reschedule.onOpen}
+                className="text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
+              >
+                Reschedule this inspection
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </li>
   )
@@ -491,10 +585,21 @@ export function InspectionDecisionCard({
  */
 export function InspectionDecisionPanel({
   inspections,
+  filingStatus,
   onChanged,
   className = '',
 }: {
   inspections: Inspection[]
+  /**
+   * The FILING's status, e.g. `for_inspection`.
+   *
+   * Required, not optional, and it is not decoration: it is one of the three
+   * conditions on whether a fresh visit may be booked (see `canReinspect`), and
+   * a caller who omitted it would silently get a panel that never offers the
+   * way out of a failed visit — which is the precise bug this panel was last
+   * changed to fix. Better to make every caller say it.
+   */
+  filingStatus: string
   onChanged: () => void
   className?: string
 }) {
@@ -503,6 +608,8 @@ export function InspectionDecisionPanel({
   const [rejecting, setRejecting] = useState<Inspection | null>(null)
   const [reinspectId, setReinspectId] = useState<number | null>(null)
   const [reinspectValue, setReinspectValue] = useState('')
+  const [reschedId, setReschedId] = useState<number | null>(null)
+  const [reschedValue, setReschedValue] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   /*
@@ -521,33 +628,71 @@ export function InspectionDecisionPanel({
     return item.inspector?.id === user.id
   }
 
+  /**
+   * Is this visit still this office's CURRENT one, or has a later one replaced
+   * it?
+   *
+   * Mirrors Inspection::scopeCurrentPerDepartment exactly — "no row exists with
+   * the same application, the same department, and a higher id". The API has to
+   * ask that as a query because a single-visit payload cannot see its siblings.
+   * This panel is handed every visit on the filing, so here it is a scan of an
+   * array of at most six.
+   *
+   * A visit whose department did not come down the wire answers false. That is
+   * a refusal on unknown data, which is normally the wrong call — but the whole
+   * question is "which of this OFFICE'S visits is the latest", and it cannot be
+   * asked at all without knowing the office. Answering true would offer to book
+   * a second visit off a superseded failure, which is the 422 this is here to
+   * avoid.
+   */
+  function isCurrentForDepartment(item: Inspection): boolean {
+    const code = item.department?.code
+    if (!code) return false
+    return !inspections.some((other) => other.department?.code === code && other.id > item.id)
+  }
+
   /*
-   * Only ever the server's own `true`.
+   * May a fresh visit be booked off the back of this one?
    *
-   * The third condition — whether a LATER visit has already replaced this one —
-   * is nowhere in this payload, and guessing it locally is exactly what left
-   * the button showing on a superseded failure that the API then refused with a
-   * 422. So there is no local fallback here: anything other than a definite
-   * `true` means the inline control is not offered, and the "Open the
-   * inspection record" link on every card carries the officer to
-   * /staff/inspections/{id}, where the flag IS computed and the same booking
-   * control is offered. A failure is therefore never a dead end, and no press
-   * on this screen can produce a 422.
+   * The server's own `true` short-circuits. Everything else falls through to
+   * the same three conditions the server checks (Inspection::canBeReinspected),
+   * asked of what this screen can see — and on this screen it can see all
+   * three:
    *
-   * KNOWN API GAP — the reason that matters in practice. `can_reinspect` is
-   * documented as three-valued, with null meaning "the response was not asked
-   * to load the filing". The assignment payload this screen runs on DOES load
-   * it, but only as `application:id,tracking_id,business_id`
-   * (AssignmentController::show) — no `status` column. Inspection::
-   * canBeReinspected() then reads `$this->application?->status === ForInspection`
-   * against a null status and returns FALSE, which the contract reads as a
-   * definite refusal rather than as "not computed". GET /inspections/{id}
-   * answers `true` for the very same visit. Until `status` is added to that
-   * select, this flag is never true here and the link is doing all the work.
-   * Reported rather than patched: AssignmentController is another agent's file.
+   *  - the visit FAILED: on the card's own payload.
+   *  - the FILING is still for inspection: the caller passes it in, from the
+   *    full ApplicationResource this screen is already built on.
+   *  - this is the office's CURRENT visit: `isCurrentForDepartment` above,
+   *    because the whole filing's visits are in hand here.
+   *
+   * ── Why there is a fallback at all ──────────────────────────────────────
+   *
+   * `can_reinspect` is documented as three-valued and null means "not
+   * computed", never "no", so a fallback is required by the contract. But the
+   * case that bites in practice is a `false` that is just as uninformed:
+   * AssignmentController::show loads the nested filing as
+   * `application:id,tracking_id,business_id` — no `status` column — so
+   * canBeReinspected() compares a null status against ForInspection and
+   * answers FALSE for a visit that GET /inspections/{id} calls re-inspectable.
+   * Reading that as a refusal is what left "Schedule re-inspection" invisible
+   * on this screen, and the officer's only route to it was a link to a page
+   * that no longer exists. So the fallback runs on any answer that is not a
+   * definite `true`.
+   *
+   * That is safe rather than a guess, and the difference matters: when the
+   * server's `false` IS informed, this test evaluates the same three conditions
+   * against the same facts and answers false too. It can only diverge where the
+   * server was working from a filing it had not loaded — exactly the case the
+   * contract says to treat as unknown.
    */
   function canReinspect(item: Inspection): boolean {
-    return item.can_reinspect === true
+    if (item.can_reinspect === true) return true
+    return (
+      inspectionDone(item) &&
+      item.result === 'failed' &&
+      filingStatus === 'for_inspection' &&
+      isCurrentForDepartment(item)
+    )
   }
 
   async function conduct(item: Inspection, result: 'passed' | 'failed', findings?: string) {
@@ -578,6 +723,34 @@ export function InspectionDecisionPanel({
       await inspectionsApi.reinspect(item.id, new Date(reinspectValue).toISOString())
       setReinspectId(null)
       setReinspectValue('')
+      onChanged()
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /*
+   * Moving a visit that has not happened yet.
+   *
+   * The only control on the deleted /staff/inspections/{id} that had no home
+   * anywhere else. Without it a filing whose visit was booked for a date the
+   * officer cannot make could only be approved, rejected, or left — the
+   * appointment itself was frozen.
+   *
+   * `reload` like the rest: rescheduling writes InspectionStatus::Rescheduled
+   * as well as the new date, so the card's own status line changes and the copy
+   * on screen is stale the moment this returns.
+   */
+  async function saveReschedule(item: Inspection) {
+    if (!reschedValue) return
+    setBusyId(item.id)
+    setError(null)
+    try {
+      await inspectionsApi.reschedule(item.id, new Date(reschedValue).toISOString())
+      setReschedId(null)
+      setReschedValue('')
       onChanged()
     } catch (err) {
       setError(toApiError(err).message)
@@ -633,6 +806,30 @@ export function InspectionDecisionPanel({
                     onClose: () => setReinspectId(null),
                     onChange: setReinspectValue,
                     onBook: () => bookReinspection(item),
+                  }
+                : undefined
+            }
+            /*
+             * Offered only on a visit that has not happened yet, and only to
+             * the office that owns it. A conducted visit has no appointment
+             * left to move — the way on from a failure is a re-inspection, not
+             * a new date on the failed row — and `canAct` is the same
+             * department test the API applies (InspectionController::
+             * authorizeDepartment covers reschedule too).
+             */
+            reschedule={
+              canAct(item) && !inspectionDone(item)
+                ? {
+                    open: reschedId === item.id,
+                    value: reschedValue,
+                    onOpen: () => {
+                      setError(null)
+                      setReschedValue('')
+                      setReschedId(item.id)
+                    },
+                    onClose: () => setReschedId(null),
+                    onChange: setReschedValue,
+                    onSave: () => saveReschedule(item),
                   }
                 : undefined
             }

@@ -381,17 +381,14 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
 }
 
 /**
- * Consent, then a complete Location & Zoning step, landing on Business
- * Information (part 3). Everything here is the minimum the step's own gate
- * demands — a trade, a pin inside the city, an address and someone an inspector
- * can reach.
+ * Consent, then Location & Zoning (part 2) with a line of business declared and
+ * nothing else answered yet.
  *
- * No capital is typed, and the step still passes its gate. It used to ask for
- * one per line here and Business & Tax Profile asked for the same figure again;
- * only the second was ever assessed. The question lives on that step alone now,
- * so this step demands place and trade and nothing about money.
+ * Split out of `goToBusinessStep` because the zoning step is a destination in
+ * its own right now, not only somewhere to pass through: Business Location
+ * Insights renders on it, so tests need to arrive and stop here.
  */
-async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
+async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
   // `beforeEach` already opened a new filing. A renewal has to be opened as
   // one from the start, because the type decides whether the wizard asks which
   // permit this filing is against at all.
@@ -424,6 +421,21 @@ async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
   // Matched on the element, not on a role: the rows carry `role="radio"` now
   // that a filing declares one trade, so `getByRole('button')` finds nothing.
   await page.locator('#psic-results button').first().click()
+}
+
+/**
+ * Consent, then a complete Location & Zoning step, landing on Business
+ * Information (part 3). Everything here is the minimum the step's own gate
+ * demands — a trade, a pin inside the city, an address and someone an inspector
+ * can reach.
+ *
+ * No capital is typed, and the step still passes its gate. It used to ask for
+ * one per line here and Business & Tax Profile asked for the same figure again;
+ * only the second was ever assessed. The question lives on that step alone now,
+ * so this step demands place and trade and nothing about money.
+ */
+async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
+  await goToZoningStep(page, type)
 
   // Centre of the map is Malabon City Hall, so this pin is always inside.
   const map = page.locator('.leaflet-container')
@@ -437,10 +449,280 @@ async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 
   await page.getByRole('button', { name: /^next$/i }).click()
-  // Leaving the zoning step opens the conformity modal on the way out.
+  /*
+   * Leaving the zoning step opens the conformity modal on the way out. The
+   * modal is now the conformity message and nothing else — Business Location
+   * Insights used to render inside it and does not any more. See the tests
+   * below for why that matters.
+   */
   await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
+
+/** The Business Location Insights card, wherever on the page it happens to be. */
+function insightsPanel(page: Page) {
+  return page.getByRole('region', { name: /business location insights/i })
+}
+
+test('Business Location Insights answers the pin, not the confirmation modal', async ({ page }) => {
+  /*
+   * The client's item, and it is a sequencing point rather than a layout one.
+   *
+   * These four figures are decision support for choosing a location. They used
+   * to render inside the zoning-result modal, which opens on the way OUT of the
+   * step — so they reached the applicant only after the location was chosen,
+   * with a Proceed button under them. Useless there, and quietly misleading:
+   * numbers inside a dialog headed CONGRATULATIONS read as part of the
+   * conformity finding.
+   *
+   * So this asserts both halves. On the step, with the pin, while it can still
+   * be moved — and NOT in the modal.
+   */
+  await goToZoningStep(page)
+
+  // Nothing to report before there is a point to report on.
+  await expect(insightsPanel(page)).toBeHidden()
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  /*
+   * Read the radius off the wire rather than hard-coding 500. The whole point of
+   * `radius_m` being in the payload is that the server owns the number; a test
+   * that asserts 500 would keep passing on the day the API changed it and the
+   * screen went on saying 500.
+   */
+  const answered = page.waitForResponse(
+    (r) => r.url().includes('location-insights') && r.status() === 200,
+  )
+  await map.click()
+  const radiusM = (await (await answered).json()).data.radius_m as number
+  expect(radiusM).toBeGreaterThan(0)
+
+  // The card is on the step, headed the way the client names it.
+  const panel = insightsPanel(page)
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('heading', { name: /business location insights/i })).toBeVisible()
+
+  /*
+   * And it has actually reported something — the skeleton is not the answer.
+   * "Registered businesses in total" is the one row that always resolves: it
+   * needs no line of business and it has no unavailable state, so it is the
+   * honest proof that a real payload rendered.
+   */
+  await expect(panel.getByText(/registered businesses in total/i)).toBeVisible()
+  await expect(panel.getByText(new RegExp(`within ${radiusM} m`, 'i')).first()).toBeVisible()
+
+  /*
+   * The band is a word, not just a tint. DESIGN.md's Never Color Alone rule —
+   * an ordinal scale carried in colour alone is no scale at all for a reader who
+   * cannot separate the tints, and it must never be the error red either,
+   * because a busy block is not a fault.
+   *
+   * Anchored to the count in brackets so this matches the BADGE and not the
+   * legend beneath it, which spells "Low 0–5 · Medium 6–10 · High 11+" as static
+   * text and would let a badge that lost its word go on passing.
+   */
+  await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+\)$/)).toBeVisible()
+
+  /* ── and the modal it used to live in no longer carries it ─────────────── */
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+  await page.getByRole('button', { name: /^next$/i }).click()
+
+  const modal = page.getByRole('dialog', { name: /congratulations/i })
+  await expect(modal).toBeVisible()
+  await expect(modal.getByRole('region', { name: /business location insights/i })).toBeHidden()
+  await expect(modal.getByText(/registered businesses in total/i)).toBeHidden()
+
+  /*
+   * What the modal must keep. This CPDO line is the standing condition under
+   * which the panel's removed "not part of the zoning decision" disclaimer would
+   * have to come back — without it, CONGRATULATIONS is the only verdict on
+   * screen and nothing says who actually issues the clearance.
+   */
+  await expect(modal.getByText(/zoning office \(cpdo\) makes the final determination/i)).toBeVisible()
+})
+
+test('the pin is ringed at the radius the figures were measured over', async ({ page }) => {
+  /*
+   * "Show a circle so the user knows how big 500 meters is." A distance is
+   * abstract until it is drawn over the streets it covers.
+   *
+   * Three properties, and each one is a way this could be built wrong:
+   *   - the ring is scaled in METRES (leaflet Circle), not pixels
+   *     (CircleMarker) — a pixel radius would mean a different distance at
+   *     every zoom level, which is the opposite of a scale reference
+   *   - its size comes from the API's `radius_m`, not a 500 in the client
+   *   - it does not eat clicks, or it would block the correction it invites
+   */
+  await goToZoningStep(page)
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  const answered = page.waitForResponse(
+    (r) => r.url().includes('location-insights') && r.status() === 200,
+  )
+  const box = (await map.boundingBox())!
+  await map.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  const radiusM = (await (await answered).json()).data.radius_m as number
+
+  const ring = page.locator('path.biztrack-radius-ring')
+  await expect(ring).toBeVisible()
+
+  /*
+   * Said in words as well as drawn, so the ring means something with colour off
+   * and to a screen reader, which cannot see an SVG path at all — and stated as
+   * the API's own number, so caption and circle can never disagree.
+   */
+  await expect(page.getByText(new RegExp(`circle around it covers ${radiusM} m`, 'i'))).toBeVisible()
+
+  /*
+   * The ring is scenery, and this is checked BEFORE zooming so the offset below
+   * is still comfortably inside it. It is centred on the pin, so the area an
+   * applicant is most likely to click to CORRECT a slightly-off pin is exactly
+   * the area it covers — if it were interactive (Leaflet's default for a Path)
+   * it would swallow that click and the pin could never be nudged.
+   *
+   * 20 px in from the centre: inside the ring at the opening zoom, and far
+   * enough from the previous click that the browser does not fold the two into
+   * a double-click, which Leaflet would answer by zooming instead of pinning.
+   */
+  await expect(ring).not.toHaveClass(/leaflet-interactive/)
+  const pinnedBefore = await page.getByText(/pinned at/i).innerText()
+  await map.click({ position: { x: box.width / 2 + 20, y: box.height / 2 } })
+  await expect
+    .poll(async () => page.getByText(/pinned at/i).innerText(), { timeout: 10_000 })
+    .not.toBe(pinnedBefore)
+
+  /*
+   * Metres, not pixels: zooming out must shrink the ring on screen, because the
+   * ground it covers has not changed. A CircleMarker would hold its pixel size
+   * here, and this is the assertion that catches the swap.
+   */
+  const widthBefore = (await ring.boundingBox())!.width
+  expect(widthBefore).toBeGreaterThan(0)
+  await page.getByRole('button', { name: /zoom out/i }).click()
+  await expect
+    .poll(async () => (await ring.boundingBox())!.width, { timeout: 10_000 })
+    .toBeLessThan(widthBefore * 0.75)
+})
+
+test('moving the pin does not stampede the lookup, and never shows the old point’s figures', async ({
+  page,
+}) => {
+  /*
+   * The lifecycle the move introduced. In the modal the query was frozen once;
+   * on the step the pin can move as often as the applicant likes, and each move
+   * is a new coordinate.
+   *
+   * Two failure modes, both invisible to tsc:
+   *   - a request per click, at an endpoint that scans the register per call
+   *   - the PREVIOUS point's figures sitting under the new pin during the gap,
+   *     which is worse than a delay because a stale number looks exactly like a
+   *     fresh one
+   */
+  await goToZoningStep(page)
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  const box = (await map.boundingBox())!
+
+  let lookups = 0
+  page.on('request', (r) => {
+    if (r.url().includes('location-insights')) lookups += 1
+  })
+
+  /*
+   * Four pins in quick succession. Debounced, this is one question; undebounced
+   * it is four.
+   *
+   * page.mouse rather than locator.click, because locator.click re-runs
+   * actionability checks each time and the burst has to be faster than the
+   * 400 ms debounce to be testing anything.
+   *
+   * The offsets are spread rather than adjacent for two reasons. Clicks a few
+   * pixels apart get folded into a double-click, which Leaflet answers by
+   * zooming instead of pinning — so the burst would silently stop moving the
+   * pin. And at the opening zoom (~18 m per pixel) every one of these lands
+   * within a kilometre of Malabon City Hall, so all four are inside the city
+   * bounding box and none is refused.
+   */
+  const cx = box.x + box.width / 2
+  const cy = box.y + box.height / 2
+  for (const [dx, dy] of [
+    [0, 0],
+    [40, -20],
+    [-40, -30],
+    [30, 20],
+  ]) {
+    await page.mouse.click(cx + dx, cy + dy)
+  }
+
+  // The figures for the LAST pin arrive and the panel settles.
+  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+    timeout: 15_000,
+  })
+  /*
+   * At most two: the debounce may legitimately let an early click through if the
+   * browser is slow enough that 400 ms elapses mid-burst. Four would mean it is
+   * not debouncing at all, which is the regression this guards.
+   */
+  expect(lookups, 'one lookup per click means the debounce is gone').toBeLessThanOrEqual(2)
+  expect(lookups).toBeGreaterThanOrEqual(1)
+
+  /*
+   * Now move the pin and catch the gap. While the answer is behind the pin the
+   * panel must be in its loading state — the previous point's figures must not
+   * be on screen under a marker they were never measured from.
+   */
+  await map.click({ position: { x: box.width / 2 - 30, y: box.height / 2 - 30 } })
+  await expect(insightsPanel(page).getByRole('status', { name: /loading location insights/i })).toBeVisible()
+  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeHidden()
+
+  // ...and it comes back on its own.
+  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+    timeout: 15_000,
+  })
+})
+
+test('a failed insights lookup never blocks the filing', async ({ page }) => {
+  /*
+   * The panel says these figures are not part of the application, and that
+   * promise has to be true in the gate as well as in the copy. It matters more
+   * here than it did in the modal: a failure now meets an applicant mid-decision
+   * staring at a map, where a broken advisory lookup could easily read as the
+   * step itself refusing to continue.
+   */
+  await page.route('**/location-insights**', (route) => route.abort())
+
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+
+  // It says so plainly rather than showing a broken table or nothing at all.
+  const panel = insightsPanel(page)
+  await expect(panel.getByText(/couldn’t load these figures/i)).toBeVisible()
+  await expect(panel.getByText(/you can continue/i)).toBeVisible()
+
+  // No ring, because no radius was ever reported. A guessed circle would be a
+  // claim about a distance nothing measured.
+  await expect(page.locator('path.biztrack-radius-ring')).toBeHidden()
+
+  // And the step still goes on, all the way through the conformity modal.
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+  await page.getByRole('button', { name: /^next$/i }).click()
+  await page.getByRole('button', { name: /proceed to application/i }).click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+})
 
 test('the type of registration is asked before the number it decides', async ({ page }) => {
   /*

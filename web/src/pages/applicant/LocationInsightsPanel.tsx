@@ -4,9 +4,26 @@ import { Skeleton } from '../../components/ui/primitives'
 import { useAsync } from '../../lib/useAsync'
 
 /*
- * Business Location Insights (docs/r-integration-spec.md §5) — the panel inside
- * the apply wizard's zoning-result modal, for the point the applicant just
- * pinned.
+ * Business Location Insights (docs/r-integration-spec.md §5) — the panel under
+ * the map on the apply wizard's Location & Zoning step, for the point the
+ * applicant has pinned.
+ *
+ * ## Why it is on the map step and not in the zoning-result modal
+ *
+ * It used to render inside the conformity modal, which opened on the way OUT of
+ * this step. That put decision support after the decision. An applicant reads
+ * "how many shops like mine are already on this block" in order to CHOOSE where
+ * to pin; behind a modal they only meet it once the choice is made and the next
+ * thing on screen is a Proceed button. The client asked for it on the pin, and
+ * the client is right: these four figures are an input to picking a location,
+ * so they belong beside the map while the pin can still be moved.
+ *
+ * The move changes the lifecycle, not the content. In the modal the query was
+ * frozen once and thrown away on close; here the pin can move any number of
+ * times, so ApplyWizard debounces the coordinates before they become a query and
+ * treats the interval between a new pin and its answer as loading rather than
+ * showing the previous point's numbers under the new pin. See `insightsQuery`
+ * there — the staleness rule is the part that would be easy to get wrong.
  *
  * Types are declared here rather than in lib/types.ts and the fetch is inline
  * rather than in lib/resources.ts: this shape has exactly one consumer, and
@@ -16,7 +33,9 @@ import { useAsync } from '../../lib/useAsync'
  * comes from the API rather than a constant duplicated here, "similar" says
  * which trade it matched, and the mean distance says it is straight-line — an
  * applicant deciding where to open a shop is entitled to know that "320 m" is
- * as-the-crow-flies and that the comparison set is their own PSIC group.
+ * as-the-crow-flies and that the comparison set is their own PSIC group. That
+ * same `radius_m` is what MapPicker draws the ring from, for the same reason:
+ * one number, stated once by the side that measured it.
  *
  * ## On the wording (checklist item 68: "remove descriptions that sound AI")
  *
@@ -26,11 +45,8 @@ import { useAsync } from '../../lib/useAsync'
  * radius that the row above already gives, and stacked restatement is exactly
  * what reads as machine-written padding.
  *
- * What did NOT go: the note under each figure saying what it counted, and the
- * closing line saying these figures are not part of the zoning decision. Both
- * are load-bearing. Four confident numbers in a modal headed CONGRATULATIONS
- * will be read as part of the conformity finding unless something says they are
- * not.
+ * What did NOT go: the note under each figure saying what it counted. Those name
+ * what was measured, and a figure whose subject is unstated is not information.
  */
 
 interface LocationInsightsData {
@@ -176,12 +192,35 @@ export function LocationInsightsPanel({
   loading: boolean
   error: unknown
 }) {
-  const radius = insights ? `${insights.radius_m} m` : '500 m'
+  /*
+   * The radius every label quotes, straight off the response.
+   *
+   * The fallback used to be the string "500 m". It was unreachable — every use
+   * below sits inside the branch where `insights` is non-null — but an
+   * unreachable 500 is still a second copy of a number the server owns, and the
+   * kind that gets found and "reused" later. Empty string keeps the type a
+   * string without asserting a distance nobody measured.
+   */
+  const radius = insights !== null ? `${insights.radius_m} m` : ''
 
   return (
-    <section className="mt-5 rounded-lg bg-canvas px-4 py-3.5" aria-labelledby="location-insights-heading">
+    <section
+      /*
+       * A peer card to the map above it, matching the other cards on this step
+       * (white, rounded-2xl, shadow-card) rather than the inset grey block it
+       * was as a sub-section of the zoning modal. It is its own thing on the
+       * page now, not a footnote to a dialog.
+       */
+      className="rounded-2xl bg-white px-5 py-4 shadow-card"
+      aria-labelledby="location-insights-heading"
+    >
+      {/*
+        * The client's own name for it. It was "Location insights:" with a
+        * trailing colon, which read as a label introducing the block beneath it
+        * inside the modal; a card heading is a heading and takes no colon.
+        */}
       <h3 id="location-insights-heading" className="text-base font-semibold text-ink">
-        Location insights:
+        Business Location Insights
       </h3>
 
       {loading && (
@@ -198,7 +237,14 @@ export function LocationInsightsPanel({
       {/*
        * A failed lookup must never block the filing. These figures are advisory;
        * the zoning clearance does not depend on them, so the panel says it could
-       * not load and Proceed stays enabled.
+       * not load and the step's Next stays enabled.
+       *
+       * Still true after the move, and more load-bearing than it was. In the
+       * modal a failure met an applicant who had already finished the step. Here
+       * it meets one mid-decision, staring at a map — so the message has to say
+       * the filing is unaffected, or a broken advisory lookup reads as the step
+       * itself refusing to go on. Nothing in ApplyWizard's `stepMissing` gate
+       * consults `insights`, and nothing should ever be added that does.
        */}
       {!loading && error !== null && (
         <p className="mt-1.5 text-sm text-ink-secondary">
@@ -284,18 +330,33 @@ export function LocationInsightsPanel({
 
           {/*
            * "These figures are not part of the zoning decision." stood here and
-           * was removed on the client's instruction (checklist item 112).
+           * was removed on the client's instruction (checklist item 112). It
+           * STAYS removed after the move out of the zoning modal, and the
+           * reasoning is worth writing down because the old note left a trigger
+           * condition that a reader could easily think has just fired.
            *
-           * It was guarding against an applicant reading four confident numbers
-           * as the conformity verdict. That job has not gone away — it has moved
-           * to where it belongs. The panel is headed "Location insights", and
-           * the zoning modal this step opens into names CPDO as the office that
-           * actually decides. A disclaimer repeated beside every figure was
-           * saying a third time what those two already say once each.
+           * The sentence guarded one specific confusion: four confident numbers
+           * sitting inside a dialog headed CONGRATULATIONS, where anything on
+           * screen reads as part of the conformity finding. The old note said it
+           * had to come back "if the CPDO line ever leaves that modal".
            *
-           * If the CPDO line ever leaves that modal, this sentence has to come
-           * back — the screen would then be asserting conformity with nothing
-           * anywhere saying who decides it.
+           * That condition has not fired, in either direction. The CPDO line is
+           * still in the modal, untouched. What left the modal is this panel —
+           * and it left TOWARDS safety, not away from it. There is no verdict on
+           * the map step at all: the step is location capture, its own intro says
+           * CPDO evaluates the zoning clearance during processing, and the
+           * caption under the map says CPDO checks the actual site. The panel is
+           * now further from a conformity claim than the disclaimer ever put it,
+           * and next to two sentences that already name who decides.
+           *
+           * So the trigger condition is restated for where the panel actually
+           * lives now. This sentence has to come back if EITHER:
+           *   - this panel is ever rendered inside the zoning-result modal, or
+           *     any other surface that announces a conformity outcome; or
+           *   - the Location & Zoning step stops naming CPDO as the office that
+           *     determines the clearance.
+           * Either would leave four authoritative-looking figures beside an
+           * apparent verdict with nothing saying they are not it.
            */}
         </>
       )}
