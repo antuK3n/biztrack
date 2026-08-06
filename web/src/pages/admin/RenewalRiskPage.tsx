@@ -1076,6 +1076,20 @@ export function RenewalRiskPage() {
             <Info metric="methodology" />
           </p>
 
+          {/*
+            The spec's §2 name for what these three cards count, asked for by
+            the client on seeing them unheaded.
+
+            Three bare numbers with colour bars read as a KPI row — the same
+            shape the dashboard uses for unrelated totals — so nothing said the
+            three belong to one scale and sum to the scored population. It also
+            keeps them apart from the Permit Lifecycle table below, which counts
+            the SAME permits on a different axis: a permit can be Low risk and
+            Near Expiry at once. Two unlabelled groups of coloured counts on one
+            screen invite exactly that conflation.
+          */}
+          <h2 className="mb-2 text-[15px] font-semibold text-ink">Renewal Risk Level</h2>
+
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <SummaryCard
               value={data.counts.high}
