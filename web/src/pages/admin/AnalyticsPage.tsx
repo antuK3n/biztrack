@@ -1022,13 +1022,35 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
 
   return (
     /*
-     * Three cards, as the spec asks — and the split is the point. The client's
-     * note on this panel was that "officer activity" averages three unrelated
-     * measures under one label: how fast staff answer, how many requests they
-     * close, how many meetings they turn up to. Nothing here is a breakdown of
-     * anything else, so nothing here shares a denominator or a card.
+     * TWO cards, where the client's paper asks for three. This is a deliberate
+     * deviation and it is recorded here so nobody "fixes" it back.
+     *
+     * The paper lists Officer Activity as "average response time, fulfilled
+     * requests, and meeting participation". BizTrack has no meetings feature.
+     * `RequestType` in lib/types.ts is 'document' | 'message' — the officer who
+     * raises a request cannot pick "meeting", there is no scheduler, no
+     * calendar, and no attendance record anywhere in the product. The third
+     * figure was therefore measuring nothing an officer or an applicant had
+     * ever done: every meeting row on the register was written by
+     * AnalyticsHistorySeeder to reproduce the paper's own illustration, and the
+     * card duly reported 18 of 18 attended, 100%. A defence-facing screen
+     * cannot carry a number whose only source is a seeder reproducing the
+     * document it is being checked against.
+     *
+     * If a meetings feature is ever built — a real scheduler with a real
+     * attendance record — this card comes back, and it comes back reading
+     * attendance rather than "an applicant left a reply against it". The server
+     * side is still there to restore it from: see the note in
+     * DashboardAnalytics::officerActivityFacts().
+     *
+     * The split across cards is still the point the client made about this
+     * panel: "officer activity" averages unrelated measures under one label —
+     * how fast staff answer, how many requests they close. Neither is a
+     * breakdown of the other, so neither shares a denominator or a card. Two of
+     * those still hold at two cards, and the grid says two rather than leaving
+     * a third of the row empty where the removed card used to sit.
      */
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2">
       <StatCard
         label="Response time"
         metric="officer_activity.mean_response_hours"
@@ -1054,31 +1076,6 @@ function OfficerPanel({ report }: { report: DashboardReport }) {
           a.requests_total === 0
             ? 'No officer request was raised in this window.'
             : `${num(a.requests_fulfilled)} of ${num(a.requests_total)} raised (${pct(a.requests_fulfilled_rate)}).`
-        }
-      />
-
-      {/*
-        "Meeting participation", not "Meetings attended" — the same name the
-        server's definition uses, and for the reason that definition gives:
-        nothing in the register records who actually turned up, so a recorded
-        reply is standing in for attendance. A card headed "attended" beside a
-        popover explaining it is not attendance was the screen contradicting
-        itself in two places at once.
-      */}
-      <StatCard
-        label="Meeting participation"
-        metric="officer_activity.meetings_attended_rate"
-        unavailable={a.meetings_scheduled === 0}
-        value={a.meetings_scheduled === 0 ? 'None scheduled' : num(a.meetings_attended)}
-        detail={
-          a.meetings_scheduled === 0
-            ? /*
-               * A true zero, and it must not read as 0% participation: the
-               * column exists and nothing has ever been written to it, so no
-               * officer has skipped anything.
-               */
-              'No meeting has been scheduled in this window, so there is nothing to report.'
-            : `${num(a.meetings_attended)} of ${num(a.meetings_scheduled)} scheduled had a reply (${pct(a.meetings_attended_rate)}).`
         }
       />
     </div>

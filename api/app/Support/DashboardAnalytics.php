@@ -952,17 +952,58 @@ final class DashboardAnalytics
     /* ── facts: officer activity ───────────────────────────────────────── */
 
     /**
-     * Officer response latencies, request fulfilment, and meeting participation.
+     * Officer response latencies and request fulfilment.
      *
      * Response time is measured per officer reply: the hours from an applicant's
      * message to the next message in that thread sent by someone else. Only
      * replies are timed — an officer's opening message answers nothing.
      *
-     * Meetings come from `officer_requests.meeting_scheduled_at`. The column
-     * exists and nothing has ever been written to it, so the count is a true
-     * zero and travels as one; the screen reports "none on record" rather than
-     * a 0% participation rate, which would read as officers skipping meetings
-     * that were never scheduled.
+     * ## The meetings figure is computed, and it is no longer reported
+     *
+     * The `meetings` fact below still runs, and the three `meetings_*` keys it
+     * feeds still travel on the payload. Nothing renders them: the client asked
+     * for "meeting participation" to come off the dashboard because no feature
+     * produces the data, and the Officer Activity panel is now two cards. See
+     * OfficerPanel in web/src/pages/admin/AnalyticsPage.tsx.
+     *
+     * The docblock that used to sit here said the column "exists and nothing has
+     * ever been written to it, so the count is a true zero". That was false, and
+     * it mattered, because it is the sentence that let the figure stay on a
+     * defence-facing screen. What is actually true:
+     *
+     *  - `officer_requests.request_type` accepts 'meeting' at the API, but the
+     *    front end's RequestType union is 'document' | 'message'. No officer
+     *    using BizTrack can raise a meeting request. There is no scheduler, no
+     *    calendar integration (`external_calendar_event_id` is never written)
+     *    and no attendance record anywhere in the product.
+     *  - Every meeting row on the register was therefore written by
+     *    AnalyticsHistorySeeder, whose OFFICER_MEETINGS_WINDOW is set to 18
+     *    specifically to reproduce the client's paper ("18 meetings all
+     *    attended"). The dashboard was reading that back as 18 of 18, 100%.
+     *  - "Attended" was never attendance. It counted meetings with any row in
+     *    `officer_request_responses` — and the seeder writes a response against
+     *    every meeting it creates, so the rate was 100% by construction.
+     *
+     * ## Why the keys are still emitted rather than deleted
+     *
+     * R is the statistics engine and `.dash_officer()` in r/R/service.R computes
+     * `meetings_scheduled`, `meetings_attended` and `meetings_attended_rate`
+     * itself. Two things follow, and both of them block a delete here:
+     *
+     *  - AnalyticsParityTest compares this port against R's golden output key by
+     *    key IN BOTH DIRECTIONS — a key present in PHP and absent from R fails
+     *    exactly as the reverse does. Dropping the three keys from PHP alone
+     *    turns the suite red.
+     *  - It would not remove them from what the browser receives anyway.
+     *    AnalyticsResolver serves R's stored snapshot verbatim when there is
+     *    one, and there is: the live `dashboard:months=12` snapshot carries all
+     *    three keys, computed by R, never touched by this file.
+     *
+     * So the removal is an R change first. When r/R/service.R drops the three
+     * fields, delete the `meetings` fact below and the three keys in
+     * computeOfficerActivity, regenerate
+     * tests/fixtures/analytics/dashboard.r-output.json against the new R, and
+     * run `analytics:refresh` so the stored snapshots stop carrying them.
      *
      * @return array<string, mixed>
      */
@@ -1020,12 +1061,16 @@ final class DashboardAnalytics
                 'total' => (clone $requests)->count(),
                 'fulfilled' => (clone $requests)->where('status', OfficerRequestStatus::Fulfilled->value)->count(),
             ],
+            // Kept only to hold schema parity with R, which still computes it.
+            // Nothing on any screen reads the keys this feeds — see the note on
+            // this method for why it is still here and what has to happen in
+            // r/R/service.R before it can go.
             'meetings' => [
                 'scheduled' => (clone $meetings)->count(),
                 // Attendance is not recorded anywhere. A meeting counts as
                 // attended when the applicant left a response against it, which
                 // is the closest thing the schema has to evidence someone turned
-                // up — stated here so nobody reads it as attendance tracking.
+                // up — and against seeded data that is 100% by construction.
                 'attended' => (clone $meetings)
                     ->whereIn('id', DB::table('officer_request_responses')->select('officer_request_id'))
                     ->count(),
@@ -1604,6 +1649,13 @@ final class DashboardAnalytics
             'requests_fulfilled_rate' => $requestTotal > 0
                 ? Rounding::statistic(((int) $requests['fulfilled'] / $requestTotal) * 100, 1)
                 : null,
+            /*
+             * Unreported. No screen, definition or printed report reads these
+             * three; they stay on the payload only because R emits them and
+             * AnalyticsParityTest compares the two key sets in both directions.
+             * They go the moment r/R/service.R stops computing them — the note
+             * on officerActivityFacts() lists what else has to change with them.
+             */
             'meetings_scheduled' => $meetingsScheduled,
             'meetings_attended' => (int) $meetings['attended'],
             'meetings_attended_rate' => $meetingsScheduled > 0

@@ -1026,6 +1026,20 @@ export interface InspectionRow {
   pass_rate: number | null
 }
 
+/**
+ * The two figures the Officer Activity panel reports.
+ *
+ * `meetings_scheduled`, `meetings_attended` and `meetings_attended_rate` are
+ * deliberately NOT declared, and the payload still carries all three. BizTrack
+ * has no meetings feature — `RequestType` below is 'document' | 'message', so
+ * no officer can raise one — which made that figure a statistic about nothing.
+ * The card was removed (see OfficerPanel in pages/admin/AnalyticsPage.tsx) and
+ * the fields are left off this type so the compiler refuses any screen that
+ * tries to read them back onto a page. They are still emitted server-side
+ * because R's /dashboard endpoint computes them and the PHP port has to match
+ * it key for key; dropping them there is an R change, tracked in
+ * DashboardAnalytics::officerActivityFacts().
+ */
 export interface OfficerActivity {
   responses: number
   mean_response_hours: number | null
@@ -1034,9 +1048,6 @@ export interface OfficerActivity {
   requests_total: number
   requests_fulfilled: number
   requests_fulfilled_rate: number | null
-  meetings_scheduled: number
-  meetings_attended: number
-  meetings_attended_rate: number | null
 }
 
 export interface MapPoint {
