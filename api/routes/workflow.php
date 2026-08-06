@@ -177,6 +177,15 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)
     Route::get('permits', [PermitController::class, 'index']);
+    /*
+     * The clearances the applicant submitted a copy of rather than applied for.
+     * Self-scoped in the controller, so no permission gate here.
+     *
+     * ABOVE `permits/{permit}`, and it has to stay there: route matching is
+     * first-come, so registered after it Laravel would bind "held" as a permit
+     * key and answer 404 on a request that is not asking for a permit at all.
+     */
+    Route::get('permits/held', [PermitController::class, 'held']);
     Route::get('permits/{permit}', [PermitController::class, 'show']);
     // Permit certificate PDF (owner-of or permit.view_all, enforced in controller)
     Route::get('permits/{permit}/pdf', [PermitController::class, 'pdf']);

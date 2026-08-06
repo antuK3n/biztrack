@@ -18,6 +18,8 @@ import type {
   Application,
   ApplicationListItem,
   ApplicationStatus,
+  Inspection,
+  InspectionResult,
   PermitType,
 } from '../../lib/types'
 
@@ -124,15 +126,45 @@ interface Chip {
 }
 
 /**
- * Per-permit chip (prototype p49). Derived from the assignment of the permit
- * type's issuing department, in this order:
+ * How the office that issues one permit type has left this filing.
+ *
+ * `undefined` on every count means "the detail response has not arrived, or did
+ * not carry an answer" — never "no". Callers must fall back, not conclude.
+ */
+interface OfficeProgress {
+  /** Status of the assignment raised against that permit type's department. */
+  assignment: string | undefined
+  /**
+   * Result of that department's CURRENT visit, once it has been conducted.
+   *
+   * "Current" is the LATEST visit for the office, matching what the API means
+   * by it (Inspection::scopeCurrentPerDepartment, and the same predicate
+   * WorkflowService::recordInspection uses to decide the filing has cleared).
+   * A failed visit is kept on the record rather than overwritten, so an office
+   * awaiting a re-inspection carries two rows and only the newer one is its
+   * standing.
+   *
+   * Undefined whenever that current visit has not been conducted — which
+   * includes an office that failed once and has a fresh visit booked. Its
+   * standing is "still to visit", not "failed": the failure is history, and
+   * history is not this office's answer.
+   */
+  inspection: InspectionResult | undefined
+}
+
+/**
+ * Per-permit chip (prototype p49). Derived from the issuing department's
+ * assignment and, once the filing reaches inspection, from that department's
+ * own visit — in this order:
  *  - app-level rejected → all red "Rejected"
  *  - assignment returned → red "Returned"
- *  - app for_inspection → yellow "For Inspection", on every row
+ *  - app for_inspection, that office's visit failed → red "Inspection Failed"
+ *  - app for_inspection, that office's visit passed → tint "Inspection Passed"
+ *  - app for_inspection, anything else → yellow "For Inspection"
  *  - assignment completed (or app approved/issued) → green "Approved"
  *  - otherwise → orange "For Approval"
  * Falls back to the coarse app-status chip when the full application (with
- * assignments + the permit type's department) isn't available yet.
+ * assignments + inspections + the permit type's department) isn't available yet.
  *
  * It no longer takes the PermitType. It used to, only to read
  * `requires_inspection` — and consulting that was the bug: see the
@@ -140,43 +172,71 @@ interface Chip {
  * parameter went with the test that needed it rather than being left as an
  * unused hint that this function still cares.
  */
-function permitChip(appStatus: ApplicationStatus, assignmentStatus: string | undefined): Chip {
+function permitChip(appStatus: ApplicationStatus, office: OfficeProgress): Chip {
   if (appStatus === 'rejected') return { tone: 'red', label: 'Rejected' }
-  if (assignmentStatus === 'returned') return { tone: 'red', label: 'Returned' }
+  if (office.assignment === 'returned') return { tone: 'red', label: 'Returned' }
 
   /*
-   * While the filing is for_inspection, EVERY row reads "For Inspection" —
-   * including the permits that need no inspection of their own.
+   * While the filing is for_inspection, a row reads "For Inspection" UNLESS
+   * that permit type's own office has already conducted its visit.
    *
-   * Two bugs met here, and the second is the subtle one.
+   * ── The history this branch is carrying, because it has been wrong twice ──
    *
    * First: the completed-assignment test used to run before this one, and a
    * completed assignment is EXACTLY what puts a filing into for_inspection.
    * afterReviewProgress() fires the moment every assignment reaches Completed
    * and only then schedules the visits, so the instant the paperwork cleared
-   * the whole list went green. Order fixed — this now runs first.
+   * the whole list went green. Order fixed — this runs first.
    *
-   * Second, and the reason `requires_inspection` is no longer consulted: only
-   * SANITARY and FSIC carry that flag. Gating on it left Mayor's Permit,
-   * Occupancy, CEC, Market and Zoning still falling through to "Approved"
-   * while the building had not been visited. The client saw the list flip from
-   * six yellow rows to seven green ones a few seconds after it loaded and
-   * asked what the mistake was; that was it.
+   * Second, and the reason `requires_inspection` is not consulted: it is false
+   * on the Mayor's Permit and true on all six clearances, so gating on it let
+   * BUSINESS fall through to "Approved" while the building had not been
+   * visited. The client saw the list flip to green a few seconds after it
+   * loaded and asked what the mistake was; that was it.
    *
-   * "Approved" on this screen has to mean the permit is granted, and NO permit
-   * is granted until the filing clears inspection — approveAndIssue() is what
-   * writes them, and it does not run until every visit has passed. A zoning
-   * clearance whose office signed off is genuinely finished with its office,
-   * and still not issued: a failed fire inspection takes the whole filing down
-   * with it. Saying "Approved" there tells an applicant they hold a permit
-   * that does not exist, and invites them to stop preparing for the visit.
+   * ── What changed, and the line it does not cross ──
    *
-   * So the stage the FILING is at outranks the state of any one office's
-   * review. The per-office detail is still on the application's own page.
+   * The client then asked for the opposite half: "once a sub-permit is already
+   * approved/done for inspection for a business, but the other sub-permits are
+   * not yet approved/done, still display those that are approved/done already."
+   * Fair — an applicant whose sanitary visit passed on Monday learned nothing
+   * from a screen that read the same on Friday while CENRO dragged.
+   *
+   * So a row now reports its OWN office's visit. What it must never do is
+   * report a permit, and that distinction is the whole design of the label:
+   *
+   *   "Inspection Passed" is a fact about a VISIT — this office came, and the
+   *   premises passed. It claims nothing about issuance and cannot be read as
+   *   claiming it, because an applicant knows a visit and a certificate are
+   *   two different events.
+   *
+   *   "Approved" is a fact about a PERMIT, and no permit exists until
+   *   approveAndIssue() writes it, which recordInspection() does not call until
+   *   EVERY office's current visit has passed. A single failed fire inspection
+   *   takes the whole filing down with it. Putting "Approved" on a row whose
+   *   office happened to finish first tells an applicant they hold a permit
+   *   that does not exist and invites them to stop preparing for the other
+   *   visits — that was the original bug and it stays fixed.
+   *
+   * The tone is `tint-green`, not the solid `green` that "Approved" wears three
+   * lines below. Two states that mean different things must not be one colour
+   * on one list. Colour is not carrying it alone either: the labels differ, and
+   * the note under the accordion spells the difference out in a sentence.
+   *
+   * A failed visit is shown too, and deliberately. Surfacing only the good
+   * outcomes would be a screen that is selectively honest, and a failed
+   * inspection is the single most actionable thing this list can tell anyone.
+   * `conditional` progresses like a pass (InspectionResult::progresses), so it
+   * is grouped with it rather than given a fourth label nobody asked for.
    */
-  if (appStatus === 'for_inspection') return { tone: 'yellow', label: 'For Inspection' }
+  if (appStatus === 'for_inspection') {
+    if (office.inspection === 'failed') return { tone: 'red', label: 'Inspection Failed' }
+    if (office.inspection === 'passed' || office.inspection === 'conditional')
+      return { tone: 'tint-green', label: 'Inspection Passed' }
+    return { tone: 'yellow', label: 'For Inspection' }
+  }
 
-  if (assignmentStatus === 'completed' || appStatus === 'approved' || appStatus === 'issued')
+  if (office.assignment === 'completed' || appStatus === 'approved' || appStatus === 'issued')
     return { tone: 'green', label: 'Approved' }
   return { tone: 'orange', label: 'For Approval' }
 }
@@ -292,13 +352,74 @@ function ApplicationRow({
     })
   }
 
-  /** Assignment status for a permit type's issuing department, if loaded. */
-  function assignmentStatusFor(code: string): string | undefined {
+  /**
+   * How the office behind one permit type has left this filing, if loaded.
+   *
+   * Keyed on the DEPARTMENT, not the permit type, because that is how the API
+   * keys both halves: WorkflowService::routeToDepartments raises one assignment
+   * per office owning a requested permit type, and scheduleInspections books
+   * one visit per inspecting office. Every seeded permit type has its own
+   * department, so the mapping is 1:1 today; if an LGU ever routed two
+   * clearances to one office, both rows would report that office's single
+   * verdict — which is the truth about how the filing is actually being worked.
+   *
+   * The office's visit is its HIGHEST-id row, and the result is read off that
+   * row only — the two steps are in that order and swapping them is a real bug
+   * this very screen was caught in.
+   *
+   * A failed visit is kept on the record rather than overwritten, so an office
+   * that failed and has a re-inspection booked carries two rows here: the old
+   * failure, and a newer scheduled visit with `result: null`. Filtering to rows
+   * that have a result BEFORE taking the newest throws the scheduled row away
+   * and hands back the failure — a verdict the office has already moved past,
+   * reported as its standing while somebody is booked to come back. That is the
+   * same superseded-verdict mistake InspectionResource's `can_reinspect` exists
+   * to stop the officer's screen making.
+   *
+   * So: newest row wins outright, and a newest row that has not been conducted
+   * yields `undefined` — "this office is still to visit", which is the truth.
+   * Only a conducted visit with a recorded result reports one.
+   */
+  function officeProgressFor(code: string): OfficeProgress {
     const pt = permitTypesByCode.get(code)
-    if (!pt || !detail) return undefined
+    if (!pt || !detail) return { assignment: undefined, inspection: undefined }
     const deptCode = pt.department.code
-    return detail.assignments.find((a) => a.department.code === deptCode)?.status
+
+    const current = detail.inspections
+      .filter((i) => i.department?.code === deptCode)
+      .reduce<Inspection | undefined>((newest, i) => (!newest || i.id > newest.id ? i : newest), undefined)
+
+    return {
+      assignment: detail.assignments.find((a) => a.department.code === deptCode)?.status,
+      inspection: current?.conducted_at ? (current.result ?? undefined) : undefined,
+    }
   }
+
+  /*
+   * The rows this accordion draws. A filing with no permit types still gets one
+   * row — the Mayor's Permit is what every filing is ultimately for, and an
+   * accordion that opens onto nothing reads as a broken control.
+   */
+  const rows =
+    app.permit_types.length > 0 ? app.permit_types : [{ code: '—', name: 'Business Permit' }]
+
+  /*
+   * Has at least one office already been and gone?
+   *
+   * Asked of the DATA, not of the chip labels: a boolean derived from
+   * `chip.label === 'Inspection Passed'` would be a second copy of permitChip's
+   * decision, kept in step by nothing, and the first person to reword a label
+   * would silently switch this off.
+   *
+   * It gates the sentence below, which exists because "Inspection Passed" is
+   * the closest this screen has ever come to saying an applicant holds
+   * something. It does not, and the row does not say it does — but the note
+   * removes the last inch of room to read it that way, and it is only shown on
+   * the filings where somebody could.
+   */
+  const someOfficeFinished =
+    app.status === 'for_inspection' &&
+    rows.some((pt) => officeProgressFor(pt.code).inspection !== undefined)
 
   return (
     <li className="space-y-3">
@@ -324,13 +445,14 @@ function ApplicationRow({
       {rejected && <RejectionNote app={app} detail={detail} />}
 
       {open && (
-        <ul className="space-y-2.5">
-          {(app.permit_types.length > 0 ? app.permit_types : [{ code: '—', name: 'Business Permit' }]).map(
-            (pt) => {
+        <>
+          <ul className="space-y-2.5">
+            {rows.map((pt) => {
               // Once detail loads, derive per-permit chip from the issuing
-              // department's assignment; otherwise fall back to app status.
+              // department's assignment and its own visit; otherwise fall back
+              // to the coarse app status.
               const chip = detail
-                ? permitChip(app.status, assignmentStatusFor(pt.code))
+                ? permitChip(app.status, officeProgressFor(pt.code))
                 : fallbackChip(app.status)
               return (
                 <li
@@ -353,9 +475,16 @@ function ApplicationRow({
                   </Link>
                 </li>
               )
-            },
+            })}
+          </ul>
+          {someOfficeFinished && (
+            <p className="rounded-lg border border-line bg-white px-4 py-2.5 text-xs text-ink-secondary">
+              An office passing its inspection does not issue the permit. Every office on this
+              application has to pass before any permit is issued, so keep preparing for the visits
+              still marked <span className="font-semibold">For Inspection</span>.
+            </p>
           )}
-        </ul>
+        </>
       )}
     </li>
   )

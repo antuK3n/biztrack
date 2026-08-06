@@ -53,6 +53,21 @@ test.use({ storageState: 'e2e/.auth/zoning.json' })
  * fact that pressing it moves a filing from `for_inspection` to `approved` with
  * permits issued was verified by hand against live data. If this is ever made
  * to press the button, give it a filing it creates itself.
+ *
+ * The same rule covers "Schedule re-inspection" and "Reschedule this
+ * inspection", both of which write: their presence and their per-visit
+ * accessible names are asserted, their effects are not.
+ *
+ * ── This file also covers the screen that was DELETED ───────────────────────
+ *
+ * /staff/inspections was a second, older screen doing this same job, and the
+ * client had it removed: "The Track page -> For Inspection is redundant with
+ * the Inspections page. Remove the Inspections page. All inspections will
+ * happen in The Track page -> For Inspection". Nothing here tested that page
+ * directly, so no test was deleted with it — but three things about its removal
+ * are worth a test each, and they are at the bottom of this file: the rail
+ * entry is gone, the old list address lands on Track, and an old DEEP link
+ * lands on the filing it named rather than on a list or a 404.
  */
 
 /** The one line that only ever appears on the full BPLO admin-review sheet. */
@@ -270,6 +285,121 @@ test('rejecting a visit asks for remarks and will not proceed without them', asy
   // And it is dismissable without touching the record.
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByText('REMARKS FOR REJECTION')).toHaveCount(0)
+})
+
+test('an outstanding visit can still be moved to another date', async ({ page }) => {
+  /*
+   * "Reschedule this inspection" is the one control that came off the deleted
+   * /staff/inspections/{id} with nowhere else to go. Losing it would leave an
+   * office able to approve or reject a visit but not to move the appointment,
+   * which is the ordinary case — the inspector is ill, the owner is away.
+   *
+   * Named per visit for the same reason Approve is: up to six of these can be
+   * on one filing.
+   */
+  const assignmentId = await openForInspectionFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')
+
+  const approve = page.getByRole('button', { name: /^Approve the .+ inspection$/ })
+  const approveCount = await approve.count()
+  test.skip(approveCount === 0, 'every visit on this filing has already been conducted')
+
+  const reschedule = page.getByRole('button', { name: /^Reschedule the .+ inspection$/ })
+  expect(
+    await reschedule.count(),
+    'a visit this office can decide is a visit it can move',
+  ).toBe(approveCount)
+
+  /*
+   * Opening it reveals the date field and the save, both named after the visit.
+   *
+   * `getByLabel` rather than a role query: `input[type=datetime-local]` has no
+   * mapped ARIA role, so getByRole('textbox') finds nothing however well the
+   * control is labelled. The label IS the thing under test here.
+   */
+  await reschedule.first().click()
+  await expect(page.getByLabel(/^New date and time for the .+ inspection$/)).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Save the new .+ inspection date$/ })).toBeVisible()
+
+  // And it closes without writing anything.
+  await page.getByRole('button', { name: /^Leave the .+ inspection where it is$/ }).click()
+  await expect(page.getByRole('button', { name: /^Save the new .+ inspection date$/ })).toHaveCount(0)
+})
+
+/* ── The screen that was removed ──────────────────────────────────────────── */
+
+test('the rail no longer offers an Inspections screen', async ({ page }) => {
+  await page.goto('/staff/queue')
+  /*
+   * Scoped to the <aside> for the reason analytics.spec.ts gives: the mobile tab
+   * bar carries the same labels and would trip strict mode.
+   *
+   * Track must still be there. Asserting only the absence would pass just as
+   * happily on a rail that failed to render at all.
+   */
+  await expect(page.locator('aside').getByRole('link', { name: 'Inspections' })).toHaveCount(0)
+  await expect(page.locator('aside').getByRole('link', { name: 'Track', exact: true })).toBeVisible()
+})
+
+test('the old Inspections list address lands on Track', async ({ page }) => {
+  await page.goto('/staff/inspections')
+  await expect(page).toHaveURL(/\/staff\/queue$/)
+  // Track itself, not a redirect loop or the login door.
+  await expect(page.getByRole('heading', { name: 'Application Verification' })).toBeVisible()
+})
+
+test('an old inspection deep link opens the filing it named', async ({ page }) => {
+  /*
+   * The regression this exists for is a redirect that DROPS what it was given.
+   * /analytics/* did exactly that once and answered every deep link with the
+   * Overview — plausible, silent, wrong. An inspection link names one visit on
+   * one filing, so it has to arrive at THAT filing.
+   *
+   * The assignment id is checked exactly, not just "some queue page", because
+   * the tempting shortcut here — reuse the inspection id as the assignment id —
+   * would land on an unrelated business's filing whenever the two numbers
+   * happen to collide, and a loose assertion would not notice.
+   */
+  await page.goto('/staff/queue')
+
+  const target = await page.evaluate(async () => {
+    const token = localStorage.getItem('biztrack.token.staff')
+    const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+
+    const list = await fetch('/api/v1/assignments?application_status=for_inspection&per_page=20', {
+      headers,
+    })
+    const rows = (await list.json()).data as {
+      id: number
+      department: { code: string } | null
+      application: { id: number }
+    }[]
+
+    for (const row of rows) {
+      if (!row.department) continue
+      const detail = await fetch(`/api/v1/applications/${row.application.id}`, { headers })
+      const app = (await detail.json()).data as {
+        inspections: { id: number; department: { code: string } | null }[]
+      }
+      // This office's OWN visit: GET /inspections/{id} answers 403 for anybody
+      // else's (InspectionController::authorizeDepartment), which is a
+      // different branch of the shim than the one under test.
+      const mine = app.inspections.find((v) => v.department?.code === row.department?.code)
+      if (mine) return { assignmentId: row.id, inspectionId: mine.id }
+    }
+    return null
+  })
+
+  test.skip(target === null, 'no inspection routed to this office on the current register')
+
+  await page.goto(`/staff/inspections/${target!.inspectionId}`)
+  // Longer than the default: the shim resolves over two API calls, and the
+  // second reads a hundred assignments.
+  await expect(page).toHaveURL(new RegExp(`/staff/queue/${target!.assignmentId}$`), {
+    timeout: 20_000,
+  })
+  // And it is the decision box that greets them, not an empty shell.
+  await expect(page.locator('section[aria-label="Application status"]')).toBeVisible()
 })
 
 test('a filing that is not for inspection still opens on the full review sheet', async ({

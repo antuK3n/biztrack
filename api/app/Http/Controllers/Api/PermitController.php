@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
+use App\Models\ApplicationDocument;
 use App\Models\Permit;
 use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
@@ -56,6 +57,90 @@ class PermitController extends Controller
         return response()->json([
             'data' => PermitResource::collection($permits->items()),
             'meta' => $this->pageMeta($permits),
+        ]);
+    }
+
+    /**
+     * The clearances this applicant SUBMITTED A COPY OF, across every filing.
+     *
+     * This endpoint exists because of one client sentence: "when you submit a
+     * sub-permit instead of apply, since it is assuming that you have one
+     * already, just also display it in the Profile page, along with the other
+     * permits." Until now the copy was reachable from exactly one screen — the
+     * clearance stage of the filing it was uploaded to — and that stage only
+     * unlocks while the filing is a draft, so once the applicant submitted the
+     * application their own certificate effectively vanished from the site.
+     *
+     * READ THE SHAPE BEFORE RENDERING IT. None of this is a permit and the
+     * payload is deliberately built so that no caller can mistake it for one:
+     *
+     *  - `id` is an ApplicationDocument id, not a Permit id. It is NOT a key
+     *    into /permits/{id}, and there is nothing at /permits/{id}/pdf for it.
+     *  - there is no permit_number, no valid_from/valid_until, no
+     *    days_until_expiry and no verify_url, because the City did not issue
+     *    this document and has not recorded a validity for it. Inventing any of
+     *    those would put a fabricated legal instrument on the applicant's
+     *    Profile. The certificate face is already careful about this (see
+     *    certificateData below on why signatories are data, never literals);
+     *    this is the same rule one step earlier.
+     *  - `filename` and `submitted_at` describe the applicant's own upload, and
+     *    that is the whole of what the register knows about it.
+     *
+     * A held copy is an ApplicationDocument carrying `permit_type_id` — see
+     * App\Support\HeldPermits for why the ordinary document table is the
+     * mechanism. `whereNotNull('permit_type_id')` is therefore exactly the set
+     * of held clearances and nothing else; every ordinary documentary
+     * requirement leaves that column null.
+     *
+     * Scoped on `applicant_user_id` alone, and NOT on business ownership the
+     * way the issued-permit list above is. That is not an oversight: the file
+     * behind each row is served by DocumentController::download, whose gate is
+     * ApplicationVisibility::canView, and the only applicant-side branch that
+     * grants is `applicant_user_id === user->id`. Listing rows on a wider
+     * predicate than the download accepts would put links on Profile that
+     * answer 403 — a row the register shows you and then refuses to hand over
+     * is worse than a row it never claimed you had.
+     */
+    public function held(Request $request): JsonResponse
+    {
+        $documents = ApplicationDocument::query()
+            ->whereNotNull('permit_type_id')
+            ->whereHas('application', fn ($a) => $a->where('applicant_user_id', $request->user()->id))
+            ->with([
+                'permitType:id,code,name',
+                'application:id,tracking_id,status,business_id',
+                // Soft-deleted businesses stay off the eager load by default, so
+                // this comes back null on a filing whose business was removed —
+                // the same shape the issued-permit list carries, answered the
+                // same way by the browser ("Business removed from register").
+                'application.business:id,name',
+            ])
+            // Newest upload first, matching the issued list's newest-first order
+            // so the two blocks on Profile do not read in opposite directions.
+            ->orderByDesc('id')
+            ->get();
+
+        return response()->json([
+            'data' => $documents->map(fn (ApplicationDocument $doc) => [
+                'id' => $doc->id,
+                'permit_type' => $doc->permitType ? [
+                    'code' => $doc->permitType->code,
+                    'name' => $doc->permitType->name,
+                ] : null,
+                'filename' => $doc->original_filename,
+                'size_bytes' => (int) $doc->size_bytes,
+                'submitted_at' => optional($doc->created_at)->toISOString(),
+                'download_url' => url("/api/v1/documents/{$doc->id}/download"),
+                'business' => $doc->application?->business ? [
+                    'id' => $doc->application->business->id,
+                    'name' => $doc->application->business->name,
+                ] : null,
+                'application' => $doc->application ? [
+                    'id' => $doc->application->id,
+                    'tracking_id' => $doc->application->tracking_id,
+                    'status' => $doc->application->status?->value,
+                ] : null,
+            ])->values(),
         ]);
     }
 

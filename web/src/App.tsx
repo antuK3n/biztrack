@@ -1,6 +1,15 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom'
+import {
+  BrowserRouter,
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom'
 import { AppShell } from './components/AppShell'
 import { Spinner } from './components/icons'
 import { DashboardPage } from './pages/DashboardPage'
@@ -23,7 +32,6 @@ import { PermitsPage } from './pages/applicant/PermitsPage'
 import { PermitDetailPage } from './pages/applicant/PermitDetailPage'
 import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
-import { InspectionsPage, InspectionDetailPage } from './pages/officer/InspectionsPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
@@ -35,6 +43,7 @@ import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { activePortal, homePathFor, loginPathFor, portalPath } from './lib/api'
+import { assignments, inspections } from './lib/resources'
 import { useAuth } from './stores/auth'
 
 function FullPageSpinner() {
@@ -112,6 +121,112 @@ function MovedToStaff({ path }: { path: string }) {
 function MovedAnalytics() {
   const rest = useParams()['*'] ?? ''
   return <Navigate to={portalPath('staff', rest ? `/analytics/${rest}` : '/analytics')} replace />
+}
+
+/**
+ * /staff/inspections/{id} — the screen that used to decide a site visit.
+ *
+ * The Inspections page is gone (see the routes below, and the note at the top
+ * of components/InspectionDecision.tsx). Notifications already sent and
+ * bookmarks already made point at these addresses, and an inspection deep link
+ * names ONE visit on ONE filing, so it has to land on that filing rather than
+ * on the queue in general.
+ *
+ * The analytics shim two comments up is the cautionary tale: it exists because
+ * a redirect that dropped its subpath answered every deep link with the wrong
+ * screen, silently and plausibly. Dropping the id here would be the same
+ * mistake, and so — importantly — would carrying it across blindly:
+ * `/staff/queue/{n}` takes an ASSIGNMENT id, and an inspection id that happens
+ * to match an unrelated assignment would open a different business's filing
+ * with no sign anything had gone wrong. That is worse than a 404.
+ *
+ * So the id is RESOLVED rather than reused:
+ *
+ *   GET /inspections/{id} → which filing the visit belongs to. Answers 403 for
+ *                           another department's visit, which is the right
+ *                           answer to give this reader anyway.
+ *   GET /assignments      → this office's own queue, read a page at a time
+ *                           until the assignment on that filing turns up.
+ *
+ * The queue is newest-first and a link worth following is nearly always to a
+ * live filing, so this stops on the first page in practice. It is capped at
+ * `MAX_PAGES` regardless: an office holds well over a thousand assignments, and
+ * a visit on a filing that was never routed here — reachable when the reader is
+ * the named inspector rather than the department — would otherwise page through
+ * every one of them to conclude nothing. A filing older than the cap gets the
+ * explanation below rather than the wrong screen, which is the trade this whole
+ * component exists to make.
+ *
+ * (`q` on /assignments would make this one request and is what the queue screen
+ * itself searches with — AssignmentFilters does not declare it, and that file
+ * belongs to another change. Worth folding in when it does.)
+ */
+function MovedInspection() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [unresolved, setUnresolved] = useState(false)
+
+  useEffect(() => {
+    const inspectionId = Number(id)
+    if (!Number.isInteger(inspectionId) || inspectionId <= 0) {
+      setUnresolved(true)
+      return
+    }
+
+    const MAX_PAGES = 5
+    const PER_PAGE = 100
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const visit = await inspections.get(inspectionId)
+        // Null when the response did not eager-load the filing. GET
+        // /inspections/{id} always does, but the type is honest and so is this.
+        const filing = visit.application
+        if (!filing) throw new Error('inspection carries no filing')
+
+        for (let page = 1; page <= MAX_PAGES; page++) {
+          const queue = await assignments.page({ page, per_page: PER_PAGE })
+          if (cancelled) return
+
+          const match = queue.data.find((a) => a.application.id === filing.id)
+          if (match) {
+            navigate(`/staff/queue/${match.id}`, { replace: true })
+            return
+          }
+          if (page >= queue.meta.last_page) break
+        }
+        setUnresolved(true)
+      } catch {
+        if (!cancelled) setUnresolved(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, navigate])
+
+  return (
+    <div className="rounded-lg bg-white px-5 py-6 shadow-card">
+      <h1 className="text-base font-bold text-ink">
+        {unresolved ? 'This inspection is not on your queue' : 'Opening this inspection…'}
+      </h1>
+      <p className="mt-1.5 max-w-prose text-sm text-ink-secondary">
+        {unresolved
+          ? 'Inspections are decided on the filing itself now, under Track → For Inspection. This link points at a visit belonging to another office, or to a filing that has since been decided or removed.'
+          : 'Site visits are decided on the filing now. Taking you to it.'}
+      </p>
+      {unresolved && (
+        <Link
+          to="/staff/queue"
+          className="mt-4 inline-flex rounded-md bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
+        >
+          Go to Track
+        </Link>
+      )}
+    </div>
+  )
 }
 
 export default function App() {
@@ -258,22 +373,30 @@ export default function App() {
               </RequirePermission>
             }
           />
-          <Route
-            path="/staff/inspections"
-            element={
-              <RequirePermission permission="inspection.manage">
-                <InspectionsPage />
-              </RequirePermission>
-            }
-          />
-          <Route
-            path="/staff/inspections/:id"
-            element={
-              <RequirePermission permission="inspection.manage">
-                <InspectionDetailPage />
-              </RequirePermission>
-            }
-          />
+          {/*
+            ── Inspections, which is not a screen any more ──────────────────
+            The Inspections page rendered a second, older copy of the decision
+            an officer already makes on the filing. "The Track page -> For
+            Inspection is redundant with the Inspections page. Remove the
+            Inspections page. All inspections will happen in The Track page ->
+            For Inspection." Both addresses stay, as redirects, because links
+            to them are already in the wild.
+
+            The LIST can only land on Track itself. Which tab Track opens on is
+            component state inside QueuePage, not something the URL can say, so
+            there is no honest way from here to put the officer on the For
+            Inspection tab specifically — they arrive at Track and pick it. If
+            those tabs ever become addressable, this is the line to change.
+          */}
+          <Route path="/staff/inspections" element={<Navigate to="/staff/queue" replace />} />
+          {/*
+            The deep link resolves to the filing it names — see MovedInspection.
+            Ungated on purpose: it holds no inspection data of its own, and the
+            two requests behind it are authorised by the API. `inspection.manage`
+            here would only turn a resolvable link into a silent bounce home for
+            BPLO, who can read the filing perfectly well.
+          */}
+          <Route path="/staff/inspections/:id" element={<MovedInspection />} />
           {/* Admin */}
           <Route
             path="/staff/analytics"
@@ -361,6 +484,13 @@ export default function App() {
         */}
         <Route path="/queue" element={<MovedToStaff path="/queue" />} />
         <Route path="/queue/:id" element={<MovedToStaff path="/queue" />} />
+        {/*
+          Two hops for the oldest inspection links, deliberately. These forward
+          to /staff/inspections/{id}, which is itself now a redirect onto the
+          filing (MovedInspection). Collapsing the chain here would mean two
+          copies of the resolution logic, and this one is the shim for a path
+          that predates the portal split — it has one job, which is the prefix.
+        */}
         <Route path="/inspections" element={<MovedToStaff path="/inspections" />} />
         <Route path="/inspections/:id" element={<MovedToStaff path="/inspections" />} />
         <Route path="/analytics/*" element={<MovedAnalytics />} />

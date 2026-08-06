@@ -709,7 +709,19 @@ export function ReviewPage() {
            * whole branch stops applying and the officer should be looking at
            * the approved filing, not at a stale card.
            */}
-          <InspectionDecisionPanel inspections={app.inspections ?? []} onChanged={reload} />
+          {/*
+           * `filingStatus` is not a formality. The panel needs the FILING's
+           * status to decide whether a failed visit may be re-inspected — one
+           * of the three conditions the API checks — and the copy of that
+           * status nested inside each inspection on this payload does not carry
+           * it (AssignmentController::show selects the stub without the
+           * column). This screen has the real one, so it hands it over.
+           */}
+          <InspectionDecisionPanel
+            inspections={app.inspections ?? []}
+            filingStatus={app.status}
+            onChanged={reload}
+          />
 
           {/* The rail the client asked to keep: "but the progress thingy is cool". */}
           <div className="mt-6">

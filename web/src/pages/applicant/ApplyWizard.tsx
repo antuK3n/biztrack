@@ -2050,13 +2050,97 @@ export function ApplyWizard() {
    */
 
   /*
-   * Frozen when the modal opens rather than tracked live off the pin: the point
-   * being reported has to be the point the applicant was told about, and moving
-   * the pin behind an open modal would silently change the figures underneath
-   * the numbers they are reading. Nulled on close so reopening refetches.
+   * ── Business Location Insights, for the pin as it stands ──────────────────
+   *
+   * This used to be frozen when the zoning modal opened, on the reasoning that
+   * the point reported must be the point the applicant was told about. Correct
+   * for a modal, and beside the point now: the panel has moved onto the map step
+   * itself (see LocationInsightsPanel's docblock), so the point being reported
+   * IS the pin, live, and the applicant is looking at both at once.
+   *
+   * `livePin` is what the pin currently says. It is not what gets fetched.
+   *
+   * The PSIC id is pulled out into its own binding so it can be the dependency.
+   * Depending on `form.lines` would rebuild this object on every keystroke in a
+   * line's capital field — none of which changes the question being asked — and
+   * that identity churn would restart the debounce below each time.
+   */
+  const insightsPsicCodeId = form.lines[0]?.psic_code_id ?? null
+  const livePin = useMemo<LocationInsightsQuery | null>(
+    () =>
+      form.latitude !== null && form.longitude !== null
+        ? {
+            latitude: form.latitude,
+            longitude: form.longitude,
+            psicCodeId: insightsPsicCodeId,
+            businessId,
+          }
+        : null,
+    [form.latitude, form.longitude, insightsPsicCodeId, businessId],
+  )
+
+  /*
+   * The point actually looked up — `livePin` after it has held still.
+   *
+   * Every click on the map is a new coordinate, and an applicant hunting for
+   * their own roof clicks repeatedly: a lookup fired on each one would put a
+   * burst of requests at an endpoint that scans the register per call
+   * (LocationInsights::nearby is a bounding box plus a haversine over every
+   * business inside it), and the answers would land out of order. So the pin has
+   * to stop moving for a moment before it becomes a question.
+   *
+   * 400 ms: longer than a double-click correction, short enough that a settled
+   * pin does not feel ignored.
+   *
+   * Note the debounce is the SECOND guard, not the only one. useLocationInsights
+   * depends on the query's scalar fields rather than its object identity, so a
+   * re-render that produces an equal query refetches nothing at all. This one
+   * exists for genuinely different coordinates arriving in quick succession.
    */
   const [insightsQuery, setInsightsQuery] = useState<LocationInsightsQuery | null>(null)
+  useEffect(() => {
+    if (livePin === null) {
+      setInsightsQuery(null)
+      return
+    }
+    const timer = window.setTimeout(() => setInsightsQuery(livePin), 400)
+    return () => window.clearTimeout(timer)
+  }, [livePin])
+
   const insights = useLocationInsights(insightsQuery)
+
+  /*
+   * True while the answer on screen belongs to a point that is no longer pinned.
+   *
+   * This is the trap the debounce sets. For those 400 ms — plus the round trip —
+   * `insights.data` still holds the PREVIOUS point's figures while the marker is
+   * already somewhere else, and `insights.loading` is false because that fetch
+   * finished. Rendering it would put four confident numbers under a pin they
+   * were never measured from, which is worse than any delay: a stale figure that
+   * looks fresh is indistinguishable from a wrong one.
+   *
+   * Compared by value, since `livePin` is a fresh object on every render.
+   */
+  const insightsStale =
+    livePin !== null &&
+    (insightsQuery === null ||
+      insightsQuery.latitude !== livePin.latitude ||
+      insightsQuery.longitude !== livePin.longitude ||
+      insightsQuery.psicCodeId !== livePin.psicCodeId ||
+      insightsQuery.businessId !== livePin.businessId)
+
+  /*
+   * The radius the ring on the map is drawn at — the API's own `radius_m`, never
+   * a 500 written here. Null until a lookup has answered, so before the first
+   * response there is simply no ring rather than a guessed one.
+   *
+   * Deliberately NOT cleared while `insightsStale`. The radius is a property of
+   * the lookup, not of the point, so the ring the applicant is looking at is
+   * still the right size for the pin they just moved — dropping it would make
+   * the ring blink out and back on every correction, which reads as the map
+   * losing its place. The FIGURES go to loading; the ring does not.
+   */
+  const insightsRadiusM = insights.data?.radius_m ?? null
 
   /*
    * The business as every office sheet carries it. The LGU Clearances step
@@ -2868,27 +2952,22 @@ export function ApplyWizard() {
 
   async function next() {
     if (stepMissing.length > 0) return
-    // Zoning result (p30) — the conformity message plus Location Insights (§5).
+    /*
+     * Zoning result (p30) — the conformity message, and only that.
+     *
+     * Location Insights used to be primed here, because the modal was where it
+     * rendered. It is on the step itself now and follows the pin on its own, so
+     * leaving the step is no longer an event the lookup cares about.
+     */
     if (phase === 'address') {
-      // stepMissing already guarantees a pin, so the coordinates are present.
-      if (form.latitude !== null && form.longitude !== null) {
-        setInsightsQuery({
-          latitude: form.latitude,
-          longitude: form.longitude,
-          psicCodeId: form.lines[0]?.psic_code_id ?? null,
-          businessId,
-        })
-      }
       setShowZoning(true)
       return
     }
     await advance()
   }
 
-  /** Both modal exits go through here so the frozen query never outlives the modal. */
   function closeZoning() {
     setShowZoning(false)
-    setInsightsQuery(null)
   }
 
   function back() {
@@ -4457,23 +4536,41 @@ export function ApplyWizard() {
 
           <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
             {/*
-              * self-start, because a grid item stretches to its row by default
-              * and this card has nothing to stretch with. Its height is the map
-              * (320px) plus two short captions — 378px — while the address
-              * column beside it is 421px, or 719px once "Rented" opens the
-              * lessor block. Stretching handed the card the difference (43px,
-              * then 341px) as height it had no content for, and because the
-              * card itself is transparent — the white comes from the captions'
-              * own bg-white — the page showed through inside a rounded, shadowed
-              * frame. That empty framed panel is what the client saw under the
-              * map. Sizing the card to its content deletes the frame rather
-              * than filling it; growing the map to match instead would make it
-              * lurch 341px taller the moment somebody ticks "Rented".
+              * The map column: the picker, then the figures for whatever it is
+              * pointing at. One column, because they are one question — "is this
+              * the right spot?" — and reading the numbers means glancing back up
+              * at the pin they describe. Split across the grid they would be a
+              * map and an unrelated table.
+              *
+              * self-start lives on this wrapper, because a grid item stretches to
+              * its row by default and this column has nothing to stretch with.
+              * Its height is the map (320px) plus a few short captions, while the
+              * address column beside it is 421px, or 719px once "Rented" opens the
+              * lessor block. Stretching handed the column the difference as height
+              * it had no content for, and because the wrapper is transparent — the
+              * white comes from the cards inside it — the page showed through
+              * inside a rounded, shadowed frame. That empty framed panel is what
+              * the client saw under the map. Sizing to content deletes the frame
+              * rather than filling it; growing the map to match instead would make
+              * it lurch 341px taller the moment somebody ticks "Rented".
+              *
+              * The insights card below the map does NOT close that gap on
+              * purpose. It is only there once a pin exists, so relying on it for
+              * height would bring the empty frame straight back on a fresh
+              * filing, which is exactly the state the client was looking at.
               */}
-            <div className="self-start overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
+            <div className="self-start space-y-6">
+            <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
               <MapPicker
                 latitude={form.latitude}
                 longitude={form.longitude}
+                /*
+                 * The ring, at the radius the API says it measured over. Null
+                 * until the first response, so nothing is drawn on a guess —
+                 * and see `insightsRadiusM` for why it is deliberately kept
+                 * while the next lookup is in flight.
+                 */
+                radiusM={insightsRadiusM}
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
@@ -4495,6 +4592,25 @@ export function ApplyWizard() {
               {form.latitude !== null ? (
                 <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
                   Pinned at {form.latitude}, {form.longitude}
+                  {/*
+                    * Says in words what the ring on the map means.
+                    *
+                    * DESIGN.md's Never Color Alone rule: the circle carries
+                    * meaning — "everything counted below is inside here" — and a
+                    * blue ring alone carries it in colour and shape only. This
+                    * sentence is the same fact in text, so it survives with
+                    * colour off, at low vision, and on a screen reader that
+                    * cannot see an SVG path at all.
+                    *
+                    * It appears only alongside the ring, off the same radius, so
+                    * the caption can never describe a circle that is not drawn.
+                    */}
+                  {insightsRadiusM !== null && (
+                    <span className="mt-0.5 block text-ink-muted">
+                      The circle around it covers {insightsRadiusM} m — the area the figures below
+                      count.
+                    </span>
+                  )}
                 </p>
               ) : (
                 <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
@@ -4515,6 +4631,30 @@ export function ApplyWizard() {
               <p className="bg-white px-4 pb-2.5 text-xs text-ink-muted">
                 CPDO checks the actual site during processing.
               </p>
+            </div>
+
+            {/*
+              * The figures for the pin, the moment there is a pin.
+              *
+              * Gated on `livePin` rather than on the response, so the card
+              * appears with the pin and shows its own skeleton while the lookup
+              * runs. Gating on `insights.data` instead would leave a beat where
+              * the applicant has pinned a spot and nothing acknowledges it, then
+              * a block of numbers drops in and pushes the page around.
+              *
+              * `insightsStale` is folded into `loading` here: while the pin has
+              * moved and the answer has not caught up, this is a lookup in
+              * progress as far as the reader is concerned, whatever the previous
+              * fetch's state says. That is the whole reason the flag exists —
+              * see where it is computed.
+              */}
+            {livePin !== null && (
+              <LocationInsightsPanel
+                insights={insights.data}
+                loading={insights.loading || insightsStale}
+                error={insights.error}
+              />
+            )}
             </div>
             <div className="space-y-4">
               <div>
@@ -5230,16 +5370,26 @@ export function ApplyWizard() {
               </span>
               . You may now proceed with the processing of your Business Permit Application.
             </p>
+            {/*
+              * This CPDO line is not decoration and must not be trimmed. It is
+              * the only thing on this dialog that stops "CONGRATULATIONS!" from
+              * reading as an issued clearance — and it is now also the standing
+              * condition under which LocationInsightsPanel's removed disclaimer
+              * would have to come back. See the comment at the foot of that
+              * file before touching either.
+              */}
             <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
               The Zoning Office (CPDO) makes the final determination on your zoning clearance
               during processing.
             </p>
 
-            <LocationInsightsPanel
-              insights={insights.data}
-              loading={insights.loading}
-              error={insights.error}
-            />
+            {/*
+              * Business Location Insights used to render here, and does not any
+              * more (client instruction). Behind this modal the figures arrived
+              * after the location was chosen, which is the wrong order for
+              * decision support — they are on the map step now, visible from the
+              * moment a pin is dropped and while it can still be moved.
+              */}
           </ProtoModal>
         ))}
 
