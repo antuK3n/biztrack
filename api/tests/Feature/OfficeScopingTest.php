@@ -496,10 +496,28 @@ it('refuses an attachment hanging off another office’s message', function () {
 it('drops a filing out of an office’s approval queue once that office has approved', function () {
     $app = sharedFiling('Item111 Queue Cafe');
 
+    /*
+     * `for_inspection` is in this filter now, and it has to be.
+     *
+     * What this case is about has not moved: the queue must partition on the
+     * OFFICE's own assignment status, not on the filing's, because filtering on
+     * the filing alone is what made the office that had just approved be shown
+     * its own finished work again (item 111). What HAS moved is the filing's
+     * status while that is true. WorkflowService::afterReviewProgress used to
+     * hold every filing at `under_review` until the last office signed off; it
+     * books each office's site visit the moment that office approves now, and
+     * the filing reads `for_inspection` from the first booking onward — so CHO
+     * approving here moves it while BFP still has a pending review.
+     *
+     * Leaving `for_inspection` out would have quietly turned the last assertion
+     * into a tautology: BFP's row would have vanished from this list because of
+     * the filing's status, not because of BFP's assignment, and the test would
+     * be measuring the bug it was written to prevent.
+     */
     $openIds = fn (string $email) => collect(
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/assignments?status=pending,in_progress,returned'
-                .'&application_status=submitted,pending_payment,under_review,returned&per_page=200')
+                .'&application_status=submitted,pending_payment,under_review,returned,for_inspection&per_page=200')
             ->assertOk()->json('data')
     )->pluck('application.id');
 
@@ -514,11 +532,14 @@ it('drops a filing out of an office’s approval queue once that office has appr
         ->assertOk();
 
     /*
-     * The application is still under_review — the fire office has not signed off
-     * — which is exactly the condition that made the old queue redisplay the row.
-     * The office that approved is done; the office that has not is not.
+     * SANITARY is inspected, so CHO's approval books CHO's visit and the filing
+     * moves — parallel, per office, rather than everyone waiting for the
+     * slowest. The filing is genuinely not `under_review` any more: a site
+     * visit is outstanding on it. What remains true, and is the whole point
+     * here, is the line below it — the office that approved is done, and the
+     * office that has not is not.
      */
-    expect(Application::find($app['id'])->status->value)->toBe('under_review');
+    expect(Application::find($app['id'])->status->value)->toBe('for_inspection');
     expect($openIds('sanitary@biztrack.local'))->not->toContain($app['id']);
     expect($openIds('fire@biztrack.local'))->toContain($app['id']);
 });

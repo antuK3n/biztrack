@@ -229,6 +229,31 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
         Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
+        /*
+         * The Send Reminder / Immediate Follow-up button on that screen. The
+         * only route in this file that sends a message to a citizen on an
+         * officer's say-so, which is why three things are true of it:
+         *
+         *  - **It sits on `analytics.view`, not on a notification permission.**
+         *    The authority being exercised is "I have read the watchlist and
+         *    this business needs chasing", and the watchlist is what
+         *    analytics.view opens. Nobody who cannot see the row should be able
+         *    to act on it — and the super admin, which no longer holds this
+         *    permission, must not acquire it here by the back door.
+         *  - **Keyed on the permit, not the business.** A business commonly
+         *    holds three permits expiring on three dates and the watchlist has
+         *    a row per permit; the message quotes a permit number and an expiry
+         *    date, so a business-keyed route would have to guess which row the
+         *    officer was looking at.
+         *  - **Throttled.** Not for load — one send is one notification row —
+         *    but because the far end is a real person's phone. Twenty a minute
+         *    is more follow-ups than an office makes in an hour and still stops
+         *    a stuck key becoming a hundred messages. The per-permit-per-day
+         *    ledger guard in the controller is the real protection against a
+         *    double send; this is the blunt outer one.
+         */
+        Route::post('analytics/renewal-risk/{permit}/remind', [AnalyticsController::class, 'remindRenewal'])
+            ->middleware('throttle:20,1');
 
         /*
          * Manual refresh, for when waiting for the nightly run will not do — a

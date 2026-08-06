@@ -44,8 +44,11 @@ import type {
   PrefillResult,
   ProcessingTimeReport,
   PsicCode,
+  RenewalReminderResult,
   RenewalRiskReport,
   RequestType,
+  RiskAction,
+  RiskBand,
   TimelineEntry,
   TranscriptMeta,
 } from './types'
@@ -653,6 +656,25 @@ export const notifications = {
 
 /* ── Analytics ────────────────────────────────────────────────────────── */
 
+/**
+ * The Renewal Risk table's server-side filter and page.
+ *
+ * Every field is optional and omitted when unset, which is load-bearing rather
+ * than tidy: the analytics snapshots are keyed on the parameters, so an
+ * unfiltered request has to send exactly `days` and `limit` or it stops
+ * matching the snapshot R precomputes and quietly drops the default screen onto
+ * the PHP engine. axios omits `undefined` params, so leaving a field out is how
+ * that is expressed.
+ */
+export interface RenewalRiskQuery {
+  /** Barangay name, exactly as the payload's `barangays` list spells it. */
+  barangay?: string
+  band?: RiskBand
+  action?: RiskAction
+  /** First row of the page, counted over the filtered set. */
+  offset?: number
+}
+
 export const analytics = {
   summary: () => unwrap<AnalyticsSummary>(api.get('/analytics/summary')),
   /** Download the summary as a CSV report (Bearer blob; v2). */
@@ -695,13 +717,37 @@ export const analytics = {
   /**
    * Renewal Risk: permits near expiry ranked by a weighted rule score.
    * `score` is out of 100 and is not a probability — see RenewalRiskReport.
+   *
+   * The filters go to the server rather than being applied to the rows that
+   * come back, and here that is not a preference. The payload is the leading
+   * `limit` rows BY SCORE; on this register the leading twenty-five are all
+   * High, so filtering them in the browser for "Low risk" would return nothing
+   * and report that the city has no low-risk businesses. It has thousands. The
+   * same reasoning as the officer queue — see the note in QueuePage.
    */
-  renewalRisk: (days: number, limit?: number) =>
+  renewalRisk: (days: number, limit?: number, view?: RenewalRiskQuery) =>
     unwrapComputed<RenewalRiskReport>(
-      api.get('/analytics/renewal-risk', { params: { days, limit } }),
+      api.get('/analytics/renewal-risk', { params: { days, limit, ...view } }),
     ),
   renewalRiskReport: (days: number) =>
     downloadBlob(`/analytics/renewal-risk/report?days=${days}`, 'renewal-risk.pdf'),
+
+  /**
+   * Send one renewal follow-up to a business owner, now.
+   *
+   * Keyed on the permit and not the business: a business commonly holds three
+   * permits expiring on three dates and the watchlist has a row per permit, so
+   * the row the officer pressed is the fact that has to travel.
+   *
+   * The server refuses a second send on the same permit the same day and says
+   * so through `already_sent` — the guard is a unique index rather than a flag
+   * in this tab, so it survives a reload, a second officer, and a replayed
+   * request. Callers must still keep the button from firing twice while one is
+   * in flight; that is about not making two requests, not about not sending two
+   * messages.
+   */
+  sendRenewalReminder: (permitId: number) =>
+    unwrap<RenewalReminderResult>(api.post(`/analytics/renewal-risk/${permitId}/remind`)),
 
   /**
    * Recompute every figure set from R now, rather than waiting for 03:00.
