@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { api } from '../../lib/api'
 import { Skeleton } from '../../components/ui/primitives'
 import { useAsync } from '../../lib/useAsync'
@@ -39,14 +39,38 @@ import { useAsync } from '../../lib/useAsync'
  *
  * ## On the wording (checklist item 68: "remove descriptions that sound AI")
  *
- * Labels are noun phrases and carry no full stop, because they are the left-hand
- * column of a table and not sentences. The trailing qualifiers went: "in the
- * area", "operating nearby" and "of nearby similar businesses" all restated the
- * radius that the row above already gives, and stacked restatement is exactly
- * what reads as machine-written padding.
+ * Each row is a Title with a Description under it, both dictated by the client
+ * down to the capitalisation. Titles are Title Case noun phrases and carry no
+ * full stop, because they are the left-hand column of a table and not sentences;
+ * descriptions say what the figure beside them actually counted, because a
+ * figure whose subject is unstated is not information.
  *
- * What did NOT go: the note under each figure saying what it counted. Those name
- * what was measured, and a figure whose subject is unstated is not information.
+ * The trailing qualifiers went long ago: "in the area", "operating nearby" and
+ * "of nearby similar businesses" all restated the radius the row above already
+ * gives, and stacked restatement is exactly what reads as machine-written
+ * padding.
+ *
+ * ## The row that is deliberately absent — do not re-add it
+ *
+ * There was briefly a fifth row, "Businesses in your own category", fed by a
+ * `your_line` key on the payload. It existed because the first and third rows
+ * count on DIFFERENT widths of PSIC and did not say so: "Nearby Similar
+ * Businesses" matches the applicant's 3-digit trade GROUP, while "Most Common
+ * Line of Business" takes the mode of the 2-digit DIVISION. Both are correct —
+ * widening "similar" to the division would make a coffee shop similar to a
+ * canteen — but as adjacent rows of one table they invited arithmetic that does
+ * not hold. A dairy applicant met "Similar: 0" above "Most common:
+ * Manufacturing, 6 of 33" and filed a bug against a count that was right.
+ *
+ * The client has since decided against that third figure and asked for it
+ * removed. The distinction is now carried by the two titles themselves —
+ * "Nearby Similar" versus "Most Common Line of Business" — which is a
+ * legitimate way to draw it and their call to make.
+ *
+ * So this is a decision, not an omission. If the confusion is reported again the
+ * answer is wording on those two rows, not a third count; re-adding it would be
+ * re-opening something the client has already ruled on. Same note sits on
+ * LocationInsights.php, where the payload key was removed.
  */
 
 interface LocationInsightsData {
@@ -68,6 +92,16 @@ interface LocationInsightsData {
      */
     reason: 'line_not_chosen' | 'line_unclassified' | null
     psic_group: string | null
+    /**
+     * The applicant's own 5-digit sub-class title, still sent by the controller.
+     *
+     * Nothing renders it now. The first row's description is fixed copy the
+     * client specified — "Similar businesses within {radius}" — where it used to
+     * name this title and then admit the count reached past it to the whole
+     * 3-digit group. Kept on the type because it is genuinely on the wire and a
+     * type that omits a field it receives is a type that lies; removing it for
+     * real means editing LocationInsightsController, which is a separate change.
+     */
     psic_title: string | null
     count: number | null
     average_distance_m: number | null
@@ -77,28 +111,6 @@ interface LocationInsightsData {
     category: string | null
     count: number | null
     of_total: number
-  }
-  /**
-   * The applicant's own category, and how many neighbours share it.
-   *
-   * The row this feeds exists to stop `similar` and `common_type` reading as a
-   * contradiction. They count on different levels of PSIC — `similar` on the
-   * 3-digit trade group, `common_type` on the 2-digit category — and rendering
-   * them as adjacent rows invites arithmetic that does not hold. A dairy
-   * applicant met "Similar: 0" above "Most common: Manufacturing, 6 of 33" and
-   * filed a bug against a correct 0.
-   *
-   * This is the missing middle term. See LocationInsights::yourLine for why it
-   * is a third figure rather than a sentence apologising for the other two.
-   *
-   * `available: false` when no line is chosen yet, or when the line is the
-   * catch-all "Other (not listed)" — the same two cases `similar.reason`
-   * separates, and the row simply does not render for either.
-   */
-  your_line: {
-    available: boolean
-    category: string | null
-    count: number | null
   }
 }
 
@@ -150,14 +162,24 @@ const BAND_CLASS: Record<'low' | 'medium' | 'high', string> = {
   high: 'bg-s-purple-tint text-s-purple',
 }
 
-/** One `label : value` row, with the note that says what the figure measured. */
+/**
+ * One row: a Title, the Description that says what the figure beside it
+ * measured, and optionally an info affordance sitting on the title.
+ *
+ * The structure is the client's — every row is a titled thing with a sentence
+ * under it, rather than the single run-on label this used to be. The title is
+ * the name of the figure; the description is the definition of it.
+ */
 function InsightRow({
-  label,
-  note,
+  title,
+  description,
+  info,
   children,
 }: {
-  label: string
-  note?: string
+  title: string
+  description?: string
+  /** Rendered inline after the title. See `InfoNote`. */
+  info?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -166,8 +188,11 @@ function InsightRow({
         <span className="flex gap-2">
           <span aria-hidden="true" className="mt-[0.45rem] h-1.5 w-1.5 shrink-0 rounded-full bg-ink-muted" />
           <span>
-            {label}
-            {note && <span className="mt-0.5 block text-xs text-ink-muted">{note}</span>}
+            <span className="font-medium">{title}</span>
+            {info}
+            {description && (
+              <span className="mt-0.5 block text-xs font-normal text-ink-muted">{description}</span>
+            )}
           </span>
         </span>
       </th>
@@ -175,6 +200,112 @@ function InsightRow({
         {children}
       </td>
     </tr>
+  )
+}
+
+/*
+ * The small "i" that holds the concentration band scale.
+ *
+ * ## Why this is not `<Info>` from components/ui/MetricInfo
+ *
+ * That component is the right PATTERN and the wrong fit twice over. It reads its
+ * text from `DefinitionsContext`, which is filled from an analytics response's
+ * `meta.definitions` — the location-insights endpoint sends no such block, and
+ * inventing one for a single band scale would put a fake analytics metric on the
+ * wire. And `MetricInfo` renders a fixed three-part body (How it is measured /
+ * What it covers / Why it is here) from a `MetricDefinition`; the client asked
+ * for exactly the band scale and nothing else, so two of those three parts would
+ * be padding invented to fill a shape.
+ *
+ * So this is the smallest thing that keeps the BEHAVIOUR, and the behaviour is
+ * the part that matters. Deliberately NOT a `title=` tooltip: there is no hover
+ * on touch, so an applicant on a phone — most of them — would never see it, and
+ * hover is not reachable by keyboard either. WCAG 2.1 AA SC 1.4.13 (Content on
+ * Hover or Focus) sets the rest:
+ *
+ *   dismissible  Escape closes it without moving focus
+ *   hoverable    the pointer can travel into the panel without it vanishing,
+ *                which is why the mouse handlers are on the wrapper, not the
+ *                button
+ *   persistent   it stays until dismissed; nothing closes it on a timer
+ *
+ * Click pins it open, which is what makes it work on touch where there is no
+ * hover to sustain. Same three-way open (pointer, focus, tap) as the analytics
+ * screens, so the affordance means the same thing wherever an applicant or an
+ * officer meets it.
+ */
+function InfoNote({ label, children }: { label: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  // Pinned by click/tap: a pointer leaving must not close what a tap opened.
+  const [pinned, setPinned] = useState(false)
+  const wrapper = useRef<HTMLSpanElement>(null)
+  const panelId = useId()
+
+  useEffect(() => {
+    if (!open) return
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        setPinned(false)
+      }
+    }
+    // A pinned panel must not outlive the reader's interest in it.
+    function onPointerDown(e: PointerEvent) {
+      if (!wrapper.current?.contains(e.target as Node)) {
+        setOpen(false)
+        setPinned(false)
+      }
+    }
+
+    document.addEventListener('keydown', onKeyDown)
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('pointerdown', onPointerDown)
+    }
+  }, [open])
+
+  return (
+    <span
+      ref={wrapper}
+      className="relative inline-flex align-middle"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => !pinned && setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
+        // Names what opens, so a screen reader announces the subject rather than
+        // yet another anonymous "more information".
+        aria-label={label}
+        onFocus={() => setOpen(true)}
+        onBlur={() => !pinned && setOpen(false)}
+        onClick={() => {
+          setPinned((was) => !was)
+          setOpen((was) => !was || !pinned)
+        }}
+        className="ml-1.5 inline-flex h-4 w-4 items-center justify-center rounded-full border border-line text-[10px] font-semibold leading-none text-ink-muted transition-colors hover:border-royal hover:text-royal focus:outline-none focus-visible:ring-2 focus-visible:ring-royal aria-expanded:border-royal aria-expanded:text-royal"
+      >
+        {/* Decorative: the accessible name is on the button. */}
+        <span aria-hidden="true">i</span>
+      </button>
+
+      {open && (
+        <span
+          id={panelId}
+          role="note"
+          /*
+           * `span`, not `div`: this lives inside a `<th>`, where a block element
+           * is invalid HTML and browsers reflow it out of position.
+           */
+          className="absolute left-0 top-6 z-20 block w-64 max-w-[min(16rem,calc(100vw-2rem))] cursor-default rounded-lg border border-line bg-white p-3 text-left text-xs font-normal leading-relaxed text-ink-secondary shadow-lg"
+        >
+          {children}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -283,38 +414,25 @@ export function LocationInsightsPanel({
             </caption>
             <tbody className="divide-y divide-line/70">
               <InsightRow
-                label={`Similar businesses within ${radius}`}
+                title="Nearby Similar Businesses"
                 /*
-                 * The note has to describe the set that was actually counted,
-                 * and it used to describe a narrower one.
+                 * The radius is interpolated, never typed. `radius_m` comes off
+                 * the response and MapPicker draws its ring from the same
+                 * number, so a hard-coded 500 here would be a second copy that
+                 * can disagree with the circle drawn over the applicant's own
+                 * street — worse than saying nothing.
                  *
-                 * It read "Same PSIC group as your line: {psic_title}" — where
-                 * psic_title is the applicant's own 5-digit sub-class, while the
-                 * count matches on the 3-digit group. Those are not the same
-                 * set. An applicant filing 56101 "Restaurants and carinderia"
-                 * was told the four matches were carinderias; one of them was a
-                 * fast-food outlet, correctly matched on group 561. 21 of the
-                 * 135 reference codes sit in a group with siblings, so the
-                 * overstatement is routine, not a corner case.
-                 *
-                 * There is no honest way to print the group's own name: the
-                 * `psic_codes` table carries id, code and title only — no group
-                 * title exists anywhere in the register, and inventing one in
-                 * the client would be a second source of truth for a
-                 * classification the standard already owns.
-                 *
-                 * So the note names the applicant's line, which IS accurate, and
-                 * then says plainly that the count reaches past it. That
-                 * describes the matched set exactly without naming something the
-                 * data cannot name.
+                 * The description is fixed copy the client specified. It
+                 * previously named the applicant's own 5-digit sub-class
+                 * (`psic_title`) and then admitted the count reached past it to
+                 * the whole 3-digit group, because those really are different
+                 * sets: an applicant filing 56101 "Restaurants and carinderia"
+                 * also matches a fast-food outlet in group 561, and 21 of the
+                 * 135 reference codes sit in a group with siblings. The title
+                 * now carries that width instead — "Similar", against "Line of
+                 * Business" three rows down.
                  */
-                note={
-                  insights.similar.available
-                    ? insights.similar.psic_title
-                      ? `${insights.similar.psic_title}, and the trades PSIC groups with it`
-                      : 'Your line, and the trades PSIC groups with it'
-                    : undefined
-                }
+                description={`Similar businesses within ${radius}`}
               >
                 {insights.similar.available && insights.similar.count !== null ? (
                   <span className="tnum">{insights.similar.count}</span>
@@ -324,8 +442,30 @@ export function LocationInsightsPanel({
               </InsightRow>
 
               <InsightRow
-                label="Registered businesses in total"
-                note={`Within ${radius} · Low 0–5 · Medium 6–10 · High ${insights.concentration.thresholds.high_from}+`}
+                title="Business Concentration"
+                description="Registered businesses in total"
+                /*
+                 * The band scale used to sit inline, stapled onto the end of
+                 * this row's note: "Within 500 m · Low 0–5 · Medium 6–10 · High
+                 * 11+". It is reference material — read once, then never again —
+                 * and inline it competed for attention with the description
+                 * every time the panel rendered. Behind the affordance it is
+                 * still one keystroke or one tap away.
+                 *
+                 * Both boundaries are read off `thresholds` rather than typed.
+                 * The scale is the server's; a legend that disagreed with the
+                 * banding would send an applicant looking for a bug in the
+                 * count.
+                 */
+                info={
+                  <InfoNote label="What the Business Concentration bands mean">
+                    {`Low 0–${insights.concentration.thresholds.medium_from - 1} · Medium ${
+                      insights.concentration.thresholds.medium_from
+                    }–${insights.concentration.thresholds.high_from - 1} · High ${
+                      insights.concentration.thresholds.high_from
+                    }+`}
+                  </InfoNote>
+                }
               >
                 <span
                   className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-xs font-semibold ${
@@ -338,13 +478,18 @@ export function LocationInsightsPanel({
               </InsightRow>
 
               <InsightRow
-                label="Most common line of business"
+                title="Most Common Line of Business"
                 /*
                  * "15 of 48" on its own said nothing — fifteen of forty-eight
                  * what? Both numbers need naming: how many nearby businesses
                  * are in this trade, out of how many are nearby at all.
+                 *
+                 * Withheld entirely when there is nothing nearby, rather than
+                 * rendered as "0 of the 0 businesses near this pin". The figure
+                 * beside it already says none are registered in range, and a
+                 * description of a count that does not exist is noise.
                  */
-                note={
+                description={
                   insights.common_type.available
                     ? `${insights.common_type.count} of the ${insights.common_type.of_total} businesses near this pin`
                     : undefined
@@ -358,49 +503,44 @@ export function LocationInsightsPanel({
               </InsightRow>
 
               {/*
-               * The row that keeps the two rows above from reading as a
-               * contradiction.
-               *
-               * "Similar businesses" counts the applicant's 3-digit PSIC trade
-               * group. "Most common line of business" names the mode of the
-               * 2-digit categories. Both are correct and the difference is
-               * deliberate — see PsicTaxonomy — but they are adjacent rows of
-               * one table, and a reader is entitled to assume adjacent rows
-               * share a definition. A dairy applicant read "Similar: 0" above
-               * "Most common: Manufacturing (6 of 33)" and filed a bug against a
-               * count that was right.
-               *
-               * This row supplies the term that was missing: the applicant's own
-               * category, and how many neighbours are in it. With it on screen
-               * the two figures resolve into one ordinary sentence — few of your
-               * trade here, plenty of someone else's — and the reader never has
-               * to reason about PSIC hierarchy levels to get there.
-               *
-               * It sits immediately under the mode because that is the row it
-               * reconciles: both are category-level, and putting them together
-               * is what makes the comparison a like-for-like one.
-               *
-               * Hidden entirely when no line is chosen, or when the line is the
-               * catch-all "Other (not listed)". In both cases "Similar" is also
-               * unavailable, so there is no comparison to reconcile and the row
-               * would be an empty explanation of nothing.
+               * A fifth row, "Businesses in your own category", sat here and was
+               * removed on the client's instruction. It is not missing by
+               * accident — see the module docblock before re-adding it.
                */}
-              {insights.your_line.available && (
-                <InsightRow
-                  label="Businesses in your own category"
-                  note={
-                    insights.your_line.category
-                      ? `${insights.your_line.category} — a wider grouping than the trade group counted at the top`
-                      : undefined
-                  }
-                >
-                  <span className="tnum">{insights.your_line.count}</span>
-                </InsightRow>
-              )}
 
               <InsightRow
-                label="Average distance to a similar business"
-                note={insights.similar.average_distance_m !== null ? 'Straight line, not walking distance' : undefined}
+                title="Average Distance to Similar Businesses"
+                /*
+                 * This description says what the figure IS. It used to say what
+                 * it is not — "Straight line, not walking distance" — which the
+                 * client rejected as vague, and they were right: a caveat is
+                 * only meaningful to a reader who already knows what was
+                 * measured, and it named neither the set averaged over nor the
+                 * fact that it is an average at all.
+                 *
+                 * Both facts it does carry are load-bearing and neither may be
+                 * dropped for brevity:
+                 *
+                 *   "Average"       — one number standing for several distances,
+                 *                     not the distance to the nearest one.
+                 *   "straight-line" — this is a haversine over the direct
+                 *                     point-to-point distance, not a route. An
+                 *                     applicant who reads "320 m" and walks it
+                 *                     will find it further, and around a river
+                 *                     or a closed block considerably further.
+                 *                     That is the whole reason the old note
+                 *                     existed and it survives the rewrite.
+                 *
+                 * "each similar business" names the set explicitly, which is the
+                 * same set the first row counts — so the two rows are visibly
+                 * about one thing and the reader does not have to guess whether
+                 * this averages over every neighbour.
+                 */
+                description={
+                  insights.similar.average_distance_m !== null
+                    ? 'Average straight-line distance from your pin to each similar business'
+                    : undefined
+                }
               >
                 {insights.similar.average_distance_m !== null ? (
                   <span className="tnum">{insights.similar.average_distance_m} m</span>

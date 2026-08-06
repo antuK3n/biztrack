@@ -316,7 +316,7 @@ it('never leaks a neighbouring business identity', function () {
 });
 
 /*
- * ── The two rows a client compared, and the row that reconciles them ────────
+ * ── The two rows a client compared, and how the mismatch was answered ───────
  *
  * Reported: "I set the line of business to 'Manufacture of dairy products' and
  * Most common line of business is 'Manufacturing' (it did not specify which
@@ -329,8 +329,16 @@ it('never leaks a neighbouring business identity', function () {
  * saying they answer different questions. The reader did the arithmetic anyone
  * would do and the screen gave them no way to see why it did not hold.
  *
- * These tests pin all three parts of the fix at once, because any one of them
- * alone leaves the contradiction on screen.
+ * The first answer was a third figure, `your_line` — the applicant's own
+ * division and how many neighbours were in it — which made the two rows resolve
+ * into one ordinary sentence. **The client then decided against it and asked for
+ * it removed**, in favour of the row titles carrying the distinction ("Nearby
+ * Similar Businesses" against "Most Common Line of Business"). That is a
+ * legitimate way to draw it and their call to make.
+ *
+ * So these tests now pin two things: the counts that were always correct, and
+ * the absence of the third figure — because a payload key removed on a client
+ * decision is exactly the kind of thing a later reader restores as a "fix".
  */
 /** The client's neighbourhood, rebuilt: six manufacturers, none of them dairy. */
 function dairyNeighbourhood(): void
@@ -386,67 +394,80 @@ describe('the dairy applicant who read a correct 0 as a bug', function () {
             ->and($body['data']['common_type']['of_total'])->toBe(8);
     });
 
-    it('carries the applicant own category, the term the comparison was missing', function () {
+    it('sends four figures and no fifth: the applicant own category stays off the payload', function () {
         /*
-         * With this on the payload the two rows above stop being a
-         * contradiction and become one ordinary sentence: none of your trade
-         * here, two in your wider category, and someone else's trade is the most
-         * common. Nothing on screen previously carried the applicant's own
-         * category, so there was no element a reader could have used to work out
-         * that "Manufacture of dairy products" is not inside "Manufacturing".
+         * The regression guard on a removal.
+         *
+         * `your_line` — the applicant's own 2-digit division and the count of
+         * neighbours in it — was on this payload for exactly the case this
+         * describe block is built from. Here it would have reported "Food &
+         * Beverage Manufacturing, 2" (the two bakeshops), a different category
+         * from the mode, and the dairy applicant's two rows would have stopped
+         * looking like a contradiction.
+         *
+         * The client decided against it. The width distinction is carried by the
+         * row titles now, so the fifth figure is gone from the response as well
+         * as from the screen — a payload key nothing renders is dead weight that
+         * the next reader has to work out the status of.
+         *
+         * This asserts the exact key set rather than just `not->toHaveKey`, so a
+         * SIXTH key cannot be added without someone reading this comment and the
+         * decision behind it.
          */
         dairyNeighbourhood();
 
         $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
 
-        expect($body['data']['your_line']['available'])->toBeTrue()
-            ->and($body['data']['your_line']['category'])->toBe('Food & Beverage Manufacturing')
-            // The two bakeshops. Division 10 is the applicant's own division.
-            ->and($body['data']['your_line']['count'])->toBe(2)
-            // And it is a different category from the mode, which is the whole
-            // point: the modal trade nearby is not the applicant's.
-            ->and($body['data']['your_line']['category'])
-            ->not->toBe($body['data']['common_type']['category']);
+        expect(array_keys($body['data']))
+            ->toBe(['radius_m', 'concentration', 'similar', 'common_type']);
     });
 
-    it('withholds the applicant own category for the catch-all Other, rather than inventing one', function () {
+    it('still separates the catch-all Other from a line never chosen', function () {
         /*
-         * Same reasoning as `similar`: 00000 means "I could not find my trade in
-         * the list", so counting the block's other unclassifiable businesses as
-         * the applicant's own kind would build a neighbourhood out of missing
-         * data. The row simply does not render.
+         * 00000 means "I could not find my trade in the list". It is a CHOICE,
+         * and the panel must not answer it by telling the applicant to choose —
+         * that is how this figure earned "Location Insights does not work
+         * properly". `reason` is what lets the panel tell the two apart, so both
+         * values are pinned here.
+         *
+         * This test used to also assert `your_line` was withheld for the
+         * catch-all, on the same reasoning: counting the block's other
+         * unclassifiable businesses as the applicant's own kind would build a
+         * neighbourhood out of missing data. That figure is gone; the `similar`
+         * half of the case is not, and is what actually reaches the screen.
          */
         dairyNeighbourhood();
 
         $body = insightsFor(['psic_code_id' => PsicCode::where('code', '00000')->value('id')]);
 
-        expect($body['data']['your_line']['available'])->toBeFalse()
-            ->and($body['data']['your_line']['category'])->toBeNull()
-            ->and($body['data']['similar']['available'])->toBeFalse()
+        expect($body['data']['similar']['available'])->toBeFalse()
             ->and($body['data']['similar']['reason'])->toBe('line_unclassified');
+
+        // The zoning map is pinned BEFORE the Line of Business picker, so an
+        // unanswered line is the normal state of a new filing, not an error.
+        $unchosen = insightsFor();
+
+        expect($unchosen['data']['similar']['available'])->toBeFalse()
+            ->and($unchosen['data']['similar']['reason'])->toBe('line_not_chosen');
     });
 
-    it('withholds it again when no line has been chosen yet', function () {
-        // The zoning map is pinned before the Line of Business picker, so this
-        // is the normal state of a new filing rather than an error.
-        dairyNeighbourhood();
-
-        expect(insightsFor()['data']['your_line']['available'])->toBeFalse();
-    });
-
-    it('still sends the group and the sub-class title the note is written from', function () {
+    it('still reports the group it matched on, and the sub-class that produced it', function () {
         /*
-         * The note under "Similar businesses" used to read "Same PSIC group as
-         * your line: {psic_title}" — naming the applicant's 5-digit sub-class as
-         * if it were the matched set, when the count reaches across the whole
-         * 3-digit group. 21 of the 135 reference codes sit in a group with
-         * siblings, so the overstatement was routine.
+         * These two say WHICH set the count above was taken over, and they are
+         * the only place that is recorded. `psic_group` is the 3-digit trade
+         * group the match ran on; `psic_title` is the applicant's own 5-digit
+         * sub-class, which is narrower — 21 of the 135 reference codes sit in a
+         * group with siblings, so the two routinely differ and conflating them
+         * is what made an earlier version of the panel's note wrong.
          *
-         * There is no honest way to print the group's own name: psic_codes holds
-         * id, code and title only, and no group title exists anywhere in the
-         * register. So the panel names the sub-class (which is accurate) and
-         * then says the count reaches past it. Both fields have to keep
-         * arriving for that sentence to be writable.
+         * Neither is rendered at the moment: the client fixed the row's
+         * description as "Similar businesses within {radius}". They stay
+         * asserted because they are still on the wire and they are what makes a
+         * disputed count auditable — an applicant asking "similar to WHAT?" is
+         * answered from `psic_group`, and nothing else in the response can
+         * answer it. There is no honest way to print the group's own name:
+         * psic_codes holds id, code and title only, and no group title exists
+         * anywhere in the register.
          */
         dairyNeighbourhood();
 
