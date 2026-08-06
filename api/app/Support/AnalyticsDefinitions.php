@@ -109,11 +109,17 @@ final class AnalyticsDefinitions
                 'why' => 'How many businesses the city regulates right now. Most percentages on this screen are a slice of this number.',
             ],
 
+            /*
+             * The key still says ytd; the figure has not been year-to-date
+             * since the client asked for "the full term" instead. The key is a
+             * wire name R echoes verbatim — see DashboardAnalytics::kpiFacts().
+             * Every word a reader sees is about the whole register.
+             */
             'kpis.applications_ytd' => [
-                'label' => 'Applications YTD',
-                'formula' => 'Filings created since 1 January this year.',
-                'covers' => 'Counted from creation, so drafts nobody submitted are included.',
-                'why' => 'The yearly workload figure BPLO reports upward. Annual reports run from 1 January, so this does too.',
+                'label' => 'Applications (all time)',
+                'formula' => 'Every filing on record, counted from creation.',
+                'covers' => 'The whole register — not this calendar year, and not the months set by the filter. Drafts nobody submitted are included; filings removed from the register are left out.',
+                'why' => 'The full-term workload figure: everything the office has ever been asked to process. It sits beside This Month so the total and the current load can be read together.',
             ],
 
             'kpis.applications_this_month' => [

@@ -567,6 +567,21 @@ export const assignments = {
   /** Assign a specific officer to this assignment (permission oic.assign; v2). */
   assign: (id: number, officer_user_id: number, reason?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/assign`, { officer_user_id, reason })),
+  /**
+   * Set which RA 11032 tier this filing belongs to (simple / complex /
+   * highly_technical). Answers with the whole APPLICATION, not the assignment.
+   *
+   * That return type is the interesting part and it is deliberate: changing the
+   * tier changes `deadline_at`, recomputed from the original submission date
+   * because the statute's clock runs from filing rather than from
+   * reclassification. The caller therefore needs the filing back, not this
+   * office's row on it, or the screen would show a new category over the old
+   * deadline. `tier` must be one of the values the payload offered in
+   * `application.ra11032.tiers` — the API refuses anything else, because the
+   * three tiers and their day counts are statute.
+   */
+  classify: (id: number, tier: string) =>
+    unwrap<Application>(api.post(`/assignments/${id}/classification`, { tier })),
 }
 
 /* ── Inspections ──────────────────────────────────────────────────────── */

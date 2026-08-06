@@ -11,9 +11,11 @@ use App\Models\ApplicationAssignment;
 use App\Models\ComplianceCheck;
 use App\Models\User;
 use App\Services\WorkflowService;
+use App\Support\Ra11032;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * Officer review queues, scoped to the caller's department (admin sees all).
@@ -240,6 +242,13 @@ class AssignmentController extends Controller
             'department', 'officer',
             'application.business.address.barangay', 'application.business.lines.psicCode',
             'application.applicant', 'application.permitTypes',
+            /*
+             * Who set the RA 11032 tier, for the For Office Use Only panel. One
+             * constant query, and without it the sheet cannot tell an officer
+             * whether they are overriding somebody's decision or our automatic
+             * guess — which is the only reason that control is safe to show.
+             */
+            'application.complexitySetBy:id,name',
             'application.documents.documentType', 'application.feeAssessment',
             'application.officeForms.permitType.department',
             'application.payments', 'application.assignments.department',
@@ -315,6 +324,72 @@ class AssignmentController extends Controller
 
         return response()->json([
             'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business'])),
+        ]);
+    }
+
+    /**
+     * Set this filing's RA 11032 processing category (the client's request).
+     *
+     * ── Why it hangs off the ASSIGNMENT ───────────────────────────────────────
+     *
+     * "Allow all office admins to set the application category during their
+     * edit mode when trying to approve the application." Every word of that is
+     * about the seat the officer is already sitting in: the review sheet, which
+     * is `GET /assignments/{id}`. Putting the write on the same resource means
+     * the caller has to hold an assignment on this filing to reach it, and
+     * `authorizeDepartment()` — the same check that guards approve, return and
+     * the compliance checklist — decides whether it is theirs.
+     *
+     * That is what makes "ALL office admins" true without a new permission and
+     * without widening anything: each of the seven offices holds its own
+     * assignment on a filing it is reviewing, so each of them reaches this for
+     * that filing and none of them reaches it for a filing they were never
+     * routed. An applicant has no assignment at all, and the route sits behind
+     * `permission:application.review`, which no owner holds — so the field
+     * stays an office field on both counts.
+     *
+     * It is deliberately NOT on OfficeFormController. Those sheets are per
+     * permit type and their answers belong to one office's clearance; the tier
+     * belongs to the FILING and there is exactly one of it, shared by every
+     * office on the application. Storing it as an office-form key would have
+     * given a filing up to seven contradictory categories and no way to say
+     * which one the statutory clock was running on.
+     *
+     * The tier itself, the terminal-filing guard and the deadline recomputation
+     * are all in WorkflowService::classify(); read it before changing anything
+     * here. This method validates and authorises, nothing more.
+     */
+    public function classify(Request $request, ApplicationAssignment $assignment): JsonResponse
+    {
+        $this->authorizeDepartment($request, $assignment);
+
+        /*
+         * `Rule::in` over `Ra11032::tierKeys()`, not a written-out list. The
+         * three tiers and their day counts are statute; a validation rule with
+         * its own copy of them is a fourth tier waiting to be typed.
+         */
+        $data = $request->validate([
+            'tier' => ['required', 'string', Rule::in(Ra11032::tierKeys())],
+        ], [
+            'tier.in' => 'RA 11032 recognises only simple, complex and highly technical transactions.',
+        ]);
+
+        $application = $this->workflow->classify(
+            $assignment->application,
+            $data['tier'],
+            $request->user(),
+        );
+
+        /*
+         * The whole application back, loaded the way the review sheet reads it
+         * — the tier, its new provenance and the RECOMPUTED deadline all land
+         * on the same screen that just changed them, so the officer sees the
+         * consequence of the change rather than being told it saved.
+         */
+        return response()->json([
+            'data' => new ApplicationResource(
+                $application->load(['business', 'complexitySetBy:id,name']),
+            ),
         ]);
     }
 

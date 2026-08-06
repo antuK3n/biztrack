@@ -4,6 +4,7 @@ namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
 use App\Support\ApplicationVisibility;
+use App\Support\Ra11032;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -50,6 +51,7 @@ class ApplicationResource extends JsonResource
             'submitted_at' => optional($this->submitted_at)->toISOString(),
             'deadline_at' => optional($this->deadline_at)->toISOString(),
             'decided_at' => optional($this->decided_at)->toISOString(),
+            'ra11032' => $this->ra11032(),
             'rejection_reason' => $this->rejection_reason,
             /*
              * `requires_inspection` is here because the progression rail on the
@@ -152,6 +154,64 @@ class ApplicationResource extends JsonResource
                 ? StatusHistoryResource::collection($this->statusHistory)
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
+        ];
+    }
+
+    /**
+     * The filing's RA 11032 standing: which tier, who said so, and the three
+     * tiers anyone is allowed to choose between.
+     *
+     * ── Why `source` is here and not inferred ─────────────────────────────────
+     *
+     * The officer's question on the review sheet is not "what tier is this",
+     * it is "am I overriding a guess or filling in a blank". Every tier in the
+     * register today came from `Ra11032::tierFor()`, a rule this project wrote
+     * and the LGU never approved (open question A10) — so `automatic` is not a
+     * neutral default, it is a claim the officer is entitled to disagree with,
+     * and a payload that only sent the tier would hide that entirely.
+     *
+     *  - `automatic` — classified at submission by our rule.
+     *  - `officer`   — a named person decided it, and `set_by` says who.
+     *  - `null`      — never classified at all (a draft, or a row that predates
+     *                  the tier being set on submission). Genuinely blank, and
+     *                  the sheet says so rather than showing a tier nobody set.
+     *
+     * ── Why the tier LIST travels with the record ─────────────────────────────
+     *
+     * So the browser never holds its own copy of the statute. The three tiers
+     * and their day counts are RA 11032; a control that hard-coded them could
+     * drift into offering a fourth, or into captioning "Simple" with the wrong
+     * number of days, and either would be a compliance defect dressed as a
+     * typo. Three fixed entries on a single-record payload is a cheap price for
+     * the browser being structurally unable to invent one.
+     *
+     * `editable` is the terminal-filing rule (WorkflowService::classify refuses
+     * one), sent rather than re-derived: the screen and the API must not
+     * disagree about whether a decided filing can be reclassified.
+     *
+     * @return array<string, mixed>
+     */
+    private function ra11032(): array
+    {
+        $tier = $this->complexity;
+        $setBy = $this->relationLoaded('complexitySetBy') ? $this->complexitySetBy : null;
+
+        return [
+            'tier' => $tier,
+            'label' => Ra11032::label($tier),
+            'statutory_working_days' => $tier === null ? null : Ra11032::statutoryWorkingDays($tier),
+            'source' => $tier === null
+                ? null
+                : ($this->complexity_set_by_user_id === null ? 'automatic' : 'officer'),
+            /*
+             * The name only when the relation was eager-loaded. A list or a
+             * create response has no use for it and must not pay a query per
+             * row to carry it; the review sheet asks for it and gets it.
+             */
+            'set_by' => $setBy ? ['id' => $setBy->id, 'name' => $setBy->name] : null,
+            'set_at' => optional($this->complexity_set_at)->toISOString(),
+            'editable' => ! (bool) $this->status?->isTerminal(),
+            'tiers' => Ra11032::tierOptions(),
         ];
     }
 

@@ -31,7 +31,7 @@ use Illuminate\Support\Facades\DB;
  * its own window on screen rather than letting the reader assume one.
  *
  *   this month     Application Volume, Decision Outcomes, the "This Month" KPI
- *   year to date   the "Applications YTD" KPI
+ *   full term      the "Applications (all time)" KPI — every filing on record
  *   trailing N mo  tier processing times, time-in-stage, compliance indicators,
  *                  inspections, officer activity
  *   as of today    Active Businesses, expiry windows, barangays, lines of
@@ -58,8 +58,14 @@ use Illuminate\Support\Facades\DB;
  *    disagree about how many businesses are active.
  *  - **Inspection type comes from the inspecting department**, because
  *    `inspections.inspection_type` is null on every seeded row. City Health reads
- *    as Sanitary, Fire Protection as Fire Safety, Zoning as Zoning. The
- *    department is real data; the type column is not populated.
+ *    as Sanitary, Fire Protection as Fire Safety, and so on. The department is
+ *    real data; the type column is not populated.
+ *  - **An office inspects if it issues an inspected permit type**, read from
+ *    `permit_types.requires_inspection` rather than from a list kept here. All
+ *    six supporting clearances are inspected and the Mayor's Permit is not, so
+ *    the panel shows six offices and no BPLO without either fact being spelled
+ *    out twice. Every one of them is shown even at zero visits: an office
+ *    missing from that panel reads as an office that does not inspect.
  *  - **Expiry windows are cumulative** (30d ⊂ 60d ⊂ 90d), matching the mockup.
  *    Expired is a separate, non-overlapping row.
  */
@@ -104,14 +110,36 @@ final class DashboardAnalytics
     private const EXPIRY_WINDOWS = [30, 60, 90];
 
     /**
-     * Which department's inspections count as which type.
+     * The short name each inspecting office's visit goes by on the panel.
+     *
+     * NAMES ONLY — this map does not decide who appears. Which offices inspect
+     * is read from the register (see inspectionFacts): whoever issues a permit
+     * type flagged `requires_inspection`. This used to be the membership list as
+     * well, hard-coded to CHO/BFP/CPDO, and the panel silently dropped every
+     * inspection carried out by anyone else. When the client made all six
+     * supporting clearances inspected, the register grew OBO, CENRO and Market
+     * inspections and the panel went on showing three offices — reading as
+     * though the other three do not inspect at all.
+     *
+     * A department with no entry here falls back to its own code rather than to
+     * a guess, so an office added later is visibly unmapped instead of
+     * mislabelled — the same rule the frontend applies to permit-type headings.
+     *
+     * The names are the *inspection*, not the office: City Health performs the
+     * Sanitary inspection, Fire Protection the Fire Safety one. BPLO is absent
+     * on purpose and is the one real exception — the Mayor's Permit is issued on
+     * the strength of the six clearances rather than a visit of its own, which
+     * is exactly what the client meant by "all 6 (no BPLO)".
      *
      * @var array<string, string>
      */
-    private const INSPECTION_TYPE_BY_DEPARTMENT = [
+    private const INSPECTION_LABEL_BY_DEPARTMENT = [
         'CHO' => 'Sanitary',
         'BFP' => 'Fire Safety',
+        'OBO' => 'Occupancy',
+        'CENRO' => 'Environmental',
         'CPDO' => 'Zoning',
+        'CMO-MARKET' => 'Market',
     ];
 
     /**
@@ -141,6 +169,14 @@ final class DashboardAnalytics
         $now = CarbonImmutable::now();
         $today = $now->startOfDay();
         $windowStart = $today->subMonths($windowMonths);
+        /*
+         * Still shipped, no longer used by a figure. `ytd_start` is a date label
+         * that R echoes straight back (service.R), so removing it would change
+         * the payload shape in PHP only and break parity. It stayed behind when
+         * the yearly KPI became a full-term one; nothing on screen reads it now.
+         * Dropping it is part of the same both-engines follow-up as renaming
+         * `kpis.applications_ytd` — see kpiFacts().
+         */
         $ytdStart = $today->startOfYear();
         $monthStart = $today->startOfMonth();
 
@@ -160,7 +196,7 @@ final class DashboardAnalytics
             'tiers' => self::tierRules(),
             'map_point_limit' => self::MAP_POINT_LIMIT,
 
-            'kpis' => self::kpiFacts($today, $ytdStart, $monthStart, $now),
+            'kpis' => self::kpiFacts($today, $monthStart, $now),
             'volume' => self::volumeFacts($monthStart, $now),
             'decisions' => self::decisionFacts($monthStart, $now),
             'tier_observations' => $tierObservations,
@@ -245,10 +281,30 @@ final class DashboardAnalytics
 
     /* ── facts: KPI cards ──────────────────────────────────────────────── */
 
-    /** @return array<string, int> */
+    /**
+     * THE `applications_ytd` KEY IS A WIRE NAME, NOT ITS MEANING.
+     *
+     * The figure is now every filing on record — the full term — and the key is
+     * kept only because R echoes it verbatim (`.dash_kpis`, service.R) and
+     * AnalyticsParityTest is byte-strict on data keys. Renaming it here without
+     * renaming it there would fork the two engines, which is a worse outcome
+     * than a stale key name. Renaming it is a follow-up that has to land in both
+     * at once; until then every reader-facing string calls it what it is.
+     *
+     * WHY NOT YEAR TO DATE. The client's words were "do not put YTD only; it
+     * should be the full term". Year-to-date made this card the odd one out in
+     * its row: Active Businesses and Compliance Rate are both whole-register
+     * figures, and This Month sits beside it as the short-window counterpart. A
+     * calendar-year cutoff also makes the headline number collapse every 1
+     * January, which is exactly when a register's total workload matters most.
+     *
+     * The upper bound stays. `now` is Laravel's clock for this build, and a
+     * filing dated ahead of it is not yet part of the term being reported.
+     *
+     * @return array<string, int>
+     */
     private static function kpiFacts(
         CarbonImmutable $today,
-        CarbonImmutable $ytdStart,
         CarbonImmutable $monthStart,
         CarbonImmutable $now,
     ): array {
@@ -256,7 +312,6 @@ final class DashboardAnalytics
             'active_businesses' => count(self::activeBusinessIds($today)),
             'applications_ytd' => DB::table('applications')
                 ->whereNull('deleted_at')
-                ->where('created_at', '>=', $ytdStart)
                 ->where('created_at', '<=', $now)
                 ->count(),
             'applications_this_month' => DB::table('applications')
@@ -893,38 +948,77 @@ final class DashboardAnalytics
     /* ── facts: inspections ────────────────────────────────────────────── */
 
     /**
-     * Per inspection type: scheduled, completed, and the completed breakdown.
+     * Per inspecting office: scheduled, completed, and the completed breakdown.
+     *
+     * WHO APPEARS IS READ FROM THE REGISTER, NOT LISTED HERE.
+     *
+     * An office inspects if it issues a permit type flagged
+     * `requires_inspection` — that flag is the same one WorkflowService uses to
+     * decide whether a clearance needs a visit, so the panel cannot disagree
+     * with the queue officers actually work. All six supporting clearances carry
+     * it; only the Mayor's Permit (BPLO) does not, so BPLO is absent without
+     * being named absent anywhere.
+     *
+     * Every such office is emitted even with nothing to report, because an
+     * office omitted from this panel reads as an office that does not inspect.
+     * A row of zeros says "no visits yet"; no row at all says something false.
+     * This is the same rule the volume panel follows for a transaction type
+     * nobody filed this month.
+     *
+     * An office that has inspections on record but no longer issues an inspected
+     * permit type still gets a bucket. Dropping its rows would quietly shrink
+     * the combined total and make the overall pass rate a figure over a subset
+     * the reader was never told about — which is precisely the bug this replaces.
      *
      * @return list<array{type: string, label: string, scheduled: int, completed: int, passed: int, failed: int, conditional: int}>
      */
     private static function inspectionFacts(CarbonImmutable $windowStart, CarbonImmutable $now): array
     {
-        $rows = DB::table('inspections')
-            ->join('departments', 'departments.id', '=', 'inspections.department_id')
-            ->join('applications', 'applications.id', '=', 'inspections.application_id')
-            ->whereNull('applications.deleted_at')
-            ->where('inspections.created_at', '>=', $windowStart)
-            ->where('inspections.created_at', '<=', $now)
-            ->get(['departments.code', 'inspections.status', 'inspections.result']);
-
         $buckets = [];
-        foreach (self::INSPECTION_TYPE_BY_DEPARTMENT as $code => $label) {
-            $buckets[$code] = [
+
+        /** Open a bucket for an office the first time it is named, in the order named. */
+        $open = static function (string $code) use (&$buckets): void {
+            $buckets[$code] ??= [
                 'type' => $code,
-                'label' => $label,
+                'label' => self::INSPECTION_LABEL_BY_DEPARTMENT[$code] ?? $code,
                 'scheduled' => 0,
                 'completed' => 0,
                 'passed' => 0,
                 'failed' => 0,
                 'conditional' => 0,
             ];
+        };
+
+        /*
+         * Ordered by permit type so the panel reads in the order the register
+         * lists the clearances, rather than alphabetically by an office code no
+         * applicant has ever seen. It is only a display order — nothing is
+         * computed from it — but it has to be *some* deterministic order, or the
+         * bars reshuffle between refreshes and the chart stops being comparable
+         * against yesterday's screenshot.
+         */
+        $inspectingOffices = DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            ->where('permit_types.requires_inspection', true)
+            ->orderBy('permit_types.id')
+            ->pluck('departments.code');
+
+        foreach ($inspectingOffices as $code) {
+            $open((string) $code);
         }
+
+        $rows = DB::table('inspections')
+            ->join('departments', 'departments.id', '=', 'inspections.department_id')
+            ->join('applications', 'applications.id', '=', 'inspections.application_id')
+            ->whereNull('applications.deleted_at')
+            ->where('inspections.created_at', '>=', $windowStart)
+            ->where('inspections.created_at', '<=', $now)
+            ->orderBy('departments.code')
+            ->get(['departments.code', 'inspections.status', 'inspections.result']);
 
         foreach ($rows as $row) {
             $code = (string) $row->code;
-            if (! isset($buckets[$code])) {
-                continue;
-            }
+            $open($code);
 
             // Every inspection on record was scheduled at some point, so
             // "scheduled" is the total rather than the count still awaiting a

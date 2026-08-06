@@ -1372,10 +1372,23 @@ export function AnalyticsPage() {
               hint="holding a permit valid today"
               metric="kpis.active_businesses"
             />
+            {/*
+              FULL TERM, NOT YEAR TO DATE. The client's note was "do not put YTD
+              only; it should be the full term", so this counts every filing on
+              record. `data.ytd_start` is deliberately no longer read here — the
+              old sub-line said "since Jan 1, 2026" and a 1 January cutoff is
+              exactly what stopped being true. The payload still carries the
+              field for R parity; see DashboardAnalytics::kpiFacts().
+
+              `applications_ytd` is the wire key, not the meaning. Label, hint
+              and the info popover (AnalyticsDefinitions) all say all-time; the
+              key is the one place that cannot be renamed without renaming it in
+              R at the same time.
+            */}
             <Kpi
               value={num(data.kpis.applications_ytd)}
-              label="Applications YTD"
-              hint={`since ${dateLabel(data.ytd_start)}`}
+              label="Applications (all time)"
+              hint="every filing on record"
               metric="kpis.applications_ytd"
             />
             <Kpi

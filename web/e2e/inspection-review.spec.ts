@@ -508,6 +508,165 @@ test('collapsing the sheet does not fold away the work the officer came to do', 
   await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
 })
 
+/*
+ * ── The RA 11032 processing category ────────────────────────────────────────
+ *
+ * The client's request, verbatim:
+ *
+ *   "In the average processing time, since it categorizes applications into
+ *    simple, complex, and highly technical, allow all office admins to set the
+ *    application category during their edit mode when trying to approve the
+ *    application."
+ *
+ * Two halves, and only one of them is anyone's to change. The DEADLINES are
+ * statute — three working days simple, seven complex, twenty highly technical
+ * — and no LGU may grant itself a fourth tier or a longer count. WHICH TIER a
+ * filing belongs to is the LGU's own classification, published in its Citizen's
+ * Charter, and Malabon has not told us theirs (open question A10). Until now
+ * every filing was tiered by a rule this project invented, and the dashboard's
+ * compliance rate was measured against that guess.
+ *
+ * So these tests pin the control AND its limits: it appears in Edit mode for a
+ * reviewing office, it offers exactly the three statutory tiers with their real
+ * day counts and nothing else, and it says who set the current one.
+ *
+ * Read-only, like everything else in this file. Saving a category rewrites a
+ * live filing's statutory deadline; the wiring is asserted up to the moment
+ * before the press. The server-side behaviour — the recomputed deadline, the
+ * audit row, the terminal-filing refusal, every office being able to do it — is
+ * covered by api/tests/Feature/Ra11032ClassificationTest.php, which owns its
+ * own data and can afford to write.
+ */
+
+/** The office's own category select, which only exists in Edit mode. */
+function categorySelect(page: Page) {
+  return page.getByLabel('Application category', { exact: true })
+}
+
+test('a reviewing office can set the RA 11032 category from Edit mode', async ({ page }) => {
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  /*
+   * View mode first, and the assertion is that there is nothing to TYPE INTO
+   * rather than nothing to read. The category is a fact about the filing and
+   * View mode shows facts; what it must not do is offer the control, which is
+   * the same rule the assessed fee and the issuance dates follow.
+   */
+  await expect(categorySelect(page)).toHaveCount(0)
+  await expect(page.getByText('RA 11032 · Processing Category')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+
+  /*
+   * In For Office Use Only, not somewhere of its own. That panel is the
+   * boundary between the applicant's sworn declaration (locked in both modes)
+   * and what the office decides, and the tier is the office's.
+   */
+  const select = categorySelect(page)
+  await expect(select).toBeVisible()
+  await expect(page.locator('#for-office-use').getByLabel('Application category')).toHaveCount(1)
+
+  /*
+   * Exactly the statutory tiers, each captioned with the day count the law
+   * actually gives it. A hard-coded list in the browser could drift into a
+   * fourth tier or a wrong number, so this asserts the whole option set rather
+   * than spot-checking one — the day counts are the compliance figure.
+   *
+   * An "Not yet categorised" placeholder is allowed and is not a tier: it is
+   * offered only while the filing genuinely has none, and it carries an empty
+   * value so it cannot be saved as one.
+   */
+  const options = await select.locator('option').evaluateAll((els) =>
+    els.map((el) => ({ value: (el as HTMLOptionElement).value, text: (el.textContent ?? '').trim() })),
+  )
+  const tiers = options.filter((o) => o.value !== '')
+  expect(
+    tiers.map((o) => o.text),
+    'the control offers the three RA 11032 tiers and their statutory day counts',
+  ).toEqual([
+    'Simple — 3 working days',
+    'Complex — 7 working days',
+    'Highly technical — 20 working days',
+  ])
+  expect(options.length - tiers.length, 'at most one non-tier placeholder').toBeLessThanOrEqual(1)
+
+  /*
+   * It says who decided the current one. An officer must be able to tell they
+   * are overruling our automatic guess from being the first to look at it —
+   * the whole reason this field was worth adding rather than leaving the rule
+   * to decide silently.
+   */
+  await expect(page.locator('#ra11032-note')).toContainText(
+    /Category set by|assigned automatically|has not been categorised/,
+  )
+  await expect(select).toHaveAttribute('aria-describedby', 'ra11032-note')
+})
+
+test('Save category is never `disabled` — it says what is missing instead', async ({ page }) => {
+  /*
+   * Same rule as the inspection decisions above and the renewal modal's
+   * Confirm. `disabled` drops a control out of the tab order and takes the
+   * sentence explaining why it is shut with it, so a keyboard user meets a
+   * button that has simply stopped existing.
+   *
+   * Checked on the attribute rather than through toBeDisabled(), which treats
+   * `disabled` and `aria-disabled` as the same thing and would pass either way.
+   */
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  const select = categorySelect(page)
+  await expect(select).toBeVisible()
+
+  const save = page.getByRole('button', { name: 'Save category' })
+  await expect(save).toBeVisible()
+  await expect(save).not.toHaveAttribute('disabled', /.*/)
+  // Nothing has been changed yet, so there is nothing to save — and it says so.
+  await expect(save).toHaveAttribute('aria-disabled', 'true')
+  await expect(page.locator('#ra11032-save-why')).toContainText(/Pick a/)
+
+  /*
+   * Choosing a category the filing does not already have opens the button.
+   * Stops here deliberately: pressing it would move a live filing's statutory
+   * deadline. See the block comment above.
+   */
+  const current = await select.inputValue()
+  const other = (
+    await select.locator('option').evaluateAll((els) =>
+      els.map((el) => (el as HTMLOptionElement).value).filter((v) => v !== ''),
+    )
+  ).find((v) => v !== current)
+  expect(other, 'there is always another tier to move to').toBeTruthy()
+
+  await select.selectOption(other as string)
+  await expect(save).toHaveAttribute('aria-disabled', 'false')
+  await expect(page.locator('#ra11032-save-why')).toHaveCount(0)
+})
+
+test('the Edit-mode banner names the category as one of the fields it turns on', async ({
+  page,
+}) => {
+  /*
+   * SEP-5's rule, applied to the new field: the banner is built from the same
+   * gates the controls are drawn behind, so it cannot describe a screen that is
+   * not there. An officer who never scrolls to For Office Use Only would
+   * otherwise never learn they are allowed to change a statutory deadline.
+   */
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  /*
+   * `.first()` because the banner nests a span inside a <p> and both match the
+   * text — strict mode would fail on the ambiguity rather than on the product.
+   */
+  await expect(
+    page.getByText(/Edit mode\. On this filing your office fills in/).first(),
+  ).toContainText('the RA 11032 category')
+})
+
 test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
   const assignmentId = await openForInspectionFiling(page)
   test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')

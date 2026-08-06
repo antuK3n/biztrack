@@ -52,7 +52,10 @@
     <table>
         <tr>
             <th>Active businesses</th>
-            <th>Applications YTD</th>
+            {{-- Full term, not year to date. The payload key still reads
+                 `applications_ytd` because R echoes it; the figure under it is
+                 every filing on record. --}}
+            <th>Applications (all time)</th>
             <th>This month</th>
             <th>Compliance rate</th>
         </tr>
