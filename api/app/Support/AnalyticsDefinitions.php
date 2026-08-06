@@ -368,8 +368,33 @@ final class AnalyticsDefinitions
 
             'at_risk.score' => [
                 'label' => 'Renewal Risk Index',
-                'formula' => 'Points out of 100 added across five rules — a score, not a percentage. The most each can add: how soon the permit expires (30), how far the renewal has got (25), late renewals by this business before (20), open compliance findings (15), unpaid renewal fees (10).',
-                'covers' => 'A checklist where some rules carry more points than others. Nothing here is fitted to past outcomes: the register never records whether a business ended up renewing late, so there was no past result to work from and there is no accuracy figure to quote. The number sorts a queue. It says nothing about what any one business will do.',
+                /*
+                 * The client's own wording, near enough verbatim, with one
+                 * substitution that is worth explaining because it looks like
+                 * an edit for its own sake.
+                 *
+                 * They wrote: "A higher score means more warning signs — it is
+                 * not a prediction, and it does not say how likely a renewal is
+                 * to be late." That is exactly the claim this screen must make,
+                 * and it CANNOT be written that way: AnalyticsDefinitionsTest
+                 * fails the build on the substring `predict`, and `prediction`
+                 * contains it. The guard cannot tell a denial from an
+                 * assertion, so the sentence denying the forecast trips the test
+                 * that exists to stop the forecast being claimed.
+                 *
+                 * Weakening the guard to allow negated forms would be the wrong
+                 * trade — it is a blunt instrument on purpose, and every draft
+                 * of this text that has drifted toward a probability claim was
+                 * caught by exactly that bluntness. So the meaning is kept and
+                 * the banned stem is not used: "it does not say what any one
+                 * business will do next" says the same thing.
+                 *
+                 * `likely` is deliberately still allowed by the test as
+                 * ordinary English; `likelihood` is not. Do not reach for
+                 * either here — the sentence does not need them.
+                 */
+                'formula' => 'Each permit is checked against five things: how soon it expires, whether a renewal has been filed, whether this business has renewed late before, open compliance findings, and unpaid fees. Each adds points, up to 100 — a score, not a percentage.',
+                'covers' => 'A higher score means more warning signs. Nothing here is fitted to past outcomes: the register never records whether a business ended up renewing late, so there is no past result to work from and no accuracy figure to quote. The number sorts a queue. It does not say what any one business will do next.',
                 'why' => 'A score lets a hundred permits be worked in the order that matters instead of by date alone. Every rule and its points are printed below the table, so an officer can disagree with the ranking on the merits.',
             ],
 
