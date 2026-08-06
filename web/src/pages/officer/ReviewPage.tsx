@@ -281,6 +281,7 @@ const REMARK_COPY = {
 function RemarkPopup({
   action,
   officer,
+  initialText,
   submitting,
   error,
   onCancel,
@@ -288,12 +289,23 @@ function RemarkPopup({
 }: {
   action: 'reject' | 'return'
   officer: string
+  /**
+   * Evaluator Remarks, carried in rather than discarded (SEP-6).
+   *
+   * Seeded into the textarea as a starting point the officer can edit, never
+   * sent on its own: the confirm button still reads what is in the box at the
+   * moment it is pressed, and an empty box still refuses. Safe as a `useState`
+   * initialiser because this component is mounted fresh each time `popup` is
+   * set and unmounted when it clears, so there is no second render in which
+   * the prop could go stale against typed text.
+   */
+  initialText: string
   submitting: boolean
   error: string | null
   onCancel: () => void
   onConfirm: (text: string) => void
 }) {
-  const [text, setText] = useState('')
+  const [text, setText] = useState(initialText)
   const copy = REMARK_COPY[action]
   const empty = !text.trim()
   return (
@@ -371,6 +383,17 @@ function ReviewSkeleton() {
       </div>
     </div>
   )
+}
+
+/**
+ * ["a", "b", "c"] → "a, b and c". Used by the Edit-mode banner, which has to
+ * NAME the controls it is talking about rather than gesture at "the office
+ * fields" — for most offices that plural resolves to exactly one control.
+ */
+function listPhrase(items: string[]): string {
+  if (items.length === 0) return ''
+  if (items.length === 1) return items[0]
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 /** "floor_area_sqm" / "floorAreaSqm" → "Floor Area Sqm". */
@@ -625,12 +648,39 @@ export function ReviewPage() {
   const { house, street } = splitLine1(address?.line1)
   const officerName = data.officer?.name ?? data.department.name
 
-  // Submitted per-office form answers: the reviewing office's form(s) first.
-  const officeForms = [...(app.office_forms ?? [])].sort(
-    (a, b) =>
-      Number(b.department_code === data.department.code) -
-      Number(a.department_code === data.department.code),
+  /*
+   * Submitted per-office form answers, split by whose sheet each one is.
+   *
+   * ── Read what arrives; do not filter again here ───────────────────────────
+   *
+   * The server filters `office_forms` on the assignment payload down to the
+   * sheets this reader may see — ApplicationResource applying the same rule
+   * OfficeFormController::readableCode has always applied to
+   * `/applications/{id}/office-forms`: the applicant sees all,
+   * `application.view_any_office` (BPLO, admin) sees all, and every other
+   * reviewer sees only the permit types its own department issues. Repeating
+   * that test in the browser would be a second copy of a confidentiality rule
+   * that can drift from the first, and the browser is the wrong place to
+   * enforce one regardless. Everything below therefore only SORTS and GROUPS.
+   * Whatever is absent is absent on purpose.
+   *
+   * ── So the array is short, and sometimes empty ────────────────────────────
+   *
+   * A sanitary officer on a seven-office filing receives ONE sheet, not seven.
+   * BPLO's own BUSINESS permit type carries no office form at all, so BPLO
+   * receives every sheet and none of them is its own — `ownOfficeForms` is
+   * legitimately empty there. Nothing below may assume a one-to-one with
+   * `app.permit_types`, which is the filing's list and is shared by every
+   * office on it.
+   */
+  const ownOfficeForms = (app.office_forms ?? []).filter(
+    (f) => f.department_code === data.department.code,
   )
+  const otherOfficeForms = (app.office_forms ?? []).filter(
+    (f) => f.department_code !== data.department.code,
+  )
+  /** Every sheet this reader holds, own office first. */
+  const officeForms = [...ownOfficeForms, ...otherOfficeForms]
   const feeProfile = app.fee_profile ?? null
   const feeFacts = feeProfile ? feeProfileFacts(feeProfile) : []
   const feeLines = feeProfile?.lines ?? []
@@ -644,29 +694,63 @@ export function ReviewPage() {
   const editing = mode === 'edit' && !decided
 
   /*
+   * Does THIS OFFICE still owe a paperwork review on this filing?
+   *
+   * The one predicate this screen and the queue tabs both branch on, named
+   * once so it cannot be spelled two different ways in two places. It is
+   * `decided` read from the other end: this office's assignment is completed
+   * (or the filing was rejected out from under it) versus pending, in_progress
+   * or returned, which are the three AssignmentStatus cases that still want a
+   * decision from the officer sitting here.
+   *
+   * Deliberately says nothing about the FILING's status. That is the whole
+   * lesson of INS-1 below.
+   */
+  const owesReview = !decided
+
+  /*
    * ── The For Inspection screen ─────────────────────────────────────────────
    *
    * A filing waiting on a site visit gets its own, much smaller page, and
-   * returns before any of the review sheet below is built.
+   * returns before any of the review sheet below is built — but only for an
+   * office that has nothing left to review on it.
    *
-   * Why it needed one at all. A filing only REACHES `for_inspection` because
-   * every review assignment completed (WorkflowService::afterReviewProgress),
-   * so `completed_at` is always set by then and `decided` above is always true.
-   * This page therefore rendered its closed-review shape: a static green
-   * "Approved" that meant "the paperwork review is done" but sat beside an
-   * un-inspected permit reading as though the permit were granted, no controls
-   * of any kind, and 1,200 lines of read-only form opened flat. The client, in
-   * order: "why is the entire application form showing it should just be like
-   * the other ones where its just a box", "there's no thing to approve
-   * something that's for inspection", and on seeing a first pass that merely
+   * ── The premise this rested on, and why it is gone (INS-1) ────────────────
+   *
+   * This branch used to read `app.status === 'for_inspection'` and nothing
+   * else, on the strength of a docblock asserting that a filing only REACHES
+   * `for_inspection` because every review assignment completed, so `decided`
+   * was always true by the time control got here. Commit 5da4daa made that
+   * false: WorkflowService::afterReviewProgress now books the approving
+   * office's visit and flips the filing to `for_inspection` on the FIRST
+   * office's approval, leaving every other office's assignment `pending`.
+   *
+   * What followed was a deadlock, not a cosmetic slip. An office whose own
+   * review was still pending landed on this page — a panel of somebody else's
+   * visits, which `canAct` correctly refuses it — and so had no Approve and no
+   * Return anywhere in the product. No approval means scheduleInspectionFor
+   * never fires for that office, which means isFullyCleared never passes, which
+   * means the seven permits are never issued. BIZ-2026-00958 sat with five
+   * offices in exactly that state. The API never carried the block —
+   * AssignmentController::approve has no status guard at all — which is why
+   * every backend test passed straight over it.
+   *
+   * ── The rule now ──────────────────────────────────────────────────────────
+   *
+   * The review form appears if and only if THIS OFFICE still owes a review on
+   * this filing. Both states live on one filing at the same time, and that is
+   * the point rather than an edge case: on BIZ-2026-00958, BFP (completed) gets
+   * the compact box and CHO (pending) gets its review form, on the same
+   * `for_inspection` filing, in the same minute.
+   *
+   * That is also what keeps the client's two rejections honoured rather than
+   * reverted — "why is the entire application form showing it should just be
+   * like the other ones where its just a box", and, on a first pass that merely
    * folded the form behind a disclosure, "I can still see the application
-   * details. Please remove this."
-   *
-   * So the form is GONE here, not collapsed. `decided` was never wrong — this
-   * office's review IS finished — it was being asked a question it does not
-   * answer. What is outstanding is the inspection, which lives on the
-   * application rather than on this assignment, and it is now the only thing on
-   * the page apart from the progression rail the client asked to keep.
+   * details. Please remove this." Both were said from an office that HAD
+   * finished its review, and that is precisely the seat that still gets the box
+   * and nothing else. The form is not coming back for them; it is being
+   * returned to the offices that were never allowed to do the work.
    *
    * The layout is updated-gui/82.png: page title, the business so the officer
    * can confirm they opened the right row, a centred serif "Application Status"
@@ -674,11 +758,18 @@ export function ReviewPage() {
    * something — it is how an officer asks the owner about a finding, and
    * deleting the sheet must not delete that too.
    *
-   * Read off `app.status` rather than off the presence of inspections: a visit
-   * can exist on a filing that has already moved past inspection (a failed one
-   * stays on the record for good), and a filing can sit in `for_inspection`
-   * before anything is scheduled. The status is the thing that says what the
-   * office is waiting for.
+   * ── What would make this wrong later ──────────────────────────────────────
+   *
+   * Keying on `app.status` alone again, in either direction. And QueuePage's
+   * tab partition must stay this same predicate: if the queue decides "this
+   * office still owes a review" one way and this line decides it another, an
+   * officer clicks a row under For Approval and lands on a screen with no
+   * controls — which is the bug that was reported, restated.
+   *
+   * The `app.status` half of the test is read off the status rather than off
+   * the presence of inspections: a visit can exist on a filing that has already
+   * moved past inspection (a failed one stays on the record for good), and a
+   * filing can sit in `for_inspection` before anything is scheduled.
    *
    * Every other status falls straight through to the sheet, unchanged.
    *
@@ -686,7 +777,7 @@ export function ReviewPage() {
    * `loading` guard, so nothing below here is a hook and no render path can
    * skip one.
    */
-  if (app.status === 'for_inspection') {
+  if (app.status === 'for_inspection' && !owesReview) {
     return (
       <div>
         {backLink}
@@ -745,21 +836,48 @@ export function ReviewPage() {
   const feeValue = feeInput ?? String(app.fee_assessment?.total_amount ?? '')
 
   /*
-   * One group per permit type on this application that carries issuance dates.
-   * Prefilled from whatever the office already recorded; edits override.
+   * One group per issuance-date-bearing sheet THIS READER ACTUALLY HOLDS.
+   *
+   * This used to read `app.permit_types` — the filing's permit types, which
+   * every office on the filing shares — so a sanitary officer opening a filing
+   * that happens to carry an occupancy permit was shown OBO's "Building Permit
+   * Date Issued" and "FSEC Date Issued" inputs with a live Save dates button
+   * (SEP-3). They could type a real date and press it, and the API answered
+   * "This application is not yours." The filing WAS theirs; the sheet was not.
+   * A dead end rather than an auth hole — the server holds — but a dead end
+   * whose error message pointed at the wrong thing.
+   *
+   * Driving the panel off the office forms that ARRIVED puts it exactly where
+   * the Save will be accepted, because the two are the same rule read from two
+   * ends: `readableCode` decides both which sheets are serialised onto this
+   * payload and whether the PUT is allowed. BPLO holds
+   * `application.view_any_office`, so it keeps the panel on every sheet — that
+   * is coordination, and the server agrees with it rather than 403ing.
+   *
+   * It also fixes SEP-3's other half in passing. Once the payload is filtered,
+   * a foreign office reading `app.permit_types` would have found no saved sheet
+   * to prefill from and been handed EMPTY date inputs over a live Save — worse
+   * than before. There is now no group to render for them at all.
+   *
+   * `permit_type_name` is the sheet's own name; `app.permit_types` is consulted
+   * only as a fallback, and only ever for a code this reader already holds.
    */
-  const issuedGroups = app.permit_types
-    .filter((pt) => OFFICER_DATE_FIELDS[pt.code])
-    .map((pt) => {
-      const saved = officeForms.find((f) => f.permit_type_code === pt.code)?.form_data ?? {}
+  const issuedGroups = officeForms
+    .filter((form) => OFFICER_DATE_FIELDS[form.permit_type_code])
+    .map((form) => {
+      const saved = form.form_data ?? {}
+      const code = form.permit_type_code
       return {
-        code: pt.code,
-        name: pt.name,
-        fields: OFFICER_DATE_FIELDS[pt.code].map((field) => {
+        code,
+        name:
+          form.permit_type_name ??
+          app.permit_types.find((pt) => pt.code === code)?.name ??
+          code,
+        fields: OFFICER_DATE_FIELDS[code].map((field) => {
           const stored = saved[field.key]
           return {
             ...field,
-            value: issued[`${pt.code}.${field.key}`] ?? (typeof stored === 'string' ? stored : ''),
+            value: issued[`${code}.${field.key}`] ?? (typeof stored === 'string' ? stored : ''),
           }
         }),
       }
@@ -795,6 +913,21 @@ export function ReviewPage() {
     }
   }
 
+  /**
+   * The text behind Reject AND Return — one function, two endpoints.
+   *
+   * `popup` is the only thing that decides which: 'reject' ends the whole
+   * application (BPLO and admin only, `application.reject`), 'return' sends
+   * this office's assignment back for revision. Read that before changing
+   * either; a mistake here fires the strongest action in the system down the
+   * path meant for the recoverable one.
+   *
+   * `text` is the composer's textarea, which is now SEEDED from the Evaluator
+   * Remarks box rather than starting blank (SEP-6). It is still the composer's
+   * text that is sent, not the box's — the officer sees it, can edit it, and
+   * confirms it — so nothing is dispatched that was not on screen at the moment
+   * the button was pressed.
+   */
   async function sendRemark(text: string) {
     /*
      * The composer disables Confirm on an empty box, but the guard is here as
@@ -864,6 +997,87 @@ export function ReviewPage() {
       u.is_active &&
       u.department?.code === data.department.code,
   )
+
+  /*
+   * ── What Edit mode actually turns on, for THIS reader, on THIS filing ─────
+   *
+   * The banner used to say "fill in the office fields at the bottom of the
+   * sheet", and the client asked what it meant (SEP-5). Three things were wrong
+   * with it at once:
+   *
+   *  - the plural. For a sanitary officer on a filing with no occupancy permit
+   *    the entire editable surface of Edit mode is ONE text input, Evaluator
+   *    Remarks. "The office fields" promised a panel of work and delivered a
+   *    single box.
+   *  - the location instead of the name. "At the bottom of the sheet" is about
+   *    1,200 lines below the banner with no anchor (SEP-7), so the instruction
+   *    was a scavenger hunt.
+   *  - it never said WHY the applicant's answers are locked, which is the
+   *    question actually asked ("Can't I edit the form itself since I am on
+   *    edit mode?"), nor what to do instead.
+   *
+   * So the list is built from the same gates the controls themselves are drawn
+   * behind — one source, so a control that appears or disappears cannot leave
+   * the banner describing a screen that is not there. Read against the JSX
+   * below: Assessed Fee is `editing && canAdjustFee`, Evaluator Remarks is
+   * `editing` alone, an issuance-date group exists per sheet in `issuedGroups`,
+   * and Assign officer-in-charge is `canAssign && editing` with at least one
+   * officer in the department to pick.
+   *
+   * Evaluator Remarks is unconditional because Edit mode always draws it. If
+   * that ever stops being true, this list has to stop asserting it.
+   */
+  const liveFields: string[] = []
+  if (canAdjustFee) liveFields.push('Assessed Fee')
+  liveFields.push('Evaluator Remarks')
+  for (const group of issuedGroups) liveFields.push(`the ${group.name} issuance dates`)
+  if (canAssign && canListUsers && deptOfficers.length > 0) {
+    liveFields.push('Assign officer-in-charge')
+  }
+
+  /*
+   * Why the rest is locked, and what to do about it — the two sentences the
+   * banner was missing.
+   *
+   * The reason is not arbitrary and is worth stating: the sheet is the
+   * applicant's sworn declaration. They signed it (rendered further down) and
+   * consented to it under RA 10173, and the API enforces the same split —
+   * OfficeFormController lets the owner write the answers and the reviewing
+   * officer write only the issuance dates, with `array_diff_key` /
+   * `array_intersect_key` making it impossible for either to reach the other's
+   * keys. The remedy is Return: the applicant fixes their own answer.
+   */
+  const lockedNote =
+    'The applicant’s answers stay locked because the sheet is their signed declaration, consented to under RA 10173 — if one of them is wrong, return the filing and the applicant corrects it themselves.'
+
+  /*
+   * The one genuinely good sentence in the old copy, kept: an office's own
+   * refusal is not the same act as ending the filing for everybody. Six of the
+   * eight staff roles cannot reject at all, and they should learn that here
+   * rather than by hunting for a button that was never drawn for them.
+   */
+  const decisionNote = canReject
+    ? 'Rejecting ends the application for every office; returning sends it back to the applicant for revision.'
+    : 'Returning is how your office refuses this filing — ending the application outright is the BPLO’s decision.'
+
+  /*
+   * Named, and no claim about WHERE beyond what is true: most of these live in
+   * For Office Use Only, but Assign officer-in-charge is its own panel below
+   * it. The anchor after this sentence is what answers "where", so the sentence
+   * does not have to guess.
+   */
+  const fieldsNote =
+    liveFields.length === 1
+      ? `Edit mode. On this filing your office fills in one field — ${liveFields[0]} — and the decision buttons are at the top of the page.`
+      : `Edit mode. On this filing your office fills in ${liveFields.length} fields — ${listPhrase(liveFields)} — and the decision buttons are at the top of the page.`
+
+  const modeNote = decided
+    ? 'This review is closed. The page is a record of the application and the decision made on it.'
+    : editing
+      ? `${fieldsNote} ${lockedNote} ${decisionNote}`
+      : `View mode. Everything below is the application exactly as the applicant submitted it. Switch to Edit to fill in ${
+          liveFields.length === 1 ? liveFields[0] : `your office’s ${liveFields.length} fields`
+        } and record a decision.`
 
   const existingRemarks = [
     ...app.assignments
@@ -976,18 +1190,32 @@ export function ReviewPage() {
           {editing ? <PencilIcon /> : <EyeIcon size={16} />}
         </span>
         <span>
-          {decided
-            ? 'This review is closed. The page is a record of the application and the decision made on it.'
-            : editing
-              ? canReject
-                ? 'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve, return with remarks, or reject. Rejecting ends the application for every office; returning sends it back for revision.'
-                : /*
-                   * Said plainly rather than left to be discovered as a missing
-                   * button (item 80). Return IS this office's way of refusing,
-                   * and the reviewer should know that before hunting for Reject.
-                   */
-                  'Edit mode. The applicant’s answers stay locked. Fill in the office fields at the bottom of the sheet, then approve or return with remarks. Returning is how your office refuses this filing — ending the application outright is the BPLO’s decision.'
-              : 'View mode. Everything below is the application exactly as the applicant submitted it. Switch to Edit to fill in your office’s fields and record a decision.'}
+          {modeNote}
+          {/*
+           * The way there, not a description of where it is (SEP-7).
+           *
+           * A plain in-page anchor rather than a scroll handler: it works
+           * without JavaScript, it is in the tab order for free, and the
+           * browser moves focus to the target as well as the viewport, which a
+           * `scrollIntoView` call does not. The target carries `tabIndex={-1}`
+           * so it can receive that focus.
+           *
+           * Inside the live region on purpose — an `aria-live` announcement
+           * reads the region's text content, so keeping the link here keeps the
+           * whole banner one announceable string rather than splitting it.
+           */}
+          {!decided && (
+            <>
+              {' '}
+              <a
+                href="#for-office-use"
+                className="font-semibold text-royal underline underline-offset-2 hover:no-underline"
+              >
+                Go to For Office Use Only
+              </a>
+              .
+            </>
+          )}
         </span>
       </p>
 
@@ -1007,21 +1235,98 @@ export function ReviewPage() {
       <div className="flex items-start gap-6">
         {/* ── The form sheet ── */}
         <div className="min-w-0 flex-1 rounded-sm bg-white px-7 py-8 shadow-card sm:px-10">
+          {/*
+           * ── Whose review this is, at the top of the sheet (SEP-4) ─────────
+           *
+           * This read "Business Permit & Licensing Office · Admin Review" for
+           * every one of the seven offices, so a sanitary officer opened a
+           * sheet announcing itself as somebody else's, lettered A–E after
+           * somebody else's paper form, with their own four questions in
+           * Section D. That is most of why the client believed there was a leak
+           * on parts of this page where there is none: "I should only see the
+           * SANITARY PERMIT".
+           *
+           * The office name is the reader's own now. The BPLO form identity is
+           * not deleted, because it is TRUE and it is what the applicant
+           * actually filled in — it moves down to the form-reference line where
+           * it belongs, phrased as the source of the record rather than as the
+           * owner of the screen.
+           */}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
-                Business Permit &amp; Licensing Office · Admin Review
+                {data.department.name} · Application Review
               </p>
               <h2 className="mt-1 text-xl font-bold text-ink">
                 Application for {TYPE_TITLES[app.application_type] ?? app.application_type} Business Permit
               </h2>
-              <p className="mt-1 text-xs text-ink-muted">Form Ref: MCG-BPLO-FO-001 · v2.0</p>
+              <p className="mt-1 text-xs text-ink-muted">
+                Filed on the BPLO business permit form · Form Ref: MCG-BPLO-FO-001 · v2.0
+              </p>
             </div>
             <p className="text-sm text-ink">
               <span className="font-bold">Application No.</span> <span className="tnum">{app.tracking_id}</span>
             </p>
           </div>
           <div className="mt-4 border-b-2 border-royal" />
+
+          {/*
+           * ── The reader's own clearance, before anyone else's paperwork ────
+           *
+           * The office's own questionnaire used to sit in Section D, after two
+           * sections of BPLO registration data and one of documents — roughly
+           * 1,200 lines of another office's form before the four answers that
+           * ARE this officer's clearance. Sorting it first inside Section D was
+           * the right instinct at the wrong altitude, so it is hoisted out
+           * whole.
+           *
+           * Sections A, B, C and E stay exactly where they are and are NOT
+           * hidden. They are the applicant's own particulars and every office
+           * on the filing needs them: the address and barangay or the inspector
+           * cannot find the premises, the PSIC line which is precisely what
+           * CENRO reviews, the uploaded requirements, and the floor area CPDO's
+           * fee is charged per square metre of. "SANITARY PERMIT ONLY" taken
+           * literally deletes all of that; the workable reading is "lead with
+           * my office, stop showing me other offices' files", which is this
+           * block plus the server-side filter on `office_forms`.
+           *
+           * Absent for BPLO and admin, and correctly so: the BUSINESS permit
+           * type carries no office form, so BPLO has no sheet of its own to
+           * lead with and goes straight to the record it coordinates.
+           */}
+          {ownOfficeForms.map((form) => {
+            const entries = Object.entries(form.form_data ?? {})
+            return (
+              <section
+                key={form.permit_type_code}
+                className="mt-6 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4"
+                aria-label={`Your office’s form — ${form.permit_type_name ?? form.permit_type_code}`}
+              >
+                <p className="text-[11px] font-bold uppercase tracking-wide text-royal">
+                  Your office · {data.department.name}
+                </p>
+                <h2 className="mt-1 text-[15px] font-bold text-ink">
+                  {form.permit_type_name ?? form.permit_type_code} — the clearance you are deciding
+                </h2>
+                {entries.length === 0 ? (
+                  <p className="mt-3 text-sm text-ink-secondary">
+                    The applicant recorded no answers on your office’s form.
+                  </p>
+                ) : (
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                    {entries.map(([key, value]) => (
+                      <Field key={key} label={humanizeKey(key)} value={formValueText(value)} />
+                    ))}
+                  </div>
+                )}
+                <p className="mt-3 text-xs text-ink-muted">
+                  The rest of this sheet is the applicant’s own filing — address, line of business,
+                  uploaded requirements and fee declaration — which your office needs in order to
+                  decide this clearance.
+                </p>
+              </section>
+            )
+          })}
 
           {/*
             * Amendment from: — checklist items 82/84.
@@ -1217,17 +1522,37 @@ export function ReviewPage() {
             )}
           </section>
 
-          {/* D — Submitted office-form answers (per permit type) */}
+          {/*
+           * D — office-form answers other than the reader's own.
+           *
+           * Still lettered D so the sheet keeps matching the paper BPLO form it
+           * is a rendering of; renumbering A–E to close a gap would make every
+           * section reference in the office wrong.
+           *
+           * The reader's own sheet is NOT repeated here — it is the lead panel
+           * above. What is left is whatever else the payload carried, and for
+           * most readers that is now nothing at all: the server serialises only
+           * the sheets they may read, so a sanitary officer sees an empty
+           * Section D where they used to read CENRO's `owner_birthday` off
+           * another office's file, eight sections above a notice about RA 10173.
+           *
+           * Empty is therefore the ordinary case, not a fault, and the copy has
+           * to say which of the two it is — "the applicant did not fill any
+           * forms" would be a flat untruth on a six-clearance filing. BPLO and
+           * admin, who hold `application.view_any_office`, still get every
+           * sheet here, which is the coordination they need.
+           */}
           <section className="mt-9">
-            <SectionHeading letter="D">Office Form Answers</SectionHeading>
-            {officeForms.length === 0 ? (
+            <SectionHeading letter="D">Other Offices’ Form Answers</SectionHeading>
+            {otherOfficeForms.length === 0 ? (
               <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
-                The applicant did not fill any per-office forms for this application.
+                {ownOfficeForms.length > 0
+                  ? 'Nothing here. Your office’s form is at the top of this sheet, and the other offices’ forms on this filing are theirs to read.'
+                  : 'No per-office form on this application is yours to read.'}
               </p>
             ) : (
-              officeForms.map((form, formIndex) => {
+              otherOfficeForms.map((form, formIndex) => {
                 const entries = Object.entries(form.form_data ?? {})
-                const reviewingHere = form.department_code === data.department.code
                 return (
                   <div key={form.permit_type_code ?? formIndex}>
                     <div className={`mb-3 flex items-center gap-2 ${formIndex === 0 ? 'mt-1' : 'mt-6'}`}>
@@ -1235,9 +1560,9 @@ export function ReviewPage() {
                       <h3 className="text-sm font-bold text-ink">
                         {form.permit_type_name ?? form.permit_type_code}
                       </h3>
-                      {reviewingHere && (
-                        <span className="rounded-md bg-royal-tint px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-royal">
-                          Your office
+                      {form.department_code && (
+                        <span className="rounded-md bg-canvas px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink-secondary">
+                          {form.department_code}
                         </span>
                       )}
                     </div>
@@ -1342,16 +1667,37 @@ export function ReviewPage() {
             </div>
           </div>
 
-          {/* FOR OFFICE USE ONLY (p72/p76) */}
-          <div className="mt-8 rounded-lg border border-officeuse-border bg-officeuse px-5 py-5">
+          {/*
+           * FOR OFFICE USE ONLY (p72/p76).
+           *
+           * `id` + `tabIndex` are the destination of the Edit-mode banner's
+           * anchor (SEP-7). `tabIndex={-1}` is what lets the browser move
+           * FOCUS here and not merely the viewport — without it a keyboard user
+           * following the link keeps their focus 1,200 lines up and tabs from
+           * there. `scroll-mt-6` keeps the heading off the very top edge.
+           */}
+          <div
+            id="for-office-use"
+            tabIndex={-1}
+            className="mt-8 scroll-mt-6 rounded-lg border border-officeuse-border bg-officeuse px-5 py-5 focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+          >
             <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
               ✎ For Office Use Only {editing ? '· You are editing this panel' : '· Read only'}
             </p>
+            {/*
+             * This used to promise that "each field saves with its own button".
+             * Evaluator Remarks has no button and never did (SEP-6), so for a
+             * sanitary officer with no `fee.adjust` and no occupancy sheet the
+             * sentence described a panel containing ZERO save buttons while
+             * pointing at the only field in it.
+             */}
             <p className="mt-1 text-xs text-ink-secondary">
               {decided
                 ? 'What this office recorded during its review.'
                 : editing
-                  ? 'This panel is the only part of the sheet you can change, and each field saves with its own button.'
+                  ? canAdjustFee || issuedGroups.length > 0
+                    ? 'This panel is the only part of the sheet you can change. Evaluator Remarks travels with the decision you make at the top of the page; the other fields here each save with their own button.'
+                    : 'This panel is the only part of the sheet you can change. Evaluator Remarks is the only field in it, and it travels with the decision you make at the top of the page.'
                   : 'Switch the mode at the top of the page to Edit to fill these in.'}
             </p>
 
@@ -1404,8 +1750,31 @@ export function ReviewPage() {
                     placeholder="Notes for this application"
                     onChange={(e) => setRemarks(e.target.value)}
                   />
+                  {/*
+                   * SEP-6, decided rather than left ambiguous: the remark is
+                   * CARRIED THROUGH, not dropped.
+                   *
+                   * It used to promise it was "sent with the application when
+                   * you approve or return it", and only approve was true.
+                   * Return and Reject both go through `sendRemark`, which sends
+                   * the RemarkPopup's own textarea and never looked at this
+                   * state at all — so an officer who typed "Water potability
+                   * certificate is expired" here and pressed Return had it
+                   * silently discarded and was then asked to write the reason
+                   * again from scratch.
+                   *
+                   * Carrying it through beat withdrawing the field, because the
+                   * withdrawal loses real work: this is where an officer writes
+                   * the finding while reading the sheet, and the popup is
+                   * opened afterwards from the header. Both endpoints take
+                   * exactly one remarks slot, so the honest shape is to seed
+                   * the popup from this box and let the officer edit it before
+                   * confirming — nothing is sent behind their back, and nothing
+                   * they typed is thrown away.
+                   */}
                   <span className="mt-1.5 block text-xs text-ink-secondary">
-                    Sent with the application when you approve or return it.
+                    Sent with the application when you approve. On Return or Reject it fills in the
+                    reason box for you to check before it goes.
                   </span>
                 </label>
               ) : (
@@ -1449,8 +1818,18 @@ export function ReviewPage() {
                   )}
                   {editing && (
                     <span className="flex items-center gap-2">
+                      {/*
+                       * Named after the sheet it saves. `issuedGroups` is one
+                       * entry per issuance-date-bearing sheet the reader holds,
+                       * so BPLO — which holds all of them — can have several of
+                       * these on one filing, and a column of buttons all called
+                       * "Save dates" is a list a screen-reader user cannot
+                       * navigate. Same rule as the inspection cards and the
+                       * document rows.
+                       */}
                       <button
                         type="button"
+                        aria-label={`Save the ${group.name} issuance dates`}
                         onClick={() => saveIssuedDates(group)}
                         disabled={issuedSavingCode !== null}
                         className="rounded-md bg-royal px-3 py-2 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
@@ -1549,6 +1928,7 @@ export function ReviewPage() {
             <RemarkPopup
               action={popup}
               officer={officerName}
+              initialText={remarks}
               submitting={busy}
               error={actionError}
               onCancel={() => setPopup(null)}
@@ -1561,12 +1941,20 @@ export function ReviewPage() {
         </aside>
       </div>
 
-      {/* Small-screen remark composer (the aside is hidden below lg) */}
+      {/*
+       * Small-screen remark composer (the aside is hidden below lg).
+       *
+       * A second, independent instance rather than one moved by CSS, so it
+       * carries its own textarea state — which is why `initialText` has to be
+       * passed to both. Seeding only one of them would make the carried-through
+       * remark (SEP-6) appear on a desktop and vanish on a phone.
+       */}
       {popup && (
         <div className="fixed inset-x-4 bottom-6 z-40 lg:hidden">
           <RemarkPopup
             action={popup}
             officer={officerName}
+            initialText={remarks}
             submitting={busy}
             error={actionError}
             onCancel={() => setPopup(null)}

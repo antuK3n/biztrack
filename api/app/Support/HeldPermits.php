@@ -32,7 +32,23 @@ final class HeldPermits
     /** Document-type code prefix for a clearance the applicant already holds. */
     public const CODE_PREFIX = 'HELD_';
 
-    /** The single held copy on this filing for this clearance, if any. */
+    /**
+     * The single held copy on this filing for this clearance, if any.
+     *
+     * The predicate is `permit_type_id`, NOT the HELD_ document type — which is
+     * a weaker test than the name suggests, and worth knowing before a third
+     * writer of that column appears. Today exactly two paths set it
+     * (ClearanceController::storeHeld through `store` below, and
+     * DocumentController's `permit_type_id` parameter), both of them under a
+     * HELD_ type, so the two predicates select the same rows. `permit_type_id`
+     * is the one to keep: it is what makes the copy findable at all, and the
+     * document type is derived from it a line further down. A row carrying the
+     * column under some other type would be counted as a held copy here — and
+     * that is the correct failure, because everything downstream (the card's
+     * `submitted` state, the mutual exclusion with applying, PermitController's
+     * "your own copy" row) keys on the same column. The name to fix in that
+     * case is the other writer's, not this filter.
+     */
     public static function find(Application $application, PermitType $permitType): ?ApplicationDocument
     {
         return ApplicationDocument::where('application_id', $application->id)

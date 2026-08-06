@@ -724,10 +724,15 @@ export interface ProcessingTimeDepartment {
  * timestamp is what says so.
  *
  * When R could not be reached and no stored result existed, the server computed
- * the figures with its own PHP port instead. `source` is then 'local' and
- * `notice` carries a sentence to show. Never present those as R's output: two
- * implementations of the same statistics can drift, and hiding which one ran is
- * what would make the drift invisible.
+ * the figures with its own PHP port instead, and `source` is then 'local'. Never
+ * present those as R's output: two implementations of the same statistics can
+ * drift, and hiding which one ran is what would make the drift invisible.
+ *
+ * That guarantee is about this payload, not about the screen. `source`, `engine`,
+ * `engine_version` and `fallback_reason` always travel, and the exported PDF
+ * reports print `notice` verbatim because a filed document's reader cannot ask
+ * which engine ran. The screens do not render `notice` — see ComputedAt.tsx for
+ * why an engine boundary is not a fact a licensing officer can act on.
  */
 export type AnalyticsSource = 'r' | 'local'
 

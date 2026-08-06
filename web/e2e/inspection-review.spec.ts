@@ -70,8 +70,16 @@ test.use({ storageState: 'e2e/.auth/zoning.json' })
  * lands on the filing it named rather than on a list or a 404.
  */
 
-/** The one line that only ever appears on the full BPLO admin-review sheet. */
-const ADMIN_REVIEW_SHEET = 'Business Permit & Licensing Office · Admin Review'
+/**
+ * The one heading that only ever appears on the full review sheet.
+ *
+ * It used to be the header eyebrow, "Business Permit & Licensing Office · Admin
+ * Review". That string is gone: the sheet now names the office READING it
+ * (SEP-4), so it is a different sentence per account and useless as a marker.
+ * Section A's heading is the sheet's first lettered section, it is the same for
+ * every reader, and it cannot appear on the compact inspection box.
+ */
+const ADMIN_REVIEW_SHEET = 'Business Information & Registration'
 
 /**
  * This office's OWN queue rather than a hardcoded id, or the register.
@@ -121,8 +129,24 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
     const token = localStorage.getItem('biztrack.token.staff')
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
 
+    /*
+     * `status=completed` is load-bearing, not tidiness.
+     *
+     * `for_inspection` no longer implies this office has finished its review:
+     * since commit 5da4daa the FIRST inspecting office's approval flips the
+     * whole filing while every other office's assignment is still `pending`.
+     * The compact box is shown only to an office whose own review is done, so
+     * without this filter the helper could hand these tests a filing on which
+     * the reading office still owes a review — where the review sheet is
+     * CORRECTLY on screen and every assertion below would be measuring the
+     * wrong branch. See `openOwedReviewFiling` for the other half.
+     *
+     * It also happens to be the only state that can carry a visit at all:
+     * WorkflowService::scheduleInspectionFor books the office's visit on its
+     * approval, so an office that has not approved has nothing to inspect.
+     */
     const list = await fetch(
-      '/api/v1/assignments?application_status=for_inspection&per_page=20',
+      '/api/v1/assignments?application_status=for_inspection&status=completed&per_page=20',
       { headers },
     )
     const rows = (await list.json()).data as {
@@ -135,16 +159,28 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
 
     for (const row of rows) {
       const detail = await fetch(`/api/v1/applications/${row.application.id}`, { headers })
-      const app = (await detail.json()).data as {
+      /*
+       * A row this session cannot read in full is skipped, not fatal.
+       *
+       * `GET /applications/{id}` is scoped by ApplicationVisibility and can
+       * answer 403 or 404 for a filing whose assignment row is still in this
+       * office's queue — a business removed from the register, a filing whose
+       * routing changed between the two requests. The body then carries no
+       * `data` key and reading `.inspections` off it threw, taking down a
+       * FIXTURE SEARCH because one candidate was unreadable. The search should
+       * move on to the next candidate; only an empty search is a skip.
+       */
+      if (!detail.ok) continue
+      const app = ((await detail.json()) as { data?: {
         inspections: {
           status: string
           conducted_at: string | null
           department: { code: string } | null
         }[]
-      }
+      } }).data
       // A filing with no visit scheduled renders the empty-state copy instead
       // of cards, which is a different branch than the one under test.
-      if (app.inspections.length === 0) continue
+      if (!app || app.inspections.length === 0) continue
 
       // Mirrors `inspectionDone` in InspectionDecision.tsx: a visit is over
       // once it has been conducted, whatever the result was.
@@ -170,7 +206,69 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
   return assignmentId
 }
 
-test('a For Inspection filing opens on the decision box, not the application form', async ({
+/**
+ * A `for_inspection` filing on which this office's own review is still OPEN.
+ *
+ * The mirror of the helper above, and the state that had no test at all. It is
+ * an ordinary state, not a corner: on BIZ-2026-00958 five of seven offices were
+ * in it at once.
+ *
+ * No inspection is required of the filing here — an office that has not
+ * approved has not had a visit booked for it — so this looks only at the
+ * assignment.
+ */
+async function openOwedReviewFiling(page: Page): Promise<number | null> {
+  await page.goto('/staff/queue')
+
+  const assignmentId = await page.evaluate(async () => {
+    const token = localStorage.getItem('biztrack.token.staff')
+    const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
+
+    const list = await fetch(
+      '/api/v1/assignments?application_status=for_inspection&status=pending,in_progress,returned&per_page=20',
+      { headers },
+    )
+    const rows = (await list.json()).data as { id: number }[]
+    return rows[0]?.id ?? null
+  })
+
+  if (assignmentId === null) return null
+  await page.goto(`/staff/queue/${assignmentId}`)
+  await page.waitForLoadState('networkidle')
+  return assignmentId
+}
+
+/*
+ * ── The rule these two tests exist to pin ───────────────────────────────────
+ *
+ * The review form appears if and only if THIS OFFICE still owes a review on
+ * this filing. Two tests because both halves are live at once on a single
+ * filing, and a suite that asserted only one of them is exactly how the product
+ * got into the state below.
+ *
+ * ── What the assertion here used to say, and why it was wrong ──────────────
+ *
+ * There was one test, and it asserted that the review form is absent on ANY
+ * `for_inspection` filing, unconditionally — no regard for whether the reading
+ * office's own assignment was still pending. Its helper preferred a filing with
+ * an outstanding visit but fell back to `anyWithVisits`, so it could and did
+ * land on an office that still owed a review and still demand the form be gone.
+ *
+ * That assertion locked a DEADLOCK in. An office in that state had no Approve
+ * and no Return control anywhere in the product; without an approval
+ * `scheduleInspectionFor` never fires, without every approval `isFullyCleared`
+ * never passes, and the permits on that filing can never be issued by any
+ * action the product offers. `BIZ-2026-00958` sat there with five offices
+ * blocked. The API had no such guard — the block was purely client-side, which
+ * is why all 649 backend tests passed over it — so the only thing standing
+ * between the bug and a fix was this file.
+ *
+ * It has been rewritten to the real rule rather than relaxed to whatever passes.
+ * If a future change makes the form disappear from an office that still owes a
+ * review, the second test must go red — do not weaken it to make it green.
+ */
+
+test('an office that has FINISHED its review opens on the decision box, not the application form', async ({
   page,
 }) => {
   const assignmentId = await openForInspectionFiling(page)
@@ -188,12 +286,44 @@ test('a For Inspection filing opens on the decision box, not the application for
    * first attempt at this satisfied "the form does not open" with a <details>
    * disclosure and the client rejected it by name — a hidden form is still a
    * form on the page.
+   *
+   * Still unconditional, and still correct: this office HAS finished. That is
+   * what the helper's `status=completed` now guarantees and what the old
+   * version of this test never checked.
    */
-  await expect(page.getByText(ADMIN_REVIEW_SHEET)).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toHaveCount(0)
   await expect(page.locator('details')).toHaveCount(0)
 
   // "but the progress thingy is cool, keep that".
   await expect(page.getByText('Application progress')).toBeVisible()
+})
+
+test('an office that still OWES a review can reach its decision on a For Inspection filing', async ({
+  page,
+}) => {
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+
+  /*
+   * The review sheet, not the compact box. The filing's status says
+   * `for_inspection`; this office's assignment does not, and the assignment is
+   * what this screen answers to.
+   */
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toBeVisible()
+  await expect(page.locator('section[aria-label="Application status"]')).toHaveCount(0)
+
+  /*
+   * And the decision is REACHABLE, which is the whole point — the deadlock was
+   * not a missing sheet, it was a missing button. Edit mode is what turns the
+   * decision controls on (checklist item 54), so the test has to open it, the
+   * same as an officer would.
+   *
+   * Presence only. Pressing Approve books this office's visit and writes to a
+   * live filing; the header note on this file explains why nothing here writes.
+   */
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Return with remarks' })).toBeVisible()
 })
 
 test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
@@ -378,9 +508,13 @@ test('an old inspection deep link opens the filing it named', async ({ page }) =
     for (const row of rows) {
       if (!row.department) continue
       const detail = await fetch(`/api/v1/applications/${row.application.id}`, { headers })
-      const app = (await detail.json()).data as {
-        inspections: { id: number; department: { code: string } | null }[]
-      }
+      // Skip an unreadable candidate rather than dying on it — same reason as
+      // `openForInspectionFiling` above: this is a fixture search.
+      if (!detail.ok) continue
+      const app = ((await detail.json()) as {
+        data?: { inspections: { id: number; department: { code: string } | null }[] }
+      }).data
+      if (!app) continue
       // This office's OWN visit: GET /inspections/{id} answers 403 for anybody
       // else's (InspectionController::authorizeDepartment), which is a
       // different branch of the shim than the one under test.
@@ -417,17 +551,85 @@ test('a filing that is not for inspection still opens on the full review sheet',
   const assignmentId = await page.evaluate(async () => {
     const token = localStorage.getItem('biztrack.token.staff')
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
-    const list = await fetch('/api/v1/assignments?application_status=under_review&per_page=3', {
-      headers,
-    })
+    // Open review only: a completed assignment renders the sheet as a closed
+    // record with no Mode pills, and the Edit-mode assertions below need them.
+    const list = await fetch(
+      '/api/v1/assignments?application_status=under_review&status=pending,in_progress,returned&per_page=3',
+      { headers },
+    )
     const rows = (await list.json()).data as { id: number }[]
     return rows[0]?.id ?? null
   })
-  test.skip(assignmentId === null, 'no under_review filing on this office’s queue')
+  test.skip(assignmentId === null, 'no open under_review review on this office’s queue')
 
   await page.goto(`/staff/queue/${assignmentId}`)
   await page.waitForLoadState('networkidle')
 
-  await expect(page.getByText(ADMIN_REVIEW_SHEET)).toBeVisible()
+  await expect(page.getByRole('heading', { name: ADMIN_REVIEW_SHEET })).toBeVisible()
   await expect(page.locator('section[aria-label="Application status"]')).toHaveCount(0)
+
+  /*
+   * The sheet leads with the office READING it (SEP-4).
+   *
+   * It announced itself as "Business Permit & Licensing Office · Admin Review"
+   * to all seven offices, lettered A–E after BPLO's paper form, with the
+   * reader's own four-question clearance buried in Section D. That is most of
+   * why the client believed there was a leak on parts of this page where there
+   * is none — "I should only see the SANITARY PERMIT".
+   *
+   * Asserted against the account's real department rather than a literal, so it
+   * cannot pass by accident on a hardcoded office name.
+   */
+  const office = await page.evaluate(async () => {
+    const token = localStorage.getItem('biztrack.token.staff')
+    const res = await fetch('/api/v1/auth/me', {
+      headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    })
+    return ((await res.json()).data as { department: { name: string } | null }).department?.name
+  })
+  expect(office, 'an office reviewer always belongs to a department').toBeTruthy()
+  await expect(page.getByText(`${office} · Application Review`)).toBeVisible()
+
+  /*
+   * And the reader's own clearance is ABOVE section A, not buried in D.
+   *
+   * A sanitary officer used to read roughly 1,200 lines of BPLO registration
+   * data, documents and another office's sheets before reaching the four
+   * answers that are their actual clearance. Asserted as document ORDER rather
+   * than mere presence, because "it is on the page somewhere" was already true
+   * before the fix and is the thing the client complained about.
+   *
+   * Null when this filing carries no sheet for this office — BPLO's own
+   * BUSINESS permit type has no office form at all, and a filing need not
+   * include this office's clearance — which is a fixture gap, not a defect.
+   */
+  const leadsWithOwnOffice = await page.evaluate(() => {
+    const lead = document.querySelector('section[aria-label^="Your office"]')
+    if (!lead) return null
+    const sectionA = [...document.querySelectorAll('h2')].find(
+      (h) => h.textContent?.trim() === 'Business Information & Registration',
+    )
+    if (!sectionA) return false
+    return Boolean(lead.compareDocumentPosition(sectionA) & Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+  if (leadsWithOwnOffice !== null) {
+    expect(leadsWithOwnOffice, 'the office’s own form leads the sheet').toBe(true)
+  }
+
+  /*
+   * And it does not offer another office's issuance dates (SEP-3).
+   *
+   * The panel used to be keyed off the FILING's permit types, so any office
+   * opening a filing that carried an occupancy permit got OBO's date inputs and
+   * a live Save dates button that the API answered 403 to. It is keyed off the
+   * office-form sheets the payload actually carries now, which is the same rule
+   * the server gates the write on — so the control exists exactly where the
+   * save would be accepted.
+   *
+   * Scoped to a clearance office (this suite runs as CPDO): BPLO and admin hold
+   * `application.view_any_office`, may write every sheet, and legitimately keep
+   * the panel.
+   */
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await expect(page.getByRole('button', { name: /^Save the .+ issuance dates$/ })).toHaveCount(0)
 })

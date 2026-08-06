@@ -2,6 +2,7 @@
 
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationOfficeForm;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
@@ -345,6 +346,31 @@ function sharedFiling(string $name): array
     return fileRoutedApplication($name, ['BUSINESS', 'SANITARY', 'FSIC']);
 }
 
+/**
+ * Put real answers on these offices' sheets.
+ *
+ * Written straight to the table rather than through PUT /office-forms because
+ * the owner may only write while the filing is a draft or returned, and
+ * sharedFiling() has already submitted and paid — which is exactly the state the
+ * officer review sheet is read in. What is under test is which stored sheets a
+ * reader is handed, not the write path, which OfficeScopingTest already covers
+ * two cases below.
+ *
+ * @param  list<string>  $permitCodes
+ */
+function storeOfficeSheets(int $applicationId, array $permitCodes): void
+{
+    foreach ($permitCodes as $code) {
+        ApplicationOfficeForm::create([
+            'application_id' => $applicationId,
+            'permit_type_id' => PermitType::where('code', $code)->value('id'),
+            // Keyed by code so a leak names the office it came from in the
+            // failure output, rather than just a count that is one too high.
+            'form_data' => ['establishment_name' => "{$code} answers"],
+        ]);
+    }
+}
+
 it('hides another office’s requirement on a filing both offices share', function () {
     $app = sharedFiling('Item111 Requests Cafe');
 
@@ -403,6 +429,86 @@ it('shows an office only its own form sheet on a filing both offices share', fun
 
     // The applicant wrote every one of these sheets and keeps all of them.
     expect($codes('owner@biztrack.local'))->toContain('SANITARY')->toContain('FSIC');
+});
+
+/*
+ * The case above asserts the right thing about the WRONG ENDPOINT (SEP-1).
+ *
+ * It only ever calls `GET /applications/{id}/office-forms`, and it has passed
+ * since item 111 shipped. The officer review sheet does not use that endpoint.
+ * It reads office forms out of the assignment payload — `GET /assignments/{id}`
+ * → ApplicationResource — which carried no filter at all, so the one screen the
+ * client actually approves filings on was the one screen the fix never reached.
+ * Same reader, same filing, two endpoints, two answers.
+ *
+ * Verified against the register before the fix: `sanitary@` on `/assignments/10`
+ * received SANITARY *and* BFP's FSIC, and on a seven-office filing the CHO
+ * officer's payload carried CENRO's `owner_birthday` — a date of birth, rendered
+ * eight sections below an RA 10173 consent notice.
+ *
+ * `grep office_forms api/tests/` returned nothing before these two cases
+ * existed, which is the lesson: the endpoint an assertion names matters as much
+ * as what it asserts, and a regression test for a read leak has to be pointed at
+ * the payload the browser actually loads.
+ */
+it('shows an office only its own form sheet in the assignment payload it actually loads', function () {
+    $app = sharedFiling('Item111 Assignment Payload Cafe');
+    storeOfficeSheets($app['id'], ['SANITARY', 'FSIC']);
+
+    // The codes THIS office reads off the assignment it opens in its own queue.
+    $codesOn = function (string $email, string $departmentCode) use ($app) {
+        $assignmentId = ApplicationAssignment::where('application_id', $app['id'])
+            ->whereHas('department', fn ($d) => $d->where('code', $departmentCode))
+            ->value('id');
+
+        return collect(
+            test()->withHeaders(authAs($email))
+                ->getJson("/api/v1/assignments/{$assignmentId}")
+                ->assertOk()
+                ->json('data.application.office_forms')
+        )->pluck('permit_type_code');
+    };
+
+    // The client's example — "sanitary accounts can only see sanitary permits,
+    // and fire accounts can only see fire" — on the endpoint that leaked it.
+    expect($codesOn('sanitary@biztrack.local', 'CHO'))->toContain('SANITARY')
+        ->and($codesOn('sanitary@biztrack.local', 'CHO'))->not->toContain('FSIC');
+    expect($codesOn('fire@biztrack.local', 'BFP'))->toContain('FSIC')
+        ->and($codesOn('fire@biztrack.local', 'BFP'))->not->toContain('SANITARY');
+
+    // BPLO holds application.view_any_office and coordinates the other offices,
+    // so it keeps every sheet. Closing the leak must not close this.
+    expect($codesOn('bplo@biztrack.local', 'BPLO'))
+        ->toContain('SANITARY')->toContain('FSIC');
+});
+
+it('keeps the applicant’s shared particulars on every office’s review sheet', function () {
+    /*
+     * The other half of the fix, and the half that is easy to break next.
+     *
+     * "SANITARY PERMIT ONLY" cannot be taken literally: it would delete the
+     * address and barangay (the inspector could not then find the premises), the
+     * PSIC line of business (CENRO reviews exactly that), the uploaded
+     * requirements and the floor area CPDO's fee is computed from. Those are the
+     * APPLICANT's own particulars, not another office's file. Only the
+     * per-office questionnaires are scoped — if a later change starts stripping
+     * the shared sheet as well, this goes red and should.
+     */
+    $app = sharedFiling('Item111 Shared Sheet Cafe');
+
+    $assignmentId = ApplicationAssignment::where('application_id', $app['id'])
+        ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
+        ->value('id');
+
+    $payload = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson("/api/v1/assignments/{$assignmentId}")->assertOk()->json('data.application');
+
+    expect($payload['business']['address']['line1'])->not->toBeEmpty()
+        ->and($payload['business']['address']['barangay'])->not->toBeNull()
+        ->and($payload['business']['lines'])->not->toBeEmpty()
+        // The sanitary officer still needs to know this filing also carries
+        // FSIC, even though the FSIC ANSWERS are not theirs to read.
+        ->and(collect($payload['permit_types'])->pluck('code'))->toContain('FSIC');
 });
 
 it('will not let an office record an issuance date on another office’s sheet', function () {

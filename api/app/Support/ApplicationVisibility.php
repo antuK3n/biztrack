@@ -43,6 +43,67 @@ final class ApplicationVisibility
         return ! self::readsEveryOffice($user) && $user->hasPermission(self::VIEW_ALL);
     }
 
+    /**
+     * May this reader see ONE office's form sheet? (checklist item 111)
+     *
+     * canView() above answers the coarse question — may you open this filing at
+     * all. This answers the finer one: a six-clearance filing is routed to six
+     * offices, so all six pass the coarse check, and each was then handed all
+     * six questionnaires. The sanitary officer could read the fire office's
+     * FSIC answers, and on a seven-office filing the CHO officer's payload
+     * carried CENRO's `owner_birthday` — a date of birth, on a screen that
+     * prints an RA 10173 consent notice eight sections earlier.
+     *
+     * This lives here, and not in the controller where it was born, because it
+     * had TWO readers and only one of them was applying it. The item-111 fix
+     * put the rule inside `OfficeFormController::readableCode`, which gates
+     * `GET /applications/{id}/office-forms`. The officer's review sheet does not
+     * call that endpoint — it reads office forms out of
+     * `GET /assignments/{id}` → ApplicationResource, which had no filter at all.
+     * Same user, same filing, two endpoints, two answers. A rule that is a
+     * private method on one of its two consumers is a rule the other consumer
+     * cannot obey; hence one predicate, in the class that already owns "who may
+     * read what".
+     *
+     * The boundary is the permit type's issuing department: the FSIC sheet
+     * belongs to whoever issues FSIC. Three readers keep everything:
+     *
+     *  - the applicant, because every one of these sheets is their own answers.
+     *    They fill all six in the wizard; hiding them would break the filing;
+     *  - BPLO and the super admin (ANY_OFFICE), who coordinate and audit across
+     *    offices by design;
+     *  - the office that issues the clearance the sheet is for.
+     *
+     * Fails closed on a null issuing department — an unrecognised permit code,
+     * or a sheet whose type was deleted — because `department_id !== null` is
+     * checked on the reader's side of the comparison, not the sheet's. A
+     * reviewer with no department matches nothing, the same posture scope()
+     * takes.
+     *
+     * This is about OFFICE FORMS ONLY. It is not a licence to strip the shared
+     * sheet: the address, barangay, PSIC line, products, uploaded requirements
+     * and floor area are the APPLICANT's particulars and every office on the
+     * filing needs them to work — CENRO reviews the PSIC line, CPDO's fee is per
+     * square metre, and an inspector who cannot read the address cannot find the
+     * premises.
+     */
+    public static function readsOfficeSheet(?User $user, ?int $issuingDepartmentId): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+        if (self::readsEveryOffice($user)) {
+            return true;
+        }
+        // The applicant is the author of every sheet on their own filing.
+        if (! $user->hasPermission(self::VIEW_ALL)) {
+            return true;
+        }
+
+        return $user->department_id !== null
+            && $user->department_id === $issuingDepartmentId;
+    }
+
     /** May this user read this application at all? */
     public static function canView(User $user, Application $application): bool
     {

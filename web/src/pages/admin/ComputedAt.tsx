@@ -5,34 +5,65 @@ import { analytics } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
 
 /*
- * When these figures were computed, by what, and a way to recompute them now.
+ * When these figures were computed, and a way to recompute them now.
  *
  * Every analytics screen carries this, and it is not decoration. The statistics
- * run in R as a separate program, in batch: `php artisan analytics:refresh` pushes
- * register rows to R and stores the result, and a page load reads the stored
- * result. So the numbers on screen are as fresh as the last refresh and no
- * fresher.
+ * are computed in batch: `php artisan analytics:refresh` recomputes them and
+ * stores the result, and a page load reads the stored result. So the numbers on
+ * screen are as fresh as the last refresh and no fresher.
  *
  * The case that makes this necessary: a tester files an application, opens the
  * dashboard, and does not see it. That is the designed behaviour, not a bug — and
  * without a visible "computed 6 hours ago" it reads as a bug. Saying it plainly
  * costs one line and saves the misread.
  *
- * Three states, deliberately distinguished rather than collapsed into one badge:
+ * ## What this line stopped saying, and why
  *
- *   R, fresh    one quiet line — the normal case should not compete with the data
- *   R, stale    the figures outlived a refresh cycle, so something is not running
- *   local       R was unreachable, so the PHP fallback computed these
+ * It used to lead with "Computed locally, not by R." in an orange panel, followed
+ * by a sentence from the server explaining that the requested window was not one
+ * of the precomputed windows, so the R service had no result for it. The client
+ * asked for that class of copy to go. Three separate things were wrong with it:
  *
- * The last must never be silent. The fallback is a second implementation of the
- * same statistics, and two implementations can drift; a screen that presented
- * fallback output as R's would make that drift invisible. AnalyticsParityTest keeps
- * the two honest, this line keeps them distinguishable.
+ *  1. **It was addressed to nobody on screen.** A BPLO officer did not choose to
+ *     run the statistics in a second process. They cannot add a window to
+ *     config/analytics.php, and pressing Refresh would not have helped, because
+ *     an unprecomputed window is a configuration answer and not an outage. A
+ *     reader who cannot act on a fact should not be handed it.
+ *  2. **It fired on ordinary use.** Only one dashboard window was precomputed
+ *     while the dropdown offered five, so four of five choices raised an orange
+ *     panel — and nothing was wrong in any of them. A warning that fires on the
+ *     majority of a screen's own options has stopped carrying information. That
+ *     half was fixed where it was caused, in config/analytics.php, which now
+ *     mirrors the selectors; rewording alone could not have fixed it.
+ *  3. **It named an implementation split as if it were a fault.** Both engines
+ *     compute the same statistics from the same rows.
  *
- * Colour carries no meaning on its own here. The fallback state is a tinted panel
- * with a text label, not an orange word: #f2a33c on white is about 2:1 and would
- * miss the WCAG 2.1 AA target PRODUCT.md sets, and a reader who cannot separate
- * the hues would lose the distinction entirely.
+ * ## What survives, and where
+ *
+ * The provenance guarantee is real and is untouched: `meta.source`,
+ * `meta.engine`, `meta.engine_version` and `meta.fallback_reason` are on every
+ * response, AnalyticsParityTest holds the two implementations to the same
+ * fixtures, and the exported PDF reports name the engine in full — a document
+ * gets forwarded and quoted by someone who cannot ask. None of that needs a
+ * banner above a dashboard. Provenance stayed; the announcement went.
+ *
+ * ## Three states, still deliberately distinguished
+ *
+ *   fresh       one quiet line with the timestamp — the normal case should not
+ *               compete with the data it qualifies
+ *   stale       the figures outlived a refresh cycle, so the age is called out
+ *   unrefreshed the figures have never been computed by the batch job, and the
+ *               Refresh button beside this line is exactly the fix
+ *
+ * The third is the only one that gets a panel, because it is the only one that
+ * names something the reader can do. Every other fallback reason renders as the
+ * ordinary quiet line: the figures are correct and current, which is all the
+ * timestamp ever claimed.
+ *
+ * Colour carries no meaning on its own here. The unrefreshed state is a tinted
+ * panel with a text label, not an orange word: #f2a33c on white is about 2:1 and
+ * would miss the WCAG 2.1 AA target PRODUCT.md sets, and a reader who cannot
+ * separate the hues would lose the distinction entirely.
  */
 
 /**
@@ -97,17 +128,41 @@ export function ComputedAt({ meta, onRefreshed }: { meta: AnalyticsProvenance; o
     </time>
   )
 
-  // role="status" rather than role="alert": this qualifies the figures, it does
-  // not interrupt. Nothing is broken and nothing is asked of the reader.
-  if (meta.source === 'local') {
+  /*
+   * The one case that earns a panel.
+   *
+   * `not_yet_refreshed` means this view IS one of the precomputed ones
+   * (config/analytics.php) and the batch job has simply not stored a result for
+   * it yet, or its last attempt failed. That is the only fallback reason where
+   * the reader is looking at something they can change, and the control that
+   * changes it is the button on this very line — so the panel and the button
+   * are one statement, not a warning followed by an unrelated affordance.
+   *
+   * The other three reasons (`no_r_endpoint`, `r_disabled`,
+   * `window_not_precomputed`) describe how the server is configured. Pressing
+   * Refresh will not move any of them, and none of them means a figure is
+   * wrong, so they fall through to the quiet line below with no announcement at
+   * all. `window_not_precomputed` in particular is now almost entirely Renewal
+   * Risk's filtered and paginated requests, whose key space cannot be
+   * precomputed by design — flagging those would be flagging the officer's own
+   * filters as a fault.
+   *
+   * `meta.notice` is deliberately not rendered anywhere here. It is written for
+   * the PDF export, which has the opposite need — see AnalyticsResolver's
+   * noticeFor and resources/views/pdf/partials/local-notice.blade.php.
+   *
+   * role="status" rather than role="alert": this qualifies the figures, it does
+   * not interrupt. Nothing is broken.
+   */
+  if (meta.fallback_reason === 'not_yet_refreshed') {
     return (
       <div
         role="status"
         className="mb-5 rounded-lg border border-s-orange bg-s-orange-tint px-4 py-3 text-sm text-ink"
       >
-        <span className="font-semibold">Computed locally, not by R.</span>{' '}
+        <span className="font-semibold">These figures have not been recomputed yet.</span>{' '}
         <span className="text-ink-secondary">
-          {meta.notice} These figures were computed {when} to answer this request.
+          They were worked out {when}, for this page only.
         </span>
         {onRefreshed && (
           <>
@@ -121,14 +176,42 @@ export function ComputedAt({ meta, onRefreshed }: { meta: AnalyticsProvenance; o
 
   return (
     <p role="status" className="mb-5 text-sm text-ink-muted">
-      Computed {when} by R{meta.engine_version ? ` ${meta.engine_version}` : ''}
-      <span aria-hidden="true"> · </span>
-      updates when the analytics refresh runs, not on page load
+      {/*
+       * The timestamp, and nothing about which process produced it. `by R 4.2.1`
+       * stood here; an R patch version is not a fact a licensing officer can use,
+       * and it travels on the exported PDF where it is genuinely evidence.
+       */}
+      Computed {when}
+      {/*
+       * Only a stored result can be out of date with the register — a locally
+       * computed one was derived from the rows as they are right now. So the
+       * "does not change on reload" qualifier belongs to the snapshot case only,
+       * and stating it for a live computation would be false.
+       *
+       * It is phrased as a fact about the figures rather than about the job that
+       * produces them ("updates when the analytics refresh runs" named an
+       * artisan command through the UI). It survives at all because the misread
+       * in this file's docblock — file an application, open the dashboard, do
+       * not see it — is a question about the figures, and the timestamp alone
+       * only half answers it.
+       */}
+      {meta.source === 'r' && (
+        <>
+          <span aria-hidden="true"> · </span>
+          they change only when they are recomputed, not when you reload
+        </>
+      )}
+      {/*
+       * The age, without the diagnosis. "the scheduled refresh may not be
+       * running" was a hypothesis about server-side cron offered to a reader
+       * with no access to it. How old the figures are is theirs to weigh; why
+       * the job did not run is for a monitoring channel.
+       */}
       {meta.stale && (
         <>
           {' '}
           <span className="rounded bg-s-orange-tint px-2 py-0.5 font-semibold text-ink">
-            Over {meta.stale_after_hours} hours old — the scheduled refresh may not be running.
+            Over {meta.stale_after_hours} hours old
           </span>
         </>
       )}

@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
+use App\Support\ApplicationVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -75,13 +76,47 @@ class ApplicationResource extends JsonResource
                 ? DocumentResource::collection($this->documents)
                 : [],
             'fee_profile' => $this->fee_profile,
+            /*
+             * Per-office questionnaires, filtered to the sheets THIS reader
+             * owns (SEP-1). See ApplicationVisibility::readsOfficeSheet().
+             *
+             * This block served every office's answers to every office. The
+             * per-office rule was written for `GET /applications/{id}/office-forms`
+             * and wired only into OfficeFormController; the officer's review
+             * sheet reads office forms from `GET /assignments/{id}`, which
+             * resolves this resource, so the one screen the client actually
+             * approves filings on was the one screen the fix never reached.
+             * Verified before the fix: `sanitary@` on `/assignments/10` received
+             * SANITARY and BFP's FSIC; on a seven-office filing the CHO
+             * officer's payload carried CENRO's `owner_birthday`.
+             *
+             * Filtered in the RESOURCE and not at AssignmentController's
+             * eager-load, though either would have closed today's leak. The
+             * eager-load fix is narrower and that is precisely its weakness: it
+             * protects the one caller that exists, and the next caller to write
+             * `->load('officeForms')` — a PDF export, a new officer screen —
+             * reopens the hole with no test failing. Here, a caller has to load
+             * the relation to get anything at all, and whatever it loads is
+             * already scoped to the reader.
+             *
+             * Only office_forms is filtered. Sections A/B/C/E of the sheet — the
+             * address, barangay, PSIC line, products, uploaded requirements,
+             * floor area — are the applicant's own particulars, shared by every
+             * office on the filing because every office needs them to do its
+             * job. Do not extend this filter over them.
+             */
             'office_forms' => $this->relationLoaded('officeForms')
-                ? $this->officeForms->map(fn ($form) => [
-                    'permit_type_code' => $form->permitType?->code,
-                    'permit_type_name' => $form->permitType?->name,
-                    'department_code' => $form->permitType?->department?->code,
-                    'form_data' => $form->form_data,
-                ])->values()
+                ? $this->officeForms
+                    ->filter(fn ($form) => ApplicationVisibility::readsOfficeSheet(
+                        $request->user(),
+                        $form->permitType?->issuing_department_id,
+                    ))
+                    ->map(fn ($form) => [
+                        'permit_type_code' => $form->permitType?->code,
+                        'permit_type_name' => $form->permitType?->name,
+                        'department_code' => $form->permitType?->department?->code,
+                        'form_data' => $form->form_data,
+                    ])->values()
                 : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
                 'line_items' => $this->feeLineItems($request),

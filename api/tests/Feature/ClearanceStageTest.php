@@ -4,6 +4,7 @@ use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationDocument;
+use App\Models\ApplicationOfficeForm;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\FeeAssessment;
@@ -522,6 +523,174 @@ it('keeps applying and submitting mutually exclusive', function () {
     ])->assertCreated();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
+});
+
+/*
+ * The refusal above is right; for four days it was also unactionable — CLR-1.
+ *
+ * It told the applicant to withdraw, and 9e30b44 had removed every control that
+ * could. The test directly above passed throughout, because it recovers by
+ * calling DELETE /clearances/SANITARY/apply itself — an endpoint with no caller
+ * on any screen. It proved the escape existed at the HTTP layer, which was true
+ * and irrelevant to a person holding a mouse.
+ *
+ * So these are the same two endpoints in the same order, asserted as the SWITCH
+ * the clearance card now performs rather than as a recovery step inside a test.
+ * Both directions, because the asymmetry was the defect: held → applied has
+ * always resolved itself in one click, and applied → held was impossible.
+ */
+it('lets an applicant switch from applying for a clearance to filing their own copy', function () {
+    $app = draftClearanceApplication();
+    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
+
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+
+    // What the Submit dialog does on an applied card: withdraw, then upload.
+    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    $body = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
+    ])->assertCreated()->json();
+
+    expect($body['data']['state'])->toBe('submitted')
+        ->and($body['data']['held_document']['name'])->toBe('sanitary.pdf')
+        ->and($app->fresh()->permitTypes->pluck('code'))->not->toContain('SANITARY');
+
+    // And back again — what Apply does over an uploaded copy, once the
+    // applicant has agreed to lose the file.
+    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held")->assertOk();
+    $back = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")
+        ->assertOk()->json();
+
+    expect($back['data']['state'])->toBe('applied')
+        ->and($back['data']['held_document'])->toBeNull()
+        ->and(ApplicationDocument::where('application_id', $app->id)
+            ->where('permit_type_id', $sanitary->id)->count())->toBe(0);
+
+    // The filing is billed for exactly the leg it ended on.
+    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
+    expect(topOrderLabels($app))->toContain('sanitary inspection fee');
+});
+
+/*
+ * The invariant the switch must not spend, asserted as a count.
+ *
+ * No filing in the register has ever carried both an `application_permit_types`
+ * row and an `application_documents.permit_type_id` row for the same clearance,
+ * and everything downstream depends on that: FeeCalculator bills the permit-type
+ * side, routeToDepartments raises an assignment from it, approveAndIssue turns
+ * it into a Permit — a legal instrument that would then sit beside the
+ * applicant's own copy of the same certificate on their profile.
+ *
+ * The switch is two guarded requests rather than one endpoint taught to write
+ * both sides, so the state between them is "neither", never "both". This walks
+ * the whole sequence and counts after every step, because a fix that made
+ * storeHeld auto-withdraw internally would pass every test above and could
+ * still leave both rows if its guards and unapply's ever drifted apart.
+ */
+it('never leaves a filing holding both an application and a copy of one clearance', function () {
+    $app = draftClearanceApplication();
+    $sanitary = PermitType::where('code', 'SANITARY')->firstOrFail();
+
+    $both = function () use ($app, $sanitary) {
+        $applied = $app->fresh()->permitTypes->contains(fn ($pt) => $pt->id === $sanitary->id);
+        $held = ApplicationDocument::where('application_id', $app->id)
+            ->where('permit_type_id', $sanitary->id)->exists();
+
+        return $applied && $held;
+    };
+
+    expect($both())->toBeFalse();
+
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    expect($both())->toBeFalse();
+
+    // The forbidden order, refused: upload while still applied.
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
+    ])->assertStatus(422);
+    expect($both())->toBeFalse();
+
+    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
+    ])->assertCreated();
+    expect($both())->toBeFalse();
+
+    // The other forbidden order, refused: apply while a copy is on file.
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
+    expect($both())->toBeFalse();
+});
+
+/*
+ * The first leg of the switch can be refused, and then the second must not run.
+ *
+ * The card withdraws before it uploads for exactly this reason: `unapply` holds
+ * three guards `storeHeld` does not — nothing issued for this type, the office
+ * has not started, and the business record is still there to re-price against.
+ * If an auto-withdraw were ever folded into `storeHeld`, this is the assertion
+ * that would go red, because the copy would be filed on a clearance the
+ * applicant is not allowed to take back.
+ */
+it('will not file a copy of a clearance whose office has already started work', function () {
+    $app = draftClearanceApplication();
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+
+    ApplicationAssignment::create([
+        'application_id' => $app->id,
+        'department_id' => Department::where('code', 'CHO')->firstOrFail()->id,
+        'status' => 'in_progress',
+        'assigned_at' => now(),
+    ]);
+
+    authAs('owner@biztrack.local');
+    $this->deleteJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 20, 'application/pdf'),
+    ])->assertStatus(422);
+
+    expect($app->fresh()->permitTypes->pluck('code'))->toContain('SANITARY');
+});
+
+/*
+ * CLR-2 — withdrawing takes the office sheet off the filing, and keeps the words.
+ *
+ * Applying inserts that clearance's sheet into the wizard as a mandatory step
+ * (`selectedOfficeCodes` is derived from the rows whose state is `applied`), and
+ * MARKET's sheet requires a market name and a stall number. With no way to
+ * withdraw, five real drafts carrying MARKET without a MARKET sheet could not
+ * reach Review & Submit at all — the applicant had to invent a market they do
+ * not trade from, or cancel the whole filing.
+ *
+ * Two halves, and the second is why withdrawing needs no confirmation: the step
+ * goes (the row is no longer `applied`), and the saved answers do not.
+ */
+it('drops the office form step when a clearance is withdrawn, without discarding the answers', function () {
+    $app = draftClearanceApplication();
+    $market = PermitType::where('code', 'MARKET')->firstOrFail();
+
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/MARKET/apply")->assertOk();
+    $this->putJson("/api/v1/applications/{$app->id}/office-forms/MARKET", [
+        'form_data' => ['market_name' => 'Malabon Central Market', 'stall_no' => 'B-14'],
+    ])->assertOk();
+
+    $body = $this->deleteJson("/api/v1/applications/{$app->id}/clearances/MARKET/apply")
+        ->assertOk()->json();
+
+    // No longer `applied`, so the wizard spawns no Market Clearance step and
+    // Review & Submit is reachable again.
+    expect($body['data']['state'])->toBe('available')
+        ->and($app->fresh()->permitTypes->pluck('code'))->not->toContain('MARKET');
+
+    $saved = ApplicationOfficeForm::where('application_id', $app->id)
+        ->where('permit_type_id', $market->id)->first();
+
+    expect($saved)->not->toBeNull()
+        ->and($saved->form_data['stall_no'])->toBe('B-14');
+
+    // Re-applying finds them still there — one click back, nothing retyped.
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/MARKET/apply")->assertOk();
+    expect(ApplicationOfficeForm::where('application_id', $app->id)
+        ->where('permit_type_id', $market->id)->count())->toBe(1);
 });
 
 // --- issuance is no longer gated on money ------------------------------------

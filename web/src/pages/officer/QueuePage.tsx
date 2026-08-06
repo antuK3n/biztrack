@@ -79,9 +79,19 @@ const PAYMENT_STATUSES = ['submitted', 'pending_payment'] as const
  * pre-decision status except draft now has a tab, and draft belongs out — an
  * unfiled draft is not an officer's work.
  */
-const APPROVAL_STATUSES = ['under_review', 'returned'] as const
-/** Statuses on the inspection/approved side. */
-const INSPECTION_STATUSES = ['for_inspection', 'approved', 'issued'] as const
+const APPROVAL_STATUSES = ['under_review', 'returned', 'for_inspection'] as const
+/**
+ * Statuses on the inspection/approved side, for a filing this office has
+ * already signed off.
+ *
+ * `under_review` is in here as well as in APPROVAL_STATUSES, and that is not a
+ * duplicate — see the note on OPEN_ASSIGNMENT_STATUSES below. The two lists are
+ * never read on their own: each is paired with an assignment-status filter, and
+ * between them those two filters partition this office's work with nothing
+ * falling between. Same filing, same status, opposite sides of the partition
+ * depending on whether the office reading it still owes a review.
+ */
+const INSPECTION_STATUSES = ['under_review', 'for_inspection', 'approved', 'issued'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   payment: PAYMENT_STATUSES,
@@ -93,6 +103,32 @@ const TAB_LABEL: Record<Tab, string> = {
   payment: 'Pending Payment',
   approval: 'For Approval',
   inspection: 'For Inspection',
+}
+
+/**
+ * What a status MEANS inside the tab it is being offered in.
+ *
+ * The Filter dropdown lists the tab's own statuses, and since the two
+ * assignment tabs overlap (see INSPECTION_STATUSES) the same filing status can
+ * appear in both. `applicationStatusMeta` labels it the same way in each,
+ * because it describes the FILING and knows nothing about which office is
+ * reading — so an officer would see "For Approval" offered inside the For
+ * Inspection tab and reasonably read it as a bug.
+ *
+ * These labels say what picking it narrows to from this seat. Deliberately only
+ * the two entries the overlap introduced — everything else keeps the shared
+ * filing label, which is right where the two readings agree, and renaming a
+ * status that was already unambiguous would move a control out from under the
+ * tests that press it by name.
+ */
+const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
+  payment: {},
+  approval: {
+    for_inspection: 'Waiting on you · another office booked an inspection',
+  },
+  inspection: {
+    under_review: 'You have approved · other offices still reviewing',
+  },
 }
 
 /**
@@ -110,12 +146,58 @@ const TAB_LABEL: Record<Tab, string> = {
  * out. `returned` stays in: the office sent it back and the filing comes to it
  * again when the applicant answers, so it is still that office's open work.
  *
- * Only the approval tab uses this, and Pending Payment must never adopt it: an
- * unrouted filing matches none of these states, which is precisely how the eight
- * unpaid filings in the register were being filtered out of a tab whose status
- * list already named them.
+ * Pending Payment must never adopt this: an unrouted filing matches none of
+ * these states, which is precisely how the eight unpaid filings in the register
+ * were being filtered out of a tab whose status list already named them.
  */
 const OPEN_ASSIGNMENT_STATUSES = 'pending,in_progress,returned'
+
+/**
+ * The other half of the partition: this office is done, somebody else is not.
+ *
+ * ── Why the tabs had a hole in them (INS-2) ────────────────────────────────
+ *
+ * Until now For Approval carried the assignment filter above and For Inspection
+ * carried none, so the second tab was decided by the FILING's status alone.
+ * Both filters were written against an invariant that commit 5da4daa deleted —
+ * that an assignment can only be pending while the filing is `under_review` or
+ * `returned`. Since that commit the first inspecting office's approval flips the
+ * whole filing to `for_inspection` while the other five assignments are still
+ * `pending`, and two things went wrong at once:
+ *
+ *  - An office that still OWED a review on a `for_inspection` filing did not
+ *    appear under For Approval at all (the tab excluded the status) and did
+ *    appear under For Inspection (which asked nothing about the assignment).
+ *    Its outstanding paperwork was filed under a heading about site visits, and
+ *    the row opened on a screen with no controls — INS-1, reached through the
+ *    wrong door. Searching For Approval for it answered "Nothing matches",
+ *    which is the client's report 4 in its live form.
+ *  - BPLO, whose BUSINESS permit type sets `requires_inspection = 0`, approved a
+ *    filing and watched it vanish from BOTH tabs: For Approval had dropped it
+ *    because BPLO's assignment was now `completed`, and For Inspection did not
+ *    want it because the filing was still `under_review`. That is the client's
+ *    report 1 — "I approved it as BPLO and it is not in For Inspection".
+ *
+ * ── The rule now ──────────────────────────────────────────────────────────
+ *
+ * A filing lands in the tab matching THIS OFFICE'S outstanding work, not the
+ * filing's global status. For Approval is "my review is still open"; For
+ * Inspection is "my review is closed and the filing has not finished". The
+ * predicate is the same one ReviewPage branches on — an assignment that is
+ * `completed` is a review this office no longer owes — so a row can no longer
+ * appear in a tab whose screen then offers nothing to do.
+ *
+ * The two application-status lists overlap on `under_review` and
+ * `for_inspection` on purpose: those are exactly the statuses where two offices
+ * on one filing are in different states. The assignment filter, not the status
+ * list, is what keeps a single filing out of both tabs for a single reader.
+ *
+ * Terminal statuses (`rejected`, `cancelled`) are in neither list, deliberately.
+ * 101 rejected filings on this register still carry a pending assignment
+ * (INS-5); they are not work waiting on anybody and must not be offered as if
+ * they were.
+ */
+const DONE_ASSIGNMENT_STATUSES = 'completed'
 
 /** Pre-payment statuses show the orange block; everything else is paid. */
 const PENDING_PAYMENT_STATUSES: readonly string[] = PAYMENT_STATUSES
@@ -482,11 +564,26 @@ export function QueuePage() {
     ? [statusFilter as ApplicationStatus]
     : tabStatuses
   const statuses = activeStatuses.join(',')
-  // See OPEN_ASSIGNMENT_STATUSES: the approval tab asks what is waiting on THIS
-  // office, so a filing this office has already signed off drops out of it even
-  // while the other offices keep the application itself under review. Pending
-  // Payment must never be given this — its rows have no assignment at all.
-  const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
+  /*
+   * The half of the partition this tab is asking about (INS-2).
+   *
+   * Both assignment tabs carry one now. For Approval asks "what review is still
+   * open for me"; For Inspection asks "what have I signed off that is not
+   * finished yet". Pending Payment gets `undefined` and must keep getting it —
+   * its rows come from `/applications` and have no assignment at all, so any
+   * value here would filter the whole tab to nothing (see PAYMENT_STATUSES).
+   *
+   * A useful side effect: `AssignmentController::statusCounts` applies this same
+   * filter, so the "Showing N of M" total and the tab badges now count the tab
+   * the officer is actually looking at. For Inspection previously counted every
+   * assignment the office had ever held in those statuses, open or closed.
+   */
+  const assignmentStatuses =
+    tab === 'approval'
+      ? OPEN_ASSIGNMENT_STATUSES
+      : tab === 'inspection'
+        ? DONE_ASSIGNMENT_STATUSES
+        : undefined
   // A deep page buys nothing where the server is doing the searching; only the
   // browser-side sorts still need more rows than fit on a screen.
   const deep = searchesOnServer ? sort !== 'newest' : isDeep(search, sort)
@@ -601,7 +698,10 @@ export function QueuePage() {
   /** Status options for the tab in hand — a tab never offers a status it excludes. */
   const statusOptions: SortFilterOption[] = [
     { value: '', label: `All in ${TAB_LABEL[tab]}` },
-    ...tabStatuses.map((s) => ({ value: s, label: applicationStatusMeta(s).label })),
+    ...tabStatuses.map((s) => ({
+      value: s,
+      label: STATUS_IN_TAB[tab][s] ?? applicationStatusMeta(s).label,
+    })),
   ]
 
   const needle = search.trim().toLowerCase()
@@ -734,8 +834,10 @@ export function QueuePage() {
               : tab === 'payment'
                 ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
-                  ? 'Nothing is waiting for approval in your department right now.'
-                  : 'No applications are on the inspection side right now.'
+                  ? 'Nothing is waiting on your department’s review right now.'
+                  : // Both halves of what this tab now holds: filings this
+                    // office has signed off and that have not finished.
+                    'Nothing your office has approved is still in progress.'
           }
         />
       ) : nothingToShow ? (

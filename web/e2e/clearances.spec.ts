@@ -191,6 +191,27 @@ async function applyFor(page: Page, appId: number, code: string): Promise<void> 
   )
 }
 
+/**
+ * The six clearance cards, found by the one control every card always has.
+ *
+ * This read `.filter({ hasText: /apply/i })`, which is a filter on the FACE of
+ * the Apply button — and that button reads "Applied ✓" once the clearance is
+ * applied for. "Applied" does not contain the substring "apply", so a card in
+ * the state most of these tests are about matched nothing, and a filing with
+ * all six applied for produced a grid of zero cards. It survived only because
+ * every card the suite happened to look at was untouched.
+ *
+ * The accessible name is the stable thing: it is "Apply for the ‹clearance›" or
+ * "Applied for the ‹clearance› — open its form", never absent, and naming the
+ * card by the control that defines it is closer to what these tests mean than
+ * matching a word that happens to be printed inside it.
+ */
+function clearanceCards(page: Page) {
+  return page
+    .locator('ul > li')
+    .filter({ has: page.getByRole('button', { name: /^appl(y|ied) for the /i }) })
+}
+
 /** Any application of the tester's whose clearance stage has already shut. */
 async function findShut(page: Page): Promise<number | null> {
   return page.evaluate(async () => {
@@ -233,7 +254,7 @@ test('a draft can still choose its clearances, and the grid says which button sp
    * asserted is that it carries that label, since a sixth card with no
    * explanation is just a sixth thing to work out.
    */
-  const cards = page.locator('ul > li').filter({ hasText: /apply/i })
+  const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6)
   const market = cards.filter({ hasText: /market clearance/i })
   await expect(market).toHaveCount(1)
@@ -295,7 +316,7 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
    * five are always there, and pinning "6" would make this test a test of which
    * application happened to be found.
    */
-  const cards = page.locator('ul > li').filter({ hasText: /apply/i })
+  const cards = clearanceCards(page)
   await expect
     .poll(() => cards.count(), { timeout: 30_000 })
     .toBeGreaterThanOrEqual(5)
@@ -437,17 +458,195 @@ test('Submit always opens the upload box, and never removes what is there', asyn
   await dialog.getByRole('button', { name: /^cancel$/i }).click()
 })
 
-/*
- * REMOVED: 'un-applying has its own labelled control, apart from Apply'.
+/**
+ * Put a real file into the SUBMISSION dialog and send it.
  *
- * The control it asserted is gone from the card — see the test near the end of
- * this file, which keeps the half of the property that still holds (Apply
- * reports its own state and never means the opposite on a second press).
+ * No test in this suite had ever uploaded anything, and that is precisely why
+ * CLR-1 shipped: the two tests that open this dialog check its wording and
+ * press Cancel, twice, so the request that 422s was never sent by anything but
+ * a person. A dialog whose Cancel button works is not a working dialog.
  *
- * The half that is genuinely unenforced now: there is no way to withdraw a
- * clearance you applied for. `clearances.unapply` still exists and works. When
- * that control finds a home, this test should come back pointed at it.
+ * The file is built in-process rather than read off disk — a fixture file is
+ * one more thing to keep, and the bytes are irrelevant to every assertion here.
  */
+async function submitCopy(page: Page, confirm: RegExp): Promise<void> {
+  const dialog = page.getByRole('dialog')
+  await dialog
+    .locator('input[type=file]')
+    .setInputFiles({ name: 'certificate.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 e2e') })
+  await expect(dialog).toContainText(/certificate\.pdf/i)
+  await dialog.getByRole('button', { name: confirm }).click()
+  await expect(dialog).toBeHidden()
+}
+
+/*
+ * RESTORED: 'un-applying has its own labelled control, apart from Apply'.
+ *
+ * This test was deleted in 9e30b44 along with the control it asserted, and
+ * replaced by a comment saying so. That comment closed with *"When that control
+ * finds a home, this test should come back pointed at it."* — this is that,
+ * pointed at the Withdraw link on the card.
+ *
+ * What the deletion cost, measured in the audit of 2026-08-06: 15 real drafts
+ * that could not take a clearance back off, 5 of which could not be submitted
+ * at all, and one route out of an accidental Apply — cancel the entire filing
+ * and retype it. Meanwhile the server went on refusing to file a held copy
+ * while a clearance was applied for, in a sentence naming a "Withdraw" control
+ * that existed on no screen.
+ *
+ * The property is a pair, and both halves have to be asserted together or the
+ * fix for one becomes the other's bug: there IS a way back out, and it is NOT a
+ * second press of Apply.
+ */
+test('withdrawing has its own named control, and Apply is never it', async ({ page }) => {
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+  await applyFor(page, appId, 'SANITARY')
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  const withdraw = card.getByRole('button', { name: /^withdraw your application for the/i })
+
+  await expect(withdraw, 'an applied clearance offers no way back out').toBeVisible()
+  // One word on the card; the clearance it belongs to is in the accessible
+  // name, because six cards share this grid and all six say "Withdraw".
+  await expect(withdraw).toHaveText(/^withdraw$/i)
+  await expect(withdraw).toHaveAccessibleName(/sanitary/i)
+
+  await withdraw.click()
+
+  // Back to untouched: the button reads Apply again and the way out is gone
+  // with the state it left.
+  await expect(card.getByRole('button', { name: /^apply for the/i })).toBeVisible()
+  await expect(withdraw).toHaveCount(0)
+
+  // Said out loud, like every other change on this grid.
+  await expect(page.getByRole('status').filter({ hasText: /withdrew your application/i })).toBeVisible()
+
+  /*
+   * And the half that must not come back. Withdrawing is its own control
+   * precisely so that Apply can keep exactly one meaning: the original bug
+   * (aabbf21) was a toggle whose second press silently un-applied and opened
+   * nothing.
+   */
+  await card.getByRole('button', { name: /^apply for the/i }).click()
+  await expect(page.getByRole('button', { name: /back without saving/i })).toBeVisible()
+  await page.getByRole('button', { name: /back without saving/i }).click()
+  await expect(card.getByRole('button', { name: /^applied for the/i })).toBeVisible()
+})
+
+/*
+ * CLR-1, the reported sequence, end to end and with a real file.
+ *
+ * The client's words: *"I cannot remove my application on the Zoning/Locational
+ * Clearance once I changed my mind to Submit instead of Apply."* Apply, then
+ * Submit with a certificate — the one sequence in the product that failed, and
+ * the one that appeared in no test, because reaching the failure needs a file
+ * and nothing here had ever picked one.
+ *
+ * ZONING deliberately, which is the card in the client's screenshot.
+ */
+test('changing your mind from Apply to Submit works, and says what it does first', async ({
+  page,
+}) => {
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+  await applyFor(page, appId, 'ZONING')
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const card = page.locator('ul > li').filter({ hasText: /zoning/i })
+  await card.getByRole('button', { name: /submit a copy of the/i }).click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  /*
+   * The switch is stated before it happens and named on the button that does
+   * it. A confirm reading "Submit" would withdraw an application for a
+   * clearance without the word appearing anywhere on the control that did it —
+   * the unnamed second meaning this card forbids everywhere else.
+   */
+  await expect(dialog).toContainText(/you applied for this one/i)
+  await expect(dialog).toContainText(/withdrawn/i)
+  const confirm = /^withdraw & submit$/i
+  await expect(dialog.getByRole('button', { name: confirm })).toBeVisible()
+
+  await submitCopy(page, confirm)
+
+  // The card is on the other leg, and there is no 422 banner in sight.
+  await expect(card.getByRole('button', { name: /replace the .* copy you submitted/i })).toBeVisible()
+  await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
+  await expect(card.getByRole('button', { name: /^withdraw your application for the/i })).toHaveCount(0)
+  await expect(page.getByText(/withdraw that request first/i)).toHaveCount(0)
+
+  await expect(
+    page.getByRole('status').filter({ hasText: /withdrew your application/i }),
+  ).toBeVisible()
+})
+
+/*
+ * CLR-3 — Apply over an uploaded copy asks before it deletes anything.
+ *
+ * The mutual exclusion is right in both directions; what was wrong is who
+ * agreed to the deletion. Apply used to call removeHeld inline whenever a copy
+ * was on file, which takes the row AND the file off disk, with no prompt and
+ * no undo, on a button named "Apply" — against the rule written on this very
+ * card: *"destroying something must never be the alternate meaning of the
+ * button that created it."*
+ *
+ * Both answers are asserted. A confirmation nobody can decline is a delay.
+ */
+test('applying over a copy you uploaded asks first, and Cancel keeps the file', async ({
+  page,
+}) => {
+  await page.goto('/dashboard')
+  const appId = await makeDraft(page)
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  await card.getByRole('button', { name: /submit a copy of the/i }).click()
+  await submitCopy(page, /^submit$/i)
+  await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
+
+  // Apply, and stop.
+  await card.getByRole('button', { name: /^apply for the/i }).click()
+  const warning = page.getByRole('dialog')
+  await expect(warning, 'Apply deleted the uploaded copy without asking').toBeVisible()
+  // The file is named. "Your copy" is not what is about to be lost; a specific
+  // file the applicant chose is, and naming it is what makes this a decision.
+  await expect(warning).toContainText(/certificate\.pdf/i)
+  await warning.getByRole('button', { name: /keep my copy/i }).click()
+
+  await expect(warning).toBeHidden()
+  await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
+  await expect(card.getByRole('button', { name: /^apply for the/i })).toBeVisible()
+
+  // Now agree to it. The confirm says Delete, because that is what it does.
+  await card.getByRole('button', { name: /^apply for the/i }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /^delete & apply$/i }).click()
+
+  await expect(page.getByRole('button', { name: /back without saving/i })).toBeVisible()
+  await page.getByRole('button', { name: /back without saving/i }).click()
+
+  await expect(card.getByRole('button', { name: /^applied for the/i })).toBeVisible()
+  await expect(card.getByRole('button', { name: /remove the .* copy/i })).toHaveCount(0)
+  // Announced once, for both halves of the act — a live region only holds the
+  // last thing written to it, so two sentences would be one deletion nobody
+  // was told about.
+  await expect(page.getByRole('status').filter({ hasText: /deleted the copy/i })).toBeVisible()
+})
 
 test('what just happened is announced, not only drawn', async ({ page }) => {
   await page.goto('/dashboard')
@@ -610,9 +809,9 @@ test('applying is reported on the button, and never by a second meaning of it', 
 }) => {
   /*
    * Replaces the ITEM 107 test, which asserted the paint on a "Don't apply for
-   * the <clearance>" button. That control has been removed from the card along
-   * with the status chip, the fee line and the panel around them: six cards
-   * each carrying five pieces of furniture made the grid unreadable, and the
+   * the <clearance>" button. That control is gone from the card along with the
+   * status chip, the fee line and the tinted panel around them: six cards each
+   * carrying five pieces of furniture made the grid unreadable, and the
    * client's verdict on seeing it was that the older, plainer card was better.
    *
    * What has to stay true is the rule underneath that control, which is why
@@ -630,6 +829,35 @@ test('applying is reported on the button, and never by a second meaning of it', 
   // The state is on the control that changed it, not in a separate badge.
   const apply = card.getByRole('button', { name: /^applied for the/i })
   await expect(apply).toBeVisible()
+
+  /*
+   * ── This assertion used to read `toHaveCount(0)` on any withdraw control ──
+   *
+   * `await expect(card.getByRole('button', { name: /don't apply/i })).toHaveCount(0)`
+   *
+   * Which enforced CLR-1. Written in 9e30b44 in place of the test that asserted
+   * the control existed, it turned the client's "this card is too busy" into
+   * "this card has no way out", and any fix restoring one would have gone red
+   * — the wrong way round, and the reason the audit called this the most
+   * dangerous thing it found. A test that has to be deleted to fix a bug was
+   * never testing the rule; it was testing the state of the file.
+   *
+   * The real rule is about SHAPE, and it is the one the client actually gave:
+   * nothing on this card may carry the full name of its clearance on its face.
+   * That is what wrapped the old control onto two lines, on all six cards, and
+   * it is why the withdraw link that replaced it reads one word and puts the
+   * clearance in its accessible name. Asserted as a property of every control
+   * on the card, so it also holds for the next one somebody adds.
+   *
+   * Whether a withdraw control exists at all is asserted positively, near the
+   * top of this file — 'withdrawing has its own named control, and Apply is
+   * never it'.
+   */
+  for (const label of await card.getByRole('button').allInnerTexts()) {
+    expect(label.trim().length, `"${label.trim()}" is too long for this card`).toBeLessThanOrEqual(
+      'Submitted ✓'.length,
+    )
+  }
   await expect(card.getByRole('button', { name: /don’t apply/i })).toHaveCount(0)
 
   /*
@@ -675,7 +903,7 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
   // market category, so its card is not addressed to this applicant.
   // Six, Market included — it is shown to everyone and labelled optional
   // rather than derived and hidden. See the item 98 test above for why.
-  const cards = page.locator('ul > li').filter({ hasText: /apply/i })
+  const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6, { timeout: 30_000 })
 
   /*
@@ -746,4 +974,86 @@ test('the wizard puts the clearances last, and one Tax Order of Payment covers t
     'fire safety inspection certificate fee',
   )
   expect(filed.total).toBeGreaterThan(0)
+})
+
+/*
+ * CLR-2 — an Apply pressed by mistake must not strand the whole filing.
+ *
+ * Applying inserts that clearance's sheet as a wizard STEP behind the cards,
+ * and the Market sheet will not be walked past without a market name and a
+ * stall number: Next is disabled while anything is missing, and the section map
+ * refuses a forward jump over an unfinished step. So a shopfront greengrocer
+ * who pressed Apply on the Market card — a card deliberately shown to every
+ * business in the city, item 98 — had two options: invent a market they do not
+ * trade from, or cancel the filing and retype it. The audit of 2026-08-06 found
+ * five real drafts in exactly that state, none of them able to reach Review &
+ * Submit.
+ *
+ * Nothing about the gating was wrong; the sheet's answers really are required.
+ * What was missing is the thing the wizard's own comment already assumed
+ * ("Withdrawing a clearance removes its sheet"), which had been true until the
+ * control was deleted. This walks the trap and then walks out of it.
+ *
+ * MARKET rather than SANITARY or OCCUPANCY because it is the one with two
+ * required answers and the one the client already objected to being offered
+ * universally — the likeliest accidental Apply in the product.
+ */
+test('a clearance applied for by mistake can be withdrawn, and its wizard step goes with it', async ({
+  page,
+}) => {
+  await page.goto('/dashboard')
+  const appId = await makeCompleteDraft(page)
+
+  await page.goto(`/apply?draft=${appId}`)
+  await page.getByRole('checkbox').first().check()
+
+  const map = page.locator('ol[aria-label="Application sections"]')
+  await map.getByRole('button', { name: /lgu clearances/i }).click()
+
+  const cards = clearanceCards(page)
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
+  const marketCard = cards.filter({ hasText: /market clearance/i })
+
+  await marketCard.getByRole('button', { name: /^apply for the/i }).click()
+
+  // The trap, exactly as five real drafts hit it: a step that cannot be
+  // finished, cannot be skipped, and stands between the filing and submission.
+  const marketStep = map.getByRole('button', { name: /market clearance form/i })
+  await expect(marketStep, 'applying did not spawn the sheet as a step').toBeVisible()
+  await expect(page.getByText(/still needed on this part/i)).toContainText(/name of market/i)
+  await expect(page.getByRole('button', { name: /save & back to clearances/i })).toBeDisabled()
+
+  /*
+   * The way out, named on the screen you cannot leave. The applicant standing
+   * here is not looking at the cards — this sheet is the one screen the trap
+   * put them on, and it was the one screen that never mentioned them.
+   */
+  await expect(page.getByText(/applied for this by mistake/i)).toContainText(/withdraw/i)
+
+  // The wizard's plain Back, since Save is refused until the sheet is answered.
+  await page.getByRole('button', { name: /^back$/i }).click()
+  await expect(marketCard.first()).toBeVisible()
+
+  await marketCard.getByRole('button', { name: /^withdraw your application for the/i }).click()
+
+  // The step goes with the clearance — the thing ApplyWizard's own comment has
+  // assumed all along.
+  await expect(marketStep, 'withdrawing left the sheet in the wizard').toHaveCount(0)
+  await expect(marketCard.getByRole('button', { name: /^apply for the/i })).toBeVisible()
+
+  /*
+   * And the filing is submittable again. Something still has to be decided on
+   * this step (walking past the six is not a decision), so this applies for the
+   * fire clearance — whose sheet requires nothing — and goes on to the end. The
+   * point is that Review & Submit is REACHABLE, which it was not while MARKET
+   * was on the filing without its answers.
+   */
+  await cards.filter({ hasText: /fire/i }).getByRole('button', { name: /^apply for the/i }).click()
+  await page.getByRole('button', { name: /save & back to clearances/i }).click()
+
+  await map.getByRole('button', { name: /review & submit/i }).click()
+  await expect(page.getByRole('button', { name: /^submit$/i })).toBeEnabled()
+  await expect(page.getByText(/fire.*applied for/i)).toBeVisible()
+  // And the clearance that was withdrawn is not on the filing being submitted.
+  await expect(page.getByText(/market.*applied for/i)).toHaveCount(0)
 })

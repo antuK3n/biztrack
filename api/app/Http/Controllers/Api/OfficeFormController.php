@@ -330,41 +330,24 @@ class OfficeFormController extends Controller
     /**
      * May this reader see this particular office's sheet? (checklist item 111)
      *
-     * authorizeView() has already answered the coarse question — may you open
-     * this filing at all. This answers the finer one the client actually
-     * reported: "form submissions for other offices are still present for only
-     * one office/admin account". A six-clearance filing is routed to six
-     * offices, so all six passed the coarse check and each was handed all six
-     * sheets. The sanitary officer could read the fire office's FSIC answers,
-     * which is one office reading another's file on the same applicant.
+     * The RULE is `ApplicationVisibility::readsOfficeSheet()` and its reasoning
+     * is written there. What stays here is the translation from a permit-type
+     * CODE — which is what this controller's routes are keyed on — to the
+     * issuing department the rule compares against.
      *
-     * The boundary is the permit type's issuing department: the FSIC sheet
-     * belongs to whoever issues FSIC. Three readers keep everything:
-     *
-     *  - the applicant, because every one of these sheets is their own answers.
-     *    They fill all six in the wizard; hiding them would break the filing;
-     *  - BPLO and the super admin (view_any_office), who coordinate and audit
-     *    across offices by design;
-     *  - the office that issues the clearance the sheet is for.
-     *
-     * An unrecognised code fails closed. A reviewer with no department resolves
-     * to null and matches nothing, which is the same fail-closed posture
-     * ApplicationVisibility::scope() takes.
+     * It used to be both, and that is why the fix leaked: the officer review
+     * sheet loads its office forms from `GET /assignments/{id}`, which cannot
+     * call a private method on this controller and therefore filtered nothing
+     * (SEP-1). Keep the rule shared. If this ever grows a second clause, the
+     * clause belongs in ApplicationVisibility, or the two endpoints will
+     * disagree again.
      */
     private function readableCode(Request $request, string $code): bool
     {
-        $user = $request->user();
-
-        if (ApplicationVisibility::readsEveryOffice($user)) {
-            return true;
-        }
-        // The applicant is the author of every sheet on their own filing.
-        if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
-            return true;
-        }
-
-        return $user->department_id !== null
-            && $user->department_id === $this->issuingDepartmentId($code);
+        return ApplicationVisibility::readsOfficeSheet(
+            $request->user(),
+            $this->issuingDepartmentId($code),
+        );
     }
 
     /**

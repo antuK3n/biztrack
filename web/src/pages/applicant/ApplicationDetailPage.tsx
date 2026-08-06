@@ -669,7 +669,23 @@ export function ApplicationDetailPage() {
           </section>
         )}
 
-        {['draft', 'submitted', 'under_review', 'returned'].includes(status) && (
+        {/*
+          CLR-4 — the statuses the API will actually cancel, and only those.
+
+          This list read ['draft', 'submitted', 'under_review', 'returned'] and
+          disagreed with ApplicationController::cancel at both ends. On
+          `under_review` and `returned` the button was offered and the request
+          came back 422 "This application can no longer be cancelled" — a dead
+          control, and on a returned filing the one an applicant is most likely
+          to reach for. On `pending_payment` the API allows it and the button
+          was not there, so a filing could be abandoned only by paying for it
+          first.
+
+          Copied from the enum list in ApplicationController::cancel and worth
+          re-reading if that list moves; there is no shared source for it, which
+          is how the two drifted in the first place.
+        */}
+        {['draft', 'submitted', 'pending_payment'].includes(status) && (
           <div className="mt-8 text-center">
             <button
               type="button"

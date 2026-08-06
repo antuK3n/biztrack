@@ -314,3 +314,145 @@ it('never leaks a neighbouring business identity', function () {
         ->and($raw)->not->toContain('1 Test St.')
         ->and($raw)->not->toContain('latitude');
 });
+
+/*
+ * ── The two rows a client compared, and the row that reconciles them ────────
+ *
+ * Reported: "I set the line of business to 'Manufacture of dairy products' and
+ * Most common line of business is 'Manufacturing' (it did not specify which
+ * manufacturing) but the count of Similar businesses within 500 m did not
+ * increase."
+ *
+ * The 0 was right and stays 0 here. What was wrong was that "Similar" counts the
+ * 3-digit PSIC trade group while "Most common" names the mode of the 2-digit
+ * category, and the panel showed them as adjacent rows of one table with nothing
+ * saying they answer different questions. The reader did the arithmetic anyone
+ * would do and the screen gave them no way to see why it did not hold.
+ *
+ * These tests pin all three parts of the fix at once, because any one of them
+ * alone leaves the contradiction on screen.
+ */
+/** The client's neighbourhood, rebuilt: six manufacturers, none of them dairy. */
+function dairyNeighbourhood(): void
+{
+    businessAt(0.001, 0, '31001');     // furniture
+    businessAt(0.002, 0, '31001');     // furniture
+    businessAt(0.003, 0, '23950');     // concrete / hollow blocks
+    businessAt(0.001, 0.001, '22200'); // plastics
+    businessAt(0.002, 0.001, '22200'); // plastics
+    businessAt(0.003, 0.001, '22200'); // plastics
+    businessAt(0.001, 0.002, '10711'); // bakeshop — division 10, same as dairy
+    businessAt(0.002, 0.002, '10711'); // bakeshop
+}
+
+describe('the dairy applicant who read a correct 0 as a bug', function () {
+    it('keeps reporting zero similar businesses, because zero is the true count', function () {
+        /*
+         * The one assertion in this file that must never be "fixed". Group 105
+         * (dairy) has exactly one code in the whole reference table, and no
+         * neighbour here carries it. Widening the match to make this number
+         * agree with the row below would put a bakeshop in the same bucket as a
+         * dairy plant — the exact confusion PsicTaxonomy exists to prevent.
+         */
+        dairyNeighbourhood();
+
+        $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
+
+        expect($body['data']['concentration']['count'])->toBe(8)
+            ->and($body['data']['similar']['available'])->toBeTrue()
+            ->and($body['data']['similar']['psic_group'])->toBe('105')
+            ->and($body['data']['similar']['count'])->toBe(0)
+            ->and($body['data']['similar']['average_distance_m'])->toBeNull();
+    });
+
+    it('names a trade in the mode instead of the residual word Manufacturing', function () {
+        /*
+         * This used to answer "Manufacturing, 6 of 8" — sixteen unrelated
+         * divisions collapsed into one word that reads as a superset of the
+         * applicant's own trade while being a sibling bucket that excludes it.
+         *
+         * The mode now falls to the three plastics firms, which is both a
+         * smaller number and a true statement about the block. A count that
+         * dropped from 6 to 3 is the taxonomy fix working: the 6 were never one
+         * kind of business.
+         */
+        dairyNeighbourhood();
+
+        $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
+
+        expect($body['data']['common_type']['available'])->toBeTrue()
+            ->and($body['data']['common_type']['category'])->toBe('Rubber & Plastics')
+            ->and($body['data']['common_type']['count'])->toBe(3)
+            ->and($body['data']['common_type']['of_total'])->toBe(8);
+    });
+
+    it('carries the applicant own category, the term the comparison was missing', function () {
+        /*
+         * With this on the payload the two rows above stop being a
+         * contradiction and become one ordinary sentence: none of your trade
+         * here, two in your wider category, and someone else's trade is the most
+         * common. Nothing on screen previously carried the applicant's own
+         * category, so there was no element a reader could have used to work out
+         * that "Manufacture of dairy products" is not inside "Manufacturing".
+         */
+        dairyNeighbourhood();
+
+        $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
+
+        expect($body['data']['your_line']['available'])->toBeTrue()
+            ->and($body['data']['your_line']['category'])->toBe('Food & Beverage Manufacturing')
+            // The two bakeshops. Division 10 is the applicant's own division.
+            ->and($body['data']['your_line']['count'])->toBe(2)
+            // And it is a different category from the mode, which is the whole
+            // point: the modal trade nearby is not the applicant's.
+            ->and($body['data']['your_line']['category'])
+            ->not->toBe($body['data']['common_type']['category']);
+    });
+
+    it('withholds the applicant own category for the catch-all Other, rather than inventing one', function () {
+        /*
+         * Same reasoning as `similar`: 00000 means "I could not find my trade in
+         * the list", so counting the block's other unclassifiable businesses as
+         * the applicant's own kind would build a neighbourhood out of missing
+         * data. The row simply does not render.
+         */
+        dairyNeighbourhood();
+
+        $body = insightsFor(['psic_code_id' => PsicCode::where('code', '00000')->value('id')]);
+
+        expect($body['data']['your_line']['available'])->toBeFalse()
+            ->and($body['data']['your_line']['category'])->toBeNull()
+            ->and($body['data']['similar']['available'])->toBeFalse()
+            ->and($body['data']['similar']['reason'])->toBe('line_unclassified');
+    });
+
+    it('withholds it again when no line has been chosen yet', function () {
+        // The zoning map is pinned before the Line of Business picker, so this
+        // is the normal state of a new filing rather than an error.
+        dairyNeighbourhood();
+
+        expect(insightsFor()['data']['your_line']['available'])->toBeFalse();
+    });
+
+    it('still sends the group and the sub-class title the note is written from', function () {
+        /*
+         * The note under "Similar businesses" used to read "Same PSIC group as
+         * your line: {psic_title}" — naming the applicant's 5-digit sub-class as
+         * if it were the matched set, when the count reaches across the whole
+         * 3-digit group. 21 of the 135 reference codes sit in a group with
+         * siblings, so the overstatement was routine.
+         *
+         * There is no honest way to print the group's own name: psic_codes holds
+         * id, code and title only, and no group title exists anywhere in the
+         * register. So the panel names the sub-class (which is accurate) and
+         * then says the count reaches past it. Both fields have to keep
+         * arriving for that sentence to be writable.
+         */
+        dairyNeighbourhood();
+
+        $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
+
+        expect($body['data']['similar']['psic_group'])->toBe('105')
+            ->and($body['data']['similar']['psic_title'])->toBe('Manufacture of dairy products');
+    });
+});

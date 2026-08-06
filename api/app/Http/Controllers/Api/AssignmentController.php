@@ -363,7 +363,7 @@ class AssignmentController extends Controller
      */
     public function assign(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
-        $this->authorizeDepartment($request, $assignment);
+        $this->authorizeOicReassignment($request, $assignment);
 
         $data = $request->validate([
             'officer_user_id' => ['required', 'exists:users,id'],
@@ -395,16 +395,70 @@ class AssignmentController extends Controller
         }
     }
 
+    /**
+     * An assignment belongs to one department, and only that department reviews
+     * it. The `admin` exemption that used to open this method is GONE (INS-7).
+     *
+     * Removed rather than replaced with a permission, for the reads and the
+     * decisions this now gates — show, approve, return, checks. There is no
+     * account for whom "City Health's review may be signed off by someone else"
+     * should be true. The super admin audits the system; it does not review
+     * clearances, and the RBAC seeder says so — `admin` holds neither
+     * `application.review` nor `inspection.manage`, so the route gate 403s it
+     * before this method runs and the exemption was already dead code. What it
+     * was NOT was harmless: it stated, in code, that a role named `admin` may
+     * approve any office's review, one seeder row away from being true.
+     *
+     * It was not swapped for a permission because the only permission with the
+     * right shape is `application.view_any_office` — held by BPLO, whose job is
+     * to READ across offices and coordinate them. Wiring that in here would hand
+     * BPLO the power to approve and return every other office's review, a live
+     * escalation the by-name check never granted. A cross-office READ permission
+     * is not a cross-office WRITE permission, and approve/return are writes.
+     *
+     * The one genuine cross-office action on this controller is OIC
+     * reassignment; it is carved out in authorizeOicReassignment() below rather
+     * than smuggled in here, so that the exception is visible at the one call
+     * site it applies to.
+     *
+     * Asymmetry left standing on purpose: scopeToDepartment() above still lets
+     * `admin` LIST every department's assignments. Narrowing a listing is a
+     * different decision — it is INS-8's subject, the super admin's queue
+     * rendering one filing once per assignment — and does not belong in a fix
+     * about who may act.
+     */
     private function authorizeDepartment(Request $request, ApplicationAssignment $assignment): void
     {
         $user = $request->user();
-        if ($user->hasRole('admin')) {
-            return;
-        }
         abort_unless(
             $user->department_id && $assignment->department_id === $user->department_id,
             403,
             'This assignment belongs to another department.'
         );
+    }
+
+    /**
+     * Naming who handles a case is not deciding it, so this one action crosses
+     * offices — for a central coordinator, and only for them.
+     *
+     * The discriminator is a structural fact rather than a role name: the caller
+     * holds `oic.assign` (the route enforces that) and has no department of
+     * their own. That is precisely the shape of a city-wide administrator, and
+     * it preserves the intent already written on assign() above — the day
+     * `oic.assign` is granted to an OFFICE's OIC, that OIC has a department, so
+     * they fall through to the strict check and still cannot reshuffle another
+     * office's queue.
+     *
+     * Deliberately narrower than what it replaces. `hasRole('admin')` exempted
+     * the super admin from every action on this controller, approve and return
+     * included; this exempts nobody from anything except naming an officer.
+     */
+    private function authorizeOicReassignment(Request $request, ApplicationAssignment $assignment): void
+    {
+        if ($request->user()->department_id === null) {
+            return;
+        }
+
+        $this->authorizeDepartment($request, $assignment);
     }
 }

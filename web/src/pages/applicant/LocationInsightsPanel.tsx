@@ -78,6 +78,28 @@ interface LocationInsightsData {
     count: number | null
     of_total: number
   }
+  /**
+   * The applicant's own category, and how many neighbours share it.
+   *
+   * The row this feeds exists to stop `similar` and `common_type` reading as a
+   * contradiction. They count on different levels of PSIC — `similar` on the
+   * 3-digit trade group, `common_type` on the 2-digit category — and rendering
+   * them as adjacent rows invites arithmetic that does not hold. A dairy
+   * applicant met "Similar: 0" above "Most common: Manufacturing, 6 of 33" and
+   * filed a bug against a correct 0.
+   *
+   * This is the missing middle term. See LocationInsights::yourLine for why it
+   * is a third figure rather than a sentence apologising for the other two.
+   *
+   * `available: false` when no line is chosen yet, or when the line is the
+   * catch-all "Other (not listed)" — the same two cases `similar.reason`
+   * separates, and the row simply does not render for either.
+   */
+  your_line: {
+    available: boolean
+    category: string | null
+    count: number | null
+  }
 }
 
 export interface LocationInsightsQuery {
@@ -262,11 +284,35 @@ export function LocationInsightsPanel({
             <tbody className="divide-y divide-line/70">
               <InsightRow
                 label={`Similar businesses within ${radius}`}
+                /*
+                 * The note has to describe the set that was actually counted,
+                 * and it used to describe a narrower one.
+                 *
+                 * It read "Same PSIC group as your line: {psic_title}" — where
+                 * psic_title is the applicant's own 5-digit sub-class, while the
+                 * count matches on the 3-digit group. Those are not the same
+                 * set. An applicant filing 56101 "Restaurants and carinderia"
+                 * was told the four matches were carinderias; one of them was a
+                 * fast-food outlet, correctly matched on group 561. 21 of the
+                 * 135 reference codes sit in a group with siblings, so the
+                 * overstatement is routine, not a corner case.
+                 *
+                 * There is no honest way to print the group's own name: the
+                 * `psic_codes` table carries id, code and title only — no group
+                 * title exists anywhere in the register, and inventing one in
+                 * the client would be a second source of truth for a
+                 * classification the standard already owns.
+                 *
+                 * So the note names the applicant's line, which IS accurate, and
+                 * then says plainly that the count reaches past it. That
+                 * describes the matched set exactly without naming something the
+                 * data cannot name.
+                 */
                 note={
                   insights.similar.available
-                    ? `Same PSIC group as your line${
-                        insights.similar.psic_title ? `: ${insights.similar.psic_title}` : ''
-                      }`
+                    ? insights.similar.psic_title
+                      ? `${insights.similar.psic_title}, and the trades PSIC groups with it`
+                      : 'Your line, and the trades PSIC groups with it'
                     : undefined
                 }
               >
@@ -310,6 +356,47 @@ export function LocationInsightsPanel({
                   <Unavailable>{`none registered within ${radius}`}</Unavailable>
                 )}
               </InsightRow>
+
+              {/*
+               * The row that keeps the two rows above from reading as a
+               * contradiction.
+               *
+               * "Similar businesses" counts the applicant's 3-digit PSIC trade
+               * group. "Most common line of business" names the mode of the
+               * 2-digit categories. Both are correct and the difference is
+               * deliberate — see PsicTaxonomy — but they are adjacent rows of
+               * one table, and a reader is entitled to assume adjacent rows
+               * share a definition. A dairy applicant read "Similar: 0" above
+               * "Most common: Manufacturing (6 of 33)" and filed a bug against a
+               * count that was right.
+               *
+               * This row supplies the term that was missing: the applicant's own
+               * category, and how many neighbours are in it. With it on screen
+               * the two figures resolve into one ordinary sentence — few of your
+               * trade here, plenty of someone else's — and the reader never has
+               * to reason about PSIC hierarchy levels to get there.
+               *
+               * It sits immediately under the mode because that is the row it
+               * reconciles: both are category-level, and putting them together
+               * is what makes the comparison a like-for-like one.
+               *
+               * Hidden entirely when no line is chosen, or when the line is the
+               * catch-all "Other (not listed)". In both cases "Similar" is also
+               * unavailable, so there is no comparison to reconcile and the row
+               * would be an empty explanation of nothing.
+               */}
+              {insights.your_line.available && (
+                <InsightRow
+                  label="Businesses in your own category"
+                  note={
+                    insights.your_line.category
+                      ? `${insights.your_line.category} — a wider grouping than the trade group counted at the top`
+                      : undefined
+                  }
+                >
+                  <span className="tnum">{insights.your_line.count}</span>
+                </InsightRow>
+              )}
 
               <InsightRow
                 label="Average distance to a similar business"
