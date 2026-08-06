@@ -87,9 +87,40 @@ final class LocationInsights
             'concentration' => self::concentration($nearby),
             'similar' => self::similar($nearby, $psicCode),
             'common_type' => self::commonType($nearby),
-            'your_line' => self::yourLine($nearby, $psicCode),
         ];
     }
+
+    /*
+     * ## The `your_line` figure, and why it is not here — do not re-add it
+     *
+     * This payload briefly carried a fifth key, `your_line`: the applicant's own
+     * 2-digit PSIC division and how many neighbours were in it. It was added to
+     * reconcile two figures that count on DIFFERENT widths of the standard and
+     * never said so:
+     *
+     *   - `similar` matches the 3-digit PSIC **group** — the applicant's actual
+     *     trade, which is what "similar" has to mean or a coffee shop becomes
+     *     similar to a canteen (see PsicTaxonomy).
+     *   - `common_type` takes the mode of the 2-digit **division**, a much
+     *     wider bucket.
+     *
+     * Both are correct, but they rendered as adjacent rows of one table, and a
+     * reader is entitled to assume adjacent rows share a definition. A client
+     * filing 10500 *Manufacture of dairy products* met "Similar businesses: 0"
+     * above "Most common: Manufacturing, 6 of 33" and filed a bug against a
+     * count that was right. `your_line` was the missing middle term that made
+     * the two resolve into one ordinary sentence.
+     *
+     * **The client then decided against the third figure** and asked for it
+     * removed. The width distinction is now carried by the row titles instead —
+     * "Nearby Similar Businesses" versus "Most Common Line of Business" — which
+     * is a legitimate way to draw it and their call to make.
+     *
+     * So: the reconciliation problem is real and this is not an oversight. If
+     * the confusion is reported again, the answer is a wording change on the two
+     * rows, not a third count. Re-adding `your_line` would be re-opening a
+     * decision the client has already made against.
+     */
 
     /**
      * Registered businesses within RADIUS_M of the point, each with its distance
@@ -247,59 +278,6 @@ final class LocationInsights
             'average_distance_m' => $matches->isEmpty()
                 ? null
                 : (int) round($matches->avg('distance_m')),
-        ];
-    }
-
-    /**
-     * The applicant's own category, and how many neighbours share it.
-     *
-     * ## Why this exists: two rows, two different keys
-     *
-     * `similar` counts on the 3-digit PSIC **group**; `common_type` names the
-     * mode of the 2-digit **division**. Both are right, and the difference is
-     * deliberate — widening `similar` to the division would make a coffee shop
-     * "similar" to a canteen, which is the confusion PsicTaxonomy's docblock
-     * exists to prevent. But the two figures render as adjacent rows of one
-     * table, and a reader has every reason to assume adjacent rows share a
-     * definition.
-     *
-     * A client filing PSIC 10500 *Manufacture of dairy products* read
-     * "Similar businesses: 0" above "Most common: Manufacturing, 6 of 33" and
-     * filed a bug. The 0 was correct: no neighbour was in group 105. The six
-     * were furniture, concrete and plastics — nothing to do with dairy at either
-     * level. Nothing on screen let them find that out, because the applicant's
-     * own division was the one quantity the payload never carried.
-     *
-     * So it carries it now. With "your line is in Food & Beverage Manufacturing
-     * — 2 nearby" on screen beside the mode, the mismatch stops being a
-     * contradiction and becomes the ordinary fact it always was: the block has
-     * few of your trade and many of someone else's. That is the answer the
-     * applicant came for, and it is why this is a figure rather than a footnote
-     * explaining that the rows are computed differently. A caveat asks the
-     * reader to reconcile the rows themselves; a third number does it for them.
-     *
-     * `available: false` for the catch-all 00000 for the same reason `group()`
-     * returns null for it: "Other" is not a trade, and counting the block's
-     * other unclassifiable businesses as the applicant's own kind would invent a
-     * neighbourhood out of the absence of data.
-     *
-     * @param  Collection<int, array{distance_m: float, psic_code: string|null}>  $nearby
-     * @return array<string, mixed>
-     */
-    private static function yourLine(Collection $nearby, ?string $psicCode): array
-    {
-        $category = $psicCode === null ? null : PsicTaxonomy::category($psicCode);
-
-        if ($category === null || $category === PsicTaxonomy::UNCLASSIFIED) {
-            return ['available' => false, 'category' => null, 'count' => null];
-        }
-
-        return [
-            'available' => true,
-            'category' => $category,
-            'count' => $nearby
-                ->filter(fn (array $row) => PsicTaxonomy::category($row['psic_code']) === $category)
-                ->count(),
         ];
     }
 
