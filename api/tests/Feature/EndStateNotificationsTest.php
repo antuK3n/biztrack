@@ -1,8 +1,8 @@
 <?php
 
-use App\Models\AppNotification;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\AppNotification;
 use App\Models\Barangay;
 use App\Models\Inspection;
 use App\Models\PermitType;
@@ -48,6 +48,12 @@ function payingApplication(string $businessName, string $registrationNumber): in
 
 it('notifies the applicant when the application is approved', function () use ($deptEmail) {
     $appId = payingApplication('Notify Test Bakery', 'DTI-88001');
+
+    // Confirmed on receipt. Approval is refused until a person has set the
+    // processing category, and what this case is about is the notification the
+    // applicant gets afterwards. The rejection case below deliberately does not
+    // need it: rejection is ungated, a refused filing having no clock to run.
+    classifyAsOfficer(Application::findOrFail($appId));
 
     foreach (ApplicationAssignment::where('application_id', $appId)->with('department')->get() as $assignment) {
         $this->withHeaders(authAs($deptEmail[$assignment->department->code]))

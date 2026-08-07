@@ -602,6 +602,11 @@ it('refuses an attachment hanging off another office’s message', function () {
 it('drops a filing out of an office’s approval queue once that office has approved', function () {
     $app = sharedFiling('Item111 Queue Cafe');
 
+    // Confirmed on receipt, so CHO's sign-off below is refused by nothing. What
+    // partitions the queue is the office's own assignment status, not the
+    // processing category, and this case is about that partition.
+    classifyAsOfficer(Application::findOrFail($app['id']));
+
     /*
      * `for_inspection` is in this filter now, and it has to be.
      *

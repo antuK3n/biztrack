@@ -62,6 +62,11 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    // Confirmed on receipt, before any office can sign off: the approval gate
+    // wants a person's name on the processing category, and re-inspection is
+    // not what that rule is about.
+    classifyAsOfficer(Application::findOrFail($appId));
+
     foreach (ApplicationAssignment::where('application_id', $appId)->with('department')->get() as $assignment) {
         $officer = authAs($deptEmail[$assignment->department->code]);
         test()->withHeaders($officer)

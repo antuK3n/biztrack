@@ -1062,6 +1062,32 @@ class AnalyticsHistorySeeder extends Seeder
         ]);
         $this->workflow->onPaymentCompleted($payment);
 
+        /*
+         * BPLO confirms the processing category as the filing reaches the
+         * offices, because that is when an office first has the file in front
+         * of it — and because nothing downstream can be approved until somebody
+         * has. `submit()` seeds a tier from Ra11032::tierFor(), but that is our
+         * guess and requireProcessingCategory() refuses to treat a guess as a
+         * decision; a seeded history of approved filings therefore has to
+         * include the moment a person put their name to the classification, or
+         * it is a history of something the product cannot produce.
+         *
+         * Filings that never got past `pending_payment` return above this line
+         * and stay marked `automatic`, which is the truthful state for a filing
+         * no office has opened. So the register keeps rows on both sides of the
+         * gate rather than becoming uniformly categorised.
+         *
+         * `$tier` rather than a fresh draw: it is this seeder's stand-in for the
+         * LGU's published classification (see complexityFor()), it agrees with
+         * what submit() computed, and re-affirming it moves no deadline. The
+         * officer is fixed rather than sampled so this adds no draw to the
+         * shared mt_rand stream, which every later number depends on.
+         */
+        $this->travelTo($paidAt);
+        Auth::setUser($this->reviewers['BPLO'][0]);
+        $this->workflow->classify($app->fresh(), $tier, $this->reviewers['BPLO'][0]);
+        $app->refresh();
+
         $assignments = $app->assignments()->with('department')->get();
         $this->counts['assignments'] += $assignments->count();
 

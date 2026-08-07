@@ -868,7 +868,24 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const canSetTier = Boolean(ra?.editable) && tierOptions.length > 0
   const tierValue = tierInput ?? ra?.tier ?? ''
-  const tierChanged = tierValue !== '' && tierValue !== (ra?.tier ?? '')
+
+  /*
+   * Saveable when the value CHANGED, or when nobody has claimed it yet.
+   *
+   * The second half is what keeps the approval gate from being a trap. The tier
+   * arrives pre-filled with Ra11032::tierFor's guess, so an officer who reads
+   * the filing and agrees with it has nothing to change — and with the old
+   * `changed`-only rule the Save button stayed shut, the guess stayed
+   * unclaimed, and Approve stayed refused. The only way out was to pick a tier
+   * they believed was wrong, save, and pick the right one back.
+   *
+   * Agreeing is a decision, and this is where the officer records it. The
+   * server takes the same view: WorkflowService::classify no longer treats an
+   * unchanged tier as a no-op while complexity_set_by_user_id is null.
+   */
+  const tierUnclaimed = ra !== null && ra.source !== 'officer'
+  const tierChanged =
+    tierValue !== '' && (tierValue !== (ra?.tier ?? '') || tierUnclaimed)
 
   /**
    * The filing has no category, so it may not be approved — the client's rule,
@@ -882,7 +899,17 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * defers to the server, which refuses for real. Present-and-null is the only
    * thing this screen is entitled to call missing.
    */
-  const categoryMissing = ra !== null && ra.tier === null
+  /*
+   * `source !== 'officer'`, not `tier === null`.
+   *
+   * A filing made through the product never has a null tier — submit() seeds a
+   * guess — so keying on null meant this never shut and the server's refusal
+   * was unreachable. What the rule is actually about is whether a person chose,
+   * and `source` is the server's own word for that: null when the payload
+   * predates the block, 'automatic' when Ra11032::tierFor guessed, 'officer'
+   * when somebody put their name to it.
+   */
+  const categoryMissing = ra !== null && ra.source !== 'officer'
 
   /**
    * Who set the tier this filing currently carries — the sentence that makes
@@ -898,7 +925,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           ra.set_at ? ` on ${formatDate(ra.set_at)}` : ''
         }.`
       : ra?.source === 'automatic'
-        ? 'Category assigned automatically from the filing type and the declared capital. No one has checked it against the Citizen’s Charter — change it if this filing is not what the system assumed.'
+        ? 'Category assigned automatically from the filing type and the declared capital. No one has checked it against the Citizen’s Charter, so it cannot be approved until you confirm it — save the category below, whether or not you change it.'
         : 'This filing has not been categorised yet, so it has no RA 11032 deadline and cannot be approved until one is chosen.'
 
   async function saveTier() {

@@ -69,6 +69,11 @@ function legalityFiling(array $permitCodes, string $name): Application
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    // The office confirms the processing category on receipt, which is what
+    // unlocks Approve. What these cases are about is the transition table, so
+    // the category has to be a settled part of the fixture rather than a step.
+    classifyAsOfficer(Application::findOrFail($appId));
+
     return Application::findOrFail($appId);
 }
 
