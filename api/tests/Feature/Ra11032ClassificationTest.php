@@ -155,13 +155,22 @@ it('records who changed a statutory clock, from what, to what', function () {
         ->and($fresh->complexity_set_at)->not->toBeNull();
 });
 
-it('does not record a decision when the tier did not change', function () {
+it('records the first officer to confirm the guess, and nothing after that', function () {
     /*
-     * An officer pressing Save on a select they did not move has not made a
-     * decision about a statutory clock, so no audit row and no provenance is
-     * written. This matters beyond tidiness: an audit trail padded with
-     * non-events is one nobody reads, and flipping `source` to `officer` on a
-     * no-op would quietly claim somebody had endorsed our guess.
+     * The unchanged-tier case, which has two halves and used to have one.
+     *
+     * It used to say only that an unchanged select writes nothing at all, and
+     * that was right while the tier was only a value. It is wrong now that the
+     * approval gate asks WHO set it. `submit()` seeds a guess and leaves the
+     * provenance null, so an officer who reads the filing, agrees with the
+     * guess and picks the same option would change nothing, never be recorded
+     * as having chosen, and stay blocked from approving with no way out but
+     * picking a tier they believe is wrong. Agreeing is a decision.
+     *
+     * What survives unchanged is the second press. Once a person's name is on
+     * the row there is nothing left to record, and writing an audit row per
+     * Save would pad the trail with non-events — the trail an LGU has to be
+     * able to read afterwards is the one nobody has stuffed with noise.
      */
     $assignment = openAssignmentFor('bplo@biztrack.local');
     expect($assignment)->not->toBeNull();
@@ -169,14 +178,29 @@ it('does not record a decision when the tier did not change', function () {
     $app = $assignment->application;
     $app->update(['complexity' => 'complex', 'complexity_set_by_user_id' => null]);
     $auditBefore = AuditLog::where('action', 'application.reclassified')->count();
+    $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
 
+    // Confirming the guess: the value does not move, the ownership does.
     $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/assignments/{$assignment->id}/classification", ['tier' => 'complex'])
         ->assertOk()
-        ->assertJsonPath('data.ra11032.source', 'automatic');
+        ->assertJsonPath('data.ra11032.tier', 'complex')
+        ->assertJsonPath('data.ra11032.source', 'officer');
 
-    expect(AuditLog::where('action', 'application.reclassified')->count())->toBe($auditBefore)
-        ->and($app->fresh()->complexity_set_by_user_id)->toBeNull();
+    $confirmed = $app->fresh();
+    expect($confirmed->complexity_set_by_user_id)->toBe($bplo->id)
+        ->and(AuditLog::where('action', 'application.reclassified')->count())->toBe($auditBefore + 1);
+
+    // Pressing Save again on a select nobody moved: genuinely nothing to say.
+    $this->travel(2)->minutes();
+    $this->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$assignment->id}/classification", ['tier' => 'complex'])
+        ->assertOk()
+        ->assertJsonPath('data.ra11032.source', 'officer');
+
+    expect(AuditLog::where('action', 'application.reclassified')->count())->toBe($auditBefore + 1)
+        ->and($app->fresh()->complexity_set_at->toDateTimeString())
+        ->toBe($confirmed->complexity_set_at->toDateTimeString());
 });
 
 it('refuses a tier the statute does not have', function () {

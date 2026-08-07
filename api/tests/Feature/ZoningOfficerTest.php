@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
@@ -85,6 +86,10 @@ it('lets the zoning officer clear its own assignment but not end the application
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
+    // Confirmed on receipt, so the only thing left standing between the zoning
+    // officer and their own assignment is the department scoping under test.
+    classifyAsOfficer(Application::findOrFail($appId));
 
     $cpdoId = Department::where('code', 'CPDO')->value('id');
     $assignment = ApplicationAssignment::where('application_id', $appId)

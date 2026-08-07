@@ -1,6 +1,9 @@
 <?php
 
+use App\Models\Application;
 use App\Models\User;
+use App\Services\WorkflowService;
+use App\Support\Ra11032;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -57,4 +60,37 @@ function authAs(string $email, string $password = 'biztrack1'): array
     Sanctum::actingAs($user);
 
     return [];
+}
+
+/**
+ * Put an office's name on a filing's RA 11032 processing category.
+ *
+ * This is a PRECONDITION, not a subject. WorkflowService refuses to approve a
+ * filing nobody has categorised — `complexity` alone is not enough, because
+ * submit() seeds a guess from Ra11032::tierFor() and the gate asks who chose,
+ * not whether a value is present (see requireProcessingCategory). A filing that
+ * has been paid for and routed to its offices has, in real use, been read by a
+ * clerk who confirmed the category on the review sheet before anyone pressed
+ * Approve; every fixture that drives a filing to issuance is modelling that
+ * office, so it has to perform that step too.
+ *
+ * The default tier is the one already on the filing — confirming the guess
+ * rather than overruling it. That is both the commonest real action and the one
+ * that changes nothing else: the deadline is recomputed to the value it already
+ * held, so a fixture using this cannot quietly move a statutory clock out from
+ * under the test that follows.
+ *
+ * Called at the service rather than through POST /assignments/{id}/classification
+ * so it stays one line and does not disturb the acting user; the endpoint and
+ * its authorization are the subject of Ra11032ClassificationTest.
+ */
+function classifyAsOfficer(Application $app, string $email = 'bplo@biztrack.local', ?string $tier = null): Application
+{
+    $app = $app->fresh();
+
+    return app(WorkflowService::class)->classify(
+        $app,
+        $tier ?? $app->complexity ?? Ra11032::tierFor($app),
+        User::where('email', $email)->firstOrFail(),
+    );
 }

@@ -80,6 +80,11 @@ function filingWithEveryClearance(): Application
 
     $app = Application::findOrFail($appId);
 
+    // Confirmed on receipt. Without a person's name on the processing category
+    // no office may approve at all, and what this file is about is which of the
+    // seven offices gets sent out to the premises.
+    classifyAsOfficer($app);
+
     // Each office signs off its own assignment; ApplicationVisibility keeps a
     // reviewer to the filings routed to their department, so no one account can
     // stand in for the rest.

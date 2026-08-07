@@ -722,6 +722,11 @@ function clearanceFilingAwaitingInspection(): Application
     test()->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
     test()->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
+    // Confirmed on receipt, because no office may approve until a person has
+    // put their name to the processing category. What is under test here is the
+    // clearance stage, so that gate belongs to the fixture and not to the case.
+    classifyAsOfficer($app);
+
     foreach (ApplicationAssignment::where('application_id', $app->id)->get() as $assignment) {
         authAs($assignment->department_id === Department::where('code', 'CPDO')->first()->id
             ? 'zoning@biztrack.local'

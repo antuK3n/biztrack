@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
@@ -128,6 +129,11 @@ it('refuses a reviewer with the admin role another department’s assignment on 
 it('still lets the office that owns the assignment act on it', function () {
     // The narrowing must not touch the office whose work this is.
     $appId = scopedAssignmentFiling('Own Office Cafe');
+
+    // Confirmed on receipt: the approval gate wants a name on the processing
+    // category, and a 422 from it would look exactly like the 403 this case is
+    // meant to prove does not happen.
+    classifyAsOfficer(Application::findOrFail($appId));
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson('/api/v1/assignments/'.choAssignmentId($appId).'/approve', ['remarks' => 'Cleared.'])

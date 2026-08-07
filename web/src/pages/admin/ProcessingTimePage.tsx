@@ -94,10 +94,34 @@ const WINDOW_OPTIONS = [
  * "we have nothing to report", which on an oversight screen is the whole
  * difference.
  */
-type Verdict = 'within' | 'outside' | 'unreported'
+type Verdict = 'within' | 'outside' | 'faster' | 'unreported'
 
+/**
+ * Which side of the range the week fell on — the half the screen used to drop.
+ *
+ * A control chart signals in BOTH directions, and the server sends one word for
+ * both: `status: 'outside'`. Printed in error red without asking which way, that
+ * made four of seven offices read as failing on a week they had been unusually
+ * FAST — BFP at 0.3 days against a 1.7–2.8 range, flagged the same crimson as a
+ * genuine slowdown. The chart directly below was drawing those same weeks black
+ * for "faster than normal", so the screen contradicted itself in two panels.
+ *
+ * The direction was always available: `latest_mean_days` against the limits the
+ * payload already carries. Nothing new is computed here and no server change was
+ * needed — the reading was simply never taken.
+ *
+ * Lower is better on this screen, so BELOW the lower limit is the good side.
+ * `lcl` can be null when a department has too little history to have limits, in
+ * which case there is no lower side to be on and the honest answer is the
+ * undirected `outside` rather than a guess.
+ */
 function verdictOf(department: ProcessingTimeDepartment): Verdict {
-  if (department.status === 'outside') return 'outside'
+  if (department.status === 'outside') {
+    const lcl = department.lcl
+    return lcl !== null && lcl !== undefined && department.latest_mean_days < lcl
+      ? 'faster'
+      : 'outside'
+  }
   if (department.status === 'inside') return 'within'
   return 'unreported'
 }
@@ -106,6 +130,13 @@ function verdictOf(department: ProcessingTimeDepartment): Verdict {
 const VERDICT_LABEL: Record<Verdict, string> = {
   within: 'Within Normal Range',
   outside: 'Outside Normal Range',
+  /*
+   * The spec's phrase, with the direction restored to it. Still says "outside
+   * the range", because that is what happened and the spec's wording is not
+   * ours to drop; the trailing clause is what stops a reader concluding the
+   * office is in trouble when it has just had its best week on record.
+   */
+  faster: 'Outside Normal Range — faster',
   unreported: 'Not yet classified',
 }
 
@@ -119,6 +150,14 @@ const VERDICT_LABEL: Record<Verdict, string> = {
 const VERDICT_TONE: Record<Verdict, string> = {
   within: 'text-royal',
   outside: 'text-s-red',
+  /*
+   * Royal, not red and not green. Red would be the bug this fixes; green would
+   * overcorrect into congratulation, and a single fast week is a signal to look
+   * at, not an achievement to celebrate — it can equally mean an office waved
+   * a batch through. Calm and legible is the honest register for "unusual, in
+   * the good direction".
+   */
+  faster: 'text-royal',
   unreported: 'text-ink-muted',
 }
 
@@ -720,7 +759,18 @@ export function ProcessingTimePage() {
               </section>
 
               <section>
-                <SectionHeading metric="departments.flagged">Noted Delays</SectionHeading>
+                {/*
+                  "and Speed-ups" is not padding. This panel lists weeks that
+                  left the range in EITHER direction, and its rows already say
+                  "faster than usual" — so a heading reading only "Noted Delays"
+                  filed a −1.6 day week under delays and contradicted the row
+                  beneath it. The spec's phrase is kept so a reader matching the
+                  document still finds this panel; the missing half is added
+                  rather than the wording replaced.
+                */}
+                <SectionHeading metric="departments.flagged">
+                  Noted Delays and Speed-ups
+                </SectionHeading>
                 <NotedDelays department={selected} />
               </section>
             </div>

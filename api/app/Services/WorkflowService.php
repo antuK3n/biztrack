@@ -208,8 +208,24 @@ class WorkflowService
             ]);
         }
 
+        /*
+         * Choosing the tier the system already guessed is still a choice.
+         *
+         * This used to return early whenever the value was unchanged, which was
+         * right while the tier was only a value. It is not right now that the
+         * approval gate asks WHO set it: submit() seeds a guess from
+         * Ra11032::tierFor() and leaves complexity_set_by_user_id null, so an
+         * officer who reads the filing, agrees with the guess and picks the same
+         * option would change nothing, never be recorded as having chosen, and
+         * stay blocked from approving with no way out but picking a tier they
+         * believe is wrong.
+         *
+         * So an unchanged value still falls through to be stamped when nobody
+         * has claimed it yet. It is only genuinely a no-op once an officer's
+         * name is already on it.
+         */
         $from = $app->complexity;
-        if ($from === $tier) {
+        if ($from === $tier && $app->complexity_set_by_user_id !== null) {
             return $app;
         }
 
@@ -380,12 +396,37 @@ class WorkflowService
      */
     private function requireProcessingCategory(Application $app): void
     {
-        if (Ra11032::isTier($app->complexity)) {
+        /*
+         * A GUESS IS NOT A CHOICE, and this gate asks for a choice.
+         *
+         * The first version of this check asked only whether `complexity` held
+         * a tier, and was therefore never once refused in ordinary use.
+         * submit() seeds every filing from Ra11032::tierFor() — which, for a new
+         * application with no high-tech line above the capital floor, falls
+         * through to `complex` — so the column is never null and the gate never
+         * fired. The client found it immediately: "how was this auto fill to
+         * complex / also i shouldnt be able to approve if i havent selected an
+         * application category."
+         *
+         * They are the same defect seen from two sides. The guess is a
+         * convenience, made from the filing type and the declared capital, and
+         * it is explicitly not the LGU's published classification — open
+         * question A10 with BPLO. Letting it satisfy a rule that exists to make
+         * an officer look would have meant the statutory clock on every filing
+         * was set by a fall-through branch that nobody read.
+         *
+         * So the question is who set it, not whether it is set. The register has
+         * recorded that since the tier became editable: null means the system
+         * guessed, a user id means an officer put their name to it, and
+         * ApplicationResource already publishes the difference as
+         * `ra11032.source` = automatic | officer.
+         */
+        if (Ra11032::isTier($app->complexity) && $app->complexity_set_by_user_id !== null) {
             return;
         }
 
         throw ValidationException::withMessages([
-            'complexity' => ['Choose this application’s processing category before approving it. RA 11032 needs to know whether the filing is simple, complex or highly technical to say which deadline it was due under. Set it under For Office Use Only, then approve.'],
+            'complexity' => ['Choose this application’s processing category before approving it. The category shown was assigned automatically from the filing type and the declared capital — nobody has checked it against the Citizen’s Charter. Confirm it or change it under For Office Use Only, then approve.'],
         ]);
     }
 

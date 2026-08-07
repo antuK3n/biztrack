@@ -63,6 +63,11 @@ function parallelFiling(array $permitCodes, string $name): Application
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    // The office confirms the processing category as the filing lands on its
+    // desk, which is what unlocks Approve. Nothing below is about that gate;
+    // without this every sign-off here would be refused for the wrong reason.
+    classifyAsOfficer(Application::findOrFail($appId));
+
     return Application::findOrFail($appId);
 }
 

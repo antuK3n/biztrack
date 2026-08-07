@@ -71,6 +71,11 @@ function filingWithOneOfficesVisitWrittenUp(): array
 
     $app = Application::findOrFail($appId);
 
+    // Confirmed on receipt. An office may not approve until somebody has put
+    // their name to the processing category; that gate is not what this file
+    // is about, and leaving it unmet would stop the fixture before it starts.
+    classifyAsOfficer($app);
+
     // Each office signs off its own assignment — a reviewer is kept to the
     // filings routed to their department, so no one account stands in for the
     // rest. The last sign-off is what books the visits.

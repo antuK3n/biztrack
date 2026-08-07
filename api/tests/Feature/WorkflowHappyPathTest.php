@@ -47,7 +47,17 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
     expect(Application::find($appId)->status->value)->toBe('under_review');
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(3);
 
-    // 5. Each department approves its assignment.
+    /*
+     * 5. The office confirms the processing category, then each department
+     * approves its assignment.
+     *
+     * The confirmation is a real step of the lifecycle, not test scaffolding:
+     * WorkflowService refuses to approve a filing still carrying the tier the
+     * system guessed at submission, so on the happy path somebody reads the
+     * filing and puts their name to that category before anyone signs off.
+     */
+    classifyAsOfficer(Application::findOrFail($appId));
+
     $deptEmail = [
         'BPLO' => 'bplo@biztrack.local',
         'CHO' => 'sanitary@biztrack.local',
