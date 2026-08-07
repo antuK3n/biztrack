@@ -177,7 +177,7 @@ class AnalyticsController extends Controller
         $view = $this->renewalRiskView($request);
 
         $params = ['days' => $days, 'limit' => $limit];
-        foreach (['barangay', 'band', 'action'] as $filter) {
+        foreach (['barangay', 'band', 'action', 'search'] as $filter) {
             if ($view[$filter] !== null) {
                 $params[$filter] = $view[$filter];
             }
@@ -239,7 +239,7 @@ class AnalyticsController extends Controller
      * stops that being a silent lie is that RenewalRiskAnalytics echoes back
      * the filters it actually applied, and the screen renders the echo.
      *
-     * @return array{barangay: string|null, band: string|null, action: string|null, offset: int}
+     * @return array{barangay: string|null, band: string|null, action: string|null, search: string|null, offset: int}
      */
     private function renewalRiskView(Request $request): array
     {
@@ -252,10 +252,21 @@ class AnalyticsController extends Controller
         $band = $text($request->query('band'));
         $action = $text($request->query('action'));
 
+        /*
+         * The search term skips the "all" sentinel, unlike every filter above
+         * it. Those are `<select>` values where "all" is how the control says
+         * "unset"; a text box says that by being empty, and a business whose
+         * name an officer typed as "all" would otherwise come back as the
+         * unfiltered city with nothing to say the term was discarded. Still
+         * capped at 120 — it travels into a snapshot key.
+         */
+        $search = trim((string) $request->query('search', ''));
+
         return [
             'barangay' => $text($request->query('barangay')),
             'band' => in_array($band, RenewalRiskAnalytics::BANDS, true) ? $band : null,
             'action' => in_array($action, RenewalRiskAnalytics::ACTIONS, true) ? $action : null,
+            'search' => $search === '' ? null : mb_substr($search, 0, 120),
             // Bounded so a hand-typed offset cannot walk a scored register row
             // by row; the screen never sends one past `matching`.
             'offset' => max(0, min(100_000, (int) $request->query('offset', '0'))),
@@ -294,7 +305,7 @@ class AnalyticsController extends Controller
      */
     private function decorateRenewalRisk(array $data, int $days, ?string $barangay = null): array
     {
-        $data['filters'] ??= ['barangay' => null, 'band' => null, 'action' => null];
+        $data['filters'] ??= ['barangay' => null, 'band' => null, 'action' => null, 'search' => null];
         $data['matching'] ??= (int) ($data['scored_permits'] ?? 0);
         $data['offset'] ??= 0;
         $data['barangays'] = RenewalRiskAnalytics::barangaysInScope($days);

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ErrorState, Skeleton, SkeletonCards } from '../../components/ui/primitives'
 import { Info, MetricDefinitions } from '../../components/ui/MetricInfo'
@@ -128,6 +128,17 @@ const DEFAULT_ROWS = '25'
  */
 const ANY = 'all'
 
+/**
+ * How long typing rests before it becomes a request.
+ *
+ * The same quarter-second the officer queue uses, and for the same reason: each
+ * keystroke here is a server round trip over the whole scored register, so
+ * firing per character would put nine requests behind "Mercado" and race their
+ * replies onto one table. Matched to QueuePage deliberately — two search boxes
+ * in one product that feel different are two bugs to somebody.
+ */
+const SEARCH_DEBOUNCE_MS = 250
+
 const LEVEL_OPTIONS = [
   { value: ANY, label: 'All levels' },
   { value: 'high', label: 'High risk' },
@@ -223,11 +234,24 @@ function expiryLabel(date: string): string {
  * heading would hear "Businesses Requiring Review How Businesses at Risk is
  * measured" on every section.
  */
-function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
+function SectionHeading({
+  children,
+  metric,
+  right,
+}: {
+  children: ReactNode
+  metric?: string
+  right?: ReactNode
+}) {
   return (
-    <div className="mb-2 flex items-center">
+    // `flex-wrap` so the search box drops under the heading on a narrow screen
+    // rather than squeezing the title. Nothing is added between the heading and
+    // its Info when `right` is absent, so every other use of this renders
+    // exactly as it did.
+    <div className="mb-2 flex flex-wrap items-center">
       <h2 className="text-lg text-ink">{children}</h2>
       {metric && <Info metric={metric} />}
+      {right && <span className="ms-auto ps-3">{right}</span>}
     </div>
   )
 }
@@ -634,6 +658,88 @@ function ReviewTable({
 }
 
 /**
+ * Where the reader is in the table, and the two controls that move them.
+ *
+ * Lifted out of the page body because the position is arithmetic over four
+ * figures — offset, page size, rows on this page, rows matching — and computing
+ * that inline in JSX is how a footer and the pager beside it drift apart.
+ *
+ * The client's note was "make the page number apparent". It read
+ * `‹ Page 1 of 104 ›` at 11px in muted grey, the same weight as the sentence
+ * beside it, so on a 104-page table the one fact a reader needs was the
+ * quietest thing on the row. It is now the loudest: bold, in ink, on its own
+ * line, with the row range under it so "where am I" and "out of how much" are
+ * answered in one glance instead of at opposite ends of the row.
+ *
+ * Deliberately NOT a numbered page list. 104 numbered links is a worse control
+ * than two arrows, and it is the state this table is actually in.
+ */
+function TablePager({
+  report,
+  perPage,
+  loading,
+  onOffset,
+}: {
+  report: RenewalRiskReport
+  perPage: number
+  loading: boolean
+  onOffset: (next: number) => void
+}) {
+  const pages = Math.max(1, Math.ceil(report.matching / perPage))
+  // Clamped, because the server may have snapped a too-large offset back onto
+  // the last populated page — the label has to say where the reader LANDED.
+  const page = Math.min(pages, Math.floor(report.offset / perPage) + 1)
+  const first = report.matching === 0 ? 0 : report.offset + 1
+  const last = report.offset + report.at_risk.length
+
+  return (
+    <span className="flex items-center gap-1.5">
+      {/*
+        aria-disabled, never `disabled` (DESIGN.md): a disabled control leaves
+        the tab order, so a keyboard user on the last page would find focus
+        jumping past the pager entirely rather than resting on a button that
+        says it can go no further. The guards are in the handlers.
+      */}
+      <button
+        type="button"
+        aria-label="Previous page of businesses"
+        aria-disabled={report.offset === 0 || loading}
+        onClick={() => onOffset(Math.max(0, report.offset - perPage))}
+        className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-royal aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
+      >
+        <span aria-hidden="true">‹</span>
+      </button>
+      {/*
+        aria-live, because turning a page swaps the rows silently: without it a
+        screen-reader user presses ‹ and is told nothing whatsoever happened.
+      */}
+      <span aria-live="polite" className="px-1.5 text-center leading-tight">
+        <span className="tnum block text-[13px] font-bold text-ink">
+          Page {page.toLocaleString()} of {pages.toLocaleString()}
+        </span>
+        <span className="tnum block text-[10px] text-ink-muted">
+          Rows {first.toLocaleString()}–{last.toLocaleString()} of{' '}
+          {report.matching.toLocaleString()}
+        </span>
+      </span>
+      <button
+        type="button"
+        aria-label="Next page of businesses"
+        aria-disabled={report.offset + perPage >= report.matching || loading}
+        onClick={() =>
+          onOffset(
+            report.offset + perPage >= report.matching ? report.offset : report.offset + perPage,
+          )
+        }
+        className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-royal aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
+      >
+        <span aria-hidden="true">›</span>
+      </button>
+    </span>
+  )
+}
+
+/**
  * How many permits fall to each action, with the cut-offs stated as arithmetic
  * rather than as a paragraph.
  */
@@ -642,6 +748,36 @@ function RecommendedActions({ report }: { report: RenewalRiskReport }) {
 
   return (
     <ProtoCard className="px-4 py-4">
+      {/*
+        The client's note, verbatim: "the Recommended Actions says thousands of
+        recorded businesses, but the table only shows a few of them. Clarify
+        why."
+
+        Both figures were already right and that is exactly why it read as a
+        contradiction — they answer different questions and nothing on screen
+        said which. This panel counts every scored permit in the window; the
+        table lists one page of whatever the filters match. So the sentence
+        states both denominators in the order the question is asked, and neither
+        number is touched.
+
+        It stays true under a search or a filter without being reworded,
+        because `matching` IS the filtered row count — narrow to one barangay,
+        or type a business name, and the middle figure follows while the count
+        this panel is about deliberately does not.
+      */}
+      <p className="mb-3 text-[11px] leading-relaxed text-ink-secondary">
+        Counts all{' '}
+        <span className="tnum font-semibold text-ink">
+          {report.scored_permits.toLocaleString()}
+        </span>{' '}
+        scored permits. The table above is showing{' '}
+        <span className="tnum font-semibold text-ink">
+          {report.at_risk.length.toLocaleString()}
+        </span>{' '}
+        of <span className="tnum font-semibold text-ink">{report.matching.toLocaleString()}</span>{' '}
+        matching.
+      </p>
+
       <div className="space-y-2.5">
         {report.actions.map((action) => (
           <div key={action.action} className="flex items-center gap-3">
@@ -703,6 +839,43 @@ function Rulebook({ report }: { report: RenewalRiskReport }) {
       <p className="mb-3 text-[11px] leading-relaxed text-ink-secondary">
         Each rule below adds points. Added up, they give the permit a score out of{' '}
         <span className="tnum font-semibold text-ink">{total}</span>.
+      </p>
+
+      {/*
+        The client's note: "Clarify on this 'What drives the index'. Is this the
+        predictive model formula? Why points are set that way?" They will be
+        asked it on stage, so it is answered on the panel rather than left to
+        the hover.
+
+        Both halves are the honest answer and neither is padding.
+
+        FIRST — it is not a fitted formula. Nothing below was estimated from
+        anything. It is a published rule book: five fixed maxima, applied
+        identically to every permit, and a reader can recompute any row by hand.
+        A fitted logistic model DOES exist in this codebase
+        (RenewalModelAnalytics, R's /renewal-model) and is deliberately not
+        mounted on this screen — the client asked for it removed. Whoever
+        re-mounts it must not let this sentence stand over it, and nobody may
+        imply these weights came out of a regression, because they did not.
+
+        SECOND — where the points came from. They are a judgement, not a
+        derivation, and there is no rationale to invent: we chose them, and
+        BPLO has not signed them off. Saying so is what makes the first half
+        believable. See D1 in docs/questions-for-malabon.md, which is where that
+        conversation belongs. This is NOT A10 — that is the RA 11032 tier
+        mapping on a different screen, and conflating them has already happened
+        once.
+
+        The vocabulary is constrained: AnalyticsDefinitionsTest bans
+        probability / likelihood / predict / forecast / confidence on this
+        dataset INCLUDING in denials, so this says "not a fitted model" rather
+        than "not a prediction". The screen holds the server's line by choice —
+        a caveat the definitions may not print is not one to print here either.
+      */}
+      <p className="mb-3 border-b border-line pb-3 text-[11px] leading-relaxed text-ink-secondary">
+        A fixed rule book, not a fitted model — the points are set in advance and none of
+        them is estimated from past outcomes. The weights are our own judgement of what
+        matters at renewal; BPLO has not approved them yet.
       </p>
 
       <ul className="space-y-1.5">
@@ -912,6 +1085,14 @@ export function RenewalRiskPage() {
   const [barangay, setBarangay] = useState(ANY)
   const [band, setBand] = useState(ANY)
   const [action, setAction] = useState(ANY)
+  /*
+   * Two states for one search box, and the split is what keeps the request
+   * count sane: `search` is what the officer has typed and re-renders on every
+   * keystroke, `query` is what has actually been asked of the server and is the
+   * only one `useAsync` watches.
+   */
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
   const [offset, setOffset] = useState(0)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
@@ -942,9 +1123,13 @@ export function RenewalRiskPage() {
         barangay: barangay === ANY ? undefined : barangay,
         band: band === ANY ? undefined : (band as RiskBand),
         action: action === ANY ? undefined : (action as RiskAction),
+        // Omitted rather than sent empty: an unfiltered request has to carry
+        // exactly `days` and `limit` or it stops keying to the snapshot R
+        // precomputes. `undefined` is how axios is told to leave it out.
+        search: query === '' ? undefined : query,
         offset: offset === 0 ? undefined : offset,
       }),
-    [days, perPage, barangay, band, action, offset],
+    [days, perPage, barangay, band, action, query, offset],
   )
 
   const data = result?.data
@@ -965,6 +1150,31 @@ export function RenewalRiskPage() {
       setOffset(0)
     }
   }
+
+  /*
+   * Typing, turned into a query — the one narrowing that has to be an effect.
+   *
+   * It cannot ride in the input's onChange the way the selects ride in
+   * `filter`, because the request must lag the keystroke by SEARCH_DEBOUNCE_MS
+   * and by the time that timer fires there is no handler left to be in.
+   *
+   * The page reset moves in the SAME commit as the term. React batches the two,
+   * so `useAsync` is never shown a new search beside an old offset and cannot
+   * fire a request for page nine of a list that no longer has nine pages. The
+   * early return on an unchanged term is what makes `query` safe to depend on
+   * here rather than an endless loop.
+   */
+  useEffect(() => {
+    const trimmed = search.trim()
+    if (trimmed === query) return
+
+    const timer = setTimeout(() => {
+      setQuery(trimmed)
+      setOffset(0)
+    }, SEARCH_DEBOUNCE_MS)
+
+    return () => clearTimeout(timer)
+  }, [search, query])
 
   /**
    * Send one follow-up, and refuse to send it twice.
@@ -1164,7 +1374,47 @@ export function RenewalRiskPage() {
           </section>
 
           <section className="mt-5">
-            <SectionHeading metric="at_risk">Businesses Requiring Review</SectionHeading>
+            {/*
+              The client's note: "Add search functionality here since this may
+              contain vast amount of businesses."
+
+              On the heading of the table it searches, not up in the filter menu
+              with the selects. The selects change what the table is ABOUT; this
+              one answers "is my business on it", which is a question asked of
+              the rows themselves and belongs next to them.
+
+              It is server-side, and on this screen that is not a preference.
+              The payload is one page of a set that runs to thousands, so a term
+              filtered in the browser would search 25 rows and answer "no such
+              business" about a register that has it on page ninety — worse than
+              having no search at all, because it answers confidently.
+            */}
+            <SectionHeading
+              metric="at_risk"
+              right={
+                <>
+                  {/*
+                    A placeholder is not an accessible name — it disappears on
+                    the first keystroke — so the field carries a real label,
+                    hidden only because a search box beside a table is obvious
+                    on sight.
+                  */}
+                  <label htmlFor="risk-search" className="sr-only">
+                    Search these businesses by name or permit number
+                  </label>
+                  <input
+                    id="risk-search"
+                    type="search"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search business or permit no.…"
+                    className="w-64 rounded-lg border border-input-border bg-input px-3.5 py-1.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+                  />
+                </>
+              }
+            >
+              Businesses Requiring Review
+            </SectionHeading>
 
             {/*
               One live region for the whole table rather than a status message
@@ -1192,7 +1442,18 @@ export function RenewalRiskPage() {
                   */}
                   {data.scored_permits === 0
                     ? `No permit expires between ${data.window_start} and ${data.window_end}.`
-                    : 'No permit in this window matches the current filter.'}
+                    : data.filters.search
+                      ? /*
+                          A third cause, and the one a search adds: the term
+                          found nothing. Quoted back from the server's echo
+                          rather than from the input, so what is named is the
+                          term actually matched on — and quoting it at all is
+                          what separates "nothing is called that" from "your
+                          other filters excluded it", which the reader fixes
+                          differently.
+                        */
+                        `No business or permit number matches “${data.filters.search}” in this window.`
+                      : 'No permit in this window matches the current filter.'}
                 </p>
               </ProtoCard>
             )}
@@ -1211,23 +1472,36 @@ export function RenewalRiskPage() {
             )}
 
             {/*
-              The status line, and the pager under it.
+              The status line, and the pager beside it.
 
               `matching` is the row count for the CURRENT filter and
               `scored_permits` is what the three band counts are out of. Both
-              are stated because they answer different questions — "how much of
-              this list have I seen" and "how much of the register is this list"
-              — and because a footer carrying only the first is how "25 of
-              2,060" quietly becomes an officer's estimate of the whole city.
+              are on this row because they answer different questions — "how
+              much of this list have I seen" and "how much of the register is
+              this list" — and because a footer carrying only the first is how
+              "25 of 2,060" quietly becomes an officer's estimate of the whole
+              city.
+
+              They are no longer in the same sentence, though. `matching` moved
+              into the pager, where it sits under the page number the client
+              asked to be made obvious; `scored_permits` stayed here, where it
+              is the one figure that does not move when a filter does.
             */}
             <div className="mt-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <p className="tnum text-[11px] text-ink-muted">
-                {data.matching > 0
-                  ? `Showing ${(data.offset + 1).toLocaleString()}–${(
-                      data.offset + data.at_risk.length
-                    ).toLocaleString()} of ${data.matching.toLocaleString()}`
-                  : 'Showing none'}
-                {' · '}
+                {/*
+                  The row range is stated HERE only when there is no pager to
+                  state it. Once the table runs to more than one page the pager
+                  carries it, in bold and beside the page number where the
+                  client asked for it, and repeating it at the other end of the
+                  same row is two figures a reader has to check against each
+                  other for no gain.
+                */}
+                {data.matching === 0
+                  ? 'Showing none · '
+                  : data.matching <= perPage
+                    ? `Rows 1–${data.at_risk.length.toLocaleString()} of ${data.matching.toLocaleString()} · `
+                    : ''}
                 {data.scored_permits.toLocaleString()} permits scored
                 <Info metric="scored_permits" />
                 {' · '}
@@ -1242,45 +1516,26 @@ export function RenewalRiskPage() {
                   that anything had been ignored. Making the PDF follow the
                   filter needs a line in the template naming it — see the
                   report.
+
+                  The search is on this list for the same reason and is the case
+                  most likely to catch someone out: having typed one business
+                  name, a report covering the whole city is the last thing the
+                  reader expects to have downloaded.
                 */}
-                {(data.filters.barangay || data.filters.band || data.filters.action) &&
+                {(data.filters.barangay ||
+                  data.filters.band ||
+                  data.filters.action ||
+                  data.filters.search) &&
                   ' · Generate Report covers the whole watchlist, not this filter'}
               </p>
 
               {data.matching > perPage && (
-                <span className="flex items-center gap-1.5">
-                  {/*
-                    aria-disabled, never `disabled` (DESIGN.md): a disabled
-                    control leaves the tab order, so a keyboard user on the last
-                    page would find focus jumping past the pager entirely rather
-                    than resting on a button that says it can go no further.
-                    The guards are in the handlers.
-                  */}
-                  <button
-                    type="button"
-                    aria-label="Previous page of businesses"
-                    aria-disabled={data.offset === 0 || loading}
-                    onClick={() => setOffset(Math.max(0, data.offset - perPage))}
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-royal aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
-                  >
-                    <span aria-hidden="true">‹</span>
-                  </button>
-                  <span className="tnum text-[11px] text-ink-muted">
-                    Page {(Math.floor(data.offset / perPage) + 1).toLocaleString()} of{' '}
-                    {Math.max(1, Math.ceil(data.matching / perPage)).toLocaleString()}
-                  </span>
-                  <button
-                    type="button"
-                    aria-label="Next page of businesses"
-                    aria-disabled={data.offset + perPage >= data.matching || loading}
-                    onClick={() =>
-                      setOffset((was) => (was + perPage >= data.matching ? was : was + perPage))
-                    }
-                    className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas focus:outline-none focus-visible:ring-2 focus-visible:ring-royal aria-disabled:opacity-40 aria-disabled:hover:bg-transparent"
-                  >
-                    <span aria-hidden="true">›</span>
-                  </button>
-                </span>
+                <TablePager
+                  report={data}
+                  perPage={perPage}
+                  loading={loading}
+                  onOffset={setOffset}
+                />
               )}
             </div>
           </section>

@@ -539,11 +539,27 @@ final class AnalyticsDefinitions
                 'why' => 'Requested directly in review: "kaya ako sinusunod, ng risk — so dapat meron ka diyan." A risk figure with no action attached leaves each officer to invent their own response.',
             ],
 
+            /*
+             * Asked on review: "Is this the predictive model formula? Why
+             * points are set that way?" Both halves are answered here and on
+             * the panel itself, because it is the question this screen gets
+             * asked in front of a room.
+             *
+             * It is a rule book, not a fit. And the weights are a judgement
+             * nobody at the city has signed off yet — stated plainly rather
+             * than dressed in a rationale we would have had to invent. See D1
+             * in docs/questions-for-malabon.md.
+             *
+             * Note the vocabulary this must dodge: the test below this file
+             * bans probability / likelihood / predict / forecast / confidence
+             * on this dataset INCLUDING in denials, so the disclaimer is
+             * phrased as "not a fitted model" rather than "not a prediction".
+             */
             'rulebook' => [
                 'label' => 'What drives the score',
-                'formula' => 'The five rules and the most each can add, with what each one measures.',
-                'covers' => 'The rules as the scorer applies them, read from the same constants the scoring runs on.',
-                'why' => 'This panel is why the score is allowed to exist. A number built out of other numbers is only defensible if a reader can take it apart.',
+                'formula' => 'Five rules, each with a fixed maximum, added together to give the score. Not a fitted model — every number in it is set in advance rather than estimated from past outcomes, so any row can be recomputed by hand.',
+                'covers' => 'The rules as the scorer applies them, read from the same constants the scoring runs on. The weights are the project team\'s judgement of what matters at renewal; BPLO has not reviewed or approved them.',
+                'why' => 'This panel is why the score is allowed to exist. A number built out of other numbers is only defensible if a reader can take it apart — and if the reader is told whose judgement set the parts.',
             ],
 
             'scored_permits' => [
@@ -593,15 +609,15 @@ final class AnalyticsDefinitions
 
             'closures' => [
                 'label' => 'Closures (Period)',
-                'formula' => 'Businesses removed from the register during the period.',
-                'covers' => 'Dated by removal, which is not when the business stopped trading — the register does not record that.',
+                'formula' => 'Businesses removed from the register or blacklisted during the period.',
+                'covers' => 'Dated by the removal or the blacklisting, which is not when the business stopped trading — the register does not record that. A blacklisting with no date on record is left out.',
                 'why' => 'The other half of growth. Read beside new registrations it says whether the register is really growing or only replacing what it loses.',
             ],
 
             'status_summary' => [
                 'label' => 'Business Status Summary',
-                'formula' => 'Every business ever registered, sorted into one of four states as things stand today: closed if struck off, inactive if never permitted, active if it holds a permit in force, expired otherwise.',
-                'covers' => 'Worked out from permits, not from the status an admin sets on the record. A suspended or revoked permit makes a business expired, never active.',
+                'formula' => 'Every business ever registered, sorted into one of four states as things stand today: closed if struck off or blacklisted, inactive if never permitted, active if it holds a permit in force, expired otherwise.',
+                'covers' => 'Blacklisting is the only admin status counted here; a suspension is temporary, so a suspended business is still read from its permits. A suspended or revoked permit makes a business expired, never active.',
                 'why' => 'How much of the register is live. The four states are checked in a fixed order, so a business lands in exactly one.',
             ],
 
@@ -639,8 +655,8 @@ final class AnalyticsDefinitions
 
             'closure_trend' => [
                 'label' => 'Business Closure Trend',
-                'formula' => 'Registrations removed each month across the period.',
-                'covers' => 'Dated by removal from the register, as above. The first month is only a part month because the period starts mid-month, so its point sits low for a reason that has nothing to do with closures.',
+                'formula' => 'Registrations removed or blacklisted each month across the period.',
+                'covers' => 'Dated by the removal or the blacklisting, as above. A blacklisting with no date on record counts as closed on the summary but cannot be placed in a month, so it is not drawn here. Lifting a blacklisting takes its point back off. The first month is only a part month because the period starts mid-month, so its point sits low for a reason that has nothing to do with closures.',
                 'why' => 'One period\'s closure count cannot say whether closures are rising. The month-by-month shape can.',
             ],
 

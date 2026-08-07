@@ -687,6 +687,18 @@ export interface RenewalRiskQuery {
   barangay?: string
   band?: RiskBand
   action?: RiskAction
+  /**
+   * Free text over business name and permit number, matched server-side.
+   *
+   * Sent rather than applied here for the same reason as the filters below,
+   * only more sharply: the browser holds one page of a set that runs to
+   * thousands, so a term filtered in the browser would search 25 rows and
+   * answer "no such business" about a register that has it on page ninety.
+   *
+   * Unlike the selects, "all" is a real term here — a text box says "no filter"
+   * by being empty, so send `undefined` rather than a sentinel.
+   */
+  search?: string
   /** First row of the page, counted over the filtered set. */
   offset?: number
 }

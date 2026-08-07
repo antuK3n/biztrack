@@ -19,6 +19,12 @@ class Business extends Model
         // panel read null on every business the application itself registered.
         'form_of_organization',
         'registration_number', 'tin', 'ban', 'is_active', 'status',
+        /*
+         * Written only by BusinessStatusController, and only when `status`
+         * actually moves. It is what dates a blacklisting on the Business
+         * Closure Trend; see the migration for why `updated_at` cannot.
+         */
+        'status_changed_at',
         'is_rented', 'lessor_name', 'lessor_address', 'lessor_contact',
         'monthly_rental', 'emergency_contact_name', 'emergency_contact_number',
         /*
@@ -60,6 +66,7 @@ class Business extends Model
 
     protected $casts = [
         'is_active' => 'boolean',
+        'status_changed_at' => 'datetime',
         'is_rented' => 'boolean',
         'has_tax_incentives' => 'boolean',
         /*
@@ -167,10 +174,20 @@ class Business extends Model
         return in_array($upper, self::REGISTRAR_BY_FORM, true) ? $upper : null;
     }
 
+    /**
+     * The moderation status that also reads as a closure.
+     *
+     * Named rather than spelled out because BusinessGrowthAnalytics now counts
+     * it as one, and a typo in a string literal over there would quietly empty
+     * the Business Closure Trend instead of failing. Suspension deliberately
+     * gets no such constant: it is temporary and is not a closure.
+     */
+    public const STATUS_BLACKLISTED = 'blacklisted';
+
     /** Statuses that bar the owner from filing new applications. */
     public function isBlockedFromApplying(): bool
     {
-        return in_array($this->status, ['suspended', 'blacklisted'], true);
+        return in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true);
     }
 
     public function owner(): BelongsTo

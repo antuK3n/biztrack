@@ -382,6 +382,124 @@ it('pages through a filtered set instead of cutting it off', function () {
     expect($past['offset'])->toBe(2);
 });
 
+/* ── and it can be pointed at one named business ───────────────────────── */
+
+it('finds a business by name from anywhere in the ranking, not just the page on screen', function () {
+    Permit::query()->delete();
+
+    /*
+     * The whole reason this search is server-side. The wanted business is the
+     * LOWEST ranked row here, so a search applied to the rows already in the
+     * browser — one high-risk permit — would match nothing and report that
+     * Malabon has no such business. On the real register the officer is looking
+     * at 25 rows of several thousand and the odds are worse.
+     */
+    $wanted = Business::whereNotNull('owner_user_id')->firstOrFail();
+    $wanted->update(['name' => 'Aling Mercado Sari-Sari Store']);
+    $other = Business::whereNotNull('owner_user_id')->where('id', '!=', $wanted->id)->firstOrFail();
+
+    riskPermit(-5, $other);    // high — the only row an unsearched first page shows
+    riskPermit(300, $wanted);  // low — far enough down that paging is the alternative
+
+    expect(riskFeed('?limit=1')['at_risk'][0]['business'])->toBe($other->name);
+
+    // Substring and case-insensitive: the distinguishing word in a Malabon
+    // business name is very often not its first one.
+    $found = riskFeed('?limit=1&search=mercado');
+    expect($found['matching'])->toBe(1);
+    expect($found['at_risk'][0]['business'])->toBe('Aling Mercado Sari-Sari Store');
+});
+
+it('finds a permit by its number, which is what an officer holding the permit has', function () {
+    Permit::query()->delete();
+    $permit = riskPermit(-5);
+    riskPermit(300);
+
+    // Lowercased on the way in, to prove the officer is not expected to guess
+    // the case the register happens to store the number in.
+    $found = riskFeed('?search='.urlencode(mb_strtolower($permit->permit_number)));
+
+    expect($found['matching'])->toBe(1);
+    expect($found['at_risk'][0]['permit_id'])->toBe($permit->id);
+});
+
+it('narrows the table without touching the cards, because a search is not a smaller city', function () {
+    Permit::query()->delete();
+
+    $wanted = Business::whereNotNull('owner_user_id')->firstOrFail();
+    $wanted->update(['name' => 'Solitaire Hardware']);
+    $other = Business::whereNotNull('owner_user_id')->where('id', '!=', $wanted->id)->firstOrFail();
+
+    riskPermit(-5, $wanted);
+    riskPermit(25, $other);
+    riskPermit(300, $other);
+
+    $all = riskFeed();
+    $found = riskFeed('?search=solitaire');
+
+    // The table narrows...
+    expect($found['matching'])->toBe(1);
+    expect($found['at_risk'])->toHaveCount(1);
+
+    /*
+     * ...and nothing else does. Search is a VIEW filter, beside band and
+     * action rather than beside barangay. Move it above the counting and
+     * Recommended Actions would announce that Malabon has one permit needing
+     * follow-up because an officer went looking for one business.
+     */
+    expect($found['scored_permits'])->toBe($all['scored_permits']);
+    expect($found['counts'])->toBe($all['counts']);
+    expect($found['actions'])->toBe($all['actions']);
+});
+
+it('intersects with the band filter and echoes the term as it was typed', function () {
+    Permit::query()->delete();
+
+    $wanted = Business::whereNotNull('owner_user_id')->firstOrFail();
+    $wanted->update(['name' => 'Solitaire Hardware']);
+
+    riskPermit(-5, $wanted);   // high
+    riskPermit(300, $wanted);  // low
+
+    expect(riskFeed('?search=Solitaire')['matching'])->toBe(2);
+
+    $narrowed = riskFeed('?search=Solitaire&band=low');
+    expect($narrowed['matching'])->toBe(1);
+    expect($narrowed['at_risk'][0]['band'])->toBe('low');
+
+    /*
+     * Echoed in the officer's own casing. The term is folded to compare
+     * against, and handing back "solitaire" under a box they typed "Solitaire"
+     * into would read as the screen having quietly corrected them.
+     */
+    expect($narrowed['filters']['search'])->toBe('Solitaire');
+});
+
+it('treats a blank search as no search, and the word "all" as a real one', function () {
+    Permit::query()->delete();
+
+    $wanted = Business::whereNotNull('owner_user_id')->firstOrFail();
+    $wanted->update(['name' => 'All Star Trading']);
+    riskPermit(-5, $wanted);
+
+    // Whitespace is not a term. A cleared box has to go back to being the
+    // unfiltered screen, not to a filter matching everything by accident.
+    $blank = riskFeed('?search=%20%20');
+    expect($blank['filters']['search'])->toBeNull();
+    expect($blank['matching'])->toBe($blank['scored_permits']);
+
+    /*
+     * "all" is the sentinel for the SELECTS, where it is the only way a
+     * `<select>` can say "unset". A text box says that by being empty, so the
+     * search deliberately does not share that cleaner — otherwise this officer
+     * gets the unfiltered city back with nothing on screen to say their term
+     * was thrown away, which is the one failure mode a search must not have.
+     */
+    $literal = riskFeed('?search=all');
+    expect($literal['filters']['search'])->toBe('all');
+    expect($literal['at_risk'][0]['business'])->toBe('All Star Trading');
+});
+
 it('ignores a filter value the scorer cannot produce, and says that it did', function () {
     Permit::query()->delete();
     riskPermit(-5);

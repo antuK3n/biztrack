@@ -333,7 +333,14 @@ export function BusinessGrowthPage() {
               hint={
                 renewal.survival === null
                   ? 'no business has reached a first renewal yet'
-                  : `after ${renewal.max_cycle} renewal ${renewal.max_cycle === 1 ? 'period' : 'periods'}${lastPoint ? ` · ${lastPoint.at_risk} businesses got that far` : ''}`
+                  : /*
+                     * "renewal periods" and not "renewals" until now, on a
+                     * screen whose selector is labelled "Last 12 months". Two
+                     * things called a period, only one of them a period, and
+                     * this figure is not filtered by the other one at all. The
+                     * shorter word is also the accurate one.
+                     */
+                    `after ${renewal.max_cycle} ${renewal.max_cycle === 1 ? 'renewal' : 'renewals'}${lastPoint ? ` · ${lastPoint.at_risk} businesses got that far` : ''}`
               }
             />
             <SummaryCard
@@ -384,13 +391,24 @@ export function BusinessGrowthPage() {
                 <>
                   <GrowthRenewalCurve points={renewal.points} />
                   {/*
-                    Verbatim from the server and not optional — see the note at
-                    the top of this file. It is the one long sentence left on
-                    the screen, and it is here because the number above it is
-                    misread without it.
+                    Two sentences, and they do different jobs. The second is
+                    verbatim from the server and not optional — see the note at
+                    the top of this file — and it explains the MEASURE.
+
+                    The first names the AXIS, which nothing on the screen did.
+                    A panelist asked "what does Renewal 1, 2, 3 mean?" and the
+                    caption could not answer: it says how the share is worked
+                    out but never what the three points are, so a reader cannot
+                    tell a business's own first renewal from the first one in
+                    the window the selector above is set to. It is the former —
+                    the curve follows each business's permit chain from its
+                    first permit and ignores the period entirely — and that is
+                    one clause's worth of fact, so it gets one clause and stays
+                    in the same block rather than becoming a second footnote.
                   */}
                   <p className="mt-2 border-t border-line pt-2 text-[11px] leading-snug text-ink-muted">
-                    {renewal.methodology}
+                    The 1st renewal is a business&rsquo;s own first, not a calendar year and not the
+                    first in this period. {renewal.methodology}
                   </p>
                 </>
               ) : (

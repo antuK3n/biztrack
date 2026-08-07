@@ -23,15 +23,33 @@ use Illuminate\Support\Facades\DB;
  * DEFINITIONS THAT ARE CHOICES
  *
  *  - **Lifecycle status** (Active / Expired / Inactive / Closed) is derived from
- *    permits, not from `businesses.status`. That column is the moderation state
- *    the admin sets (active / flagged / suspended / blacklisted) and answers a
- *    different question. A business is Closed when its registration was removed
- *    (soft delete), Active when it holds a permit valid today, Expired when its
- *    permits have all lapsed, and Inactive when it is registered but has never
+ *    permits and from two ways a business can leave the register. A business is
+ *    Closed when its registration was removed (soft delete) OR when an admin
+ *    blacklisted it; Active when it holds a permit valid today; Expired when its
+ *    permits have all lapsed; and Inactive when it is registered but has never
  *    been issued one.
- *  - **A closure is dated by `deleted_at`.** There is no closed_at column, and
- *    `updated_at` moves for every edit, so the soft-delete timestamp is the only
- *    honest closure date in the schema.
+ *  - **Blacklisting closes a business; suspension does not.** `businesses.status`
+ *    (active / flagged / suspended / blacklisted) is the moderation state an
+ *    admin sets, and most of it answers a different question from this screen.
+ *    Blacklisting is the exception: it is the LGU striking a business off, which
+ *    is the same thing the Closed bucket already counts. Suspension is temporary
+ *    and reversible by design — counting it here would put businesses that are
+ *    expected back into a panel that means "gone", and would make the Closure
+ *    Trend a chart of sanctions rather than of closures.
+ *    A blacklisting IS reversible too, so lifting one takes a point back off the
+ *    trend. The client was told this and accepted it: the chart shows the
+ *    register as it stands, not a ledger of everything that ever happened to it.
+ *  - **A closure is dated by `deleted_at`, or by `status_changed_at` for a
+ *    blacklisting.** There is no closed_at column and `updated_at` moves for
+ *    every edit, so those two are the only honest closure dates in the schema.
+ *    A blacklisted business whose `status_changed_at` is null — nobody recorded
+ *    when the sanction landed — still counts as Closed in the Status Summary,
+ *    which is an undated snapshot, but cannot appear in the monthly trend. There
+ *    is no month to put it in and inventing one would draw a closure where
+ *    nothing happened.
+ *  - Closures in the period and the closure trend are counted by ONE query
+ *    (closureDates()) so the headline figure and the sum of the chart cannot
+ *    drift apart.
  *  - Growth compares the requested period against the equally long period that
  *    ended where it began.
  *
@@ -444,16 +462,64 @@ final class BusinessGrowthAnalytics
             ->count();
     }
 
-    private static function closures(CarbonImmutable $from, CarbonImmutable $to): int
+    /**
+     * Every closure inside the window, as a list of the dates they happened on.
+     *
+     * Two things close a business and they are dated by different columns, so
+     * this is the one place that knows the union. `closures()` counts what comes
+     * back and `closureMonths()` buckets it; neither reads the register itself.
+     * That is deliberate — the headline "Closures in period" and the sum of the
+     * Closure Trend are the same number in two shapes, and a reader who adds up
+     * the chart and gets a different figure from the card above it has been told
+     * two things by one screen. Two closure counts that disagree would be worse
+     * than the dead chart this change exists to fix.
+     *
+     * Soft deletes are matched with `onlyTrashed` and blacklistings with the
+     * default scope, so the two sets cannot overlap: a business that was
+     * blacklisted and later removed from the register closed once, on the day it
+     * was removed, and is counted once.
+     *
+     * A blacklisted business with a null `status_changed_at` is absent from
+     * both. See the class docblock.
+     *
+     * @return list<CarbonImmutable>
+     */
+    private static function closureDates(CarbonImmutable $from, CarbonImmutable $to): array
     {
-        return Business::onlyTrashed()
+        $removed = Business::onlyTrashed()
             ->where('deleted_at', '>=', $from)
             ->where('deleted_at', '<=', $to)
-            ->count();
+            ->pluck('deleted_at');
+
+        $blacklisted = Business::query()
+            ->where('status', Business::STATUS_BLACKLISTED)
+            ->whereNotNull('status_changed_at')
+            ->where('status_changed_at', '>=', $from)
+            ->where('status_changed_at', '<=', $to)
+            ->pluck('status_changed_at');
+
+        return $removed->concat($blacklisted)
+            ->map(static fn ($date): CarbonImmutable => CarbonImmutable::parse($date))
+            ->values()
+            ->all();
+    }
+
+    private static function closures(CarbonImmutable $from, CarbonImmutable $to): int
+    {
+        return count(self::closureDates($from, $to));
     }
 
     /**
-     * Active / Expired / Inactive / Closed, derived from permits + soft deletes.
+     * Active / Expired / Inactive / Closed, from permits, soft deletes and
+     * blacklistings.
+     *
+     * Unlike the trend, this needs no date: it is a snapshot of how the register
+     * stands right now, so a blacklisted business counts as Closed whether or
+     * not anyone recorded when the sanction landed. That is the one place the
+     * two panels legitimately disagree — a blacklisting with a null
+     * `status_changed_at` is Closed here and invisible on the chart — and it is
+     * the honest split, because "this business is struck off" is knowable today
+     * while "it was struck off in March" is not.
      *
      * @return array<string, int>
      */
@@ -461,7 +527,7 @@ final class BusinessGrowthAnalytics
     {
         $today = CarbonImmutable::now()->toDateString();
 
-        $businesses = Business::withTrashed()->get(['id', 'deleted_at']);
+        $businesses = Business::withTrashed()->get(['id', 'deleted_at', 'status']);
 
         // One pass over permits: has each business ever held one, and does it
         // hold one that is valid today?
@@ -478,7 +544,11 @@ final class BusinessGrowthAnalytics
         $counts = ['active' => 0, 'expired' => 0, 'inactive' => 0, 'closed' => 0];
 
         foreach ($businesses as $business) {
-            if ($business->deleted_at !== null) {
+            // Closed is tested first, and both ways of closing are tested
+            // together: a blacklisted business may well still hold a permit
+            // valid today — nothing revokes it — and without this it would be
+            // counted as Active, which is exactly the gap this fixes.
+            if ($business->deleted_at !== null || $business->status === Business::STATUS_BLACKLISTED) {
                 $counts['closed']++;
             } elseif (! isset($everPermitted[$business->id])) {
                 $counts['inactive']++;
@@ -539,10 +609,7 @@ final class BusinessGrowthAnalytics
      */
     private static function closureMonths(CarbonImmutable $periodStart, CarbonImmutable $now, int $periodMonths): array
     {
-        $closures = Business::onlyTrashed()
-            ->where('deleted_at', '>=', $periodStart)
-            ->where('deleted_at', '<=', $now)
-            ->pluck('deleted_at');
+        $closures = self::closureDates($periodStart, $now);
 
         // Walk from the first of the month: adding months to, say, the 29th
         // overflows past February and would drop that bucket entirely.
@@ -553,7 +620,7 @@ final class BusinessGrowthAnalytics
         }
 
         foreach ($closures as $closedAt) {
-            $month = CarbonImmutable::parse($closedAt)->format('Y-m');
+            $month = $closedAt->format('Y-m');
             if (array_key_exists($month, $buckets)) {
                 $buckets[$month]++;
             }
