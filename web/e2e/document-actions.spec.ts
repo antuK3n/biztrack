@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * Runs as BPLO, not as the super admin.
@@ -20,7 +21,7 @@ import type { Page } from '@playwright/test'
  * needs a genuine 200. A departmentally scoped officer would be narrowed on
  * both counts.
  */
-test.use({ storageState: 'e2e/.auth/bplo.json' })
+test.use({ storageState: sessionFor('bplo') })
 
 /*
  * Checklist item 111, first sub-item: "view/download file uploaded not working"
@@ -113,6 +114,38 @@ async function openSheetWithReadableDocument(page: Page): Promise<number | null>
 
   if (discovered === null) return null
   await page.goto(`/staff/queue/${discovered}`)
+
+  /*
+   * The applicant's uploads live behind a disclosure now, so open it.
+   *
+   * The client asked for the filed sheet to be folded away on the review
+   * screen — the office's own clearance panel is the work, and the applicant's
+   * answers are reference. The View controls went with it, so this helper was
+   * finding the sheet, finding no button, and reporting "element(s) not found"
+   * as though documents had stopped rendering.
+   *
+   * Clicked only when collapsed: the control toggles, so an unconditional
+   * click would SHUT it on any screen that opens expanded, and this test would
+   * then fail in exactly the same way for the opposite reason.
+   *
+   * Waited for rather than sampled once. `count()` on a page that is still
+   * loading answers 0, and the dev server compiles this route on demand, so the
+   * first navigation of a run is slow enough to lose that race every time —
+   * which is why the first test in this file failed while the second, arriving
+   * at a warm route, passed with identical code.
+   */
+  const disclosure = page.getByRole('button', { name: 'Show the application as filed' })
+  await disclosure
+    .first()
+    .waitFor({ state: 'visible', timeout: 20_000 })
+    .catch(() => {})
+
+  if ((await disclosure.count()) > 0) {
+    if ((await disclosure.first().getAttribute('aria-expanded')) === 'false') {
+      await disclosure.first().click()
+    }
+  }
+
   return discovered
 }
 

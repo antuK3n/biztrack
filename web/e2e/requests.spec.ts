@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * The officer request composer, against a filing whose business is gone.
@@ -20,7 +21,7 @@ import { expect, test } from '@playwright/test'
  * contract with a shape, not the register's contents, that is under test.
  */
 
-test.use({ storageState: 'e2e/.auth/bplo.json' })
+test.use({ storageState: sessionFor('bplo') })
 
 const WITH_DELETED_BUSINESS = [
   {

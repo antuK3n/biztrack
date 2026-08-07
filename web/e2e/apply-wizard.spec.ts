@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * The apply wizard, from a business owner's side.
@@ -14,7 +15,7 @@ import { expect, test, type Page } from '@playwright/test'
  * asserted here rather than assumed.
  */
 
-test.use({ storageState: 'e2e/.auth/owner.json' })
+test.use({ storageState: sessionFor('owner') })
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/apply')

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * Search, sort and filter on the two Track pages (checklist items 88 and 90),
@@ -89,7 +90,7 @@ async function trackRowNames(page: import('@playwright/test').Page): Promise<str
 }
 
 test.describe('applicant Track page', () => {
-  test.use({ storageState: 'e2e/.auth/owner.json' })
+  test.use({ storageState: sessionFor('owner') })
 
   test.beforeEach(async ({ page }) => {
     await page.route('**/api/v1/applications*', async (route) => {
@@ -317,7 +318,7 @@ const UNPAID = [
 ]
 
 test.describe('officer queue', () => {
-  test.use({ storageState: 'e2e/.auth/bplo.json' })
+  test.use({ storageState: sessionFor('bplo') })
 
   /** Every /assignments URL the page asked for, in order. */
   let requested: string[]

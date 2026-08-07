@@ -302,8 +302,22 @@ class AssignmentController extends Controller
         $this->authorizeDepartment($request, $assignment);
         $data = $request->validate(['remarks' => ['nullable', 'string', 'max:1000']]);
 
-        $assignment->update(['officer_user_id' => $request->user()->id]);
+        /*
+         * The claim is written only once the approval is known to be accepted.
+         *
+         * This used to stamp officer_user_id first and call the workflow after,
+         * which quietly undid the care taken on the other side of that call:
+         * approveAssignment() refuses BEFORE any write precisely so that a
+         * refused approval leaves nothing behind. Since the RA 11032 gate, that
+         * refusal is reachable in ordinary use — approve an uncategorised filing
+         * and it throws — and the old order left the refusing officer's name
+         * recorded against a review they had just been told they could not make.
+         *
+         * Both writes now sit on the accepted path, in the order a reader would
+         * expect: decide, then record who decided.
+         */
         $this->workflow->approveAssignment($assignment, $data['remarks'] ?? null);
+        $assignment->update(['officer_user_id' => $request->user()->id]);
 
         return response()->json([
             'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business'])),

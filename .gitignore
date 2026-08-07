@@ -34,6 +34,8 @@ Revenue Code.pdf
 # Playwright MCP session artifacts
 .playwright-mcp/
 api/database/e2e.sqlite
+# Per-slot throwaway registers (E2E_SLOT), same rule as the one above.
+api/database/e2e-*.sqlite
 
 # Playwright run artifacts at the repo root (web/.gitignore covers web/)
 test-results/

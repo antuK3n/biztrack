@@ -134,7 +134,19 @@ function OfficeVisits({ app }: { app: Application }) {
     <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
       <h2 className="text-lg font-bold text-ink">Inspections by office</h2>
       <p className="mt-1 text-sm text-ink-secondary">
-        {outstanding === 0
+        {/*
+          * Three states, not two. "Your permits are issued once the last result
+          * is recorded" is a promise about the future, and it was still on
+          * screen on a filing whose permits already exist — on the same page as
+          * the card offering them for download. Told on the data rather than on
+          * the status: `permits` is the thing the sentence is about, and it is
+          * non-empty exactly when approveAndIssue has run. The forward-looking
+          * wording survives for the gap between the last passing visit and the
+          * permits being written, which is the only moment it was ever true.
+          */}
+        {outstanding === 0 && app.permits.length > 0
+          ? 'Every office has been, and your permits are issued — they are on this page and in your Profile.'
+          : outstanding === 0
           ? 'Every office has been. Your permits are issued once the last result is recorded.'
           : `An office passing its visit does not issue a permit — ${
               outstanding === 1 ? 'one office has' : `${outstanding} offices have`
@@ -196,19 +208,23 @@ function EyeChip({
   label,
   onClick,
   to,
+  className = '',
 }: {
   label: string
   onClick?: () => void
   to?: string
+  /** Layout only. Used by the issued-permits list to make a column of chips
+      one width instead of a ragged stack of intrinsic ones. */
+  className?: string
 }) {
   const inner = (
     <>
       <EyeIcon size={20} />
-      <span className="underline underline-offset-4">{label}</span>
+      <span className="truncate underline underline-offset-4">{label}</span>
     </>
   )
   const cls =
-    'inline-flex items-center gap-2.5 bg-royal px-6 py-2.5 text-base font-medium text-white transition-colors hover:bg-royal-hover'
+    `inline-flex items-center gap-2.5 bg-royal px-6 py-2.5 text-base font-medium text-white transition-colors hover:bg-royal-hover ${className}`
   return to ? (
     <Link to={to} className={cls}>
       {inner}
@@ -383,7 +399,6 @@ export function ApplicationDetailPage() {
 
   const status = app.status
   const isPayment = status === 'pending_payment'
-  const issuedPermit = app.permits[0]
   /*
    * The visit the applicant should be getting ready for.
    *
@@ -505,20 +520,67 @@ export function ApplicationDetailPage() {
               <CheckRingIcon />
               <span className="text-4xl font-medium">Approved</span>
             </div>
-            {issuedPermit ? (
-              <div className="mt-6 flex items-center gap-4">
-                <EyeChip label="Business Permit" to={`/permits/${issuedPermit.id}`} />
-                <Link
-                  to={`/permits/${issuedPermit.id}`}
-                  aria-label="Download Business Permit"
-                  className="text-royal hover:text-royal-hover"
-                >
-                  <DownloadIcon size={26} />
-                </Link>
-              </div>
+            {/*
+              * Every certificate this filing produced, each under its own name.
+              *
+              * This was `app.permits[0]` behind the literal strings "Business
+              * Permit" and "Download Business Permit", and both halves of that
+              * were wrong at once. A filing that asks for seven permit types
+              * issues seven permits — `approveAndIssue` writes one per requested
+              * type in a single transaction — so six of them had no route from
+              * the screen that announced the approval. And `[0]` is whatever
+              * that insert happened to write first, which is the filing's
+              * permit-type order and not a promise about which type leads it:
+              * the first filing whose order puts a clearance ahead of the
+              * Mayor's Permit served a Sanitary Permit under a link that read
+              * "Download Business Permit". A certificate under another
+              * certificate's name is not a wording slip.
+              *
+              * So the name comes from `permit_type.name` — the API's own word
+              * for the document, the same one Profile prints — and never from a
+              * string written here.
+              *
+              * The list is `items-stretch` inside a column that centres its
+              * children, so it takes the width of its widest row and every chip
+              * fills it. With one permit that is the single chip's intrinsic
+              * width, which is exactly what this card showed before; with seven
+              * it is a tidy column instead of a ragged centred stack.
+              */}
+            {app.permits.length > 0 ? (
+              <ul className="mt-6 flex flex-col items-stretch gap-3">
+                {app.permits.map((permit) => {
+                  const typeName = permit.permit_type?.name ?? 'Permit'
+                  /* The permit NUMBER is what makes each link's accessible name
+                     distinct beyond doubt (WCAG 2.1 AA, PRODUCT.md): seven
+                     arrows all announcing "Download" is a list a screen-reader
+                     user cannot choose from, and a renewal can leave two
+                     permits of the same type on one business. It is the same
+                     naming Profile uses for the same documents. */
+                  const name = `${typeName} (${permit.permit_number})`
+                  return (
+                    <li key={permit.id} className="flex items-center gap-4">
+                      <EyeChip
+                        label={typeName}
+                        to={`/permits/${permit.id}`}
+                        className="min-w-0 flex-1"
+                      />
+                      {/* The arrow opens the certificate, where the PDF is
+                          produced — the same destination as the chip beside it,
+                          which is why the two share an href. */}
+                      <Link
+                        to={`/permits/${permit.id}`}
+                        aria-label={`Download the ${name}`}
+                        className="shrink-0 text-royal hover:text-royal-hover"
+                      >
+                        <DownloadIcon size={26} />
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
             ) : (
               <p className="mt-3 text-sm italic text-ink-secondary">
-                Your permit is being issued. It will appear here shortly.
+                Your permits are being issued. They will appear here shortly.
               </p>
             )}
           </StatusCard>

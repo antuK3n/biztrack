@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\ApplicationVisibility;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -27,6 +28,27 @@ class InspectionResource extends JsonResource
             ? $app->business->address
             : null;
 
+        /*
+         * Is this reader entitled to the written-up half of the visit (INS-8)?
+         *
+         * Here, and not at the eager-load in AssignmentController, for exactly
+         * the reason office_forms is filtered in ApplicationResource rather than
+         * in its callers: the leak was never one endpoint. `GET /inspections/{id}`
+         * refused a cross-office read all along, while
+         * `GET /assignments/{id}` and `GET /applications/{id}` both handed the
+         * same rows over through this resource. A rule enforced by whoever
+         * happens to load the relation is a rule the next caller — a PDF export,
+         * a new officer screen — silently reopens. Every one of the five
+         * responses that carries an inspection goes through this method, so this
+         * is the one place all five can obey it.
+         *
+         * Reads `department_id` and `inspector_user_id` off the row, never the
+         * `department` / `inspector` relations, so a payload that did not eager
+         * load them does not pay a query per inspection to find out who may read
+         * it.
+         */
+        $readsDetail = ApplicationVisibility::readsInspectionDetail($request->user(), $this->resource);
+
         return [
             'id' => $this->id,
             'status' => $this->status?->value,
@@ -35,7 +57,21 @@ class InspectionResource extends JsonResource
             'result_label' => $this->result?->label(),
             'scheduled_at' => optional($this->scheduled_at)->toISOString(),
             'conducted_at' => optional($this->conducted_at)->toISOString(),
-            'findings' => $this->findings,
+            /*
+             * Free prose about somebody else's premises. Withheld from every
+             * office but the one that conducted the visit — "Food handlers
+             * without current health certificates" is the City Health Office's
+             * account of the applicant's business, and the fire office does not
+             * need it to know that CHO's visit failed.
+             *
+             * Null rather than absent, and null rather than a "redacted"
+             * sentinel. `findings` is already nullable on the column and every
+             * reader already handles an empty write-up, so a withheld visit
+             * renders as one that has not been written up — which is all another
+             * office is entitled to conclude. A sentinel would advertise that
+             * there is something here to go and ask for.
+             */
+            'findings' => $readsDetail ? $this->findings : null,
             /*
              * Whether a fresh visit may be booked off the back of this one.
              *
@@ -61,7 +97,13 @@ class InspectionResource extends JsonResource
                 'code' => $this->department->code,
                 'name' => $this->department->name,
             ] : null,
-            'inspector' => $this->relationLoaded('inspector') && $this->inspector ? [
+            /*
+             * A named member of another office's staff, on a screen the client
+             * only ever asked to show a clearance's standing. `department` stays
+             * — which OFFICE inspected is the coordination fact every office on
+             * the filing needs — but WHO is that office's own personnel record.
+             */
+            'inspector' => $readsDetail && $this->relationLoaded('inspector') && $this->inspector ? [
                 'id' => $this->inspector->id,
                 'name' => $this->inspector->name,
             ] : null,

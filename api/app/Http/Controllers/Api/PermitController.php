@@ -291,9 +291,28 @@ class PermitController extends Controller
             return;
         }
 
+        /*
+         * Two ways in, and the office branch is narrower than the filing.
+         *
+         * An office reviewer reaches a permit only if it was issued by THEIR
+         * office — see ApplicationVisibility::readsPermitOf. Scoping to the
+         * filing alone handed every office on a six-clearance filing all six
+         * certificates.
+         *
+         * The department comparison is inside the same branch as the filing
+         * check rather than applied to the whole query, because the owner
+         * branch beside it must stay untouched: an applicant reads their own
+         * certificates regardless of which office issued them.
+         *
+         * A reviewer with no department matches nothing — `where(col, null)`
+         * is never true in SQL — which is the fail-closed posture scope() takes.
+         */
         $query->where(function ($sub) use ($user) {
             $sub->whereHas('business', fn ($b) => $b->where('owner_user_id', $user->id))
-                ->orWhereHas('application', fn ($a) => ApplicationVisibility::scope($a, $user));
+                ->orWhere(fn ($office) => $office
+                    ->whereHas('application', fn ($a) => ApplicationVisibility::scope($a, $user))
+                    ->whereHas('permitType', fn ($t) => $t->where('issuing_department_id', $user->department_id))
+                );
         });
     }
 
@@ -314,10 +333,15 @@ class PermitController extends Controller
             return;
         }
 
-        $permit->loadMissing('application');
+        $permit->loadMissing(['application', 'permitType']);
         $ok = $user->hasPermission('permit.view_all')
             && $permit->application
-            && ApplicationVisibility::canView($user, $permit->application);
+            && ApplicationVisibility::canView($user, $permit->application)
+            // ...and issued by this reader's own office. The filing check above
+            // is the coarse one — every office routed to a six-clearance filing
+            // passes it, which is how a CHO session came to be able to download
+            // a BFP certificate. See readsPermitOf.
+            && ApplicationVisibility::readsPermitOf($user, $permit->permitType?->issuing_department_id);
 
         abort_unless($ok, 403, 'This permit is not yours.');
     }

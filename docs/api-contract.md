@@ -71,6 +71,7 @@ admin adds: `analytics.view user.manage owner.manage_status oic.assign reference
 ### Inspections (inspection.manage)
 - `GET /inspections` — caller's department (or own if inspector). Query `?status=`. InspectionResource `{id,status,status_label,result,result_label,scheduled_at,conducted_at,findings,department:{code,name},inspector:{id,name}|null, application:{id,tracking_id,business:{name}, address:{line1,barangay:{name},latitude,longitude}}}`
 - `GET /inspections/{id}`
+- `findings` and `inspector` are per-reader wherever an inspection is serialised (here, and nested in `GET /applications/{id}` and `GET /assignments/{id}`): both come back `null` unless the caller is the applicant, BPLO/super admin, the office that conducted the visit, or the inspector named on it. `status`, `result`, `department` and the dates are shared with every office on the filing, because none of them can issue until the others' visits pass. See `ApplicationVisibility::readsInspectionDetail`.
 - `POST /inspections/{id}/conduct` — body `{result: passed|failed|conditional, findings?, photos?}` → `WorkflowService::recordInspection`.
 - `POST /inspections/{id}/reschedule` — body `{scheduled_at}`.
 

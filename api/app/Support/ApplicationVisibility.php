@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Application;
+use App\Models\Inspection;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -102,6 +103,102 @@ final class ApplicationVisibility
 
         return $user->department_id !== null
             && $user->department_id === $issuingDepartmentId;
+    }
+
+    /**
+     * May this reader see ONE office's issued clearance?
+     *
+     * The same boundary as readsOfficeSheet, and deliberately the same code:
+     * the answers an office collects and the certificate it issues off those
+     * answers belong to that office, and it would be incoherent to hide the
+     * FSIC questionnaire from the sanitary officer while handing them the FSIC.
+     *
+     * That incoherence was live. PermitController drew its line at the FILING —
+     * `canView()` — so a six-clearance filing routed to six offices gave all
+     * six offices all six certificates. A CHO session could read a BFP-issued
+     * Fire Safety Inspection Certificate and download its PDF: 200, the owner's
+     * name and street address, more than the deliberately anonymous public
+     * /verify endpoint gives out. Permit ids are sequential and the URL is
+     * typeable, so filtering the list alone was never a boundary.
+     *
+     * The client's sentence is the specification: "sanitary accounts can only
+     * see sanitary permits, and fire accounts can only see fire".
+     *
+     * Same three readers keep everything, for the same reasons as the sheets:
+     * the applicant (it is their certificate), BPLO and the super admin
+     * (ANY_OFFICE — they coordinate and audit across offices by design), and
+     * the office that issues that clearance.
+     *
+     * Fails closed on a null department on either side.
+     */
+    public static function readsPermitOf(?User $user, ?int $issuingDepartmentId): bool
+    {
+        return self::readsOfficeSheet($user, $issuingDepartmentId);
+    }
+
+    /**
+     * May this reader see the WRITTEN-UP half of one site visit? (INS-8)
+     *
+     * The third instance of the same shape, and the third time the rule was
+     * enforced at one door and not the other. `InspectionController` has always
+     * refused a cross-office read — `GET /inspections/10163` answers 403 to a
+     * CHO session on a BFP visit — but the officer's review sheet never calls
+     * that endpoint. It reads visits out of `GET /assignments/{id}`, and
+     * `GET /applications/{id}` carries the same block, both through
+     * ApplicationResource → InspectionResource, which had no filter at all. An
+     * e2e run found 21 leaked visits across all six inspecting offices: the CHO
+     * session refused inspection 10163 could nonetheless read that BFP visit's
+     * inspector by name off assignment 15805, and on filing 3393 the prose
+     * "Food handlers without current health certificates…".
+     *
+     * ── Where the boundary is ─────────────────────────────────────────────────
+     *
+     * NOT the permit type's issuing department, which is what readsOfficeSheet
+     * and readsPermitOf use. A visit carries its OWN `department_id` — the
+     * office that booked it and will conduct it (WorkflowService::openInspection
+     * sets it, and the column is NOT NULL) — so the conducting
+     * office is a fact on the row rather than something to infer through the
+     * permit type. The two happen to coincide today because each clearance is
+     * inspected by the office that issues it, but they are different questions
+     * and this one has a direct answer.
+     *
+     * ── Which readers keep everything ─────────────────────────────────────────
+     *
+     *  - the applicant, because the visit is to THEIR premises and the findings
+     *    are what they have to put right before a re-inspection can pass;
+     *  - BPLO and the super admin (ANY_OFFICE), who coordinate and audit across
+     *    offices by design;
+     *  - the office that conducted the visit;
+     *  - the inspector NAMED on the visit, even from another office. That
+     *    disjunct is not new here — it is the second half of
+     *    InspectionController::authorizeDepartment, which lets a departmentless
+     *    officer act on the visits booked to them. Read and write have to agree,
+     *    or `/inspections` would hand that officer a row whose own findings are
+     *    blanked while `conduct` still accepts their result.
+     *
+     * ── What is withheld, and what deliberately is not ────────────────────────
+     *
+     * Only `findings` and `inspector`. Bare progress — status, result, the
+     * office, the dates — stays visible to every office on the filing, because
+     * the filing does not advance until every current visit passes
+     * (WorkflowService::recordInspection) and an office waiting on a
+     * clearance has a genuine need to know that the fire visit happened and
+     * whether it passed. Withholding the result would replace a privacy defect
+     * with a coordination one. What another office has no need for is the free
+     * prose about someone else's premises and the name of the officer who wrote
+     * it — the two fields the e2e run actually surfaced.
+     *
+     * Fails closed on a null user, and on a reviewer with no department, for the
+     * same reason scope() does.
+     */
+    public static function readsInspectionDetail(?User $user, Inspection $inspection): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+
+        return self::readsOfficeSheet($user, $inspection->department_id)
+            || $inspection->inspector_user_id === $user->id;
     }
 
     /** May this user read this application at all? */

@@ -122,6 +122,70 @@ it('counts each tab over the whole scoped set, not the page in hand', function (
     }
 });
 
+/*
+ * The invariant QueuePage's "Showing N of M" line now rests on, pinned here
+ * because nothing else pinned it.
+ *
+ * The queue used to build M by summing `application_status_counts` across the
+ * tab's statuses, and that breakdown is computed WITHOUT the `q` the same
+ * request carried — so a search matching one filing announced "Showing 1 of 12
+ * matching “BIZ-2026-00969”". The screen takes M from `meta.total` instead,
+ * which is the paginator's count over the query that returned the rows, so the
+ * only thing keeping the sentence honest is that `total` narrows with `q`.
+ *
+ * `data` is deliberately compared against `total` rather than against a literal:
+ * one filing is routed to several offices, and BPLO reads all of them, so a
+ * tracking-ID search legitimately matches more than one assignment row.
+ */
+it('narrows the total by the search term, not just the page', function () {
+    $bplo = authAs('bplo@biztrack.local');
+
+    /*
+     * A second filing in the SAME office, so that a search has something to
+     * narrow away from. The seeded register hands BPLO one assignment, and one
+     * row cannot tell a total that respects the search from a total that
+     * ignores it — both answer 1.
+     */
+    $routed = Application::whereHas('assignments')->firstOrFail();
+    $copy = $routed->replicate();
+    $copy->tracking_id = 'BIZ-2026-90001';
+    $copy->save();
+
+    $extra = $routed->assignments()->firstOrFail()->replicate();
+    $extra->application_id = $copy->id;
+    $extra->save();
+
+    $unsearched = test()->withHeaders($bplo)
+        ->getJson('/api/v1/assignments?per_page=200')->assertOk()->json();
+    expect($unsearched['meta']['total'])->toBeGreaterThan(1);
+
+    $trackingId = $copy->tracking_id;
+
+    $searched = test()->withHeaders($bplo)
+        ->getJson('/api/v1/assignments?per_page=200&q='.urlencode($trackingId))
+        ->assertOk()->json();
+
+    expect($searched['meta']['total'])->toBeLessThan($unsearched['meta']['total'])
+        ->and($searched['meta']['total'])->toBeGreaterThan(0)
+        // Every row on the page is a match, and the page is the whole result.
+        ->and(count($searched['data']))->toBe($searched['meta']['total']);
+
+    foreach ($searched['data'] as $row) {
+        expect($row['application']['tracking_id'])->toBe($trackingId);
+    }
+
+    /*
+     * And the figure the screen no longer reads, stated as the reason it does
+     * not. The breakdown still answers "how many per status in this scope",
+     * ignoring the search, so summing it here would reproduce the defect
+     * exactly. Asserted rather than merely described so that a later change
+     * making the counts search-aware shows up as a failing test to reconsider
+     * this note against, instead of passing silently.
+     */
+    expect(array_sum($searched['meta']['application_status_counts']))
+        ->toBe($unsearched['meta']['total']);
+});
+
 it('counts only the office the reader belongs to', function () {
     $sanitary = authAs('sanitary@biztrack.local');
     $body = test()->withHeaders($sanitary)->getJson('/api/v1/assignments')->assertOk()->json();

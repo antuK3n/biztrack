@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * The LGU Clearances, from a business owner's side.
@@ -26,7 +27,7 @@ import { expect, test, type Page } from '@playwright/test'
  * still demanding the old lock would be demanding the accrual back.
  */
 
-test.use({ storageState: 'e2e/.auth/owner.json' })
+test.use({ storageState: sessionFor('owner') })
 
 /**
  * Make a draft of our own, through the API, rather than hunting for one.
