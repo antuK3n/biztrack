@@ -7,7 +7,32 @@ import { ACCOUNTS, DEMO_PASSWORD, mergedStorageState, signIn } from './helpers'
  * Every other spec takes the API shortcut in helpers.ts, so this file is the
  * only place the form itself is exercised. If it goes, everything else keeps
  * passing against a door nobody can open.
+ *
+ * ── Why this file waits before it starts ────────────────────────────────────
+ *
+ * `login` is limited to ten attempts a minute per IP (AppServiceProvider). This
+ * is the only spec that spends that budget through the real endpoint, and it is
+ * not the only thing spending it: auth.setup.ts now mints NINE sessions, one
+ * per office, so a full run arrives here with roughly one attempt left and
+ * these tests fail on 429 — an infrastructure artefact wearing the costume of a
+ * broken sign-in page.
+ *
+ * The fix is a wait, not a bigger limit. Raising it in a test environment would
+ * mean the suite passes against a control the product does not ship, and a
+ * lockout that only exists in production is one nobody has ever exercised. So
+ * this file idles out the window instead, once, for the whole file.
+ *
+ * The window is a minute; 65s covers the edge where setup's last login lands
+ * just before a tick. It costs one minute per full run and buys assertions that
+ * are about sign-in rather than about scheduling.
  */
+test.beforeAll(async () => {
+  // The hook's own timeout, not a test's: hooks default to 30s, so a 65s wait
+  // is killed before it finishes and every test in the file reports a 0ms
+  // failure — which looks nothing like the waiting it actually is.
+  test.setTimeout(90_000)
+  await new Promise((resolve) => setTimeout(resolve, 65_000))
+})
 
 test('the sign-in page is reachable and labelled', async ({ page }) => {
   await page.goto('/login')

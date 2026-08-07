@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * Runs as a clearance office, not as the super admin.
@@ -18,7 +19,7 @@ import type { Page } from '@playwright/test'
  * CPDO, which is why the helpers below find their filing rather than hard-code
  * one.
  */
-test.use({ storageState: 'e2e/.auth/zoning.json' })
+test.use({ storageState: sessionFor('zoning') })
 
 /*
  * Opening a For Inspection filing from Application Verification.

@@ -16,7 +16,43 @@ export const ACCOUNTS = {
   bplo: 'bplo@biztrack.local',
   zoning: 'zoning@biztrack.local',
   owner: 'owner@biztrack.local',
+  // The other five clearance offices. Present so a spec can prove an office
+  // sees ITS filings and nobody else's — a claim that cannot be made from a
+  // single office's session, because one office looking at its own queue looks
+  // identical whether scoping works or was never implemented.
+  sanitary: 'sanitary@biztrack.local',
+  fire: 'fire@biztrack.local',
+  obo: 'obo@biztrack.local',
+  cenro: 'cenro@biztrack.local',
+  market: 'market@biztrack.local',
 } as const
+
+/**
+ * The seven offices, paired with the permit each one issues.
+ *
+ * Read off `permit_types.issuing_department_id`, and the pairing is the point:
+ * "a sanitary account can only see sanitary permits" is a claim about that
+ * table, so a spec asserting it should be driven by the same mapping rather
+ * than by a list retyped into a test that can quietly fall out of step.
+ *
+ * BPLO carries `inspects: false` because it is the only office that reads the
+ * papers without ever booking a visit — it coordinates the clearances. Every
+ * other office's permit type has `requires_inspection` set.
+ */
+export const OFFICES = [
+  { account: 'bplo', code: 'BPLO', permit: 'BUSINESS', inspects: false },
+  { account: 'sanitary', code: 'CHO', permit: 'SANITARY', inspects: true },
+  { account: 'fire', code: 'BFP', permit: 'FSIC', inspects: true },
+  { account: 'zoning', code: 'CPDO', permit: 'ZONING', inspects: true },
+  { account: 'obo', code: 'OBO', permit: 'OCCUPANCY', inspects: true },
+  { account: 'cenro', code: 'CENRO', permit: 'CEC', inspects: true },
+  { account: 'market', code: 'CMO-MARKET', permit: 'MARKET', inspects: true },
+] as const satisfies ReadonlyArray<{
+  account: keyof typeof ACCOUNTS
+  code: string
+  permit: string
+  inspects: boolean
+}>
 
 /**
  * Sign in through the API and hand the token to the app.
@@ -64,7 +100,17 @@ interface StorageState {
   origins: { origin: string; localStorage: { name: string; value: string }[] }[]
 }
 
-const AUTH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '.auth')
+/** Must match auth.setup.ts — see the note there on why the slot is in the path. */
+const AUTH_DIR = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '.auth',
+  process.env.E2E_SLOT ?? 'default',
+)
+
+/** The saved session for an account, for `browser.newContext({ storageState })`. */
+export function sessionFor(account: keyof typeof ACCOUNTS): string {
+  return path.join(AUTH_DIR, `${account}.json`)
+}
 
 /**
  * Two saved sessions in one browser profile.

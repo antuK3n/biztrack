@@ -269,23 +269,23 @@ const PAGE_SIZE = 25
  *
  *  - Filter → server, on every tab. Both endpoints take a status list, so
  *    narrowing a tab to one status is a query change and the totals stay exact.
- *  - Search → server on Pending Payment, browser on the other two. Not a
- *    preference: `/applications` takes `q` (tracking ID or business name, two
- *    LIKEs in SQL) and `/assignments` takes nothing of the kind —
- *    AssignmentController::index validates only status / application_status /
- *    page / per_page. Moving the other two tabs off browser search needs `q` on
- *    that endpoint and is not in this change; see the report.
+ *  - Search → server, on every tab. This note used to read "server on Pending
+ *    Payment, browser on the other two", because `/applications` took `q` and
+ *    `/assignments` took nothing of the kind. It takes one now, over the same
+ *    two columns (tracking ID and business name, two LIKEs in SQL) and applied
+ *    inside the department scoping, so all three tabs search the whole queue
+ *    rather than the rows that happen to be loaded. See `searchesOnServer`.
  *  - Sort → browser on every tab, because neither endpoint accepts an ordering
  *    parameter (`/assignments` orders assigned_at DESC and `/applications`
  *    created_at DESC, both unconditionally).
  *
- * Where the browser is doing the work the page asks for the API's ceiling
- * instead of a screenful, so it usually covers the whole queue in one request:
- * an office's "For Approval" tab is tens of rows, not thousands. `maxPerPage`
- * is 200 (PaginatesLists) and asking for more is clamped, not obeyed. Where the
- * SERVER is doing the work no deep page is needed, and the status line says
- * "Showing 3 of 3" rather than "3 of the 200 loaded" because for once that is
- * the whole truth.
+ * Sort is therefore the only one left in the browser, and where it is doing the
+ * work the page asks for the API's ceiling instead of a screenful, so it usually
+ * covers the whole queue in one request: an office's "For Approval" tab is tens
+ * of rows, not thousands. `maxPerPage` is 200 (PaginatesLists) and asking for
+ * more is clamped, not obeyed. Where the SERVER is doing the work no deep page
+ * is needed, and the status line says "Showing 3 of 3" rather than "3 of the 200
+ * loaded" because for once that is the whole truth.
  */
 const DEEP_PAGE_SIZE = 200
 
@@ -342,16 +342,16 @@ interface QueueItem {
   pendingPayment: boolean
 }
 
-/** What one page of either feed looks like once it has been normalised. */
+/**
+ * What one page of either feed looks like once it has been normalised.
+ *
+ * `meta` carries the only total this screen quotes. It used to carry a second
+ * one — `meta.application_status_counts`, lifted out into a `counts` field here
+ * — and see the note on `total` in QueuePage for why nothing reads it any more.
+ */
 interface QueueFeed {
   items: QueueItem[]
   meta: PageMeta
-  /**
-   * Per-status totals over the whole scoped set, from `/assignments` only.
-   * `/applications` needs no equivalent: its `meta.total` is already the total
-   * for exactly the status list that was asked for.
-   */
-  counts?: Partial<Record<ApplicationStatus, number>>
 }
 
 /**
@@ -435,11 +435,7 @@ async function loadPage(args: {
     per_page: args.perPage,
   })
 
-  return {
-    items: res.data.map(fromAssignment),
-    meta: res.meta,
-    counts: res.meta.application_status_counts,
-  }
+  return { items: res.data.map(fromAssignment), meta: res.meta }
 }
 
 /** Is the browser being asked to do work the current page of rows cannot answer? */
@@ -469,11 +465,27 @@ function QueueRow({ item }: { item: QueueItem }) {
     <>
       <div className="min-w-0 flex-1 px-6 py-4">
         <p className="truncate text-[17px] font-bold text-ink">{item.name}</p>
-        {item.nameIsFallback && (
-          <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            Business removed from the register
-          </p>
-        )}
+        {/*
+          * The tracking ID, on the row, in its own right.
+          *
+          * It was searchable on both feeds and never once printed, so an officer
+          * who searched "BIZ-2026-00969" got back a row that did not contain the
+          * thing they had searched by — and two filings from one business were
+          * the same three lines twice, with nothing on screen to tell them apart.
+          * It is also what an applicant quotes over the phone, which makes it the
+          * one handle both sides of that call share.
+          *
+          * One slot holding one of two captions, deliberately, rather than a line
+          * added beside the existing one. When the business is gone `nameOf` has
+          * already promoted the tracking ID into the heading above; printing it
+          * again here would say the same thing twice AND leave the heading looking
+          * like an ID with no explanation. The caption that earns the space in
+          * that case is the one that explains the heading. Either way the row
+          * carries the tracking ID exactly once.
+          */}
+        <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+        </p>
         <p className="mt-0.5 text-sm italic text-ink-muted">
           {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
         </p>
@@ -532,10 +544,9 @@ function QueueRow({ item }: { item: QueueItem }) {
  * browser is what made this fragile: it pulled the office's whole assignment
  * history to show a screenful, and against a paged feed it would have counted
  * one page's rows and presented that as the queue — a number that is always
- * plausible and always wrong. The assignment tabs' totals come from
- * `meta.application_status_counts`, counted over the whole department-scoped
- * set; Pending Payment's comes from `meta.total`, which is already the total for
- * the status list it asked for.
+ * plausible and always wrong. Every tab's total is `meta.total`, counted by the
+ * paginator over the same query that produced the rows beside it; see the note
+ * on `total` below for why it is not assembled out of anything else.
  */
 export function QueuePage() {
   const canReadEveryOffice = useAuth((s) => Boolean(s.user?.permissions.includes(ANY_OFFICE)))
@@ -593,10 +604,10 @@ export function QueuePage() {
    * its rows come from `/applications` and have no assignment at all, so any
    * value here would filter the whole tab to nothing (see PAYMENT_STATUSES).
    *
-   * A useful side effect: `AssignmentController::statusCounts` applies this same
-   * filter, so the "Showing N of M" total and the tab badges now count the tab
-   * the officer is actually looking at. For Inspection previously counted every
-   * assignment the office had ever held in those statuses, open or closed.
+   * A useful side effect: the list query applies it, so `meta.total` — and with
+   * it the "Showing N of M" line — counts the tab the officer is actually
+   * looking at. For Inspection previously counted every assignment the office
+   * had ever held in those statuses, open or closed.
    */
   const assignmentStatuses =
     tab === 'approval'
@@ -705,13 +716,34 @@ export function QueuePage() {
     if (was !== now) restart()
   }
 
-  // Counted over the whole set, not the page in hand. `/applications` has no
-  // per-status breakdown and needs none: it was asked for exactly these statuses,
-  // so its `total` already is this tab's total.
-  const counts = data?.counts
-  const total = counts
-    ? activeStatuses.reduce((sum, s) => sum + (counts[s] ?? 0), 0)
-    : (data?.meta.total ?? 0)
+  /*
+   * The denominator, taken from the same query as the numerator.
+   *
+   * `meta.total` is what the paginator counted over the very query that returned
+   * these rows: the tab's status list, the assignment-status half of the
+   * partition and the search term, all applied. So "Showing 1 of 1" is
+   * arithmetic on one question rather than on two.
+   *
+   * The assignment tabs used to sum `meta.application_status_counts` across the
+   * tab's statuses instead, and that breakdown is a SECOND query — one that does
+   * not carry `q`. A search matching a single filing therefore announced
+   * "Showing 1 of 12 matching “BIZ-2026-00969”" while `meta.total` sat correctly
+   * at 1 in the same payload. Twelve was a truthful answer to a question nobody
+   * had asked.
+   *
+   * Fixed by dropping the summation rather than by teaching the counts about
+   * `q`, because this is the third denominator this screen has quoted from
+   * somewhere other than the rows — "Showing 0 of the 13 loaded" was the second
+   * — and re-syncing two queries only holds until the next filter is added to
+   * one of them. Nothing summed is nothing left to drift.
+   *
+   * No precision is lost by it: `/assignments` filters on `application_status`
+   * server-side, so its `total` already IS this tab's total. OfficerQueueFilterTest
+   * asserts exactly that — every per-status count equals the total of asking for
+   * that status on its own — which is what makes the breakdown a reconstruction
+   * of a number the payload was already carrying.
+   */
+  const total = data?.meta.total ?? 0
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
   const firstLoad = loading && rows.length === 0
 

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { sessionFor } from './helpers'
 
 /*
  * ITEM 110 — "For the renewal, it should ask first (in modal) the permit ID so
@@ -23,7 +24,7 @@ import { expect, test, type Page } from '@playwright/test'
  * browser facts.
  */
 
-test.use({ storageState: 'e2e/.auth/owner.json' })
+test.use({ storageState: sessionFor('owner') })
 
 /*
  * The seeded owner's one business with permits in the register — and it holds

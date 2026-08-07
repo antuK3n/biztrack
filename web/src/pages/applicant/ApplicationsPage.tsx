@@ -153,10 +153,52 @@ interface OfficeProgress {
 }
 
 /**
+ * The chip for a status where the FILING's own state is the whole answer.
+ *
+ * A row on this list normally reports the office behind one permit type, and
+ * that only means something once the filing has been routed to offices at all.
+ * Routing happens on payment — `WorkflowService::routeToDepartments` is called
+ * from `onPaymentCompleted` and from nowhere else — so on `submitted` and
+ * `pending_payment` there is no assignment to report and no office reading
+ * anything. `cancelled` and `rejected` are the far end of the same fact: the
+ * filing is decided and no office is working it either.
+ *
+ * All four used to fall through to the default at the bottom of `permitChip`
+ * and print "For Approval", which is `ApplicationStatus::UnderReview`'s own
+ * label — one name answering for five states. On `pending_payment` it printed
+ * once per permit type on a row whose other half is an orange "Pay Online"
+ * button, so the row contradicted itself: the one person who could move that
+ * filing was told, seven times, that somebody else already was.
+ *
+ * The labels are read from the shared status table and never written again
+ * here. `api/tests/Feature/StatusLabelParityTest.php` holds that table
+ * character-for-character against the PHP enum, so a chip taken from it cannot
+ * quietly become a third vocabulary for a state that already has a name.
+ *
+ * Only the tones are this list's own, because the chip palette here is the
+ * prototype's solid blocks rather than status.ts's tinted badges: orange for
+ * `pending_payment` is the colour of the Pay Online block on the same row and
+ * of status.ts's `attention`, and `submitted`/`cancelled` take gray because
+ * this palette has no blue and neither state is asking the applicant for
+ * anything.
+ */
+const APP_STATE_TONES: Partial<Record<ApplicationStatus, ChipTone>> = {
+  submitted: 'gray',
+  pending_payment: 'orange',
+  rejected: 'red',
+  cancelled: 'gray',
+}
+
+function appStateChip(status: ApplicationStatus): Chip | undefined {
+  const tone = APP_STATE_TONES[status]
+  return tone ? { tone, label: applicationStatusMeta(status).label } : undefined
+}
+
+/**
  * Per-permit chip (prototype p49). Derived from the issuing department's
  * assignment and, once the filing reaches inspection, from that department's
  * own visit — in this order:
- *  - app-level rejected → all red "Rejected"
+ *  - a status that is the filing's own answer (see APP_STATE_TONES) → that chip
  *  - assignment returned → red "Returned"
  *  - app for_inspection, that office's visit failed → red "Inspection Failed"
  *  - app for_inspection, that office's visit passed → tint "Inspection Passed"
@@ -173,7 +215,12 @@ interface OfficeProgress {
  * unused hint that this function still cares.
  */
 function permitChip(appStatus: ApplicationStatus, office: OfficeProgress): Chip {
-  if (appStatus === 'rejected') return { tone: 'red', label: 'Rejected' }
+  // First, and before any assignment is consulted: on these statuses there is
+  // either no assignment yet or none that still means anything, so a chip
+  // derived from one would be reporting work nobody is doing.
+  const own = appStateChip(appStatus)
+  if (own) return own
+
   if (office.assignment === 'returned') return { tone: 'red', label: 'Returned' }
 
   /*
@@ -241,9 +288,26 @@ function permitChip(appStatus: ApplicationStatus, office: OfficeProgress): Chip 
   return { tone: 'orange', label: 'For Approval' }
 }
 
-/** Coarse fallback chip from application status alone (before detail loads). */
+/**
+ * Coarse fallback chip from application status alone (before detail loads).
+ *
+ * It carried the same default as `permitChip` and so told the same untruths for
+ * the moment before the detail response lands — which on a slow connection is
+ * the only version of the row a lot of people ever read.
+ *
+ * `returned` is handled here and NOT in `permitChip`, deliberately. With the
+ * detail loaded, a returned filing knows which office sent it back and only
+ * that office's row goes red; with nothing loaded it knows only that the filing
+ * is in the applicant's hands, and the one thing it must not say is that the
+ * offices are still reading it.
+ *
+ * What is left on the default is `under_review` — whose label this is — and
+ * `draft`, which never reaches this list (drafts have their own page).
+ */
 function fallbackChip(status: ApplicationStatus): Chip {
-  if (status === 'rejected') return { tone: 'red', label: 'Rejected' }
+  const own = appStateChip(status)
+  if (own) return own
+  if (status === 'returned') return { tone: 'red', label: applicationStatusMeta(status).label }
   if (status === 'for_inspection') return { tone: 'yellow', label: 'For Inspection' }
   if (status === 'approved' || status === 'issued') return { tone: 'green', label: 'Approved' }
   return { tone: 'orange', label: 'For Approval' }

@@ -60,7 +60,12 @@ export default defineConfig({
     {
       name: 'chromium',
       testIgnore: /auth\.(setup|spec)\.ts/,
-      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/admin.json' },
+      use: {
+        ...devices['Desktop Chrome'],
+        // Slot-keyed: see the note in auth.setup.ts. A saved session belongs to
+        // one origin AND one copy of the register, so two slots cannot share.
+        storageState: `e2e/.auth/${process.env.E2E_SLOT ?? 'default'}/admin.json`,
+      },
       dependencies: ['setup'],
     },
   ],

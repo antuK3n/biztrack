@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { infoButtonNames, waitForAnalytics } from './helpers'
+import { infoButtonNames, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * The four analytics screens, and the promise they make.
@@ -38,8 +38,8 @@ import { infoButtonNames, waitForAnalytics } from './helpers'
  * default; `test.use` below overrides it per block, which is why the BPLO tests
  * do not need a project of their own.
  */
-const BPLO_SESSION = 'e2e/.auth/bplo.json'
-const SUPER_ADMIN_SESSION = 'e2e/.auth/admin.json'
+const BPLO_SESSION = sessionFor('bplo')
+const SUPER_ADMIN_SESSION = sessionFor('admin')
 
 /** §1, §2 and §4 of the spec — all headed "(Admin - BPLO)". */
 const BPLO_SCREENS = [

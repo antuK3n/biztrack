@@ -19,9 +19,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 API="$ROOT/api"
 LIVE_DB="$API/database/database.sqlite"
-E2E_DB="$API/database/e2e.sqlite"
-API_PORT=8081
-WEB_PORT=5199
+
+# ── Naming a stack ───────────────────────────────────────────────────────────
+#
+# The defaults are the single stack this script has always raised, so
+# `npm run e2e:stack` behaves exactly as before.
+#
+# E2E_SLOT gives a run its own database AND its own ports, which is what lets
+# two suites be written at once without either seeing the other's writes. The
+# database is copied per slot, so a test that submits an application in one
+# slot is invisible in the next — which matters more than it sounds: these
+# specs assert on counts, and a stray filing from a neighbouring run is
+# indistinguishable from the product double-counting.
+SLOT="${E2E_SLOT:-}"
+E2E_DB="${E2E_DB:-$API/database/e2e${SLOT:+-$SLOT}.sqlite}"
+API_PORT="${E2E_API_PORT:-8081}"
+WEB_PORT="${E2E_WEB_PORT:-5199}"
 
 if [ ! -f "$LIVE_DB" ]; then
   echo "No database at $LIVE_DB — nothing to copy from." >&2

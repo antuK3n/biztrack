@@ -475,7 +475,89 @@ function splitLine1(line1: string | null | undefined): { house: string; street: 
   return { house: '—', street: raw }
 }
 
+/**
+ * ── Why the approval confirmation is up here and the sheet is a child ───────
+ *
+ * Approving sets a flag and calls `reload()`, and the reload is the whole
+ * difficulty: it changes the filing out from under the sheet, and the sheet
+ * legitimately returns early on some of what can come back. Two of those early
+ * returns used to swallow the confirmation, because the modal was the last
+ * thing in the sheet's own JSX:
+ *
+ *  - A clearance office's approval flips the filing to `for_inspection` AND
+ *    completes that office's assignment — exactly the pair the For Inspection
+ *    branch keys on — so the office's own success returned before the modal was
+ *    ever reached. Its confirmation was unmounted by the thing it was
+ *    confirming.
+ *  - `reload()` also sets `loading` back to true, so the skeleton branch above
+ *    that one dropped the modal for the length of the refetch, for EVERY office
+ *    including BPLO.
+ *
+ * BPLO only ever looked correct because its approval leaves the filing at
+ * `under_review`, so once the refetch settled it landed back on the one path
+ * that still drew the modal. The dialog was never surviving the state change;
+ * it was being re-created after it.
+ *
+ * So the confirmation does not live on a branch at all. It is a sibling of the
+ * whole sheet, rendered from the one return statement that every branch inside
+ * `ReviewSheet` sits beneath, and `showVerification` lives beside it because
+ * state is no use on a component whose render is what drops the dialog.
+ *
+ * This is deliberately NOT "have the For Inspection branch render it too". Two
+ * copies of one dialog are two things to keep in step, and the next early
+ * return added to that sheet would silently be a third place that forgets it —
+ * which is precisely how this bug was written the first time. One JSX site
+ * cannot drift from itself, and no `return` inside a child can escape a
+ * sibling. Nothing here touches the branch conditions, so the INS-1 rule below
+ * — that branch keys on whether THIS OFFICE still owes a review, never on the
+ * filing's status alone — is untouched.
+ */
 export function ReviewPage() {
+  const navigate = useNavigate()
+  const [showVerification, setShowVerification] = useState(false)
+
+  return (
+    <>
+      <ReviewSheet onApproved={() => setShowVerification(true)} />
+
+      {showVerification && (
+        <ProtoModal
+          title="VERIFICATION"
+          cancelLabel="Home Page"
+          confirmLabel="Tracking Page"
+          onCancel={() => navigate('/dashboard')}
+          onConfirm={() => navigate('/staff/queue')}
+        >
+          {/*
+           * The dialog is the only word an officer gets that the decision
+           * landed, so it says that before it asks anything. It used to open on
+           * "Where would you like to go?" alone — a question about navigation,
+           * not a confirmation — while behind it the screen had usually just
+           * changed shape under them.
+           *
+           * ProtoModal supplies the rest of what a dialog owes a screen reader:
+           * role="dialog", aria-modal, an accessible name taken from the title,
+           * and a focus move onto the first footer button (useDialogKeyboard).
+           * This copy is what is read out after that name.
+           */}
+          <p className="text-center text-base font-semibold text-ink">
+            Approval recorded. This application has moved on from your office.
+          </p>
+          <p className="py-4 text-center text-base">Where would you like to go?</p>
+        </ProtoModal>
+      )}
+    </>
+  )
+}
+
+/**
+ * The review sheet itself. Every early return in this function is beneath the
+ * confirmation dialog rendered by `ReviewPage` above; keep it that way.
+ *
+ * `onApproved` is called once the API has accepted the approval, before the
+ * reload that will change this component's render out from under it.
+ */
+function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const assignmentId = Number(id)
@@ -525,7 +607,6 @@ export function ReviewPage() {
   const [popup, setPopup] = useState<'reject' | 'return' | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
-  const [showVerification, setShowVerification] = useState(false)
 
   /*
    * The only two FOR OFFICE USE ONLY boxes that go anywhere: the assessment
@@ -1196,7 +1277,13 @@ export function ReviewPage() {
     setActionError(null)
     try {
       await assignments.approve(assignmentId, remarks.trim() || undefined)
-      setShowVerification(true)
+      /*
+       * Raised before the reload, and deliberately not by this component: the
+       * reload is what changes this screen out from under the officer, and the
+       * confirmation has to outlive that. It is owned by ReviewPage, one level
+       * up, so no early return below can take it down. See the note there.
+       */
+      onApproved()
       reload()
     } catch (err) {
       setActionError(toApiError(err).message)
@@ -2572,18 +2659,6 @@ export function ReviewPage() {
             onConfirm={sendRemark}
           />
         </div>
-      )}
-
-      {showVerification && (
-        <ProtoModal
-          title="VERIFICATION"
-          cancelLabel="Home Page"
-          confirmLabel="Tracking Page"
-          onCancel={() => navigate('/dashboard')}
-          onConfirm={() => navigate('/staff/queue')}
-        >
-          <p className="py-4 text-center text-base">Where would you like to go?</p>
-        </ProtoModal>
       )}
     </div>
   )
