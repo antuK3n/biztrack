@@ -53,20 +53,23 @@ use Illuminate\Support\Facades\DB;
  * badge the spec asks for could never be drawn. Raising `limit` does not fix
  * that — it moves the cut further down the same ranking.
  *
- * So compute() takes a `$view`: a barangay, a band, an action, and an offset.
- * Two different kinds of narrowing, and the difference is the whole reason the
- * counts stay trustworthy:
+ * So compute() takes a `$view`: a barangay, a band, an action, a search term
+ * and an offset. Two different kinds of narrowing, and the difference is the
+ * whole reason the counts stay trustworthy:
  *
  *  - **Barangay is a POPULATION filter.** It is applied before scoring, so
  *    `counts`, `scored_permits` and `actions` all describe the same set of
  *    permits the table is drawn from. Ask for Tonsuya and every figure on the
  *    screen is about Tonsuya.
- *  - **Band and action are VIEW filters.** They are applied after the counting,
- *    so the three summary cards keep describing every scored permit in the
- *    population — which is what makes them the legend for this control. The
- *    card says "Low risk 2,060"; pick Low and there are exactly 2,060 rows to
- *    page through. The cards and the table cannot disagree, because the card IS
- *    the row count.
+ *  - **Band, action and search are VIEW filters.** They are applied after the
+ *    counting, so the three summary cards keep describing every scored permit
+ *    in the population — which is what makes them the legend for this control.
+ *    The card says "Low risk 2,060"; pick Low and there are exactly 2,060 rows
+ *    to page through. The cards and the table cannot disagree, because the card
+ *    IS the row count. Search is on this side for the same reason but a
+ *    stronger one: an officer looking up one business is asking where it sits
+ *    in the city's risk picture, not asking for the picture to be redrawn
+ *    around it.
  *
  * `matching` is that row count, and it is what the table's footer states. It is
  * deliberately NOT `scored_permits`: one is "how many rows this filter has",
@@ -446,7 +449,7 @@ final class RenewalRiskAnalytics
     }
 
     /**
-     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, search?: string|null, offset?: int}  $view
      * @return array<string, mixed>
      */
     public static function build(
@@ -521,7 +524,7 @@ final class RenewalRiskAnalytics
      * two engines cannot drift over filtering — only one of them does any.
      *
      * @param  array<string, mixed>  $dataset  as returned by dataset()
-     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, search?: string|null, offset?: int}  $view
      * @return array<string, mixed>
      */
     public static function compute(array $dataset, array $view = []): array
@@ -595,12 +598,23 @@ final class RenewalRiskAnalytics
          * length of the filtered list and is what the table's footer states —
          * never `scored_permits`, which is the denominator the bands are out
          * of and is a larger number the moment any band is selected.
+         *
+         * Search sits here, beside band and action, rather than up with the
+         * barangay. That is the difference between "narrow the population I am
+         * measuring" and "find me a row in it", and only the second is what a
+         * search box means. Put it above the counting and typing a name would
+         * redraw the three summary cards and the Recommended Actions panel
+         * around that one business — a screen reporting that the city has one
+         * high-risk permit because an officer went looking for one.
          */
-        $matching = $filters['band'] === null && $filters['action'] === null
+        $needle = $filters['search'] === null ? null : mb_strtolower($filters['search']);
+
+        $matching = $filters['band'] === null && $filters['action'] === null && $needle === null
             ? $rows
             : array_values(array_filter($rows, static fn (array $row): bool => (
                 ($filters['band'] === null || $row['band'] === $filters['band'])
                 && ($filters['action'] === null || $row['action'] === $filters['action'])
+                && ($needle === null || self::matchesSearch($row, $needle))
             )));
 
         $perPage = max(1, $limit);
@@ -624,7 +638,8 @@ final class RenewalRiskAnalytics
          * with the values that are true of an unfiltered result by definition.
          */
         $view = $filters['barangay'] !== null || $filters['band'] !== null
-            || $filters['action'] !== null || $filters['offset'] > 0
+            || $filters['action'] !== null || $filters['search'] !== null
+            || $filters['offset'] > 0
             ? [
                 /*
                  * What was actually applied, echoed rather than assumed.
@@ -639,6 +654,10 @@ final class RenewalRiskAnalytics
                     'barangay' => $filters['barangay'],
                     'band' => $filters['band'],
                     'action' => $filters['action'],
+                    // As typed, not as matched: the term is folded to lower
+                    // case to compare against, and echoing THAT would show an
+                    // officer "mercado" under a box they typed "Mercado" into.
+                    'search' => $filters['search'],
                 ],
                 'matching' => count($matching),
                 'offset' => $offset,
@@ -666,15 +685,24 @@ final class RenewalRiskAnalytics
     }
 
     /**
-     * A caller's `$view` reduced to the four things compute() acts on.
+     * A caller's `$view` reduced to the five things compute() acts on.
      *
      * Blank strings and the sentinel "all" both mean "no filter": the screen's
      * selects carry an "All" option and posting its value must not be a
      * barangay named "all". Unknown bands and actions are dropped for the
      * reason given where `filters` is echoed.
      *
-     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, offset?: int}  $view
-     * @return array{barangay: string|null, band: string|null, action: string|null, offset: int}
+     * The search term is deliberately NOT put through that same cleaner. "all"
+     * is a sentinel for a `<select>`, where it is the only way to say "no
+     * choice"; a text box says that by being empty. Sharing the cleaner would
+     * mean an officer who types the word "all" gets an unfiltered table back
+     * with no sign the term was thrown away — a silent wrong answer, and the
+     * one failure mode a search must not have. It is capped for the same reason
+     * the controller caps it: a term longer than a business name is not a
+     * search, and it ends up in a snapshot key.
+     *
+     * @param  array{barangay?: string|null, band?: string|null, action?: string|null, search?: string|null, offset?: int}  $view
+     * @return array{barangay: string|null, band: string|null, action: string|null, search: string|null, offset: int}
      */
     private static function normaliseView(array $view): array
     {
@@ -684,6 +712,8 @@ final class RenewalRiskAnalytics
             return ($value === null || $value === '' || $value === 'all') ? null : $value;
         };
 
+        $search = is_string($view['search'] ?? null) ? trim((string) $view['search']) : '';
+
         $band = $clean($view['band'] ?? null);
         $action = $clean($view['action'] ?? null);
 
@@ -691,8 +721,31 @@ final class RenewalRiskAnalytics
             'barangay' => $clean($view['barangay'] ?? null),
             'band' => in_array($band, self::BANDS, true) ? $band : null,
             'action' => in_array($action, self::ACTIONS, true) ? $action : null,
+            'search' => $search === '' ? null : mb_substr($search, 0, 120),
             'offset' => max(0, (int) ($view['offset'] ?? 0)),
         ];
+    }
+
+    /**
+     * Whether a scored row answers to a typed term.
+     *
+     * Business name and permit number, because those are the two things an
+     * officer has in front of them when they come looking: a name from a phone
+     * call, or a number off the permit itself. Substring rather than prefix —
+     * "Mercado" has to find "Aling Mercado Sari-Sari Store", and the register
+     * is full of businesses whose distinguishing word is not their first.
+     *
+     * The needle arrives already lowercased so this is not re-folding the same
+     * string once per row; `$row` values are folded here because they differ
+     * every call. Case-insensitive throughout: nobody types a permit number in
+     * the case the register happens to store it in.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private static function matchesSearch(array $row, string $needle): bool
+    {
+        return str_contains(mb_strtolower((string) $row['business']), $needle)
+            || str_contains(mb_strtolower((string) $row['permit_number']), $needle);
     }
 
     /**

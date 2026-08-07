@@ -76,7 +76,25 @@ class BusinessStatusController extends Controller
         ]);
 
         $from = $business->status;
-        $business->update(['status' => $data['status']]);
+
+        /*
+         * `status_changed_at` is only touched when the status actually moves.
+         * It dates a blacklisting on the Business Closure Trend, so re-saving
+         * the same status — which the roster lets an admin do, and which the QA
+         * sweeps in the audit log did twice — must not shift that closure into
+         * the current month. Re-blacklisting an already-blacklisted business is
+         * not a second closure.
+         *
+         * The audit row is still written either way: "an admin looked at this
+         * and left it alone, for this reason" is a fact worth keeping, it is
+         * just not a status change.
+         */
+        $changes = ['status' => $data['status']];
+        if ($data['status'] !== $from) {
+            $changes['status_changed_at'] = now();
+        }
+        $business->update($changes);
+
         Audit::log('business.status_changed', $business, [
             'from' => $from,
             'to' => $data['status'],

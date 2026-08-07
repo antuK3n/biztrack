@@ -1361,6 +1361,12 @@ export interface RenewalRiskFilters {
   barangay: string | null
   band: RiskBand | null
   action: RiskAction | null
+  /**
+   * The term the server matched on, in the casing the officer typed it. Folded
+   * to lower case to compare against rows, never to echo — a box that answered
+   * "Mercado" with "mercado" reads as having corrected the reader.
+   */
+  search: string | null
 }
 
 /**

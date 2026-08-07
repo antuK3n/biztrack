@@ -44,9 +44,12 @@
              the word the rest of this rename just removed. --}}
         Every figure is computed from the register. Business status is derived from permits: Active
         means a permit valid today, Expired means every permit has lapsed, Inactive means registered
-        but never issued one, and Closed means the registration was removed. A closure is dated by
-        when the registration was removed, which is the only closure date the schema records. Where a
-        period has nothing to compare against, the rate is left blank rather than filled in.
+        but never issued one, and Closed means the registration was removed or the business was
+        blacklisted. A suspension is temporary and is not counted as a closure. A closure is dated by
+        when the registration was removed or the blacklisting was recorded; a blacklisting with no
+        date on record is counted in the status summary but cannot be placed in a month, so it does
+        not appear in the closure trend. Where a period has nothing to compare against, the rate is
+        left blank rather than filled in.
     </div>
 
     <h2>Headline figures</h2>

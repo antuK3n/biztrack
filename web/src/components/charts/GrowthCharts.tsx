@@ -215,6 +215,16 @@ export function GrowthBarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
 
 /* ── Business Renewal Performance — line across renewal cycles ─────────── */
 
+/** "1st", "2nd", "3rd", "4th" — see the axis note on GrowthRenewalCurve. */
+function ordinal(cycle: number): string {
+  const teens = cycle % 100
+  if (teens >= 11 && teens <= 13) {
+    return `${cycle}th`
+  }
+
+  return `${cycle}${['th', 'st', 'nd', 'rd'][cycle % 10] ?? 'th'}`
+}
+
 /**
  * The spec's Business Renewal Performance: compliance across renewal periods.
  *
@@ -227,15 +237,35 @@ export function GrowthBarangayBars({ rows }: { rows: BarangayGrowthRow[] }) {
  * The at-risk count rides along on every point because a late cycle can rest on
  * very few businesses — 117 behind cycle 3 where 451 stood behind cycle 1 — and
  * a reader who cannot see that has no way to weigh the last point.
+ *
+ * ── Why the ticks are ordinals ──────────────────────────────────────────────
+ *
+ * They read "Renewal 1", "Renewal 2", "Renewal 3", and a panelist asked in
+ * those words what that meant. Fairly: "Renewal 1" is shaped like a category
+ * name — Region 1, Barangay 1 — so it says nothing about being a position in a
+ * sequence, and the screen carries a period selector directly above it, which
+ * invites a reader to guess the axis is windowed by it. It is not.
+ *
+ * BusinessGrowthAnalytics::cohortObservations() builds each business's
+ * mayor's-permit chain from its FIRST permit with no date filter at all, and
+ * cycle k is the k-th renewal along that chain. So the axis is each business's
+ * own renewal history, not the calendar and not the selected period. "1st
+ * renewal" reads as an ordinal position, which is what a cycle is; the caption
+ * under the chart in BusinessGrowthPage says whose first it is.
+ *
+ * Nothing here fixes the count of ticks at three. `points` is however many
+ * cycles the register supports — survivalCurve() walks t = 1..max_cycle and
+ * stops when no business reached the next one — so a register with a longer
+ * history draws a 4th and a 5th without a change on this side.
  */
 export function GrowthRenewalCurve({ points }: { points: SurvivalPoint[] }) {
-  const data = points.map((point) => ({ ...point, label: `Renewal ${point.cycle}` }))
+  const data = points.map((point) => ({ ...point, label: `${ordinal(point.cycle)} renewal` }))
 
   return (
     <GrowthChartFrame
       label="Business Renewal Performance"
-      summary="Share of the cohort still renewing on time at each renewal period"
-      columns={['Renewal period', 'Still renewing on time', 'Businesses that reached it', 'Lapses']}
+      summary="Share still renewing on time at each renewal, counted from each business's own first permit"
+      columns={['Renewal', 'Still renewing on time', 'Businesses that reached it', 'Lapses']}
       rows={data.map((point) => ({
         cells: [point.label, pct(point.survival), point.at_risk, point.lapses],
       }))}
