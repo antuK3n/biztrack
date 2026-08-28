@@ -6,17 +6,16 @@
     file was printed, when it actually means when the statistics were computed,
     and those differ by however long it has been since the last
     `php artisan analytics:refresh`. So the wording is "Computed", and it names
-    the engine.
+    what computed them.
 
-    Naming the engine matters more on paper than on screen: if the R service was
-    down and the PHP fallback produced these numbers, that fact has to travel with
-    the document rather than being something the exporter happened to see once.
+    This line used to read "by R 4.6.1" or "locally, not by R", because there
+    were two engines and which one ran was a fact a filed document had to carry.
+    R has been removed; BizTrack computes its own statistics, so there is one
+    answer and the version is no longer a variable worth printing. The client
+    asked for the banner to say "by BizTrack", and that is all it needs to say —
+    how fresh the figures are is a separate question, answered by the date beside
+    it and by pdf.partials.local-notice.
 
     Expects: $generated_at (formatted), $meta (AnalyticsResolver provenance).
 --}}
-Computed {{ $generated_at }}
-@if (($meta['source'] ?? 'local') === 'r')
-    by R{{ isset($meta['engine_version']) ? ' '.$meta['engine_version'] : '' }}
-@else
-    locally, not by R
-@endif
+Computed {{ $generated_at }} by {{ $meta['engine'] ?? 'BizTrack' }}

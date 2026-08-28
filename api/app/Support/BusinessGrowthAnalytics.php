@@ -15,10 +15,11 @@ use Illuminate\Support\Facades\DB;
  * naming; the paper wins on formulas. That split is deliberate and is recorded in
  * docs/r-integration-spec.md §4.
  *
- * Same shape as the other analytics features: `dataset()` gathers facts and is
- * what `analytics:refresh` pushes to R, `compute()` turns facts into statistics
- * and doubles as the fallback, and R's `POST /growth/lifecycle` returns the same
- * schema from the same facts.
+ * Same shape as the other analytics features: `dataset()` runs the SQL and
+ * gathers facts, `compute()` turns those facts into statistics without touching
+ * the database. Keeping the arithmetic on the far side of that seam is what lets
+ * it be pinned to a frozen fixture (AnalyticsGoldenOutputTest) instead of to a
+ * seeded database.
  *
  * DEFINITIONS THAT ARE CHOICES
  *
@@ -59,9 +60,6 @@ use Illuminate\Support\Facades\DB;
  */
 final class BusinessGrowthAnalytics
 {
-    /** The R endpoint that computes this dataset. */
-    public const R_ENDPOINT = '/growth/lifecycle';
-
     public const DEFAULT_PERIOD_MONTHS = 12;
 
     /** How many barangays and industries the screen lists. */
@@ -149,8 +147,8 @@ final class BusinessGrowthAnalytics
      * cannot act differently for knowing the estimator's name; what they have to
      * know is which businesses were followed and which were set aside, and that
      * is still here. NOTHING ABOUT THE METHOD CHANGED — only the words for it.
-     * The method is documented on computeSurvival() below and in r/R/service.R,
-     * where the audience is a developer rather than an officer.
+     * The method is documented on computeSurvival() below, where the audience is
+     * a developer rather than an officer.
      */
     public const SURVIVAL_METHODOLOGY = 'Of the businesses that reached each renewal, this is the '
         .'share that had renewed every earlier one with no gap in cover. Businesses still inside '
@@ -166,8 +164,9 @@ final class BusinessGrowthAnalytics
     }
 
     /**
-     * The facts every panel needs. No rates, no ranks, no survival curve — R's
-     * job (and compute()'s).
+     * The facts every panel needs. No rates, no ranks, no survival curve — those
+     * are compute()'s job, and keeping them out of here is what keeps this method
+     * to plain SQL and its output to plain data.
      *
      * @return array<string, mixed>
      */
@@ -185,12 +184,12 @@ final class BusinessGrowthAnalytics
             'survival_methodology' => self::SURVIVAL_METHODOLOGY,
 
             /*
-             * R reads `grace_days` off this payload and falls back to its own
-             * literal 30 when the key is absent — which it was, so the two
-             * engines agreed only by coincidence. Sending it makes this constant
-             * the single source: change it here and both engines move together,
-             * instead of the R side silently keeping the old cut-off and
-             * reporting a different lapse count for the same register.
+             * The grace period travels with the facts rather than being read
+             * straight out of the constant inside compute(). A dataset is a
+             * self-contained record of the question that was asked, so a fixture
+             * frozen today still describes the cut-off its numbers were produced
+             * under, instead of quietly adopting a later one and reporting a
+             * different lapse count for the same register.
              */
             'grace_days' => self::RENEWAL_GRACE_DAYS,
 
@@ -298,18 +297,17 @@ final class BusinessGrowthAnalytics
      *
      * ── Why this is not on compute() ────────────────────────────────────────
      *
-     * `industry_growth` is computed by r/R/service.R as well, and
-     * AnalyticsParityTest compares the two engines' key sets in both directions,
-     * byte-strict. R sorts that panel by count and slices to six; a re-ranking
-     * done in PHP alone would fail parity, and a new key on compute()'s output
-     * would fail it too. AnalyticsResolver serves R's stored snapshot verbatim
-     * when one exists, so a PHP-only change would not even reach the browser.
-     * r/R/service.R is not ours to change.
+     * compute() feeds the nightly snapshot, and AnalyticsResolver serves that
+     * stored snapshot verbatim when one exists. Anything added to compute()
+     * therefore reaches the browser a refresh late, at last night's vintage —
+     * which is exactly what these lenses must not be (see the next section).
+     * Its `industry_growth` panel is also part of a published response shape:
+     * the PDF report reads it, and the golden fixture is frozen against it.
      *
      * So this is spliced onto the response at serve time by
      * AnalyticsController, exactly as the renewal-risk barangay menu and
      * permit-lifecycle split are. `industry_growth` is left untouched: the PDF
-     * report and the parity fixture still read it, and it is still the Largest
+     * report and the golden fixture still read it, and it is still the Largest
      * lens' answer.
      *
      * ── Why all three lenses are computed here, live ────────────────────────
@@ -380,9 +378,9 @@ final class BusinessGrowthAnalytics
             static fn (array $row): bool => $row['count'] >= $minBusinesses,
         ));
 
-        // Identical to computeIndustries() and to R's `order(-count, -delta,
-        // codes)`: count, then change, then PSIC code so ties hold a stable
-        // order across engines and across reloads.
+        // Identical to computeIndustries(): count, then change, then PSIC code,
+        // so ties hold a stable order across reloads and between this panel and
+        // that one rather than following whatever order the rows arrived in.
         $largest = $rows;
         usort(
             $largest,
@@ -786,8 +784,10 @@ final class BusinessGrowthAnalytics
      * Censored businesses leave the risk set without ever counting as failures,
      * which is the whole reason for using this rather than a single division.
      *
-     * R computes the same thing through `survival::survfit`; this reproduces it so
-     * the fallback cannot quietly become a second, different measure.
+     * This is the same estimator `survival::survfit` implements, written out here
+     * rather than taken from a library — it is four lines of arithmetic, and
+     * writing it out is what lets the censoring rule above be stated in the same
+     * place as the code that applies it.
      *
      * @param  list<array{cohort: string, business_id: int, time: int, event: int}>  $observations
      * @return array<string, mixed>

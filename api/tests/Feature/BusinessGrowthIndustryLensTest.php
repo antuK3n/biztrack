@@ -151,16 +151,15 @@ it('never hands the chart more series than the palette can keep apart', function
     expect(lensNamed($lenses, 'growing')['qualifying'])->toBe(20);
 });
 
-it('serves the lenses beside the panel R computed, without touching it', function () {
+it('serves the lenses beside the stored panel, without touching it', function () {
     /*
      * The splice AnalyticsController makes. Two halves matter:
      *
      *  - `industry_lenses` reaches the browser at all. It cannot ride on the
-     *    dataset: R computes `industry_growth` too and AnalyticsParityTest
-     *    compares the key sets in both directions, so a new key there would fail
-     *    parity — and AnalyticsResolver serves R's snapshot verbatim, so a
-     *    PHP-only re-ranking would never be seen.
-     *  - `industry_growth` is untouched. The PDF report and the parity fixture
+     *    snapshot, because AnalyticsResolver serves a stored payload verbatim —
+     *    a key added to the builder would not appear until the next refresh, and
+     *    until then the screen would keep drawing last night's rows without it.
+     *  - `industry_growth` is untouched. The PDF report and the golden fixture
      *    both read it, and the Largest lens reproduces its ranking rule exactly,
      *    so on one register read the two agree row for row.
      */

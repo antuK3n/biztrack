@@ -290,16 +290,23 @@ it('ignores an exclusion the caller does not own', function () {
     expect($body['data']['concentration']['count'])->toBe(1);
 });
 
-it('says the figures were computed locally, right now', function () {
+it('says the figures were computed right now, not read from a snapshot', function () {
     /*
-     * The rest of the analytics suite reads batch snapshots and shows when R
-     * computed them. This one cannot: the key is a point the applicant picked
-     * seconds ago. The meta block says PHP so no screen can claim otherwise.
+     * The rest of the analytics suite reads batch snapshots and shows when the
+     * refresh computed them. This one cannot: the key would be a point the
+     * applicant picked seconds ago, so there is nothing to precompute and
+     * `source` is always 'local'. That is the assertion that matters here.
+     *
+     * `engine` used to read 'PHP', which only meant anything while R was the
+     * other option. It now reads 'BizTrack' like every other analytics response
+     * — one engine, named the same way everywhere, so a screen cannot render
+     * this endpoint's provenance differently from the rest.
      */
     $body = insightsFor();
 
     expect($body['meta']['source'])->toBe('local')
-        ->and($body['meta']['engine'])->toBe('PHP')
+        ->and($body['meta']['engine'])->toBe('BizTrack')
+        ->and($body['meta']['engine_version'])->toBeNull()
         ->and($body['meta']['computed_at'])->not->toBeNull();
 });
 

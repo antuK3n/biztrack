@@ -3,58 +3,75 @@
 namespace App\Support;
 
 use App\Models\AnalyticsSnapshot;
-use App\Services\RAnalytics;
 use Carbon\CarbonImmutable;
 
 /**
- * Serves an analytics dataset: the statistics R computed if we have them, the
- * PHP port if we do not — and always says which one it was.
+ * Serves an analytics dataset: the precomputed figures if we have them, freshly
+ * computed figures if we do not — and always says which it was.
  *
- * The batch architecture (docs/r-integration-spec.md) means a read never calls
- * R. `analytics:refresh` pushes rows to the R service and persists what comes
- * back; this class reads that. Two consequences the whole feature is built
- * around, neither of which is papered over here:
+ * ## What changed, and what did not
  *
- *  - **Figures are as fresh as the last refresh.** `meta.computed_at` is
- *    mandatory on every response and every screen displays it. A tester who
- *    files an application and does not see it in the dashboard has found the
- *    designed behaviour, and the timestamp on screen is what tells them so.
- *  - **R being down does not break analytics.** It only stops them getting
- *    newer. Existing snapshots keep serving; a dataset that has none falls back
- *    to the PHP port.
+ * This class used to arbitrate between two statistics engines. R was the
+ * reference implementation, PHP was a fallback that stood in when R was
+ * unreachable or switched off, and the meta existed largely to keep the two
+ * distinguishable so their drift could not go unnoticed. R has been removed from
+ * BizTrack. `App\Support\DashboardAnalytics`, `ProcessingTimeAnalytics`,
+ * `RenewalRiskAnalytics`, `BusinessGrowthAnalytics` and `RenewalModelAnalytics`
+ * are now the only implementation, so there is no second engine to disagree
+ * with, no outage to survive and no drift to detect.
  *
- * The fallback is never silent. When PHP computed the numbers, `meta.source` is
- * 'local', `meta.engine` is 'PHP' and `meta.fallback_reason` says why.
- * Presenting fallback output as R output would make the two implementations'
- * drift invisible, which is precisely the risk the fallback introduces — and the
- * reason the parity test against shared fixtures exists.
+ * What survived the removal is the thing that was never about R: analytics are
+ * PRECOMPUTED. `analytics:refresh` walks the registry nightly and stores one
+ * snapshot per (dataset, parameter combination); a page load reads that snapshot
+ * rather than recomputing. The client chose that explicitly over computing on
+ * request, and it is still the reason this class exists. So the axis the meta
+ * reports is no longer "which engine" but "how fresh":
  *
- * ## Where that provenance is spoken aloud, and where it is not
+ *  - **`source: 'snapshot'`** — read from the last refresh. `computed_at` is when
+ *    that refresh ran, which may be hours ago, and `stale` says when that is old
+ *    enough to mention.
+ *  - **`source: 'local'`** — no snapshot existed for these exact parameters, so
+ *    the figures were computed to answer this request. They are current by
+ *    construction.
  *
- * "Never silent" is a guarantee about the payload, not a licence to put an
- * engine architecture in front of a licensing officer. The two are separable and
- * they have been separated:
+ * `engine` is now always the string 'BizTrack' and `engine_version` always null.
+ * Neither carries information any more, and both are kept because the printed
+ * reports and the analytics screens read them: the client asked for the banner
+ * that read "by R 4.6.1" to read "by BizTrack", not to disappear.
  *
- *  - **The fields always travel.** `source`, `engine`, `engine_version`,
- *    `fallback_reason` and `notice` are on every response, in every case. The
- *    parity test and the printed reports read them. Nothing below removes one.
- *  - **`meta.notice` is written for the printed report.** A PDF is forwarded,
- *    filed and quoted months later by a reader who cannot ask which engine ran,
- *    so the document names it — see resources/views/pdf/partials. That is the
- *    surface where "R" earns its place.
- *  - **The screens do not render `notice`.** A BPLO officer cannot act on the
- *    location of a computation. web/src/pages/admin/ComputedAt.tsx keys its own
- *    plain-language line off `fallback_reason` instead, and shows a notice at
- *    all only for the one reason that names something the reader can do.
+ * ## Why a miss is not always a fault — and why there are still two reasons
  *
- * So `notice` stays engine-worded on purpose. Reword it for a screen and the
- * document loses the vocabulary it is the last witness to.
+ * The reasons that meant "R was unreachable", "R was switched off" and "R has no
+ * endpoint for this view" went with R. Two survive, and they must NOT be
+ * collapsed into one however similar they look from here:
+ *
+ *  - **`not_yet_refreshed`** — this dataset's precomputed set includes these
+ *    exact parameters, and the refresh has not written them yet. Something we
+ *    intended to precompute is missing. That is a real freshness signal, the
+ *    Refresh button will fix it, and the screen is right to say so loudly.
+ *  - **`window_not_precomputed`** — the caller asked for a combination that was
+ *    never in the precomputed set: a barangay filter, a risk band, a different
+ *    page size, an offset. Computing it on request is the DESIGNED behaviour and
+ *    no refresh will ever change it.
+ *
+ * Collapsing them was tried and had to be undone. Renewal Risk's key space
+ * carries the page size, the filters and the pagination offset, so it is
+ * unbounded and cannot be precomputed (see config/analytics.php). With one reason
+ * for both, pressing an ordinary band filter reported the same state as a refresh
+ * that had never run, and the screen raised a staleness panel over a supported
+ * option working exactly as designed. ComputedAt.tsx's own note is the argument
+ * against it: a warning that fires on the majority of a screen's own options has
+ * stopped carrying information.
+ *
+ * So the distinction the screen renders is: did we fail to precompute something
+ * we meant to, or did the caller ask for something outside the set?
+ * AnalyticsDatasets::variants() is what defines that set and is what decides.
  */
 final class AnalyticsResolver
 {
     /**
      * @param  array<string, int|string>  $params  parameters that identify the snapshot
-     * @param  callable(): array<string, mixed>  $local  the PHP port, called only on a miss
+     * @param  callable(): array<string, mixed>  $local  computes the figures now, called only on a miss
      * @return array{data: array<string, mixed>, meta: array<string, mixed>}
      */
     public static function resolve(string $dataset, array $params, callable $local): array
@@ -63,93 +80,72 @@ final class AnalyticsResolver
         $snapshot = AnalyticsSnapshot::where('key', $key)->first();
 
         /*
-         * What the figures mean does not depend on which engine computed them —
-         * both emit the same schema, which is the premise the parity test
-         * enforces. So the definitions are resolved once, outside the branch: if
-         * they differed by engine they would be describing a difference that is
-         * not supposed to exist.
+         * The definitions describe what the figures MEAN, which does not depend
+         * on when they were computed. Resolved once, outside the branch, so a
+         * snapshot and a fresh computation cannot end up explaining themselves
+         * differently.
          */
         $definitions = AnalyticsDefinitions::for($dataset);
 
         if ($snapshot !== null) {
             return [
                 'data' => $snapshot->payload,
-                'meta' => [
-                    'source' => 'r',
-                    'engine' => 'R',
-                    'engine_version' => $snapshot->engine_version,
-                    'computed_at' => $snapshot->computed_at->toISOString(),
-                    'stale' => $snapshot->isStale(),
-                    'stale_after_hours' => (int) config('analytics.stale_after_hours'),
-                    'fallback_reason' => null,
-                    'notice' => null,
-                    'definitions' => $definitions,
-                ],
+                'meta' => self::meta(
+                    source: 'snapshot',
+                    computedAt: $snapshot->computed_at->toISOString(),
+                    stale: $snapshot->isStale(),
+                    reason: null,
+                    definitions: $definitions,
+                ),
             ];
         }
 
-        $reason = self::missReason($dataset, $params);
-
         return [
             'data' => $local(),
-            'meta' => [
-                'source' => 'local',
-                'engine' => 'PHP',
-                'engine_version' => PHP_VERSION,
-                // Locally computed figures are current by construction: they were
-                // computed to answer this request.
-                'computed_at' => CarbonImmutable::now()->toISOString(),
-                'stale' => false,
-                'stale_after_hours' => (int) config('analytics.stale_after_hours'),
-                'fallback_reason' => $reason,
-                'notice' => self::noticeFor($reason),
-                'definitions' => $definitions,
-            ],
+            'meta' => self::meta(
+                source: 'local',
+                // Computed to answer this request, so current by construction.
+                computedAt: CarbonImmutable::now()->toISOString(),
+                stale: false,
+                reason: self::missReason($dataset, $params),
+                definitions: $definitions,
+            ),
         ];
     }
 
     /**
-     * Why there was no snapshot. The three cases call for three different
-     * actions, so the response distinguishes them instead of shrugging.
+     * Why there was no snapshot: a refresh that owes us this view, or a request
+     * for one that was never going to be precomputed.
+     *
+     * The two call for different things from the reader — one is worth a panel
+     * and a button press, the other is worth a quiet line — so they are reported
+     * apart. See the class docblock for what happened when they were not.
      *
      * @param  array<string, int|string>  $params
      */
     private static function missReason(string $dataset, array $params): string
     {
-        // Nothing to refresh: R has no endpoint for this dataset yet, so it will
-        // never have a snapshot. Telling the reader to run the refresh here would
-        // send them after a fix that does not exist.
-        if (AnalyticsDatasets::get($dataset)['endpoint'] === null) {
-            return 'no_r_endpoint';
-        }
-
-        if (! app(RAnalytics::class)->enabled()) {
-            return 'r_disabled';
-        }
-
-        /*
-         * A window nobody asked to precompute is a configuration answer
-         * (config/analytics.php), not an outage — and it is the only one of the
-         * four reasons that describes a correct, intended, permanent outcome.
-         *
-         * config/analytics.php now mirrors every window selector the screens
-         * offer, so a plain window choice no longer lands here. What still does
-         * is Renewal Risk's filtered, resized and paginated requests, whose key
-         * space is unbounded by design. That is why the screen renders nothing
-         * for this reason: it would be flagging the register's own filters as a
-         * fault, forever.
-         */
         return self::isPrecomputedVariant($dataset, $params)
             ? 'not_yet_refreshed'
             : 'window_not_precomputed';
     }
 
-    /** @param array<string, int|string> $params */
+    /**
+     * Whether these exact parameters are one of the combinations the refresh
+     * writes.
+     *
+     * Compared by SNAPSHOT KEY rather than by array equality, because the key is
+     * what actually decides a hit — it sorts the parameters and stringifies them,
+     * so two arrays that differ only in ordering are the same snapshot, and a
+     * variant configured with the wrong key shape is not.
+     *
+     * @param  array<string, int|string>  $params
+     */
     private static function isPrecomputedVariant(string $dataset, array $params): bool
     {
         $wanted = AnalyticsSnapshot::keyFor($dataset, $params);
 
-        foreach ((array) config("analytics.variants.{$dataset}", []) as $variant) {
+        foreach (AnalyticsDatasets::variants($dataset) as $variant) {
             if (AnalyticsSnapshot::keyFor($dataset, $variant) === $wanted) {
                 return true;
             }
@@ -159,30 +155,73 @@ final class AnalyticsResolver
     }
 
     /**
-     * The sentence the printed report carries. Each one names the engine, and
-     * that is the point.
+     * The provenance block that travels on every analytics response.
      *
-     * These used to be shown on screen too, which is how a BPLO officer came to
-     * be reading "This window is not one of the precomputed windows, so the R
-     * service has no result for it" above their dashboard. Nothing in that
-     * sentence is addressed to them: they did not choose the architecture, they
-     * cannot edit config/analytics.php, and the Refresh button beside it would
-     * not have helped. The client asked for it to go, and it has gone from the
-     * screens — ComputedAt.tsx writes its own copy from `fallback_reason`.
+     * Assembled in one place because the two branches above must not be able to
+     * disagree about which keys exist. Screens, the PDF partials and
+     * AnalyticsInsightsTest all read this shape unconditionally, and a key that
+     * appears in only one branch is a blank panel on whichever branch omits it.
      *
-     * It has NOT gone from the payload, because the PDF reports embed it and a
-     * document has the opposite need: the reader holding a printout months later
-     * cannot ask which of the two implementations produced the figures, so the
-     * page has to say. Provenance that is noise in a dashboard header is
-     * evidence in a filed report.
+     * @param  array<string, mixed>  $definitions
+     * @return array<string, mixed>
+     */
+    private static function meta(
+        string $source,
+        string $computedAt,
+        bool $stale,
+        ?string $reason,
+        array $definitions,
+    ): array {
+        return [
+            'source' => $source,
+
+            /*
+             * One engine, named rather than versioned. `engine_version` held R's
+             * "4.6.1" and answered a question that mattered when two engines could
+             * disagree — if two snapshots differed, the first thing to check was
+             * whether the engine had changed underneath them. With a single
+             * implementation shipped in the same deploy as the code that reads it,
+             * there is no such question, and PHP's own version answers nothing a
+             * reader of a permit report could act on. The key stays, always null,
+             * because the reports and the screens read it.
+             */
+            'engine' => 'BizTrack',
+            'engine_version' => null,
+
+            'computed_at' => $computedAt,
+            'stale' => $stale,
+            'stale_after_hours' => (int) config('analytics.stale_after_hours'),
+            'fallback_reason' => $reason,
+            'notice' => $reason === null ? null : self::noticeFor($reason),
+            'definitions' => $definitions,
+        ];
+    }
+
+    /**
+     * The sentence the printed report carries when the figures were not read from
+     * a refresh.
+     *
+     * These used to name the engine, and that was their whole justification: a PDF
+     * is forwarded, filed and quoted months later by a reader who cannot ask which
+     * of two implementations produced the figures, so the document had to say.
+     * There is one implementation now, so naming it tells the reader nothing.
+     *
+     * What a reader of a filed report still cannot work out is HOW OLD the numbers
+     * are, and whether the view they are looking at is one the register keeps
+     * precomputed at all. Those are the two things left to say, and they are the
+     * two reasons — so the sentences differ by reason rather than by engine.
      */
     private static function noticeFor(string $reason): string
     {
         return match ($reason) {
-            'no_r_endpoint' => 'R does not compute this view yet, so the local implementation produced these figures.',
-            'r_disabled' => 'The R statistics service is switched off in the environment that produced this report.',
-            'window_not_precomputed' => 'This window is outside the set R precomputes, so the local implementation answered it.',
-            default => 'R had not yet computed this view when this report was produced, so the local implementation answered it.',
+            // Coverage, not staleness. Nothing is wrong and no refresh will
+            // change it, so the sentence must not imply either.
+            'window_not_precomputed' => 'This combination is not one the register precomputes, '
+                .'so these figures were computed as this report was produced.',
+
+            // Staleness. The scheduled run owes this view a result.
+            default => 'These figures were computed as this report was produced, '
+                .'because the scheduled refresh has not yet stored a result for this view.',
         };
     }
 }

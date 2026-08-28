@@ -9,29 +9,26 @@ use Carbon\CarbonImmutable;
 /**
  * Feature 7 on real data: per-department control charts over weekly review
  * turnaround, computed from `application_assignments` rather than the synthetic
- * frames `r/R/generate.R` used to build.
+ * frames the original R prototype used to build.
  *
- * This class is split in two on purpose, because R is the primary engine and
- * this is its fallback (docs/r-integration-spec.md):
+ * This class is split in two on purpose, and the split still earns its keep now
+ * that this is the only engine:
  *
- *  - **dataset()** runs the SQL and returns the review rows. Laravel owns all
- *    SQL — R never touches the database — so this is also exactly what
- *    `analytics:refresh` pushes to the R service.
+ *  - **dataset()** runs the SQL and returns the review rows. All database access
+ *    is confined here.
  *  - **compute()** turns those rows into the screen's payload with no database
- *    access at all. R's `POST /spc/processing-time` returns the same schema from
- *    the same rows, which is what makes the two comparable on one fixture (see
- *    AnalyticsParityTest) and what keeps the fallback honest.
+ *    access at all — plain arrays in, plain arrays out. That is what lets the
+ *    arithmetic be pinned to a fixture without a database (see
+ *    AnalyticsGoldenOutputTest), which is the whole reason the seam exists.
  *
- * The maths lives in Spc (the port of r/R/spc.R). Rows are pulled into PHP and
- * bucketed there instead of grouped in SQL, because ISO-week bucketing is
+ * The maths lives in Spc, ported from the prototype's spc.R. Rows are pulled
+ * into PHP and bucketed there instead of grouped in SQL, because ISO-week
+ * bucketing is
  * spelled differently in SQLite and PostgreSQL and the volume here is one LGU's
  * review history.
  */
 final class ProcessingTimeAnalytics
 {
-    /** The R endpoint that computes this dataset. */
-    public const R_ENDPOINT = '/spc/processing-time';
-
     /**
      * How far back the chart looks by default, in weeks.
      *
@@ -44,12 +41,12 @@ final class ProcessingTimeAnalytics
 
     /**
      * The register rows this dataset is computed from, plus the parameters that
-     * frame them. Pushed to R as-is; also the input to the local compute().
+     * frame them. This is the sole input to compute().
      *
      * Timestamps are serialised to ISO 8601 strings rather than left as Carbon
-     * instances: this array crosses a JSON boundary to R, and the fallback must
-     * see byte-for-byte the same input R does or the parity test is comparing
-     * two different questions.
+     * instances, so that this array is plain JSON-shaped data: it can be frozen
+     * into a fixture and replayed into compute() byte-for-byte, which is what
+     * the golden test does.
      *
      * @return array{
      *     params: array{weeks: int},
@@ -92,8 +89,9 @@ final class ProcessingTimeAnalytics
             'params' => ['weeks' => $windowWeeks],
             'now' => $now->toISOString(),
             'window_start' => $windowStart->toDateString(),
-            // Sent rather than hardcoded on the R side so one change of policy
-            // cannot leave the two engines disagreeing about the rules.
+            // Carried on the dataset rather than re-read inside compute(), so a
+            // frozen fixture records the thresholds its numbers were produced
+            // under instead of silently picking up today's constants.
             'min_completions_per_week' => Spc::MIN_COMPLETIONS_PER_WEEK,
             'calibration_weeks_cap' => Spc::CALIBRATION_WEEKS,
             'departments' => $departments,
@@ -119,7 +117,7 @@ final class ProcessingTimeAnalytics
     }
 
     /**
-     * The local (PHP) engine: dataset in, screen payload out, no database.
+     * The engine: dataset in, screen payload out, no database.
      *
      * @param  array<string, mixed>  $dataset  as returned by dataset()
      * @return array<string, mixed>
@@ -128,8 +126,8 @@ final class ProcessingTimeAnalytics
     {
         // Echoed, not re-parsed. Round-tripping it through Carbon re-formats the
         // fractional seconds (".000Z" becomes ".000000Z"), which is the same
-        // instant but not the same bytes R returns — and the two engines have to
-        // be indistinguishable.
+        // instant but not the same bytes — enough to break the golden fixture
+        // and to change what clients see, for no gain.
         $now = (string) $dataset['now'];
         $windowWeeks = (int) $dataset['params']['weeks'];
         $windowStart = (string) $dataset['window_start'];

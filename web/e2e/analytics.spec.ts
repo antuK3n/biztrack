@@ -416,9 +416,18 @@ test.describe('the three BPLO analytics screens', () => {
     await expect(table.getByText('Low risk').first()).toBeVisible({ timeout: 30_000 })
     await expect(table.getByText('High risk')).toHaveCount(0)
 
-    // The summary cards keep describing every scored permit, not the page, so
-    // the count on the Low card is the size of the set just filtered to.
-    await expect(page.getByText(/showing 1–\d+ of [\d,]+/i)).toBeVisible()
+    /*
+     * And the pager states the filtered set, not the whole watchlist: the
+     * summary cards keep counting every scored permit, so the only thing on the
+     * screen that says how big the set just filtered to is, is this range.
+     *
+     * The wording is the pager's own — "Rows 1–25 of 2,009". It read "Showing"
+     * when this assertion was written and the control was reworded without the
+     * test following, which is why the regex is pinned to the words on screen
+     * rather than loosened to a bare number: a range that silently stopped
+     * starting at row 1 after a filter is the bug this line exists to catch.
+     */
+    await expect(page.getByText(/rows 1–\d+ of [\d,]+/i)).toBeVisible()
   })
 
   test('the action filter is offered for all three recommended actions', async ({ page }) => {

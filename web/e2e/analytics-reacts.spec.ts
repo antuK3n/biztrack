@@ -13,11 +13,13 @@ import { sessionFor, waitForAnalytics } from './helpers'
  *
  * ── The shape of the test, and why it is not the obvious shape ──────────────
  *
- * Analytics on this product are BATCH, not live. `analytics:refresh` pushes the
- * register to the R service at 127.0.0.1:8787 and persists what comes back;
- * every screen reads that persisted row and never calls R (AnalyticsResolver,
- * docs/r-integration-spec.md). Nothing an officer does in the browser reaches a
- * dashboard until a refresh has run.
+ * Analytics on this product are BATCH, not live. `analytics:refresh` recomputes
+ * every dataset from the register and persists the result; every screen reads
+ * that persisted row rather than computing on the request (AnalyticsResolver).
+ * Nothing an officer does in the browser reaches a dashboard until a refresh has
+ * run. That was true when the statistics were computed by a separate service and
+ * it is still true now they are computed in-process — the batch boundary is a
+ * product decision, not a consequence of where the arithmetic happened.
  *
  * So the honest sequence is: read the figure, change the register, read it again
  * and expect it UNCHANGED, refresh, read a third time and expect the exact
@@ -176,7 +178,7 @@ async function openDashboard(page: Page) {
 }
 
 /**
- * Push the register to R and persist the result, then say how many sets moved.
+ * Recompute every dataset and persist the result, then say how many sets moved.
  *
  * Asserted rather than fired and forgotten: a refresh that silently did nothing
  * would make every "the figure did not move" assertion below pass for the wrong
@@ -189,16 +191,16 @@ async function refreshAnalytics(page: Page) {
 
   const data = (body?.data ?? {}) as { refreshed?: number; failed?: number }
   expect(data.refreshed ?? 0, 'the refresh persisted no snapshots at all').toBeGreaterThan(0)
-  expect(data.failed ?? 0, 'R refused a dataset, so the figures below are half old').toBe(0)
+  expect(data.failed ?? 0, 'a dataset failed to refresh, so the figures below are half old').toBe(0)
 }
 
 test.describe('the dashboard answers to the register', () => {
   test.use({ storageState: BPLO_SESSION })
 
   /*
-   * Two refreshes, each a full push of the register to R, plus the page loads
-   * around them. The default 30s is for a spec that reads a screen; this one
-   * drives a batch pipeline twice.
+   * Two refreshes, each a full recompute of every dataset over the register,
+   * plus the page loads around them. The default 30s is for a spec that reads a
+   * screen; this one drives a batch pipeline twice.
    */
   test('a rejection moves Decision Outcomes by exactly one, and moves nothing else', async ({
     page,
@@ -306,7 +308,7 @@ test.describe('the dashboard answers to the register', () => {
      * a persisted snapshot and no refresh has run since. This is the product's
      * real contract, and it is worth a demo audience knowing it before they
      * click around expecting a live figure. If this ever fails, analytics have
-     * quietly become per-request and the whole R integration is being bypassed.
+     * quietly become per-request and the snapshot layer is being bypassed.
      */
     await openDashboard(page)
     const stale = await decisions(page)
@@ -337,9 +339,9 @@ test.describe('the dashboard answers to the register', () => {
      * ── And the figures that must NOT have moved ───────────────────────────
      *
      * This half is what separates a dashboard that responds from one that
-     * recomputes noise. Each of these was recomputed by R in the same pass, from
-     * the same register, seconds after the ones above — so an unchanged reading
-     * here is a positive result and not an absence of evidence.
+     * recomputes noise. Each of these was recomputed in the same pass, from the
+     * same register, seconds after the ones above — so an unchanged reading here
+     * is a positive result and not an absence of evidence.
      */
     expect(after['Approved'] ?? 0, 'an approval appeared out of a rejection').toBe(
       before['Approved'] ?? 0,

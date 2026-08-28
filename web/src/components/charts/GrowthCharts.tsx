@@ -47,9 +47,9 @@ import {
  * numbers into the accessibility tree — see the long note in that file.
  *
  * Nothing in here computes a statistic. Every figure arrives from
- * /analytics/business-growth already derived (App\Support\BusinessGrowthAnalytics,
- * or R's POST /growth/lifecycle) and is drawn as given, so the screen and the
- * PDF can never disagree about a number.
+ * /analytics/business-growth already derived (App\Support\BusinessGrowthAnalytics)
+ * and is drawn as given, so the screen and the PDF can never disagree about a
+ * number.
  */
 
 function signed(value: number): string {
@@ -228,8 +228,8 @@ function ordinal(cycle: number): string {
 /**
  * The spec's Business Renewal Performance: compliance across renewal periods.
  *
- * It is a curve and not a single ratio on purpose. The spec has R fit this with
- * the `survival` package, which follows one group of businesses through renewal
+ * It is a curve and not a single ratio on purpose. The spec asks for a
+ * Kaplan-Meier estimate, which follows one group of businesses through renewal
  * after renewal, so the answer is a rate per cycle. Collapsing it to one number
  * would throw away the shape, which is the only part that says whether the city
  * loses businesses at the first renewal or slowly over years.

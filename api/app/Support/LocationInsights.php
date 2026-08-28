@@ -6,31 +6,30 @@ use App\Models\Business;
 use Illuminate\Support\Collection;
 
 /**
- * Business Location Insights (docs/r-integration-spec.md §5) — the four figures
+ * Business Location Insights (spec §5, docs/r-integration-spec.md) — the four figures
  * shown to an applicant in the apply wizard's zoning step, for the point they
  * just dropped on the map.
  *
- * ## Why this is computed per request, in PHP
+ * ## Why this is computed per request rather than precomputed
  *
- * The rest of the analytics suite is batch: `analytics:refresh` pushes rows to
- * the R service and persists snapshots, and page loads read the snapshot
- * (AnalyticsResolver). That architecture cannot answer this question. A snapshot
- * is keyed by a fixed list of parameter combinations (config/analytics.php
- * `variants`) because "control limits for a 52-week window cannot be sliced out
- * of a 26-week result". Here the parameter is a latitude/longitude the applicant
- * chose seconds ago — a continuous, unbounded key space. There is no finite set
- * of variants to precompute, and a nightly figure for a point nobody had picked
- * yet does not exist.
+ * The rest of the analytics suite is batch: `analytics:refresh` computes and
+ * persists snapshots, and page loads read the snapshot (AnalyticsResolver). That
+ * architecture cannot answer this question. A snapshot is keyed by a fixed list
+ * of parameter combinations (config/analytics.php `variants`) because "control
+ * limits for a 52-week window cannot be sliced out of a 26-week result". Here
+ * the parameter is a latitude/longitude the applicant chose seconds ago — a
+ * continuous, unbounded key space. There is no finite set of variants to
+ * precompute, and a nightly figure for a point nobody had picked yet does not
+ * exist.
  *
- * So this is the case config/analytics.php already describes as the honest
- * outcome: "A request outside these combinations is computed locally and says
- * so." Responses carry `meta.engine = "PHP"` for exactly that reason.
+ * So this one is computed on the request, every time, and the response says so:
+ * it carries `meta.engine = "PHP"`, which the "computed by" line renders.
  *
- * The paper attributes the spatial analysis to R (`sf`/`dplyr`). The statistics
+ * The paper attributed the spatial analysis to R (`sf`/`dplyr`), which is not
+ * part of this project. It never needed to be, for this screen: the statistics
  * here are a count, a banding, a mode and an arithmetic mean over a haversine
- * distance — no `sf` spatial predicate, no model fitting — so the port is small
- * enough to be obviously equivalent, and shelling out to `Rscript` on an
- * applicant's click is explicitly ruled out.
+ * distance — no `sf` spatial predicate, no model fitting — small enough to be
+ * obviously correct on its own terms, and cheap enough to run on a click.
  *
  * ## What counts as a neighbour
  *

@@ -12,7 +12,6 @@ use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitExpiryNotice;
 use App\Services\NotificationService;
-use App\Services\RAnalytics;
 use App\Support\AnalyticsDatasets;
 use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
@@ -90,13 +89,11 @@ class AnalyticsController extends Controller
      * BusinessGrowthAnalytics::industryLenses(); this note is only about where
      * the computation is allowed to happen.
      *
-     * It cannot be part of the dataset. `industry_growth` is computed by
-     * r/R/service.R as well as by PHP, AnalyticsParityTest compares the two key
-     * sets in BOTH directions byte-strict, and AnalyticsResolver serves R's
-     * stored snapshot verbatim whenever one exists. So a re-ranking or a new key
-     * added in PHP alone would fail parity and would never reach the browser
-     * anyway — the screen would keep drawing last night's six-by-count rows. R
-     * is not ours to change.
+     * It cannot be part of the dataset. AnalyticsResolver serves the stored
+     * snapshot verbatim whenever one exists, so a re-ranking or a new key added
+     * to the builder would not reach the browser until the next refresh — the
+     * screen would keep drawing last night's six-by-count rows. Snapshots are
+     * what they were when they were computed; that is the point of them.
      *
      * That leaves serve time, which is the same door the renewal-risk barangay
      * menu and permit-lifecycle split come through, for the same reason. The
@@ -153,18 +150,21 @@ class AnalyticsController extends Controller
      * down to nothing and report that the city has no low-risk businesses. It
      * has 2,060.
      *
-     * ── Why a filtered request is computed locally ───────────────────────────
+     * ── Why a filtered request is computed on the spot ───────────────────────
      *
      * The filters ride in the snapshot key, and `analytics:refresh` only
      * precomputes the unfiltered variants in config/analytics.php. So the
-     * default screen keys to exactly the snapshot it always did and is still
-     * served by R, and any filtered or paged request misses and falls to the
-     * PHP engine, which says so through `meta.source` and `meta.notice`. That
-     * is not a new behaviour to reason about: asking for more than 25 rows has
-     * always dropped to the local engine for the same reason. Filtering has to
-     * happen before the ranking is cut, R is only ever handed the whole
-     * watchlist, and neither engine ends up with a second opinion about what a
-     * filter means.
+     * default screen keys to exactly the snapshot it always did and is served
+     * from store, while any filtered or paged request misses and is computed for
+     * that request, saying so through `meta.source` and `meta.fallback_reason`.
+     *
+     * That reason is `window_not_precomputed`, NOT `not_yet_refreshed`, and the
+     * difference is the whole reason both still exist: a band filter is a
+     * supported option working as designed, and reporting it as staleness put a
+     * warning panel and a Refresh button — which could not have helped — over a
+     * correct table. Filtering also has to happen before the ranking is cut, so
+     * a filtered view is a different computation rather than a slice of the
+     * stored one, which is why it cannot be served from the snapshot at all.
      *
      * The filters are deliberately absent from the key when they are unset,
      * rather than present as nulls — `renewal_risk:days=365,limit=25` has to
@@ -277,26 +277,26 @@ class AnalyticsController extends Controller
      * Three things the statistics payload cannot carry, added at serve time.
      *
      *  - **The barangay menu.** A control's options are a register question,
-     *    not a statistic, and they have to be there whichever engine answered.
-     *    A snapshot computed by R has no idea what a filter is.
+     *    not a statistic, and they have to be there whether the payload came
+     *    from store or was computed for this request. A stored snapshot has no
+     *    idea what a filter is.
      *  - **Officer follow-ups per row.** These are live state — the whole point
      *    is that an officer sees a send they made a minute ago — and the
      *    snapshot is a nightly figure. Reading them off the payload would tell
      *    an officer they had not rung a business they rang this morning.
-     *  - **The permit lifecycle split.** A statistic R was never asked to
-     *    compute. It cannot go in the snapshot without failing the parity check
-     *    in both directions, and r/R/service.R is not ours to extend — see the
+     *  - **The permit lifecycle split.** It runs its own register query and so
+     *    cannot come out of `compute()`, which touches no database — see the
      *    long note on RenewalRiskAnalytics::lifecycle().
      *
      * The barangay is passed down rather than read back off `$data['filters']`,
-     * because a snapshot served by R carries no filters at all and would
-     * silently give the whole city's lifecycle counts under a screen filtered to
-     * one barangay — where they would read as that barangay's, and would not sum
-     * to the `scored_permits` printed beside them.
+     * because a stored snapshot carries no filters at all and would silently
+     * give the whole city's lifecycle counts under a screen filtered to one
+     * barangay — where they would read as that barangay's, and would not sum to
+     * the `scored_permits` printed beside them.
      *
      * The paging fields are defaulted rather than computed here: a payload with
      * no `filters` is by definition an unfiltered one, so `matching` is
-     * `scored_permits` and the offset is zero. That is exactly the R-served
+     * `scored_permits` and the offset is zero. That is exactly the snapshot-served
      * default screen, and it means the client has one shape to render instead
      * of two.
      *
@@ -463,36 +463,30 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Recompute every snapshot from R now, instead of waiting for 03:00.
+     * Recompute every snapshot now, instead of waiting for 03:00.
      *
      * The screens are deliberately batch-fed — a page load reads a stored
-     * snapshot and never calls R — so without this there is no way to see a
-     * filing you just made reflected in the figures until the nightly run. That
-     * is right for serving pages and wrong for a demo.
+     * snapshot — so without this there is no way to see a filing you just made
+     * reflected in the figures until the nightly run. That is right for serving
+     * pages and wrong for a demo.
      *
-     * Reports what happened per dataset rather than returning a bare 204. A
-     * refresh can partly succeed: R may compute three datasets and fail the
-     * fourth, leaving the screens showing a mix of fresh and stale figures, each
-     * labelled with its own timestamp. The two failures worth telling apart are
-     * "R is switched off" and "R did not answer", because the fix differs.
+     * ## What a failure means now that there is one engine
+     *
+     * This used to distinguish three outcomes, two of which were about R being a
+     * separate process: "R is switched off" (409) and "R did not answer" (503).
+     * R has been removed, so neither can happen and both are gone. There is no
+     * service to be unreachable and no flag that can disable the statistics —
+     * the builders are in this codebase and ship with it.
+     *
+     * What is left can only fail the way a query fails: a dataset throws while
+     * being computed. That is still per snapshot rather than global — a dataset
+     * that throws leaves its previous snapshot in place and costs the others
+     * nothing — so a refresh can still partly succeed, and the response still
+     * reports per dataset rather than returning a bare 204.
      */
-    public function refresh(RAnalytics $r): JsonResponse
+    public function refresh(): JsonResponse
     {
-        $outcome = AnalyticsRefresher::run($r);
-
-        if ($outcome['disabled']) {
-            return response()->json([
-                'message' => 'R analytics is switched off, so there is nothing to refresh. The screens are computing locally.',
-                'refreshed' => 0,
-            ], 409);
-        }
-
-        if ($outcome['unreachable']) {
-            return response()->json([
-                'message' => 'The R statistics service did not answer. The screens keep serving the last figures and say how old they are.',
-                'refreshed' => 0,
-            ], 503);
-        }
+        $outcome = AnalyticsRefresher::run();
 
         /*
          * A run where every dataset failed is a 502 with the error envelope, so
@@ -512,34 +506,37 @@ class AnalyticsController extends Controller
                 'message' => $this->refreshMessage($outcome),
                 'refreshed' => $outcome['succeeded'],
                 'failed' => $outcome['failed'],
-                'engine_version' => $outcome['engine_version'],
+
+                // Kept, and kept null, for the reason AnalyticsResolver keeps
+                // them on every response: the client reads this shape and the
+                // engine is no longer a variable.
+                'engine' => 'BizTrack',
+                'engine_version' => null,
+
                 'results' => $outcome['results'],
             ],
         ]);
     }
 
-    /** @param  array{succeeded: int, failed: int, engine_version: string|null}  $outcome */
+    /** @param  array{succeeded: int, failed: int}  $outcome */
     private function refreshMessage(array $outcome): string
     {
-        $engine = $outcome['engine_version'] !== null ? 'R '.$outcome['engine_version'] : 'R';
-
         if ($outcome['failed'] === 0) {
             return sprintf(
-                '%d figure set%s recomputed by %s.',
+                '%d figure set%s recomputed.',
                 $outcome['succeeded'],
                 $outcome['succeeded'] === 1 ? '' : 's',
-                $engine,
             );
         }
 
         if ($outcome['succeeded'] === 0) {
-            return sprintf('%s could not compute any figures. The screens keep the last ones.', $engine);
+            return 'No figures could be computed. The screens keep the last ones.';
         }
 
         return sprintf(
-            '%d recomputed by %s, %d failed. Those screens keep their previous figures.',
+            '%d figure set%s recomputed, %d failed. Those screens keep their previous figures.',
             $outcome['succeeded'],
-            $engine,
+            $outcome['succeeded'] === 1 ? '' : 's',
             $outcome['failed'],
         );
     }
@@ -568,7 +565,7 @@ class AnalyticsController extends Controller
     }
 
     /**
-     * Read a dataset's persisted statistics, or compute them locally.
+     * Read a dataset's precomputed statistics, or compute them now.
      *
      * @param  array<string, int>  $params
      * @return array{data: array<string, mixed>, meta: array<string, mixed>}
@@ -580,14 +577,15 @@ class AnalyticsController extends Controller
         return AnalyticsResolver::resolve(
             $dataset,
             $params,
-            static fn (): array => ($definition['local'])($params),
+            static fn (): array => ($definition['build'])($params),
         );
     }
 
     /**
-     * `meta` sits beside `data` rather than inside it so the payload R returns
-     * stays exactly the payload R returned — the provenance of a figure is not
-     * one of the figures.
+     * `meta` sits beside `data` rather than inside it so the computed payload
+     * stays exactly the computed payload — the provenance of a figure is not one
+     * of the figures, and a screen that spread them together would have to know
+     * which keys were which.
      *
      * @param  array<string, int>  $params
      */
@@ -603,9 +601,8 @@ class AnalyticsController extends Controller
 
     /*
      * There is deliberately no staffing-simulation endpoint. App\Support\Des is
-     * a complete, validated port of r/R/des.R, but docs/r-integration-spec.md
-     * puts the discrete-event simulation out of scope for the delivered flow.
-     * See the note in routes/workflow.php.
+     * a complete, validated discrete-event simulation, but the DES is out of
+     * scope for the delivered flow — see the note in routes/workflow.php.
      */
 
     /** How far ahead the renewal watchlist looks, in days. */

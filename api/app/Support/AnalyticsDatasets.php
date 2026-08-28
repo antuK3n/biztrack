@@ -3,17 +3,26 @@
 namespace App\Support;
 
 /**
- * The registry of analytics datasets: for each one, how to gather its rows, which
- * R endpoint computes them, and how to compute them locally if R cannot.
+ * The registry of analytics datasets: for each one, its heading, how to build it
+ * and the parameters it is built with by default.
  *
- * One place, because three callers need to agree on the same list and would
- * otherwise drift: `analytics:refresh` walks it to push, AnalyticsController
- * reads through it to serve, and the parity test walks it to compare engines.
+ * One place, because two callers must agree on the same list and would otherwise
+ * drift: `analytics:refresh` walks it to precompute every variant, and
+ * AnalyticsController reads through it to serve a request.
  *
- * A dataset with `endpoint => null` is one Laravel computes and R does not yet.
- * That is a real state, not a gap to hide: the resolver labels those responses
- * "computed locally" like any other fallback, and the screen says so. Giving it a
- * null instead of leaving it out of the registry is what keeps it visible.
+ * ## What R left behind here
+ *
+ * Each entry used to carry an `endpoint` — the route on the R (plumber) service
+ * that computed it — and a `dataset` closure that gathered the rows to POST
+ * there. Its builder was filed under `local`, meaning "computed here rather than
+ * by R". R has been removed, so the endpoint and the push are gone and the
+ * builder is simply `build`: there is no longer a non-local alternative for the
+ * name to distinguish it from.
+ *
+ * `pushable()` went with them. It filtered this list down to the datasets R had
+ * an endpoint for, which was the only sense in which a dataset could be
+ * refreshable-but-not-servable. Every dataset here is now built the same way by
+ * the same code, so the whole registry is the refresh list and `all()` is it.
  */
 final class AnalyticsDatasets
 {
@@ -28,20 +37,20 @@ final class AnalyticsDatasets
     /**
      * The fitted companion to RENEWAL_RISK, kept as its own dataset.
      *
-     * Not extra keys on the renewal-risk payload, for the three reasons set out
-     * in RenewalModelAnalytics' docblock — the short one being that
-     * AnalyticsParityTest compares that payload against R's key for key in both
-     * directions, and this is the one dataset R computes that PHP deliberately
-     * does not port.
+     * Not extra keys on the renewal-risk payload, because the two are different
+     * KINDS of claim and a reader has to be able to tell which is which. The
+     * rule score is a transparent weighted ranking that never needed evidence;
+     * the fitted figure is a claim about the world that is worthless without the
+     * AUC, Brier and calibration readings attached. They are shown side by side
+     * and stored apart. See RenewalModelAnalytics.
      */
     public const RENEWAL_MODEL = 'renewal_model';
 
     /**
      * @return array<string, array{
      *     label: string,
-     *     endpoint: string|null,
      *     dataset: callable(array<string, int>): array<string, mixed>,
-     *     local: callable(array<string, int>): array<string, mixed>,
+     *     build: callable(array<string, int>): array<string, mixed>,
      *     defaults: array<string, int>
      * }>
      */
@@ -50,11 +59,10 @@ final class AnalyticsDatasets
         return [
             self::DASHBOARD => [
                 'label' => 'Analytics Dashboard',
-                'endpoint' => DashboardAnalytics::R_ENDPOINT,
                 'dataset' => static fn (array $p): array => DashboardAnalytics::dataset(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
                 ),
-                'local' => static fn (array $p): array => DashboardAnalytics::build(
+                'build' => static fn (array $p): array => DashboardAnalytics::build(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
                 ),
                 'defaults' => ['months' => DashboardAnalytics::DEFAULT_WINDOW_MONTHS],
@@ -62,11 +70,10 @@ final class AnalyticsDatasets
 
             self::PROCESSING_TIME => [
                 'label' => 'Permit Processing Time Monitoring',
-                'endpoint' => ProcessingTimeAnalytics::R_ENDPOINT,
                 'dataset' => static fn (array $p): array => ProcessingTimeAnalytics::dataset(
                     $p['weeks'] ?? ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS,
                 ),
-                'local' => static fn (array $p): array => ProcessingTimeAnalytics::build(
+                'build' => static fn (array $p): array => ProcessingTimeAnalytics::build(
                     $p['weeks'] ?? ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS,
                 ),
                 'defaults' => ['weeks' => ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS],
@@ -74,12 +81,11 @@ final class AnalyticsDatasets
 
             self::RENEWAL_RISK => [
                 'label' => 'Renewal Risk Prediction',
-                'endpoint' => RenewalRiskAnalytics::R_ENDPOINT,
                 'dataset' => static fn (array $p): array => RenewalRiskAnalytics::dataset(
                     $p['days'] ?? RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
                     $p['limit'] ?? RenewalRiskAnalytics::DEFAULT_LIMIT,
                 ),
-                'local' => static fn (array $p): array => RenewalRiskAnalytics::build(
+                'build' => static fn (array $p): array => RenewalRiskAnalytics::build(
                     $p['days'] ?? RenewalRiskAnalytics::DEFAULT_HORIZON_DAYS,
                     $p['limit'] ?? RenewalRiskAnalytics::DEFAULT_LIMIT,
                 ),
@@ -91,7 +97,6 @@ final class AnalyticsDatasets
 
             self::RENEWAL_MODEL => [
                 'label' => 'Renewal Risk — fitted model',
-                'endpoint' => RenewalModelAnalytics::R_ENDPOINT,
                 'dataset' => static fn (array $p): array => RenewalModelAnalytics::dataset(
                     $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
                     $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
@@ -105,7 +110,7 @@ final class AnalyticsDatasets
                  * outright lie this feature is capable of telling. It returns the
                  * same keys with `available => false` and a reason instead.
                  */
-                'local' => static fn (array $p): array => RenewalModelAnalytics::build(
+                'build' => static fn (array $p): array => RenewalModelAnalytics::build(
                     $p['days'] ?? RenewalModelAnalytics::DEFAULT_HORIZON_DAYS,
                     $p['limit'] ?? RenewalModelAnalytics::DEFAULT_LIMIT,
                 ),
@@ -132,11 +137,10 @@ final class AnalyticsDatasets
                  * is how a screen and its own payload drift apart.
                  */
                 'label' => 'Business Growth Analysis',
-                'endpoint' => BusinessGrowthAnalytics::R_ENDPOINT,
                 'dataset' => static fn (array $p): array => BusinessGrowthAnalytics::dataset(
                     $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
                 ),
-                'local' => static fn (array $p): array => BusinessGrowthAnalytics::build(
+                'build' => static fn (array $p): array => BusinessGrowthAnalytics::build(
                     $p['months'] ?? BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS,
                 ),
                 'defaults' => ['months' => BusinessGrowthAnalytics::DEFAULT_PERIOD_MONTHS],
@@ -147,9 +151,8 @@ final class AnalyticsDatasets
     /**
      * @return array{
      *     label: string,
-     *     endpoint: string|null,
      *     dataset: callable(array<string, int>): array<string, mixed>,
-     *     local: callable(array<string, int>): array<string, mixed>,
+     *     build: callable(array<string, int>): array<string, mixed>,
      *     defaults: array<string, int>
      * }
      */
@@ -162,12 +165,6 @@ final class AnalyticsDatasets
         }
 
         return $all[$dataset];
-    }
-
-    /** Datasets R can actually compute — what `analytics:refresh` iterates. */
-    public static function pushable(): array
-    {
-        return array_filter(self::all(), static fn (array $d): bool => $d['endpoint'] !== null);
     }
 
     /**

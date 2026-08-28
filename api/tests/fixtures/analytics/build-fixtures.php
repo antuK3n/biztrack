@@ -1,24 +1,39 @@
 <?php
 
 /*
- * Builds the dashboard and growth/lifecycle parity DATASETS.
+ * Builds the dashboard and growth/lifecycle fixture DATASETS.
  *
  * These are not dumps of the register. Every row is here because it sits on a
- * branch where two implementations of the same statistic could plausibly
- * disagree — and two of them already caught real divergences (see the notes in
- * tests/Unit/AnalyticsParityTest.php). Values are arithmetic, never random, so
- * the files are byte-stable across machines.
+ * branch where a statistic could plausibly come out wrong — a null that must not
+ * become a zero, an exact half that exposes the rounding mode, a denominator the
+ * register cannot complete. Values are arithmetic, never random, so the files are
+ * byte-stable across machines.
  *
  *   php tests/fixtures/analytics/build-fixtures.php
  *
- * Then capture R's side, which is what the goldens are:
+ * ── ABOUT THE `.expected.json` FILES ────────────────────────────────────────
  *
- *   cd r && Rscript run_api.R &
- *   cd api/tests/fixtures/analytics
- *   curl -s -X POST 127.0.0.1:8787/dashboard -H 'Content-Type: application/json' \
- *     --data-binary @dashboard.dataset.json | python3 -m json.tool > dashboard.r-output.json
- *   curl -s -X POST 127.0.0.1:8787/growth/lifecycle -H 'Content-Type: application/json' \
- *     --data-binary @growth-lifecycle.dataset.json | python3 -m json.tool > growth-lifecycle.r-output.json
+ * They were originally `.r-output.json`: R was the reference implementation, and
+ * the goldens were captured by POSTing these datasets to the plumber service.
+ * AnalyticsParityTest then held the PHP port to them value for value.
+ *
+ * R has been removed. The goldens were not regenerated, because they did not
+ * need to be — the parity test passed on every run up to the removal, so those
+ * files already ARE the PHP builders' output, and keeping the bytes means the
+ * baseline still pins the numbers a user has actually seen. They were renamed and
+ * nothing else. See tests/Unit/AnalyticsGoldenOutputTest.php.
+ *
+ * To re-baseline after a deliberate change to a builder, dump `compute()`'s
+ * output over the dataset file and write it back, e.g.:
+ *
+ *   cd api && php -r '
+ *     $d = json_decode(file_get_contents("tests/fixtures/analytics/dashboard.dataset.json"), true);
+ *     require "vendor/autoload.php";
+ *     echo json_encode(App\Support\DashboardAnalytics::compute($d), JSON_PRETTY_PRINT);
+ *   ' > tests/fixtures/analytics/dashboard.expected.json
+ *
+ * Do that only when the change was intended and is described in the commit. The
+ * whole value of the baseline is that re-baselining is a deliberate act.
  */
 
 $dir = __DIR__;

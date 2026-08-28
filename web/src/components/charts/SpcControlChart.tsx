@@ -20,7 +20,7 @@ import type { ProcessingTimeDepartment, ProcessingTimePoint } from '../../lib/ty
  * ordinary ups and downs are ignored, and only movements beyond the normal
  * range are treated as real problems." Everything the picture needs — the
  * centre line, the two edges of the range, which weeks fell outside — is
- * computed server-side (App\Support\Spc, or R's `qcc`), so nothing on this file
+ * computed server-side (App\Support\Spc), so nothing on this file
  * re-derives a statistic. The browser draws what the server decided; that is
  * what keeps the screen and the PDF report from ever disagreeing.
  *

@@ -298,11 +298,14 @@ it('no longer explains an expiry panel on the dashboard, and explains this one i
      * The panel is gone from the dashboard screen, so its definition went with
      * it — a popover explaining a table nobody can see is the stalest kind.
      *
-     * The payload KEY is a different matter and is still there on purpose:
-     * r/R/service.R computes `expiry`, AnalyticsParityTest reads both engines'
-     * key sets in both directions, and removing it from PHP alone would fail as
-     * "present in R, absent from PHP". Asserted rather than merely commented, so
-     * a well-meant cleanup of the dead key breaks here instead of in parity.
+     * The payload KEY is a different matter and is still there on purpose. It
+     * was originally kept because R emitted it and the parity check compared key
+     * sets in both directions, so it could not be dropped on one side alone.
+     * That constraint went with R — this codebase can now decide the key's fate
+     * on its own — but the reasons to keep it did not: the PDF report reads it,
+     * the golden baseline contains it, and every snapshot already stored carries
+     * it. Asserted rather than merely commented, so a well-meant cleanup breaks
+     * here, next to the explanation, rather than somewhere downstream.
      */
     expect($dashboard->json('meta.definitions'))->not->toHaveKey('expiry');
     expect($dashboard->json('data'))->toHaveKey('expiry');

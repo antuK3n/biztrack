@@ -66,10 +66,10 @@ import { ComputedAt } from './ComputedAt'
  * Range", "normal range", "Noted Delays" — is what is printed instead.
  *
  * Nothing here computes a statistic. Every figure comes from
- * GET /analytics/processing-time, which runs R's `qcc` port (App\Support\Spc)
- * over real review assignments, so the screen and the PDF report cannot
- * disagree. Where the payload has nothing to say, the panel says so rather
- * than filling the gap — see `verdictOf` and the empty states below.
+ * GET /analytics/processing-time, which runs the control-chart implementation
+ * (App\Support\Spc) over real review assignments, so the screen and the PDF
+ * report cannot disagree. Where the payload has nothing to say, the panel says
+ * so rather than filling the gap — see `verdictOf` and the empty states below.
  */
 
 const WINDOW_OPTIONS = [
@@ -490,10 +490,10 @@ function NotedDelays({ department }: { department: ProcessingTimeDepartment }) {
 /*
  * ── Gradual Slowdown Warnings ──────────────────────────────────────────────
  *
- * The supporting indicator: R weights recent weeks more heavily than old ones,
- * so a slide of half a day a week — which never crosses the edge of the range
- * and so never appears in Noted Delays — still walks the weighted average away
- * from centre until it trips.
+ * The supporting indicator: the server weights recent weeks more heavily than
+ * old ones, so a slide of half a day a week — which never crosses the edge of
+ * the range and so never appears in Noted Delays — still walks the weighted
+ * average away from centre until it trips.
  *
  * "Rising" and "easing" are the server's words and they are ambiguous on their
  * own (rising *what*?), so they are printed as what they mean to an office:
@@ -617,9 +617,9 @@ export function ProcessingTimePage() {
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
 
-  // Resolves to { data, meta }: the statistics plus when and by which engine
-  // they were computed. ComputedAt renders the meta — see AnalyticsProvenance
-  // for why provenance is not optional on an analytics screen.
+  // Resolves to { data, meta }: the statistics plus when they were computed and
+  // whether that was a stored refresh or this request. ComputedAt renders the
+  // meta — see AnalyticsProvenance for why a batch figure has to be dated.
   const {
     data: result,
     loading,

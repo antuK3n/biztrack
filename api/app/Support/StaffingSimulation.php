@@ -10,10 +10,12 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Feature 6 on real data: the staffing/queue simulation, driven by the register
- * instead of the synthetic frames `r/R/generate.R` used to build.
+ * instead of the synthetic frames the original R prototype's `generate.R` used
+ * to build.
  *
- * The maths lives in Des (the port of r/R/des.R); this class only decides what
- * to feed it and shapes the answer for the Staffing Simulation screen. It
+ * The maths lives in Des, ported from that prototype's des.R; this class only
+ * decides what to feed it and shapes the answer for the Staffing Simulation
+ * screen. It
  * answers one question — "what happens to the backlog if I add one reviewer to
  * OBO?" — by running the observed pipeline twice: once at today's headcount, and
  * once with the change the admin asked for.
@@ -32,7 +34,10 @@ use Illuminate\Support\Facades\DB;
  *    exists but is unpopulated, so it is not used.
  *  - Reviewer headcount: active officers with `users.department_id` set.
  *
- * DIVERGENCES FROM r/R/des.R, AND WHY
+ * WHERE THIS DEPARTS FROM THE R REFERENCE, AND WHY
+ *
+ * R is no longer part of the project; these notes are kept because they explain
+ * choices this model still makes, not because anything needs reconciling.
  *
  *  - **Inspections seize the office, not a separate inspector pool.** config.R
  *    declared `INSPECTORS <- list(sanitary = 2L, fire = 2L)` as standalone
@@ -63,14 +68,15 @@ final class StaffingSimulation
     public const MAX_ADDED_REVIEWERS = 10;
 
     /**
-     * RA 11032 processing deadlines in working days (`DEADLINES` in r/config.R).
-     * Only the two the pipeline distinguishes are used.
+     * RA 11032 processing deadlines in working days, carried over from
+     * `DEADLINES` in the reference's config.R. Only the two the pipeline
+     * distinguishes are used.
      */
     private const DEADLINE_WORKING_DAYS = ['complex' => 7, 'simple' => 3];
 
     /**
      * Fixed intake/payment and issuance delays, uniform over these ranges. Taken
-     * from des.R, where they stand in for the parts of the pipeline that are not
+     * from des.R, where they stood in for the parts of the pipeline that are not
      * queueing for an officer. Left as the reference had them: the register does
      * not timestamp "waiting for the applicant to pay" separately from the
      * status change, so there is nothing better to fit.

@@ -5,11 +5,15 @@ namespace App\Support;
 use Carbon\CarbonImmutable;
 
 /**
- * Statistical process control over review turnaround — a native PHP port of
- * `r/R/spc.R` (Feature 7). The R project stays on disk as the team's academic
- * artefact; the site does not call it. No Rscript, no plumber, no R runtime.
+ * Statistical process control over review turnaround.
  *
- * The port is faithful to the reference down to the constants qcc uses:
+ * This was ported to PHP from the project's original R prototype, `r/R/spc.R`
+ * (Feature 7). R is no longer part of the project — this class is the only
+ * implementation. The lineage notes below are kept as the record of what the
+ * port decided, because they explain the constants and the edge cases; they are
+ * not instructions to go and check anything against R.
+ *
+ * The port was faithful to the reference down to the constants qcc uses:
  *
  *  - Weekly buckets are ISO weeks (Monday start) keyed on the completion date,
  *    and a week needs at least 3 completed reviews before its mean is trusted
@@ -24,7 +28,7 @@ use Carbon\CarbonImmutable;
  *    window's sample standard deviation, catching drift the Shewhart chart
  *    misses (`detect_processing_anomalies`).
  *
- * Verified against qcc 2.7: for weekly means alternating 2/3 over 12 weeks,
+ * Verified against qcc 2.7 at porting time: for weekly means alternating 2/3 over 12 weeks,
  * qcc::qcc(type = "xbar.one") reports center 2.5, sigma 0.886524822695036,
  * UCL 5.15957446808511, LCL -0.159574468085107 — the values SpcTest asserts.
  */
@@ -48,8 +52,10 @@ final class Spc
     /**
      * Bucket completed reviews into per-department ISO weeks.
      *
-     * Port of `weekly_turnaround()`. Rows missing either timestamp are dropped
-     * the way R drops NA, and weeks under the minimum are discarded entirely.
+     * Ported from `weekly_turnaround()`. Rows missing either timestamp are
+     * dropped rather than treated as zero — the reference's NA handling, and
+     * still the right answer: an unfinished review has no turnaround. Weeks
+     * under the minimum are discarded entirely.
      *
      * @param  iterable<array{department_code: string, assigned_at: mixed, completed_at: mixed}>  $reviews
      * @return list<array{department_code: string, week_start: string, n: int, mean_days: float}>
@@ -101,7 +107,7 @@ final class Spc
     /**
      * Individuals-chart control limits fitted on the leading calibration window.
      *
-     * Port of `compute_control_limits()` / qcc's `stats.xbar.one` +
+     * Ported from `compute_control_limits()` / qcc's `stats.xbar.one` +
      * `sd.xbar.one(std.dev = "MR", k = 2)`. LCL is clamped at 0 because a
      * turnaround cannot be negative.
      *
@@ -141,7 +147,7 @@ final class Spc
     }
 
     /**
-     * Sample standard deviation (R's `stats::sd`, n-1 denominator).
+     * Sample standard deviation: n-1 denominator, as `stats::sd` in the reference.
      *
      * @param  list<float>  $values
      */
@@ -161,7 +167,7 @@ final class Spc
     }
 
     /**
-     * EWMA chart — port of `qcc::ewma` for individual observations.
+     * EWMA chart — ported from `qcc::ewma` for individual observations.
      *
      * z_i = lambda * x_i + (1 - lambda) * z_{i-1}, with z_0 = center, and
      * time-varying limits center +- nsigmas * sd * sqrt(lambda / (2 - lambda) *
@@ -169,7 +175,7 @@ final class Spc
      *
      * @param  list<float>  $values
      * @return array{z: list<float>, ucl: list<float>, lcl: list<float>, violations: list<int>}
-     *                                                                                          `violations` are zero-based indices (R reports them one-based).
+     *                                                                                          `violations` are zero-based indices — a deliberate divergence from the reference, which reported them one-based.
      */
     public static function ewma(array $values, float $center, float $stdDev, float $lambda = self::EWMA_LAMBDA, float $nsigmas = self::SIGMA_MULTIPLIER): array
     {
@@ -200,7 +206,7 @@ final class Spc
     /**
      * Flag out-of-control weeks for one department.
      *
-     * Port of `detect_processing_anomalies()` for a single department: a week is
+     * Ported from `detect_processing_anomalies()` for a single department: a week is
      * out of control when it sits beyond the Shewhart limits, when the EWMA
      * breaches its own limit, or both.
      *

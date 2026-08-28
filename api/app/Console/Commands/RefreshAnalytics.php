@@ -3,34 +3,41 @@
 namespace App\Console\Commands;
 
 use App\Models\AnalyticsSnapshot;
-use App\Services\RAnalytics;
 use App\Support\AnalyticsDatasets;
-use Carbon\CarbonImmutable;
+use App\Support\AnalyticsRefresher;
 use Illuminate\Console\Command;
 use Throwable;
 
 /**
- * Push register rows to the R statistics service and persist what comes back.
+ * Recompute every analytics snapshot and persist it.
  *
- * This command *is* the integration. R stays a separate program and remains the
- * statistics engine; analytics are computed in batch rather than per request, so
- * there is no live R call on a page load:
+ * Analytics are computed in BATCH rather than per request, so there is no
+ * statistics work on a page load:
  *
  *     analytics:refresh
- *         ├─ Laravel queries the register (one owner of SQL, scoping applied)
- *         ├─ POSTs the row sets to plumber
- *         ├─ R computes the statistics
- *         └─ Laravel persists the result
+ *         ├─ query the register (one owner of SQL, scoping applied)
+ *         ├─ compute the statistics in PHP (app/Support/*Analytics.php)
+ *         └─ persist the result
  *
- *     page load ──> Laravel reads the persisted result  (no R involved, fast)
+ *     page load ──> read the persisted result  (no computation, fast)
  *
  * Run it nightly next to `biztrack:scan-permits`, and by hand after seeding.
+ *
+ * This command used to be the R integration: it pushed row sets to a plumber
+ * service on another port, and R did the arithmetic. R has been removed. The
+ * middle step above is now a function call instead of an HTTP round trip, which
+ * is the only thing that changed — the batching, the schedule and the snapshot
+ * table are all unaffected, because none of them existed because of R.
  *
  * One snapshot per (dataset, window), because statistics are not sliceable: the
  * control limits fitted on 52 weeks are not the limits for the 26-week view. The
  * windows come from config/analytics.php.
  *
- * Failure is per snapshot, never global. A dataset R chokes on leaves its
+ * Safe to run repeatedly. Snapshots are written by key, so a second pass
+ * overwrites the first rather than accumulating rows, and nothing is ever
+ * deleted.
+ *
+ * Failure is per snapshot, never global. A dataset that throws leaves its
  * previous snapshot in place — stale figures with an honest timestamp beat
  * wiping the screen — and the command reports what failed. It exits non-zero
  * only if nothing at all got through, which is the signal a scheduler should
@@ -40,172 +47,135 @@ class RefreshAnalytics extends Command
 {
     protected $signature = 'analytics:refresh
                             {--only= : Refresh a single dataset (processing_time, renewal_risk)}
-                            {--dry-run : Build and size the payloads without calling R}';
+                            {--dry-run : Compute and size the payloads without persisting them}';
 
-    protected $description = 'Push register rows to the R statistics service and persist the computed analytics.';
+    protected $description = 'Recompute the analytics snapshots the screens read.';
 
-    /** Read off /health once and recorded on every snapshot this pass writes. */
-    private ?string $engineVersion = null;
-
-    public function handle(RAnalytics $r): int
+    public function handle(): int
     {
-        $datasets = AnalyticsDatasets::pushable();
+        $datasets = AnalyticsDatasets::all();
 
         if ($only = $this->option('only')) {
             if (! isset($datasets[$only])) {
                 $this->components->error(sprintf(
-                    'Dataset [%s] is not one R computes. Pushable: %s.',
+                    'Unknown dataset [%s]. Available: %s.',
                     $only,
-                    implode(', ', array_keys($datasets)) ?: 'none',
+                    implode(', ', array_keys($datasets)),
                 ));
 
                 return self::FAILURE;
             }
-
-            $datasets = [$only => $datasets[$only]];
         }
 
-        if ($datasets === []) {
-            $this->components->warn('No datasets are wired to R yet — nothing to refresh.');
+        if ($this->option('dry-run')) {
+            return $this->dryRun($only ?: null);
+        }
+
+        $outcome = AnalyticsRefresher::run($only ?: null);
+
+        foreach ($outcome['results'] as $result) {
+            if ($result['ok']) {
+                $this->components->twoColumnDetail(
+                    $result['key'],
+                    sprintf('<fg=green>ok</> <fg=gray>%d rows in %dms</>', $result['rows'], $result['duration_ms']),
+                );
+
+                continue;
+            }
+
+            $this->components->twoColumnDetail($result['key'], '<fg=red>failed</>');
+            $this->line('    '.($result['error'] ?? 'unknown error'));
+        }
+
+        $this->newLine();
+
+        if ($outcome['failed'] > 0 && $outcome['succeeded'] === 0) {
+            $this->components->error(sprintf(
+                'All %d snapshot(s) failed. The screens keep their previous figures and say how old they are.',
+                $outcome['failed'],
+            ));
+
+            return self::FAILURE;
+        }
+
+        if ($outcome['failed'] > 0) {
+            $this->components->warn(sprintf(
+                '%d snapshot(s) refreshed, %d failed.',
+                $outcome['succeeded'],
+                $outcome['failed'],
+            ));
 
             return self::SUCCESS;
         }
 
-        $dryRun = (bool) $this->option('dry-run');
+        $this->components->info(sprintf('%d snapshot(s) refreshed.', $outcome['succeeded']));
 
-        if (! $dryRun && ! $this->checkService($r)) {
-            return self::FAILURE;
+        return self::SUCCESS;
+    }
+
+    /**
+     * Compute everything and persist none of it.
+     *
+     * This used to size the JSON that was about to be POSTed, so a dataset
+     * creeping towards the R timeout was visible before it started failing.
+     * Nothing is serialised over a wire any more, but the same number still
+     * answers a question worth asking — a payload is a row in the snapshot table
+     * and eventually a response body — and the timing now measures the actual
+     * computation rather than a round trip. It is also the only way to exercise
+     * every builder without touching the database.
+     */
+    private function dryRun(?string $only): int
+    {
+        $datasets = AnalyticsDatasets::all();
+
+        if ($only !== null) {
+            $datasets = [$only => $datasets[$only]];
         }
 
-        $succeeded = 0;
         $failed = 0;
 
         foreach ($datasets as $name => $definition) {
             foreach (AnalyticsDatasets::variants($name) as $params) {
                 $key = AnalyticsSnapshot::keyFor($name, $params);
 
+                $startedAt = microtime(true);
+
                 try {
-                    $dataset = ($definition['dataset'])($params);
+                    $payload = ($definition['build'])($params);
                 } catch (Throwable $e) {
-                    $this->components->twoColumnDetail($key, '<fg=red>query failed</>');
+                    $this->components->twoColumnDetail($key, '<fg=red>failed</>');
                     $this->line("    {$e->getMessage()}");
                     $failed++;
 
                     continue;
                 }
 
-                if ($dryRun) {
-                    $this->components->twoColumnDetail(
-                        $key,
-                        sprintf('<fg=gray>%s → %s</>', self::size($dataset), $definition['endpoint']),
-                    );
-
-                    continue;
-                }
-
-                $startedAt = microtime(true);
-                $statistics = $r->compute($definition['endpoint'], $dataset);
                 $durationMs = (int) round((microtime(true) - $startedAt) * 1000);
-
-                if ($statistics === null) {
-                    // The previous snapshot, if any, is deliberately left alone.
-                    $this->components->twoColumnDetail($key, '<fg=red>R failed</>');
-                    $this->line('    '.($r->lastError() ?? 'unknown error'));
-                    $failed++;
-
-                    continue;
-                }
-
-                AnalyticsSnapshot::updateOrCreate(
-                    ['key' => $key],
-                    [
-                        'dataset' => $name,
-                        'payload' => $statistics,
-                        'source' => 'r',
-                        'engine_version' => $this->engineVersion,
-                        'duration_ms' => $durationMs,
-                        'computed_at' => CarbonImmutable::now(),
-                    ],
-                );
 
                 $this->components->twoColumnDetail(
                     $key,
-                    sprintf('<fg=green>ok</> <fg=gray>%s in %dms</>', self::size($dataset), $durationMs),
+                    sprintf('<fg=gray>%s in %dms</>', self::size($payload), $durationMs),
                 );
-                $succeeded++;
             }
         }
 
-        if ($dryRun) {
-            $this->newLine();
-            $this->components->info('Dry run: nothing was pushed or persisted.');
-
-            return self::SUCCESS;
-        }
-
         $this->newLine();
+        $this->components->info('Dry run: nothing was persisted.');
 
-        if ($failed > 0 && $succeeded === 0) {
-            $this->components->error("All {$failed} snapshot(s) failed. Analytics screens will fall back to local computation and say so.");
-
-            return self::FAILURE;
-        }
-
-        if ($failed > 0) {
-            $this->components->warn("{$succeeded} snapshot(s) refreshed, {$failed} failed.");
-
-            return self::SUCCESS;
-        }
-
-        $this->components->info("{$succeeded} snapshot(s) refreshed from R.");
-
-        return self::SUCCESS;
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 
-    /**
-     * Confirm plumber is up before building payloads, so an outage costs one
-     * request instead of a full pass of register queries.
-     */
-    private function checkService(RAnalytics $r): bool
-    {
-        if (! $r->enabled()) {
-            $this->components->error('R analytics is disabled. Set R_ANALYTICS_ENABLED=true to refresh.');
-
-            return false;
-        }
-
-        $health = $r->health();
-
-        if ($health === null) {
-            $this->components->error('The R statistics service is not reachable at '.config('analytics.r.base_url').'.');
-            $this->line('    '.($r->lastError() ?? 'unknown error'));
-            $this->line('    Start it with: <fg=cyan>cd r && Rscript run_api.R</>');
-
-            return false;
-        }
-
-        $this->engineVersion = isset($health['r_version']) ? (string) $health['r_version'] : null;
-
-        $this->components->info(sprintf(
-            'R %s at %s',
-            $this->engineVersion ?? 'service',
-            config('analytics.r.base_url'),
-        ));
-
-        return true;
-    }
-
-    /** Rough payload size, so a dataset creeping towards the timeout is visible. */
-    private static function size(array $dataset): string
+    /** Rough payload size, so a dataset growing towards a slow refresh is visible. */
+    private static function size(array $payload): string
     {
         $rows = 0;
-        foreach ($dataset as $value) {
+        foreach ($payload as $value) {
             if (is_array($value) && array_is_list($value)) {
                 $rows += count($value);
             }
         }
 
-        $bytes = strlen((string) json_encode($dataset));
+        $bytes = strlen((string) json_encode($payload));
 
         return sprintf('%d rows, %s', $rows, self::humanBytes($bytes));
     }

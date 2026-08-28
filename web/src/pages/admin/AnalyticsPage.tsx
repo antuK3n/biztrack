@@ -36,10 +36,10 @@ import { GenerateReportButton } from './GenerateReportButton'
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
  *
- * Everything is computed server-side (App\Support\DashboardAnalytics, or R's
- * POST /dashboard) and rendered as given. This file does no arithmetic beyond bar
- * widths: no rate is derived here, so there is no second implementation of a
- * formula that could drift from the one the parity test pins.
+ * Everything is computed server-side (App\Support\DashboardAnalytics) and
+ * rendered as given. This file does no arithmetic beyond bar widths: no rate is
+ * derived here, so there is no second implementation of a formula that could
+ * drift from the one the server ships.
  *
  * THREE RULES THIS SCREEN IS BUILT AROUND
  *
@@ -710,8 +710,8 @@ function CompliancePanel({ report }: { report: DashboardReport }) {
  * nothing but permits running out. Two screens were describing one population.
  *
  * The dashboard payload still carries an `expiry` key. It is not read here and
- * it is not on the DashboardReport type — see the note there for why R's copy of
- * it cannot be removed without editing r/R/service.R.
+ * it is not on the DashboardReport type — see the note there for why the type,
+ * not the payload, is where this is enforced.
  */
 
 /* ── Ranked panels ─────────────────────────────────────────────────────── */
@@ -1302,13 +1302,14 @@ export function AnalyticsPage() {
               only; it should be the full term", so this counts every filing on
               record. `data.ytd_start` is deliberately no longer read here — the
               old sub-line said "since Jan 1, 2026" and a 1 January cutoff is
-              exactly what stopped being true. The payload still carries the
-              field for R parity; see DashboardAnalytics::kpiFacts().
+              exactly what stopped being true. The payload still carries
+              `ytd_start`; see DashboardAnalytics::kpiFacts().
 
               `applications_ytd` is the wire key, not the meaning. Label, hint
-              and the info popover (AnalyticsDefinitions) all say all-time; the
-              key is the one place that cannot be renamed without renaming it in
-              R at the same time.
+              and the info popover (AnalyticsDefinitions) all say all-time. The
+              key survives its own name because renaming it means renaming it in
+              the snapshot payloads already stored, and a misleading key behind
+              three honest labels is the cheaper of the two.
             */}
             <Kpi
               value={num(data.kpis.applications_ytd)}

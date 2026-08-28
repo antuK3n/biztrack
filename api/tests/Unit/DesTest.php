@@ -12,12 +12,15 @@ use App\Support\Des;
  * queue discipline, or the metric accumulation were wrong — plus exact equality
  * on the one part that is deterministic, the distribution fit.
  *
- * The port was separately validated against simmer 4.4 head-to-head on an
- * identical five-office pipeline (300 replications, 1800-day horizon): office
- * utilisations agreed to within 0.6%, mean end-to-end flow to 0.10%, and the
- * RA 11032 on-time rate to 0.11%. Those runs live in the pull request, not here,
- * because a test that shells out to Rscript would reintroduce exactly the
- * dependency this port exists to remove.
+ * The port was validated against simmer 4.4 head-to-head, once, on an identical
+ * five-office pipeline (300 replications, 1800-day horizon): office utilisations
+ * agreed to within 0.6%, mean end-to-end flow to 0.10%, and the RA 11032 on-time
+ * rate to 0.11%. Those runs live in the pull request, not here, because a test
+ * that shelled out to an R runtime would have reintroduced exactly the dependency
+ * this port existed to remove — and R has since been removed from the project
+ * outright, so that comparison is now unrepeatable and the properties below are
+ * the whole of the safety net. They are written to be, rather than to lean on a
+ * second implementation that is no longer there.
  */
 
 /**

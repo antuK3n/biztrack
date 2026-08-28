@@ -713,8 +713,8 @@ export interface AnalyticsSummary {
 
 /*
  * Permit Processing Time Monitoring (Feature 7). Statistical process control
- * over weekly review turnaround, computed server-side in App\Support\Spc — the
- * PHP port of the retired standalone R project. These shapes mirror it exactly.
+ * over weekly review turnaround, computed server-side in App\Support\Spc. These
+ * shapes mirror it exactly.
  */
 
 export type SpcStatus = 'in_control' | 'out_of_control'
@@ -769,35 +769,50 @@ export interface ProcessingTimeDepartment {
 /*
  * Where an analytics figure came from, and when.
  *
- * R is the statistics engine and it runs as a separate program. The analytics
- * are computed in batch — `php artisan analytics:refresh` pushes register rows to
- * R and stores the result — so a screen is showing figures as of `computed_at`,
- * not as of now. That has to be on screen: a tester who files an application and
- * does not see it in the dashboard has found the designed behaviour, and the
- * timestamp is what says so.
+ * BizTrack computes its own statistics. There is one implementation, in PHP,
+ * inside this application — no second program, no service to be unreachable, no
+ * parity to hold between two codebases. `engine` is therefore always the string
+ * 'BizTrack' and `engine_version` is always null. They are kept on the payload
+ * rather than dropped because the exported PDFs attribute their figures, and a
+ * document that gets forwarded and quoted has to carry that attribution with it;
+ * a screen or a report that hard-codes the name instead would be the thing that
+ * lies the day the product is renamed.
  *
- * When R could not be reached and no stored result existed, the server computed
- * the figures with its own PHP port instead, and `source` is then 'local'. Never
- * present those as R's output: two implementations of the same statistics can
- * drift, and hiding which one ran is what would make the drift invisible.
+ * `source` is the field that still does real work, and it is about FRESHNESS,
+ * not about who computed anything:
  *
- * That guarantee is about this payload, not about the screen. `source`, `engine`,
- * `engine_version` and `fallback_reason` always travel, and the exported PDF
- * reports print `notice` verbatim because a filed document's reader cannot ask
- * which engine ran. The screens do not render `notice` — see ComputedAt.tsx for
- * why an engine boundary is not a fact a licensing officer can act on.
+ *   'snapshot'  the figures were precomputed by `php artisan analytics:refresh`
+ *               and stored, and this response read the stored result
+ *   'local'     no stored result existed for this exact request, so the figures
+ *               were computed during it, from the rows as they are right now
+ *
+ * That difference has to reach the screen. A snapshot is as fresh as the last
+ * refresh and no fresher, so a tester who files an application and does not see
+ * it on the dashboard has found the designed behaviour rather than a bug —
+ * `computed_at` is what says so, and only a snapshot can be out of date at all.
+ * The precompute layer is deliberate and is staying: the client kept it when the
+ * external engine went, so do not "simplify" this to a single source and do not
+ * assume `computed_at` means "now".
+ *
+ * The screens do not render `notice`; it is written for the PDF export, whose
+ * reader cannot ask. See ComputedAt.tsx.
  */
-export type AnalyticsSource = 'r' | 'local'
+export type AnalyticsSource = 'snapshot' | 'local'
 
+/**
+ * Why a request fell back to computing during the request instead of reading a
+ * stored result.
+ *
+ * One member, and that is not an oversight waiting to be collapsed into a
+ * boolean. The reasons that stood beside it — no endpoint on the other engine,
+ * the other engine switched off, the other engine unreachable — described a
+ * second statistics process that no longer exists. This stays a named union so
+ * that a future reason arrives as a compile error at every screen that reads it,
+ * rather than as an unexplained `true`.
+ */
 export type AnalyticsFallbackReason =
-  /** R has no endpoint for this dataset yet, so refreshing would not help. */
-  | 'no_r_endpoint'
   /** The refresh has not run yet, or its last run failed for this view. */
-  | 'not_yet_refreshed'
-  /** This window is not one of the precomputed ones (see config/analytics.php). */
-  | 'window_not_precomputed'
-  /** R is switched off for this environment. */
-  | 'r_disabled'
+  'not_yet_refreshed'
 
 /**
  * What one figure on an analytics screen measures, and why it is on the screen.
@@ -818,8 +833,15 @@ export interface MetricDefinition {
 }
 
 export interface AnalyticsProvenance {
+  /** Precomputed and stored, or worked out during this request. */
   source: AnalyticsSource
+  /** Always 'BizTrack'. Read it; never hard-code the name on a screen. */
   engine: string
+  /**
+   * Always null under the current contract — there is no external engine left to
+   * version. Typed nullable rather than `null` so that a caller has to handle
+   * the absent case, which is what stops a banner rendering "by BizTrack null".
+   */
   engine_version: string | null
   computed_at: string
   stale: boolean
@@ -895,14 +917,16 @@ export interface AnalyticsRefreshRow {
 /**
  * What a manual refresh actually did.
  *
- * `failed` can be non-zero on a 200: R may recompute some datasets and fail
- * others, leaving the screens showing a mix of fresh and stale figures. The
- * caller has to report that rather than treat any 200 as a clean refresh.
+ * `failed` can be non-zero on a 200: a refresh walks eight dataset variants and
+ * may store some and fail others, leaving the screens showing a mix of fresh and
+ * stale figures. The caller has to report that rather than treat any 200 as a
+ * clean refresh.
  */
 export interface AnalyticsRefreshResult {
   message: string
   refreshed: number
   failed: number
+  /** Always null — same reason as AnalyticsProvenance.engine_version. */
   engine_version: string | null
   results: AnalyticsRefreshRow[]
 }
@@ -929,8 +953,9 @@ export interface ProcessingTimeReport {
 /*
  * Analytics Dashboard (docs/r-integration-spec.md §1).
  *
- * Mirrors App\Support\DashboardAnalytics exactly, which is also what R's
- * POST /dashboard returns. Three conventions run through the whole shape:
+ * Mirrors App\Support\DashboardAnalytics exactly — that class is what the
+ * endpoint returns, whether from a snapshot or computed on the request. Three
+ * conventions run through the whole shape:
  *
  *  - **A null rate means "no rate exists"**, never zero. An empty denominator is
  *    not 0%, and a screen that printed one would be asserting a finding nobody
@@ -1073,10 +1098,12 @@ export interface InspectionRow {
  * no officer can raise one — which made that figure a statistic about nothing.
  * The card was removed (see OfficerPanel in pages/admin/AnalyticsPage.tsx) and
  * the fields are left off this type so the compiler refuses any screen that
- * tries to read them back onto a page. They are still emitted server-side
- * because R's /dashboard endpoint computes them and the PHP port has to match
- * it key for key; dropping them there is an R change, tracked in
- * DashboardAnalytics::officerActivityFacts().
+ * tries to read them back onto a page. They are still emitted server-side —
+ * DashboardAnalytics::officerActivityFacts() computes them — and nothing pins
+ * them there any more now that there is only one implementation of the
+ * dashboard, so dropping them is an ordinary change against api/. Leaving them
+ * off this type is what holds the line in the meantime, and would still be the
+ * right shape even if the payload were trimmed tomorrow.
  */
 export interface OfficerActivity {
   responses: number
@@ -1128,11 +1155,12 @@ export interface DashboardReport {
    *
    * "Permits Approaching Expiry" moved to Renewal Risk Prediction and its first
    * column became four named states (see PermitLifecycle below). The dashboard
-   * key could not go with it: r/R/service.R computes `expiry` in .dash_expiry()
-   * and AnalyticsParityTest reads both engines' key sets in both directions, so
-   * dropping it from PHP alone fails parity and dropping it from both is an R
-   * change. Leaving it off this type is what stops a screen reading a panel that
-   * is no longer anywhere in the design — the compiler refuses it.
+   * key stayed behind: it was once pinned by a parity check against a second
+   * implementation, and now it is simply an unused key on a payload nobody has
+   * got round to trimming. Leaving it off this type is what stops a screen
+   * reading a panel that is no longer anywhere in the design — the compiler
+   * refuses it, which is the guarantee that matters whether or not the key ever
+   * goes.
    */
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
   top_lines_of_business: { rows: LineOfBusinessRow[]; total: number; groups: number }
@@ -1246,8 +1274,9 @@ export interface SurvivalCurve {
 /**
  * Cohort survival over renewal cycles.
  *
- * A Kaplan-Meier estimate, computed in R by `survival::survfit` and mirrored by
- * the PHP fallback. It is descriptive, not predictive: it reports what an observed
+ * A Kaplan-Meier estimate, computed server-side in
+ * App\Support\BusinessGrowthAnalytics. It is descriptive, not predictive: it
+ * reports what an observed
  * cohort did, and businesses still inside their current permit are censored rather
  * than counted as failures. It is not a probability that any given business will
  * renew, and `methodology` is the sentence that has to travel with it.
@@ -1275,12 +1304,13 @@ export interface BusinessGrowthReport {
   industry_growth: IndustryGrowthRow[]
   /**
    * The lens toggle's three rankings, spliced on by AnalyticsController at serve
-   * time rather than computed into the dataset — R computes `industry_growth`
-   * too and the parity check reads both key sets, so a new key on the dataset
-   * would fail it. See the note on that controller method.
+   * time rather than computed into the dataset. See the note on that controller
+   * method; the short of it is that the rankings are a presentation of
+   * `industry_growth` rather than a new measurement, so they are derived where
+   * the response is assembled and never stored in a snapshot.
    *
-   * Optional because `industry_growth` is what the engines actually produce, and
-   * a client reading a payload from before the splice must still draw the panel.
+   * Optional because `industry_growth` is what the dataset actually carries, and
+   * a snapshot stored before the splice existed must still draw the panel.
    * The page falls back to it, which is exactly the Largest lens.
    */
   industry_lenses?: IndustryLenses
@@ -1395,8 +1425,9 @@ export interface PermitLifecycleRow {
  * `total` equals the report's `scored_permits`, which is what lets this table
  * and the risk-level cards above it be read against each other.
  *
- * Added by the server at serve time rather than by either analytics engine; R
- * does not compute it. See RenewalRiskAnalytics::lifecycle().
+ * Added by the server at serve time rather than stored in the snapshot: it is a
+ * re-cut of permits the report already scored, so it has to answer to whatever
+ * filter the request carried. See RenewalRiskAnalytics::lifecycle().
  */
 export interface PermitLifecycle {
   columns: { code: string; label: string }[]
@@ -1562,7 +1593,7 @@ export interface RenewalModelPeriod {
 }
 
 export interface RenewalModelReport {
-  /** False when no model could be fitted, or when R was not reachable. */
+  /** False when no model could be fitted — see `unavailable_reason` for which. */
   available: boolean
   unavailable_reason: string | null
   generated_at: string
@@ -1617,9 +1648,9 @@ export interface RenewalModelReport {
 }
 
 /*
- * No StaffingSimulationReport type. App\Support\Des is a complete port of
- * r/R/des.R, but docs/r-integration-spec.md puts the discrete-event simulation
- * out of scope for the delivered flow, so it has no endpoint and no screen.
+ * No StaffingSimulationReport type. App\Support\Des is a complete discrete-event
+ * simulation, but the spec puts it out of scope for the delivered flow, so it
+ * has no endpoint and no screen. Nothing to type until one of those exists.
  */
 
 /* ── Admin ────────────────────────────────────────────────────────────── */

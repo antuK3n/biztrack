@@ -45,6 +45,18 @@ async function saveSession(
   portal: 'staff' | 'public',
   file: string,
 ) {
+  /*
+   * Long enough to outlast the limiter window this step may have to wait on.
+   *
+   * The retry below sleeps 65s on a 429, and a Playwright step times out at 30s
+   * — so without this the recovery could never finish, and the step failed at
+   * exactly 30s reporting a timeout rather than the rate limit that caused it.
+   * Two full windows plus the work, because a run that trips the limiter twice
+   * (setup invoked directly and then again as the chromium project's
+   * dependency) is the case that produced this.
+   */
+  setup.setTimeout(150_000)
+
   await page.goto('/login')
 
   /*
