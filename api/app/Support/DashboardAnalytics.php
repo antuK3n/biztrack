@@ -16,10 +16,11 @@ use Illuminate\Support\Facades\DB;
  * register.
  *
  * Same split as every other analytics feature here: `dataset()` gathers facts in
- * bulk queries and is the payload `analytics:refresh` pushes to R; `compute()` is
- * the PHP engine that turns those facts into the screen's statistics and doubles
- * as the fallback when R is unreachable. R's `POST /dashboard` returns the same
- * schema from the same facts, and AnalyticsParityTest asserts they agree.
+ * bulk queries and is the payload `analytics:refresh` stores; `compute()` turns
+ * those facts into the screen's statistics and touches no database at all. That
+ * second half is the point of the split — plain arrays in, plain arrays out, so
+ * every rate and rank on this screen can be replayed against a frozen dataset
+ * and compared to a frozen answer (AnalyticsGoldenOutputTest).
  *
  * WINDOWS, BECAUSE EACH PANEL ANSWERS A DIFFERENT QUESTION
  *
@@ -71,9 +72,6 @@ use Illuminate\Support\Facades\DB;
  */
 final class DashboardAnalytics
 {
-    /** The R endpoint that computes this dataset. */
-    public const R_ENDPOINT = '/dashboard';
-
     /**
      * Trailing window, in months, for the rate and mean panels.
      *
@@ -100,7 +98,9 @@ final class DashboardAnalytics
      *
      * These are legal thresholds from the Ease of Doing Business Act, not
      * internal service targets, and they are the reason this screen exists. They
-     * travel in the payload so R and PHP read one copy instead of hardcoding two.
+     * travel in the payload rather than being read from the constant inside
+     * compute(), so a stored snapshot records the thresholds its figures were
+     * judged against instead of being reinterpreted under later ones.
      *
      * @var array<string, array{label: string, statutory_working_days: int}>
      */
@@ -157,10 +157,10 @@ final class DashboardAnalytics
     /**
      * The facts every panel needs, gathered from the register.
      *
-     * No statistics here — no rates, no means, no ranks. Those are R's job (and
-     * compute()'s). What travels is counts, per-observation rows, and the rules
-     * (statutory targets, window horizons) so neither engine keeps its own copy
-     * of a number the other also keeps.
+     * No statistics here — no rates, no means, no ranks. Those are compute()'s
+     * job. What travels is counts, per-observation rows, and the rules (statutory
+     * targets, window horizons), so the dataset is a self-contained record of the
+     * question that was asked and compute() has nothing left to look up.
      *
      * @return array<string, mixed>
      */
@@ -171,11 +171,11 @@ final class DashboardAnalytics
         $windowStart = $today->subMonths($windowMonths);
         /*
          * Still shipped, no longer used by a figure. `ytd_start` is a date label
-         * that R echoes straight back (service.R), so removing it would change
-         * the payload shape in PHP only and break parity. It stayed behind when
-         * the yearly KPI became a full-term one; nothing on screen reads it now.
-         * Dropping it is part of the same both-engines follow-up as renaming
-         * `kpis.applications_ytd` — see kpiFacts().
+         * that stayed behind when the yearly KPI became a full-term one; nothing
+         * on screen reads it now, but it is on the published payload and on the
+         * frozen fixture, so dropping it is a response-shape change rather than a
+         * tidy-up. It goes together with renaming `kpis.applications_ytd` — see
+         * kpiFacts() — and that is now a call this codebase can make on its own.
          */
         $ytdStart = $today->startOfYear();
         $monthStart = $today->startOfMonth();
@@ -220,7 +220,7 @@ final class DashboardAnalytics
     }
 
     /**
-     * The local (PHP) engine: facts in, dashboard statistics out, no database.
+     * The engine: facts in, dashboard statistics out, no database.
      *
      * @param  array<string, mixed>  $dataset  as returned by dataset()
      * @return array<string, mixed>
@@ -233,8 +233,9 @@ final class DashboardAnalytics
         $compliance = self::computeCompliance($dataset['compliance']);
 
         return [
-            // Echoed, not re-derived: the frame is Laravel's clock and R must
-            // stay a pure function of its input.
+            // Echoed, not re-derived: the frame was fixed when dataset() ran, and
+            // compute() has to stay a pure function of its input or the same
+            // fixture would give a different answer tomorrow.
             'generated_at' => (string) $dataset['now'],
             'window_months' => (int) $dataset['params']['months'],
             'window_start' => (string) $dataset['window_start'],
@@ -285,11 +286,12 @@ final class DashboardAnalytics
      * THE `applications_ytd` KEY IS A WIRE NAME, NOT ITS MEANING.
      *
      * The figure is now every filing on record — the full term — and the key is
-     * kept only because R echoes it verbatim (`.dash_kpis`, service.R) and
-     * AnalyticsParityTest is byte-strict on data keys. Renaming it here without
-     * renaming it there would fork the two engines, which is a worse outcome
-     * than a stale key name. Renaming it is a follow-up that has to land in both
-     * at once; until then every reader-facing string calls it what it is.
+     * kept because it is a published wire name: the dashboard screen and the PDF
+     * report both read `kpis.applications_ytd`, and the golden fixture is frozen
+     * against it. Renaming it is a small, coordinated change — screen, PDF,
+     * fixture — and it is now entirely this codebase's call to make, which it was
+     * not when the key was written. Until someone does, every reader-facing
+     * string calls the figure what it is.
      *
      * WHY NOT YEAR TO DATE. The client's words were "do not put YTD only; it
      * should be the full term". Year-to-date made this card the odd one out in
@@ -390,8 +392,9 @@ final class DashboardAnalytics
      * This month's filings bucketed by outcome.
      *
      * `decisioned` marks the three buckets that belong in the Approval Rate
-     * denominator. Carrying the flag with the fact keeps the formula's one
-     * subtlety — that Pending is excluded — out of two engines' arithmetic.
+     * denominator. Carrying the flag with the fact states the formula's one
+     * subtlety — that Pending is excluded — next to the rows it applies to,
+     * rather than leaving it as a list of outcome names buried in the arithmetic.
      *
      * @return list<array{outcome: string, label: string, count: int, decisioned: bool}>
      */
@@ -439,9 +442,10 @@ final class DashboardAnalytics
     /**
      * One row per decided filing in the window: its tier and how long it took.
      *
-     * Working days are counted here rather than in R because the calendar is
-     * Laravel's and R must stay pure. Both measures travel; only the working-day
-     * one is compared against the statutory limit.
+     * Working days are counted here, in dataset(), because the count depends on
+     * the calendar and compute() must stay a pure function of its input. Both
+     * measures travel; only the working-day one is compared against the statutory
+     * limit.
      *
      * TWO DEADLINES, AND THEY ARE NOT THE SAME DEADLINE. `within_statutory` is
      * measured against RA 11032's limit for the filing's own tier — 3, 7 or 20
@@ -566,9 +570,11 @@ final class DashboardAnalytics
     /**
      * Numerator and denominator for each indicator in spec §1.
      *
-     * Only the two counts travel. Both engines then compute the same division,
-     * which is the point: an indicator that cannot be computed (empty
-     * denominator) is null in both, and neither invents a zero.
+     * Only the two counts travel; compute() does the division. That is the point:
+     * the facts carry no rate, so an indicator with an empty denominator arrives
+     * as "nothing to divide" and comes out null. A rate computed in SQL would
+     * have to decide what to do about a zero denominator down in a query, where
+     * the easy answer is a zero — and a zero is a claim, not an absence.
      *
      * @return list<array{indicator: string, label: string, numerator: int, denominator: int, numerator_label: string, denominator_label: string}>
      */
@@ -809,9 +815,10 @@ final class DashboardAnalytics
     /**
      * One row per permit in the widest window, with its signed days to expiry.
      *
-     * R buckets these cumulatively. Emitting per-permit rows rather than
+     * The buckets are cumulative. Emitting per-permit rows rather than
      * pre-bucketed counts is what lets the cumulative nesting (30 ⊂ 60 ⊂ 90) be
-     * a computation R performs instead of an assumption Laravel bakes in.
+     * a computation compute() performs, visibly and testably, instead of an
+     * assumption baked into a SQL `case` nobody re-reads.
      *
      * @return list<array{code: string, days_to_expiry: int}>
      */
@@ -1080,24 +1087,26 @@ final class DashboardAnalytics
      *
      * ## Why the keys are still emitted rather than deleted
      *
-     * R is the statistics engine and `.dash_officer()` in r/R/service.R computes
-     * `meetings_scheduled`, `meetings_attended` and `meetings_attended_rate`
-     * itself. Two things follow, and both of them block a delete here:
+     * `meetings_scheduled`, `meetings_attended` and `meetings_attended_rate` are
+     * a published part of the dashboard response, and deleting a published key is
+     * not free:
      *
-     *  - AnalyticsParityTest compares this port against R's golden output key by
-     *    key IN BOTH DIRECTIONS — a key present in PHP and absent from R fails
-     *    exactly as the reverse does. Dropping the three keys from PHP alone
-     *    turns the suite red.
-     *  - It would not remove them from what the browser receives anyway.
-     *    AnalyticsResolver serves R's stored snapshot verbatim when there is
-     *    one, and there is: the live `dashboard:months=12` snapshot carries all
-     *    three keys, computed by R, never touched by this file.
+     *  - The stored snapshots carry them. AnalyticsResolver serves the stored
+     *    `dashboard:months=12` snapshot verbatim, so removing the keys from this
+     *    file does not remove them from what the browser receives until the
+     *    snapshots are rebuilt.
+     *  - The golden fixture is frozen against them
+     *    (tests/fixtures/analytics/dashboard.expected.json), and anything else
+     *    still reading the three keys would start seeing them missing rather than
+     *    seeing an honest figure.
      *
-     * So the removal is an R change first. When r/R/service.R drops the three
-     * fields, delete the `meetings` fact below and the three keys in
-     * computeOfficerActivity, regenerate
-     * tests/fixtures/analytics/dashboard.r-output.json against the new R, and
-     * run `analytics:refresh` so the stored snapshots stop carrying them.
+     * None of that is a reason not to do it — and it is now a change this
+     * codebase can make on its own, which it could not when a second engine
+     * computed the same three fields. The steps are: delete the `meetings` fact
+     * below and the three keys in computeOfficerActivity, check nothing on the
+     * screens or in the PDFs reads them, re-freeze
+     * tests/fixtures/analytics/dashboard.expected.json, and run
+     * `analytics:refresh` so the stored snapshots stop carrying them.
      *
      * @return array<string, mixed>
      */
@@ -1155,10 +1164,9 @@ final class DashboardAnalytics
                 'total' => (clone $requests)->count(),
                 'fulfilled' => (clone $requests)->where('status', OfficerRequestStatus::Fulfilled->value)->count(),
             ],
-            // Kept only to hold schema parity with R, which still computes it.
-            // Nothing on any screen reads the keys this feeds — see the note on
-            // this method for why it is still here and what has to happen in
-            // r/R/service.R before it can go.
+            // Kept only to hold the published payload shape. Nothing on any
+            // screen reads the keys this feeds — see the note on this method for
+            // why it is still here and what has to happen before it can go.
             'meetings' => [
                 'scheduled' => (clone $meetings)->count(),
                 // Attendance is not recorded anywhere. A meeting counts as
@@ -1457,8 +1465,9 @@ final class DashboardAnalytics
         // Code ascending is the final tie-break and it is not decoration. Three
         // offices here have one review each at a mean of 0.0 days, so mean and
         // volume both tie and the order would otherwise fall back to whatever
-        // order the rows arrived in — which differs between this engine and R's.
-        // The parity fixture caught exactly that.
+        // order the rows arrived in — which is not a stable property. A fixture
+        // caught exactly that: the same data, a different row order, a different
+        // panel.
         usort(
             $rows,
             static fn (array $a, array $b) => [$b['mean_days'], $b['reviews'], $a['code']]
@@ -1745,10 +1754,11 @@ final class DashboardAnalytics
                 : null,
             /*
              * Unreported. No screen, definition or printed report reads these
-             * three; they stay on the payload only because R emits them and
-             * AnalyticsParityTest compares the two key sets in both directions.
-             * They go the moment r/R/service.R stops computing them — the note
-             * on officerActivityFacts() lists what else has to change with them.
+             * three; they stay on the payload only because it is a published
+             * shape and the stored snapshots and the golden fixture both carry
+             * them. Removing them is a decision this codebase can make on its
+             * own — the note on officerActivityFacts() lists what has to change
+             * with them.
              */
             'meetings_scheduled' => $meetingsScheduled,
             'meetings_attended' => (int) $meetings['attended'],

@@ -3,41 +3,19 @@
 /*
  * Analytics computation settings.
  *
- * R is the statistics engine and it stays a separate program (see
- * docs/r-integration-spec.md). Laravel owns all SQL, pushes row sets to the
- * plumber service, and persists what comes back; page loads read the persisted
- * result and never call R.
+ * Statistics are computed by BizTrack itself, in PHP, by the builders in
+ * app/Support. They used to be computed by a separate R (plumber) service that
+ * Laravel pushed row sets to; R has been removed and its settings with it. If
+ * R_ANALYTICS_ENABLED, R_ANALYTICS_URL or the R timeouts are still set in a .env
+ * somewhere, nothing reads them any more — they are inert, not honoured.
+ *
+ * What did NOT change is that analytics are computed in BATCH rather than per
+ * request. `analytics:refresh` walks the registry and stores a snapshot per
+ * window; page loads read the snapshot. That was the client's explicit choice
+ * and it long outlives the engine that used to do the arithmetic.
  */
 
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | R (plumber) service
-    |--------------------------------------------------------------------------
-    |
-    | The default host is deliberately 127.0.0.1: plumber has no authentication
-    | of its own, so anything that can reach it can read register data. The live
-    | Cloudflare tunnel forwards only the web port, and this must not become the
-    | exception. Point R_ANALYTICS_URL somewhere else only behind a network you
-    | control.
-    |
-    | The timeouts exist because `analytics:refresh` is the only caller and a
-    | hung R process must fail the refresh rather than hang it forever. Nothing
-    | on the request path waits on these.
-    |
-    */
-
-    'r' => [
-        'enabled' => filter_var(env('R_ANALYTICS_ENABLED', true), FILTER_VALIDATE_BOOLEAN),
-        'base_url' => rtrim((string) env('R_ANALYTICS_URL', 'http://127.0.0.1:8787'), '/'),
-
-        // Generous: the SPC and lifecycle endpoints fit a year of review rows.
-        'timeout' => (float) env('R_ANALYTICS_TIMEOUT', 60),
-
-        // Tight: if plumber is not up, we want to know in a second, not a minute.
-        'connect_timeout' => (float) env('R_ANALYTICS_CONNECT_TIMEOUT', 2),
-    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -49,8 +27,9 @@ return [
     | window cannot be sliced out of a 26-week result. `analytics:refresh` walks
     | these lists and stores one snapshot per entry.
     |
-    | A request outside these combinations is computed locally and says so, which
-    | is the honest outcome: adding a window here is what makes it R-backed.
+    | A request outside these combinations is computed on the spot and says so.
+    | The figures are the same either way — one implementation computes both — so
+    | adding a window here buys a faster page load, not a better number.
     |
     | THESE LISTS MIRROR THE WINDOW SELECTORS THE SCREENS ACTUALLY OFFER. That is
     | the rule, and it is worth stating because the lists drifted away from it
@@ -58,8 +37,8 @@ return [
     |
     | Only `dashboard: months=12` used to be here while the dashboard's Window
     | dropdown offered five choices, so four of five picks missed the snapshot,
-    | fell to the PHP port and raised a fallback notice. The figures were right;
-    | the screen called correct, intended operation a degradation, on the
+    | were computed on request and raised a notice about it. The figures were
+    | right; the screen called correct, intended operation a degradation, on the
     | majority of its own options. The fix is here, not in the copy: if a screen
     | offers a window, this file precomputes it.
     |
@@ -67,8 +46,8 @@ return [
     | commit. If precomputing it is not wanted, the option should not be offered.
     |
     | The one selector that cannot follow the rule is Renewal Risk's — see the
-    | note on that dataset below. It is the reason the fallback notice can never
-    | be driven to zero and therefore must not be shaped like an alert.
+    | note on that dataset below. It is the reason a computed-on-request notice
+    | can never be driven to zero and therefore must not be shaped like an alert.
     |
     */
 
@@ -112,12 +91,14 @@ return [
          * (AnalyticsController::renewalRisk), so the key space is the product of
          * five horizons, three page sizes, every barangay, every risk level,
          * every action and every offset. That is thousands of combinations, each
-         * a separate R round trip of up to ~1MB — precomputing them is not a
-         * bigger list, it is a different architecture.
+         * storing a snapshot of up to ~1MB — precomputing them is not a bigger
+         * list, it is a different architecture.
          *
-         * So this dataset precomputes the five horizons at the default, unfiltered
-         * first page, and everything else is answered by the PHP port. That is
-         * not a degradation and the screens must not present it as one.
+         * So this dataset precomputes the five horizons at the default,
+         * unfiltered first page, and every other combination is computed when it
+         * is asked for. Renewal risk builds in about 90ms, so that is a page load
+         * nobody notices. It is not a degradation and the screens must not
+         * present it as one.
          */
         /*
          * The fitted model. ONE variant, and that is the whole list.
@@ -154,9 +135,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | Snapshots never expire on their own — a stale figure with an honest
-    | timestamp beats no figure at all, and silently falling back to a second
-    | implementation because a refresh was skipped would hide that the refresh
-    | was skipped. This threshold only decides when the UI calls a snapshot old.
+    | timestamp beats no figure at all, and quietly recomputing because a refresh
+    | was skipped would hide that the refresh was skipped. This threshold only
+    | decides when the UI calls a snapshot old.
     |
     */
 

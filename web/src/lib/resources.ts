@@ -70,9 +70,10 @@ async function unwrap<T>(promise: Promise<{ data: { data: T } }>): Promise<T> {
  * Like unwrap, but keeps the provenance meta.
  *
  * The analytics endpoints are the one place `meta` is not optional detail: it
- * says when the figures were computed and whether R or the PHP fallback computed
- * them, and every analytics screen is required to show that. Keeping it in the
- * return type is what stops a caller quietly dropping it — see AnalyticsProvenance.
+ * says when the figures were computed and whether they came from a stored
+ * refresh or were worked out during this request, and every analytics screen is
+ * required to show that. Keeping it in the return type is what stops a caller
+ * quietly dropping it — see AnalyticsProvenance.
  */
 async function unwrapComputed<T>(
   promise: Promise<{ data: { data: T; meta: AnalyticsProvenance } }>,
@@ -677,10 +678,10 @@ export const notifications = {
  *
  * Every field is optional and omitted when unset, which is load-bearing rather
  * than tidy: the analytics snapshots are keyed on the parameters, so an
- * unfiltered request has to send exactly `days` and `limit` or it stops
- * matching the snapshot R precomputes and quietly drops the default screen onto
- * the PHP engine. axios omits `undefined` params, so leaving a field out is how
- * that is expressed.
+ * unfiltered request has to send exactly `days` and `limit` or it stops matching
+ * the precomputed snapshot and the default screen pays to recompute on every
+ * load. axios omits `undefined` params, so leaving a field out is how that is
+ * expressed.
  */
 export interface RenewalRiskQuery {
   /** Barangay name, exactly as the payload's `barangays` list spells it. */
@@ -709,10 +710,11 @@ export const analytics = {
   export: (filename = 'biztrack-analytics.csv') => downloadBlob('/analytics/export', filename),
 
   /*
-   * The three R-backed screens. Each resolves to { data, meta }: the statistics
-   * plus when and by which engine they were computed. Read the meta onto the
-   * screen — these are batch figures, as fresh as the last `analytics:refresh`,
-   * and the PHP fallback stands in when R is unreachable.
+   * The three precomputed screens. Each resolves to { data, meta }: the
+   * statistics plus when they were computed, and whether that was a stored
+   * refresh or this very request. Read the meta onto the screen — these are
+   * batch figures, as fresh as the last `analytics:refresh` and no fresher,
+   * which is a thing a reader has to be told rather than left to infer.
    */
 
   /**
@@ -770,9 +772,10 @@ export const analytics = {
    * and serve the "no model" fallback for every filtered view, which a reader
    * would correctly read as an outage. See AnalyticsController::renewalModel().
    *
-   * Resolves to `available: false` with a reason when R is down or the register
-   * holds too little settled history to fit on. The screen renders that state
-   * rather than a number, because there is no honest number to render.
+   * Resolves to `available: false` with a reason when the register holds too
+   * little settled history to fit on, or when the fit itself found nothing. The
+   * screen renders that state rather than a number, because there is no honest
+   * number to render.
    */
   renewalModel: () => unwrapComputed<RenewalModelReport>(api.get('/analytics/renewal-model')),
 
@@ -794,13 +797,13 @@ export const analytics = {
     unwrap<RenewalReminderResult>(api.post(`/analytics/renewal-risk/${permitId}/remind`)),
 
   /**
-   * Recompute every figure set from R now, rather than waiting for 03:00.
+   * Recompute and re-store every figure set now, rather than waiting for 03:00.
    *
-   * Slow by nature — it pushes the register to R and waits for eight dataset
-   * variants, a few seconds in total — so the caller has to show a pending state
-   * rather than assume this returns promptly. Resolves to what happened per
-   * dataset, because a refresh can partly succeed and the screens would then
-   * mix fresh and stale figures.
+   * Slow by nature — it walks eight dataset variants over the whole register, a
+   * few seconds in total — so the caller has to show a pending state rather than
+   * assume this returns promptly. Resolves to what happened per dataset, because
+   * a refresh can partly succeed and the screens would then mix fresh and stale
+   * figures.
    */
   refresh: () =>
     unwrap<AnalyticsRefreshResult>(api.post('/analytics/refresh')),

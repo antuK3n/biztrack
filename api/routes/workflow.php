@@ -276,11 +276,13 @@ Route::middleware('auth:sanctum')->group(function () {
          * demo, or an officer who has just filed something and wants the figures
          * to include it.
          *
-         * Throttled because one call pushes the whole register to R: a year of
-         * review history plus the full renewal watchlist, several MB of JSON over
-         * eight dataset variants. Holding it to a few calls a minute stops a
-         * held-down button turning into a self-inflicted load test on a service
-         * that a page load depends on.
+         * Throttled because one call recomputes the whole register: a year of
+         * review history, the full renewal watchlist and a fitted model, over
+         * twenty dataset variants and a second or two of query and arithmetic.
+         * It used to push all of that to a separate R service over HTTP; the
+         * work is now in-process, which removes the network but not the cost.
+         * Holding it to a few calls a minute stops a held-down button turning
+         * into a self-inflicted load test on the database every page load shares.
          */
         Route::post('analytics/refresh', [AnalyticsController::class, 'refresh'])
             ->middleware('throttle:4,1');
@@ -299,11 +301,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         /*
          * No staffing-simulation route. App\Support\Des is a complete, tested
-         * port of r/R/des.R, but docs/r-integration-spec.md puts the discrete-
-         * event simulation out of scope for the delivered flow: the client's
-         * paper has six features and DES is not one of them. The port stays on
-         * disk with its unit tests; wiring it up is a two-line change here plus
-         * the controller if the feature is ever brought back.
+         * discrete-event simulation, but it is out of scope for the delivered
+         * flow: the client's paper has six features and DES is not one of them.
+         * It stays on disk with its unit tests; wiring it up is a two-line
+         * change here plus the controller if the feature is ever brought back.
          */
     });
 

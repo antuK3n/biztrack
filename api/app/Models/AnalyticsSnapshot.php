@@ -5,12 +5,18 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * A set of statistics R computed, as of `computed_at`.
+ * A precomputed set of statistics, as of `computed_at`.
  *
  * See the migration for why the table exists and why one row is one (dataset,
  * parameter combination). Read through App\Support\AnalyticsResolver rather than
  * querying this model from a controller — the resolver is what attaches the
- * source and freshness meta a screen is required to display.
+ * freshness meta a screen is required to display.
+ *
+ * `engine_version` is a leftover of the removed R service: it holds R's version
+ * on the rows R computed and null on everything written since. It stays fillable
+ * so those historical rows still hydrate, and the refresher writes null into it.
+ * Nothing reads it — see AnalyticsResolver on why the response reports `engine`
+ * as a constant now.
  */
 class AnalyticsSnapshot extends Model
 {

@@ -53,8 +53,11 @@
         <tr>
             <th>Active businesses</th>
             {{-- Full term, not year to date. The payload key still reads
-                 `applications_ytd` because R echoes it; the figure under it is
-                 every filing on record. --}}
+                 `applications_ytd`: it is a wire name older clients and the
+                 dashboard screen already read, so it was left alone when the
+                 figure widened. The number under it is every filing on record.
+                 Renaming the key is now this codebase's own call to make — see
+                 DashboardAnalytics::kpiFacts(). --}}
             <th>Applications (all time)</th>
             <th>This month</th>
             <th>Compliance rate</th>
@@ -223,9 +226,10 @@
         30/60/90 copy here would put two different answers to one question in two
         PDFs an officer files side by side.
 
-        `$report['expiry']` is still on the payload — R computes it and the
-        parity check reads both engines' key sets. See the note where its
-        definition used to be in AnalyticsDefinitions::dashboard().
+        `$report['expiry']` is still on the payload: it is still computed and
+        older clients still read it, so it was not dropped along with the panel.
+        See the note where its definition used to be in
+        AnalyticsDefinitions::dashboard().
     --}}
 
     <h2>Top barangays <span class="window">(active businesses, as of {{ $report['today'] }})</span></h2>

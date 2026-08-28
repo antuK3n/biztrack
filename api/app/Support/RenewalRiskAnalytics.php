@@ -76,10 +76,11 @@ use Illuminate\Support\Facades\DB;
  * the other is "how many permits the bands are out of", and conflating them is
  * how a footer starts lying about a filtered table.
  *
- * An empty `$view` reproduces the previous behaviour exactly — same ranking,
- * same slice, same keys — which is what lets the R engine keep serving the
- * default screen unchanged. See AnalyticsController::renewalRisk() for why a
- * filtered request is computed locally instead.
+ * An empty `$view` reproduces the unfiltered behaviour exactly — same ranking,
+ * same slice, same keys — which is what lets the nightly snapshot keep serving
+ * the default screen unchanged. A filtered request is a parameter combination no
+ * snapshot exists for, so it is computed on the request instead; see
+ * AnalyticsController::renewalRisk().
  */
 final class RenewalRiskAnalytics
 {
@@ -221,20 +222,19 @@ final class RenewalRiskAnalytics
         .'and unpaid fees. Each adds points, up to 100. A higher score means more warning signs — it is not '
         .'a prediction, and it does not say how likely a renewal is to be late.';
 
-    /** The R endpoint that scores this dataset. */
-    public const R_ENDPOINT = '/renewal-risk';
-
     /**
      * The facts each in-scope permit carries, gathered from the register.
      *
-     * This is the whole SQL half of the feature and the payload
-     * `analytics:refresh` pushes to R. The split matters here more than anywhere
-     * else in the analytics code, because the two halves are different kinds of
-     * decision: *what counts as a risk signal* is a register question settled by
-     * the five bulk queries below, and *how signals become a score and a band* is
-     * the rule set — which lives in R, with RenewalRiskScoring as its fallback.
+     * This is the whole SQL half of the feature. The dataset/compute split
+     * matters here more than anywhere else in the analytics code, because the two
+     * halves are different kinds of decision: *what counts as a risk signal* is a
+     * register question settled by the five bulk queries below, and *how signals
+     * become a score and a band* is the rule set, which lives in
+     * RenewalRiskScoring. Keeping them apart means the rules can be re-read,
+     * argued with and re-tested without a database.
      *
-     * Note what is NOT here: no scores, no bands, no ranking. R gets facts.
+     * Note what is NOT here: no scores, no bands, no ranking. This half produces
+     * facts only.
      *
      * @return array<string, mixed>
      */
@@ -253,11 +253,11 @@ final class RenewalRiskAnalytics
             'window_end' => $windowEnd->toDateString(),
             'drivers_per_row' => self::DRIVERS_PER_ROW,
             'methodology' => self::METHODOLOGY,
-            // The rule set travels with the facts. R reads the weights, bands and
-            // thresholds out of this payload instead of keeping its own copy, so
-            // there is exactly one place the numbers live (RenewalRiskScoring)
-            // and no way for the two engines to disagree about them. What R
-            // duplicates is the logic, which is what the parity test checks.
+            // The rule set travels with the facts. The weights, bands and
+            // thresholds live in exactly one place (RenewalRiskScoring) and are
+            // carried on the payload rather than re-read downstream, so a stored
+            // snapshot — or a frozen fixture — records the rules its scores were
+            // produced under instead of being reinterpreted under later ones.
             'parameters' => RenewalRiskScoring::parameters(),
             'rulebook' => RenewalRiskScoring::rulebook(),
         ];
@@ -291,8 +291,10 @@ final class RenewalRiskAnalytics
                 'permit_type' => $permit['permit_type'],
                 'valid_until' => $validUntil->toDateString(),
                 // Whole days, signed: negative means the permit has already
-                // lapsed. Computed here, not in R, because "today" is Laravel's
-                // clock and R must stay a pure function of its input.
+                // lapsed. Computed here, in dataset(), because it depends on
+                // "today" — and compute() has to stay a pure function of its
+                // input, or the same fixture would give a different answer
+                // tomorrow.
                 'days_to_expiry' => (int) $today->diffInDays($validUntil, false),
                 'renewal_stage' => $renewal['stage'] ?? 'none',
                 'renewal_tracking_id' => $renewal['tracking_id'] ?? null,
@@ -339,20 +341,20 @@ final class RenewalRiskAnalytics
      *
      * ── WHY THIS IS NOT PART OF compute() ───────────────────────────────────
      *
-     * It cannot be. compute() is the PHP half of a two-engine contract:
-     * AnalyticsParityTest walks R's golden output against compute()'s key for
-     * key, in BOTH directions, and reports any key present in one and absent
-     * from the other. R does not compute lifecycle states, r/R/service.R is out
-     * of bounds for this change, and a new key on compute() would therefore fail
-     * parity on the first run — the exact "passes locally, forks the engines"
-     * outcome that test exists to prevent.
+     * It cannot be. compute() takes a dataset and touches no database — that is
+     * the property that lets its arithmetic be pinned to a frozen fixture
+     * (AnalyticsGoldenOutputTest) and re-run without a register behind it. This
+     * panel runs its own permitsInScope() query, so putting it inside compute()
+     * would mean either widening dataset() to carry a second population or giving
+     * compute() a database, and both give up the thing the split buys.
      *
      * So it is a serve-time decoration, joining the two that are already there
      * for the same class of reason (see AnalyticsController::decorateRenewalRisk):
      * the barangay menu, which is a register question rather than a statistic,
      * and the officer follow-up marks, which are live state rather than a nightly
-     * figure. This one is a third kind — a statistic R was never asked for — and
-     * it is honest about that rather than smuggled into the snapshot.
+     * figure. This one is a third kind — a statistic read straight off the
+     * register at serve time — and it is honest about that rather than smuggled
+     * into the snapshot.
      *
      * ── WHY THE POPULATION IS THE WATCHLIST, EXACTLY ───────────────────────
      *
@@ -511,17 +513,18 @@ final class RenewalRiskAnalytics
     }
 
     /**
-     * The local (PHP) engine: facts in, scored watchlist out, no database.
+     * The engine: facts in, scored watchlist out, no database.
      *
-     * R's `POST /renewal-risk` returns this same schema from the same facts. The
-     * numbers must agree — AnalyticsParityTest is what enforces that, and without
-     * it the fallback would quietly become a second, divergent rule set.
+     * Because it takes plain arrays and returns plain arrays, the whole rule set
+     * can be replayed against a frozen dataset and compared to a frozen answer —
+     * AnalyticsGoldenOutputTest does exactly that, and it is what catches a
+     * change of scoring that nobody meant to make.
      *
-     * The `$view` argument is NOT pushed to R and R is never asked for a
-     * filtered watchlist: `analytics:refresh` only ever sends the unfiltered
-     * variants in config/analytics.php, and a request carrying filters keys to
-     * a snapshot that cannot exist, so it lands here. That is the reason the
-     * two engines cannot drift over filtering — only one of them does any.
+     * The `$view` argument only ever arrives from a live request.
+     * `analytics:refresh` precomputes the unfiltered variants in
+     * config/analytics.php, and a request carrying filters keys to a snapshot
+     * that cannot exist, so it lands here with the filters applied. Filtering
+     * therefore never touches a stored snapshot.
      *
      * @param  array<string, mixed>  $dataset  as returned by dataset()
      * @param  array{barangay?: string|null, band?: string|null, action?: string|null, search?: string|null, offset?: int}  $view
@@ -622,19 +625,17 @@ final class RenewalRiskAnalytics
 
         /*
          * The three view fields are added ONLY when a view was actually asked
-         * for, and that is not tidiness — it is what keeps AnalyticsParityTest
-         * meaningful.
+         * for, and that is not tidiness — an unfiltered watchlist and a filtered
+         * one are meant to be different shapes.
          *
-         * That test compares this function's output against R's, key for key,
-         * over a shared fixture. R does no filtering and never will (it is only
-         * ever handed the whole watchlist), so emitting `filters`, `matching`
-         * and `offset` unconditionally makes the two schemas differ on every
-         * run and the parity check has to be loosened to accommodate keys it
-         * was written to catch. An unfiltered compute is therefore byte-for-key
-         * identical to R's, which is exactly the claim parity exists to make;
-         * a filtered one is a shape R was never asked to produce.
+         * `filters`, `matching` and `offset` describe a filtering that did not
+         * happen when nothing was filtered. Emitting them unconditionally would
+         * put a "showing N of M" contract on a payload that is simply the whole
+         * list, and would change the stored snapshot's shape for every caller in
+         * order to describe a case none of them are in. An unfiltered compute is
+         * therefore key-for-key the payload it has always been.
          *
-         * AnalyticsController fills the same three in for an R-served payload,
+         * AnalyticsController fills the same three in when it serves a snapshot,
          * with the values that are true of an unfiltered result by definition.
          */
         $view = $filters['barangay'] !== null || $filters['band'] !== null
@@ -772,10 +773,10 @@ final class RenewalRiskAnalytics
      *
      * `permit_type_code` is carried for the lifecycle panel's columns and is
      * deliberately NOT copied onto the dataset rows in dataset(): those rows are
-     * the payload pushed to R, and a field R was never sent is a field the parity
-     * check would report as PHP-only. The scored table shows the type's full
-     * name; only the lifecycle table, whose headings are four characters wide,
-     * needs the code.
+     * the stored, published payload, and a field no scored row uses would widen
+     * it — and the golden fixture with it — for a panel that reads it from here
+     * instead. The scored table shows the type's full name; only the lifecycle
+     * table, whose headings are four characters wide, needs the code.
      *
      * @return list<array{id: int, permit_number: string, business_id: int, business: string, barangay: string|null, permit_type: string, permit_type_code: string, valid_until: string}>
      */

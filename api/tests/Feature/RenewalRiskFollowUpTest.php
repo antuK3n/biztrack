@@ -514,12 +514,16 @@ it('ignores a filter value the scorer cannot produce, and says that it did', fun
     expect($body['at_risk'])->toHaveCount(1);
 });
 
-it('leaves the default request keyed to the snapshot R already computes', function () {
+it('leaves the default request keyed to the snapshot the refresh already writes', function () {
     /*
      * The filters ride in the snapshot key, so an unfiltered request has to
      * produce the string it always did — `renewal_risk:days=365,limit=25` — or
-     * the existing snapshots stop matching and the default screen silently
-     * moves onto the PHP engine.
+     * the existing snapshots stop matching and the default screen quietly starts
+     * recomputing on every load.
+     *
+     * That string is also why the rows already in the live register survived R's
+     * removal: the key format did not change, so every snapshot R had computed
+     * kept being found and served.
      */
     $key = AnalyticsSnapshot::keyFor('renewal_risk', ['days' => 365, 'limit' => 25]);
 
@@ -538,28 +542,38 @@ it('leaves the default request keyed to the snapshot R already computes', functi
         ->getJson('/api/v1/analytics/renewal-risk')
         ->assertOk();
 
-    expect($response->json('meta.source'))->toBe('r');
+    expect($response->json('meta.source'))->toBe('snapshot');
     expect($response->json('data.scored_permits'))->toBe(7);
 
     /*
-     * A snapshot R computed knows nothing about filters or paging, and the
-     * screen still has to render. The serving layer fills the gap with the
-     * answers that are true of an unfiltered payload by definition.
+     * A stored snapshot knows nothing about filters or paging, and the screen
+     * still has to render. The serving layer fills the gap with the answers that
+     * are true of an unfiltered payload by definition.
      */
     expect($response->json('data.matching'))->toBe(7);
     expect($response->json('data.offset'))->toBe(0);
     expect($response->json('data.filters.band'))->toBeNull();
     expect($response->json('data.barangays'))->not->toBeEmpty();
 
-    // Ask for one band and the snapshot no longer answers, so the local engine
-    // does — and says so, rather than serving R's unfiltered figures under a
-    // filtered heading.
+    // Ask for one band and the snapshot no longer answers, so the figures are
+    // computed for the request — and say so, rather than serving the stored
+    // unfiltered payload under a filtered heading.
     $filtered = test()->withHeaders(authAs('bplo@biztrack.local'))
         ->getJson('/api/v1/analytics/renewal-risk?band=low')
         ->assertOk();
 
     expect($filtered->json('meta.source'))->toBe('local');
     expect($filtered->json('meta.notice'))->not->toBeNull();
+
+    /*
+     * And it must say so QUIETLY. A band filter is one of this screen's own
+     * supported options and can never be precomputed (the key space is the
+     * product of every filter and offset), so this is designed behaviour, not a
+     * degradation. `window_not_precomputed` is what routes it to the quiet line
+     * instead of the staleness panel with the Refresh button — which would be
+     * offering a button that cannot help. See AnalyticsPrecomputedWindowsTest.
+     */
+    expect($filtered->json('meta.fallback_reason'))->toBe('window_not_precomputed');
 });
 
 it('does not blank the table when a listed business has since been closed', function () {

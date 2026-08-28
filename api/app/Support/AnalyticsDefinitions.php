@@ -8,11 +8,11 @@ namespace App\Support;
  * These travel in `meta.definitions` beside `meta.engine` and `meta.computed_at`,
  * never inside `data`. The reason is the one AnalyticsController already states
  * about provenance: `data` is exactly the payload the engine returned, and how a
- * figure was derived is not one of the figures. Putting definitions in `data`
- * would also mean R had to emit them, which would fork the wording across two
- * implementations — the precise drift the parity test exists to prevent.
+ * figure was derived is not one of the figures. Keeping them out of `data` also
+ * keeps them out of the frozen golden fixtures, so re-wording an explanation is
+ * never mistaken for a change in a number.
  *
- * They live in PHP rather than in the React screens because a sentence typed into
+ * They live server-side rather than in the React screens because a sentence typed into
  * a component is a copy of the truth, not the truth. Change a `where` clause in
  * DashboardAnalytics and a frontend string describing it goes stale silently, on a
  * screen whose entire purpose is to be trusted. AnalyticsDefinitionsTest walks
@@ -113,8 +113,9 @@ final class AnalyticsDefinitions
             /*
              * The key still says ytd; the figure has not been year-to-date
              * since the client asked for "the full term" instead. The key is a
-             * wire name R echoes verbatim — see DashboardAnalytics::kpiFacts().
-             * Every word a reader sees is about the whole register.
+             * wire name the screens and the PDF already read, so it was left
+             * alone — see DashboardAnalytics::kpiFacts(). Every word a reader
+             * sees is about the whole register.
              */
             'kpis.applications_ytd' => [
                 'label' => 'Applications (all time)',
@@ -212,14 +213,16 @@ final class AnalyticsDefinitions
              * and its definition went with it — a definition for a figure nobody
              * can see is the stalest kind.
              *
-             * The KEY could not go. DashboardAnalytics::computeExpiry() is one
-             * half of a two-engine contract: r/R/service.R computes `expiry` in
-             * .dash_expiry() from `permit_type_columns`, `expiring_permits` and
-             * `expiry_windows`, and AnalyticsParityTest compares the two key sets
-             * in both directions. Dropping it from PHP alone would fail parity as
-             * "present in R, absent from PHP"; dropping it from both is an R
-             * change, which this one was not allowed to be. So the payload key
-             * stays, unread by any screen, and this comment is why.
+             * The KEY stayed. DashboardAnalytics::computeExpiry() still runs and
+             * `expiry` is still on the dashboard payload: it was part of the
+             * published response shape before the panel moved, so removing it is
+             * a breaking change for anything still reading it, not a tidy-up.
+             *
+             * That removal is now a decision this codebase can make on its own —
+             * there is no second implementation to coordinate with any more. It
+             * needs a check that nothing reads `expiry`, the golden fixture
+             * re-frozen, and then the key and computeExpiry() can both go.
+             * Until someone does that, the key stays and this comment is why.
              *
              * AnalyticsDefinitionsTest's panel list drops `expiry` to match. Do
              * not add it back without a screen to put it on.

@@ -68,10 +68,21 @@ class LocationInsightsController extends Controller
 
         return response()->json([
             'data' => $insights,
+            /*
+             * `engine` said 'PHP' and `engine_version` carried PHP_VERSION, both
+             * of which only meant anything as "not R". R has been removed, so
+             * this matches what AnalyticsResolver now puts on every other
+             * analytics response: one named engine, no version. The keys stay
+             * because the client reads this block unconditionally.
+             *
+             * `source` is always 'local' here and correctly so — location
+             * insights are computed per point and are not in the precomputed
+             * set, so there is no snapshot for them to have come from.
+             */
             'meta' => [
                 'source' => 'local',
-                'engine' => 'PHP',
-                'engine_version' => PHP_VERSION,
+                'engine' => 'BizTrack',
+                'engine_version' => null,
                 'computed_at' => CarbonImmutable::now()->toISOString(),
             ],
         ]);

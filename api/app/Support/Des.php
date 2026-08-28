@@ -7,10 +7,14 @@ use Random\IntervalBoundary;
 use Random\Randomizer;
 
 /**
- * Discrete-event simulation of the permit pipeline — a native PHP port of
- * `r/R/des.R` (Feature 6), which drove a `simmer` model. The R project stays on
- * disk as the team's academic artefact; the site does not call it. No Rscript,
- * no plumber, no R runtime.
+ * Discrete-event simulation of the permit pipeline.
+ *
+ * This was ported to PHP from the project's original R prototype, `r/R/des.R`
+ * (Feature 6), which drove a `simmer` model. R is no longer part of the project
+ * — this class is the only implementation. The two sections below are kept as
+ * the record of what the port decided: they document behaviour this code still
+ * has, and the divergence list is why the numbers here are not the numbers the
+ * prototype produced.
  *
  * The model answers the staffing question: "what happens to the backlog if I
  * add one reviewer to OBO?" Applications arrive as a Poisson process, seize an
@@ -19,7 +23,7 @@ use Random\Randomizer;
  * mean time an application spent waiting for a free reviewer, and utilisation —
  * plus end-to-end flow time and RA 11032 on-time compliance.
  *
- * WHAT IS FAITHFUL TO r/R/des.R
+ * WHAT THE PORT KEPT FROM des.R
  *
  *  - Service times are lognormal, fitted per stage by maximum likelihood, the
  *    same estimator `fitdistrplus::fitdist(x, "lnorm")` converges to:
@@ -33,29 +37,31 @@ use Random\Randomizer;
  *    (the full pipeline) and a "simple" stream (single-office revalidation),
  *    mirroring `add_generator("complex", ...)` / `add_generator("simple", ...)`.
  *  - Complex applications fan out to every reviewing office in parallel and wait
- *    for all of them — R's `clone(3, ...) |> synchronize(wait = TRUE)`. Fixed
+ *    for all of them — the reference's `clone(3, ...) |> synchronize(wait = TRUE)`. Fixed
  *    intake/payment and issuance delays are uniform, as in the reference.
  *  - Queue length and utilisation are time-weighted means over [0, horizon]: a
  *    state holds from its event until the next one, the trailing interval runs
  *    to the horizon, and the denominator is the whole horizon so idle time
- *    before the first arrival counts as idle (R's `.tw_mean`).
+ *    before the first arrival counts as idle (the reference's `.tw_mean`).
  *  - RA 11032 deadlines are counted in working days and the simulation clock is
  *    calendar days, so the deadline is scaled by 7/5 before comparing, and only
  *    arrivals that entered early enough to have finished in time are judged
- *    (R's `eligible`).
+ *    (the reference's `eligible`).
  *  - One RNG seed per replication (`set.seed(SEED + r)`), so re-running the same
- *    scenario returns the same numbers. Exact draw-for-draw agreement with R is
- *    impossible — R's Mersenne Twister and simmer's lazy generator draws are a
- *    different stream from PHP's — so the port is validated statistically
- *    against simmer on identical inputs, not by equality.
+ *    scenario returns the same numbers. Draw-for-draw agreement with the
+ *    prototype was never possible — R's Mersenne Twister and simmer's lazy
+ *    generator draws are a different stream from PHP's — so the port was
+ *    validated statistically against simmer on identical inputs, not by
+ *    equality. Reproducibility within this engine is the property that still
+ *    holds and the one the screens rely on.
  *
- * DOCUMENTED DIVERGENCES
+ * DOCUMENTED DIVERGENCES FROM THE REFERENCE
  *
- *  - The reference decides each arrival's deadline from the *scenario name*
- *    (`grepl("^complex", name)`), and every scenario in `run_des` is named
- *    "baseline" / "plus2_bfp_inspectors" / "plus1_cho_reviewer" — so R judged
+ *  - The reference decided each arrival's deadline from the *scenario name*
+ *    (`grepl("^complex", name)`), and every scenario in `run_des` was named
+ *    "baseline" / "plus2_bfp_inspectors" / "plus1_cho_reviewer" — so it judged
  *    every arrival, complex ones included, against the 3-working-day simple
- *    deadline. That is a defect, not a modelling choice. Here each arrival is
+ *    deadline. That was a defect, not a modelling choice. Here each arrival is
  *    judged against its own class's deadline.
  *  - The offices are not hard-coded to BPLO/CHO/BFP. The register has seven, and
  *    which ones review a filing is a routing decision, so the pipeline is built
@@ -66,8 +72,8 @@ use Random\Randomizer;
 final class Des
 {
     /**
-     * Base RNG seed. Matches `SEED` in r/config.R, and the reason a given
-     * scenario reproduces: replication r runs on seed + r.
+     * Base RNG seed, carried over from `SEED` in the prototype's config.R. It is
+     * the reason a given scenario reproduces: replication r runs on seed + r.
      */
     public const DEFAULT_SEED = 1103;
 
@@ -79,7 +85,8 @@ final class Des
 
     /**
      * Working days per calendar week, for converting an RA 11032 deadline into
-     * the calendar days the simulation clock measures (R's `wd_to_cal = 7 / 5`).
+     * the calendar days the simulation clock measures (the reference's
+     * `wd_to_cal = 7 / 5`).
      */
     private const WORKING_DAYS_PER_WEEK = 5;
 
@@ -90,10 +97,10 @@ final class Des
     private const MAX_EVENTS = 4_000_000;
 
     /**
-     * Maximum-likelihood lognormal fit — the port of
+     * Maximum-likelihood lognormal fit, ported from
      * `fitdistrplus::fitdist(x, "lnorm")`.
      *
-     * Non-positive durations are dropped the way `des.R` drops them
+     * Non-positive durations are dropped the way `des.R` dropped them
      * (`filter(dur > 0)`): the log of zero is not a number, and a review that
      * completed in the same instant it was assigned is a data artefact.
      *
@@ -246,7 +253,7 @@ final class Des
                 'max_queue' => $stats['max_queue'] / $reps,
                 // Pooled over every served request across replications, so a
                 // replication that served more filings weighs more — the same
-                // pooling R's mean over bound-together frames performs.
+                // pooling the reference's mean over bound-together frames did.
                 'mean_wait_days' => $stats['served'] > 0 ? $stats['wait_sum'] / $stats['served'] : 0.0,
                 'served' => $stats['served'] / $reps,
             ];
@@ -310,7 +317,8 @@ final class Des
                 'wait_sum' => 0.0,
                 'served' => 0,
                 // Seeded at t = 0 so the idle stretch before the first arrival
-                // is weighted, matching R's division by the full horizon.
+                // is weighted: the denominator is the full horizon, as in the
+                // reference.
                 'log' => [[0.0, 0, 0]],
             ];
         }
@@ -560,7 +568,7 @@ final class Des
         return $area / $horizon;
     }
 
-    /** Exponential inter-arrival time — R's `rexp(1, rate)`. */
+    /** Exponential inter-arrival time — the reference's `rexp(1, rate)`. */
     private static function exponential(Randomizer $rng, float $rate): float
     {
         if ($rate <= 0.0) {
@@ -572,7 +580,7 @@ final class Des
     }
 
     /**
-     * Lognormal service time — R's `rlnorm(1, meanlog, sdlog)`.
+     * Lognormal service time — the reference's `rlnorm(1, meanlog, sdlog)`.
      *
      * @param  array<string, mixed>  $stage
      */
@@ -597,7 +605,9 @@ final class Des
     }
 
     /**
-     * Type-7 quantile (R's `stats::quantile` default) over a sorted sample.
+     * Type-7 quantile over a sorted sample — the interpolation `stats::quantile`
+     * defaulted to in the reference, and the one this project's p90 figures have
+     * always been computed with.
      *
      * @param  list<float>  $sorted
      */

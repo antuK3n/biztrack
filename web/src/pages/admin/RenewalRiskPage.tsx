@@ -853,7 +853,7 @@ function Rulebook({ report }: { report: RenewalRiskReport }) {
         anything. It is a published rule book: five fixed maxima, applied
         identically to every permit, and a reader can recompute any row by hand.
         A fitted logistic model DOES exist in this codebase
-        (RenewalModelAnalytics, R's /renewal-model) and is deliberately not
+        (App\Support\RenewalModelAnalytics) and is deliberately not
         mounted on this screen — the client asked for it removed. Whoever
         re-mounts it must not let this sentence stand over it, and nobody may
         imply these weights came out of a regression, because they did not.
@@ -1124,8 +1124,10 @@ export function RenewalRiskPage() {
         band: band === ANY ? undefined : (band as RiskBand),
         action: action === ANY ? undefined : (action as RiskAction),
         // Omitted rather than sent empty: an unfiltered request has to carry
-        // exactly `days` and `limit` or it stops keying to the snapshot R
-        // precomputes. `undefined` is how axios is told to leave it out.
+        // exactly `days` and `limit` or it stops keying to the precomputed
+        // snapshot and gets computed on the request instead — correct figures,
+        // but a slower default screen. `undefined` is how axios is told to
+        // leave a param out.
         search: query === '' ? undefined : query,
         offset: offset === 0 ? undefined : offset,
       }),
@@ -1558,8 +1560,8 @@ export function RenewalRiskPage() {
 
             What sat below was RenewalModelPanel — the fitted logistic model,
             with its AUC, coefficients and calibration. The component and its
-            whole server side (RenewalModelAnalytics, the `renewal_model`
-            dataset, R's /renewal-model) are deliberately LEFT IN PLACE and
+            whole server side (App\Support\RenewalModelAnalytics and the
+            `renewal_model` dataset) are deliberately LEFT IN PLACE and
             still refresh on schedule; only the mount is gone. Deleting them
             would throw away the one thing on this product that can support the
             word "prediction", and re-mounting is a one-line change if the

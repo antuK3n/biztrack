@@ -150,10 +150,10 @@ function TrainingDataNotice({ notice }: { notice: string }) {
  * What the panel says when there is no model.
  *
  * Deliberately not a blank space and deliberately not the rule score wearing a
- * different heading. "No model" is a state an officer can act on — the
- * statistics service is down, or the register has not accumulated enough settled
- * history yet — and the counts underneath say which by showing how much history
- * there actually is.
+ * different heading. "No model" is a state an officer can read — every reason
+ * below is now some version of "the register has not accumulated enough settled
+ * renewal history yet" — and the counts underneath say how much history there
+ * actually is, which is the only thing that will change the answer.
  */
 function Unavailable({
   reason,
@@ -163,9 +163,13 @@ function Unavailable({
   counts: RenewalModelReport['counts']
 }) {
   const sentence: Record<string, string> = {
+    // The key is the server's (RenewalModelAnalytics), not ours, and it is left
+    // spelled as the server spells it. The SENTENCE is what a reader sees, and
+    // it no longer names an outside service: the fit is attempted here, so a
+    // failure to fit is a fact about the data, not about a program being down.
     r_did_not_fit:
-      'The statistics service has not produced a model. The figures on this panel are computed by R and there is no ' +
-      'second implementation of them — a rule score presented under a fitted heading would be worse than nothing.',
+      'A model could not be fitted to the renewal history on record. There is no second set of figures to show in ' +
+      'its place — a rule score presented under a fitted heading would be worse than nothing.',
     no_labelled_history:
       'No completed renewal cycles could be recovered from permit history yet, so there is nothing to fit to.',
     not_enough_training_history:

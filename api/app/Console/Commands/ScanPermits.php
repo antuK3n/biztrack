@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Nightly permit-expiry scan (master plan S6; R integration spec §3).
+ * Nightly permit-expiry scan (master plan S6; docs/r-integration-spec.md §3).
  *
  *   1. Renewal reminders at 30 / 15 / 7 / 1 day before `valid_until`.
  *   2. Flip past-due active permits → expired (+ notify).
@@ -53,8 +53,9 @@ class ScanPermits extends Command
     protected $description = 'Notify owners of expiring permits, auto-expire past-due ones, and nudge renewals.';
 
     /**
-     * Reminder thresholds in days before expiry, widest first (R integration
-     * spec §2/§3: "30, 15 and 7 and 1 day before expiry").
+     * Reminder thresholds in days before expiry, widest first
+     * (docs/r-integration-spec.md §2/§3: "30, 15 and 7 and 1 day before
+     * expiry").
      *
      * @var list<int>
      */

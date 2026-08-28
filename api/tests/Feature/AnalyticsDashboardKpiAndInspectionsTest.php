@@ -131,10 +131,14 @@ function backdateAFilingToLastYear(): CarbonImmutable
 
 it('counts the whole register on the yearly KPI, not the year to date', function () {
     /*
-     * The key is still `applications_ytd` — R echoes that name verbatim and
-     * AnalyticsParityTest is byte-strict on data keys, so it cannot be renamed
-     * on one side. The figure under it is the whole register. See
-     * DashboardAnalytics::kpiFacts().
+     * The key is still `applications_ytd` and the figure under it is the whole
+     * register, which is a mismatch this test exists to pin rather than to
+     * excuse. It could not be renamed while R echoed the name verbatim and the
+     * parity check was byte-strict on data keys; that is no longer true, so the
+     * rename is now this codebase's to make. It has not been made because the
+     * name travels — stored snapshots, the golden baseline, the PDF and the
+     * client all carry it — and renaming it is a coordinated change, not a
+     * tidy-up. See DashboardAnalytics::kpiFacts().
      */
     backdateAFilingToLastYear();
 

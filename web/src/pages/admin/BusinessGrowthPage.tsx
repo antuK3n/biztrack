@@ -66,8 +66,8 @@ import { GenerateReportButton } from './GenerateReportButton'
  * who has not been told, as a plain pass rate — far more certain than it is.
  * It sits directly under the curve it qualifies rather than in the popover.
  *
- * Everything is computed server-side (App\Support\BusinessGrowthAnalytics, or
- * R's POST /growth/lifecycle) and rendered as given. Where a figure genuinely
+ * Everything is computed server-side (App\Support\BusinessGrowthAnalytics) and
+ * rendered as given. Where a figure genuinely
  * cannot be derived — a growth rate against an empty prior period, renewal
  * performance for a cohort that has not reached its first renewal — the server
  * sends null and this page says so rather than printing a number nobody can
@@ -249,10 +249,11 @@ export function BusinessGrowthPage() {
    * the splice can offer.
    *
    * `industry_lenses` is added to the response by AnalyticsController at serve
-   * time and is not part of the dataset R computes — the long argument is on
-   * that controller method, but the short of it is that R also computes
-   * `industry_growth` and the parity check reads both engines' key sets in both
-   * directions, so the toggle's rankings could not live there.
+   * time and is not part of the stored dataset — the long argument is on that
+   * controller method, but the short of it is that the lenses are three ways of
+   * ordering `industry_growth` rather than a fourth measurement, so they are
+   * assembled with the response and a snapshot from before they existed is
+   * still a valid snapshot.
    *
    * The fallback is deliberately a ONE-lens object rather than three lenses with
    * two of them empty. `industry_growth` is exactly the Largest ranking, and
