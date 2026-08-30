@@ -104,6 +104,60 @@ it('derives the sanitary and CEC application types from the application record',
         ->assertJsonPath('data.form_data.application_type', 'Renewal of CEC');
 });
 
+/*
+ * ── One question, asked once ──────────────────────────────────────────────
+ *
+ * The health certificate fee (Sec. 4D.02) is ₱50 per employee per year against
+ * `fee_profile.employees`, charged only when the applicant says their staff
+ * need certificates. The sanitary sheet then asked for the same headcount a
+ * second time in free text that nothing read — so the office could be shown one
+ * number and the applicant billed on another, for the same fee, on the same
+ * filing.
+ */
+
+it('carries the health-certificate headcount from the profile instead of re-asking', function () {
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => [
+        'employees' => 7,
+        'flags' => ['employees_need_health_certificates'],
+    ]]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", [
+            // The old free-text answer, still posted by a stale client. It must
+            // not win: the fee is computed on the profile, not on this box.
+            'form_data' => ['workers_requiring_health_certs' => '2'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.workers_requiring_health_certs', '7');
+
+    expect(savedForm($app, 'SANITARY')['workers_requiring_health_certs'])->toBe('7');
+});
+
+it('says None when no employee needs a health certificate', function () {
+    // Unflagged means the fee is not charged at all, so the honest answer is
+    // "none" — a blank box reads as an unanswered question.
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => ['employees' => 7, 'flags' => []]]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", ['form_data' => []])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.workers_requiring_health_certs', 'None');
+});
+
+it('leaves the headcount blank when the profile is flagged but has no number', function () {
+    // Half-filled profile: better an empty box the office can send back than a
+    // zero it would act on.
+    $app = officeFormApp(['SANITARY']);
+    $app->update(['fee_profile' => ['flags' => ['employees_need_health_certificates']]]);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/SANITARY", ['form_data' => []])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.workers_requiring_health_certs', '');
+});
+
 it('leaves the occupancy full/partial choice to the applicant', function () {
     $app = officeFormApp(['OCCUPANCY']);
 

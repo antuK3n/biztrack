@@ -59,6 +59,34 @@ class BusinessController extends Controller
 
         $businesses = Business::with($this->eager)
             ->where('owner_user_id', $request->user()->id)
+            /*
+             * Permit holders first, then everything else newest-first.
+             *
+             * This list feeds the renewal and amendment choosers, which fetch
+             * ONE page of 200 (PICKER_PAGE_SIZE). Ordered purely newest-first,
+             * an owner past 200 businesses lost the oldest off the end — and
+             * the oldest are precisely the ones whose permits are old enough to
+             * need renewing. One owner on the demo register holds 239
+             * businesses of which 5 have a permit: the chooser rendered 200
+             * rows that could not be renewed and silently dropped the one that
+             * could.
+             *
+             * The obvious fix — filter to businesses holding a permit — is
+             * WRONG, and was tried. A renewal may legitimately be filed for a
+             * business with no permit in this system at all: its permit was
+             * issued on paper, which in year one is the common case, and
+             * `prior_permit_declared_none` exists precisely so an applicant can
+             * say so. Filtering would trap exactly those applicants, and
+             * "a business whose permits are on paper is not trapped" is an
+             * asserted rule.
+             *
+             * So the answer is ordering, not exclusion: the businesses that can
+             * be renewed surface first, and the paper-permit ones remain
+             * reachable behind them. `withCount` rather than a join because
+             * `permits` is many-per-business and a join would multiply the page.
+             */
+            ->withCount('permits')
+            ->orderByRaw('CASE WHEN permits_count > 0 THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->paginate($this->perPage($request));

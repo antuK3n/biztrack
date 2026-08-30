@@ -613,6 +613,30 @@ test('Save category is never `disabled` — it says what is missing instead', as
    *
    * Checked on the attribute rather than through toBeDisabled(), which treats
    * `disabled` and `aria-disabled` as the same thing and would pass either way.
+   *
+   * ── Why this walks two states instead of asserting one ────────────────────
+   *
+   * This used to open on "nothing has been changed yet, so there is nothing to
+   * save", and that premise is no longer true. A filing arrives already
+   * carrying a tier, because submit() seeds Ra11032::tierFor's GUESS; what the
+   * approval gate waits for is a PERSON, which the payload reports as
+   * `ra11032.source === 'officer'`. So on a filing nobody has claimed there is
+   * something to save without changing anything — the officer's agreement — and
+   * Save is open on arrival by design. Shutting it was the trap the product was
+   * fixed to remove: an officer who read the filing and agreed with the guess
+   * could only get out by picking a tier they believed was wrong, saving, and
+   * picking the right one back. The provenance line says as much on screen
+   * ("save the category below, whether or not you change it").
+   *
+   * The rule this test is NAMED for did not move with it, so rather than drop
+   * it, it is asserted from both sides: the button never carries `disabled`,
+   * its state is always announced through `aria-disabled`, and the shut state
+   * never appears without the sentence saying what is missing. Which state the
+   * fixture starts in is a property of the register — an uncategorised filing,
+   * an unclaimed guess, or a tier somebody has already put their name to, and a
+   * previous run of this test leaves the middle one looking like the last — so
+   * it is read off the screen and the OTHER state is then driven from it. That
+   * is what makes this repeatable rather than passing once.
    */
   const assignmentId = await openOwedReviewFiling(page)
   test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
@@ -622,18 +646,57 @@ test('Save category is never `disabled` — it says what is missing instead', as
   await expect(select).toBeVisible()
 
   const save = page.getByRole('button', { name: 'Save category' })
+  const why = page.locator('#ra11032-save-why')
   await expect(save).toBeVisible()
-  await expect(save).not.toHaveAttribute('disabled', /.*/)
-  // Nothing has been changed yet, so there is nothing to save — and it says so.
-  await expect(save).toHaveAttribute('aria-disabled', 'true')
-  await expect(page.locator('#ra11032-save-why')).toContainText(/Pick a/)
+
+  /** The whole rule in one place, so neither state can be checked more weakly. */
+  const expectSaveState = async (open: boolean) => {
+    await expect(
+      save,
+      'Save category was closed with the native attribute, which drops it out of the tab order',
+    ).not.toHaveAttribute('disabled', /.*/)
+    await expect(save).toHaveAttribute('aria-disabled', open ? 'false' : 'true')
+    if (open) await expect(why).toHaveCount(0)
+    else await expect(why, 'Save category is shut and does not say why').toContainText(/Pick a/)
+  }
+
+  const current = await select.inputValue()
+  const claimed = /^Category set by/.test((await page.locator('#ra11032-note').innerText()).trim())
+  /*
+   * Open exactly when there is something a press would record: a tier to save,
+   * and nobody's name against it yet. Mirrors ReviewPage's `tierChanged` at the
+   * moment of arrival, before the officer has touched anything.
+   */
+  const openOnArrival = current !== '' && !claimed
+  await expectSaveState(openOnArrival)
+
+  if (openOnArrival) {
+    /*
+     * The shut state, reached by SAVING the tier already on screen. That is the
+     * one press here that cannot move a live filing's statutory clock: the tier
+     * does not change, so the deadline recomputed from the filing date is the
+     * one it already had, and the only thing written is who agreed to it. The
+     * button then has nothing left to record — and says so.
+     */
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (r) =>
+          /\/assignments\/\d+\/classification$/.test(r.url()) && r.request().method() === 'POST',
+        { timeout: 30_000 },
+      ),
+      save.click(),
+    ])
+    expect(saved.status(), `claiming the category was refused: ${await saved.text()}`).toBe(200)
+
+    await expectSaveState(false)
+    return
+  }
 
   /*
-   * Choosing a category the filing does not already have opens the button.
-   * Stops here deliberately: pressing it would move a live filing's statutory
-   * deadline. See the block comment above.
+   * The open state, reached by choosing a category the filing does not already
+   * have. Stops there deliberately: pressing it WOULD re-count a live filing's
+   * deadline from the date it was filed.
    */
-  const current = await select.inputValue()
   const other = (
     await select.locator('option').evaluateAll((els) =>
       els.map((el) => (el as HTMLOptionElement).value).filter((v) => v !== ''),
@@ -642,8 +705,7 @@ test('Save category is never `disabled` — it says what is missing instead', as
   expect(other, 'there is always another tier to move to').toBeTruthy()
 
   await select.selectOption(other as string)
-  await expect(save).toHaveAttribute('aria-disabled', 'false')
-  await expect(page.locator('#ra11032-save-why')).toHaveCount(0)
+  await expectSaveState(true)
 })
 
 test('the Edit-mode banner names the category as one of the fields it turns on', async ({

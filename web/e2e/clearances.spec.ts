@@ -19,12 +19,31 @@ import { sessionFor } from './helpers'
  * comes back in a merge because it looks tidier, so it is asserted rather than
  * assumed.
  *
- * The third property is the lock, and it is the one that changed on 4 August
- * 2026. This suite used to assert that the stage was SHUT until the first
- * payment cleared. It is the other way round now: the six are chosen while the
- * filing is a draft, and they shut the moment it is submitted, because payment
- * is the last thing that happens (docs/clearances-before-payment.md). A spec
- * still demanding the old lock would be demanding the accrual back.
+ * The third property is the lock, and it has now been round the houses twice.
+ * It asserted a stage shut until the first payment cleared; then, from 4 August
+ * 2026, the reverse — the six chosen while the filing was a draft, shut the
+ * moment it was submitted. As of 28 August it is the first arrangement again,
+ * and this time it is the whole point rather than an implementation detail
+ * (docs/clearances-after-payment.md):
+ *
+ *     wizard (business permit only) → submit → Tax Order of Payment #1 → PAID
+ *         → the stage unlocks
+ *         → each Apply adds its office's fee to a running balance
+ *         → the permit is not released until that balance reaches zero
+ *
+ * So a DRAFT is locked here, which inverts the setup of almost every test
+ * below: exercising Apply or Submit needs a PAID application, not a draft, and
+ * `makePaidApplication` is what most of them now call.
+ *
+ * Two consequences worth asserting explicitly, because both are money:
+ *
+ *   The balance is on the screen. Applying re-assesses the filing, so the
+ *   number moves under the applicant's hand, and a stage that charged them
+ *   without showing it would be taking money in the dark.
+ *
+ *   The price is on the card BEFORE the press. `fee_preview` was allowed off
+ *   the cards while one Tax Order of Payment at submit covered everything —
+ *   there was a later screen to read the amount on. There is not now.
  */
 
 test.use({ storageState: sessionFor('owner') })
@@ -178,7 +197,55 @@ async function makeCompleteDraft(page: Page): Promise<number> {
   })
 }
 
-/** Apply for one clearance on that draft, so a card is in the applied state. */
+/**
+ * An application that has been submitted AND PAID — the state in which this
+ * stage is actually open.
+ *
+ * This is the setup most of this file needs now, and it did not exist before,
+ * because until 28 August a draft was the state the six were chosen in. A draft
+ * is locked now, so a test that presses Apply on one is testing the lock rather
+ * than the thing it means to test.
+ *
+ * It builds on `makeCompleteDraft` rather than repeating it: the reason that
+ * helper fills in every required field and uploads every required document is
+ * that submission refuses an incomplete filing, and that reason has not
+ * changed. What is added on the end is the two calls that used to be somebody
+ * else's problem —
+ *
+ *   POST /applications/{id}/submit  — assigns the tracking ID, moves the filing
+ *     to pending_payment, and assesses the Tax Order of Payment for the
+ *     business permit.
+ *   POST /applications/{id}/pay     — the simulated gateway. This is what flips
+ *     `meta.unlocked`, and it is the whole subject of this file.
+ *
+ * Both are asserted rather than fire-and-forget. A silent failure here would
+ * leave every test below staring at a locked stage and reporting that the cards
+ * do not work, which is the least useful failure this suite could produce.
+ */
+async function makePaidApplication(page: Page): Promise<number> {
+  const appId = await makeCompleteDraft(page)
+  await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    }
+    const submitted = await fetch(`/api/v1/applications/${id}/submit`, { method: 'POST', headers })
+    if (!submitted.ok) {
+      throw new Error(`submitting answered ${submitted.status}: ${await submitted.text()}`)
+    }
+    const paid = await fetch(`/api/v1/applications/${id}/pay`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ method: 'gcash' }),
+    })
+    if (!paid.ok) throw new Error(`paying answered ${paid.status}: ${await paid.text()}`)
+  }, appId)
+  return appId
+}
+
+/** Apply for one clearance, so a card is in the applied state. */
 async function applyFor(page: Page, appId: number, code: string): Promise<void> {
   await page.evaluate(
     async ({ appId, code }) => {
@@ -213,27 +280,26 @@ function clearanceCards(page: Page) {
     .filter({ has: page.getByRole('button', { name: /^appl(y|ied) for the /i }) })
 }
 
-/** Any application of the tester's whose clearance stage has already shut. */
-async function findShut(page: Page): Promise<number | null> {
-  return page.evaluate(async () => {
-    const token = localStorage.getItem('biztrack.token.public')
-    const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
-    const res = await fetch('/api/v1/applications?per_page=100', { headers })
-    const body = await res.json()
-    for (const app of body.data ?? []) {
-      if (app.status === 'draft') continue
-      const c = await fetch(`/api/v1/applications/${app.id}/clearances`, { headers })
-      if (!c.ok) continue
-      if (!(await c.json()).meta.unlocked) return app.id as number
-    }
-    return null
-  })
-}
-
-test('a draft can still choose its clearances, and the grid says which button spends money', async ({
+test('before the first payment the stage is visible but locked, in the API’s own words', async ({
   page,
 }) => {
+  /*
+   * The gate, and the direction it now points.
+   *
+   * A draft is LOCKED. This test asserted the opposite between 4 and 28 August
+   * — "a draft can still choose its clearances" — because the six were then a
+   * step of the wizard and payment was the last thing that happened. It is not
+   * a weakening to invert it: what is being asserted is the same property in
+   * both cases, that the stage is open exactly when the server says it is and
+   * says why when it is not.
+   *
+   * Visible-but-locked rather than hidden or 404, deliberately. The cards are
+   * how an applicant finds out which clearances exist and what they cost, and
+   * that is worth knowing before you can act on it — "where do I get my
+   * sanitary permit" is the question this page answers even while shut.
+   */
   await page.goto('/dashboard')
+  // A draft, unpaid on purpose — that IS the locked state under test.
   const appId = await makeDraft(page)
 
   await page.goto(`/applications/${appId}/clearances`)
@@ -242,18 +308,14 @@ test('a draft can still choose its clearances, and the grid says which button sp
   })
 
   /*
-   * Six, including Market.
+   * All six are on screen, Market included.
    *
-   * It was five: item 98 derived the Market card from the filing's own
-   * declaration and hid it otherwise. That was reversed on the client's
-   * instruction, and the reason is worth keeping — the three revenue-code
-   * categories it keyed on describe the operator who RUNS a market, not the
-   * trader renting one stall inside it. So the card was hidden from precisely
-   * the people it exists for, who then had no way to discover it.
-   *
-   * Shown to everyone, labelled with who it is for, and optional. What is
-   * asserted is that it carries that label, since a sixth card with no
-   * explanation is just a sixth thing to work out.
+   * It was five for a while: item 98 derived the Market card from the filing's
+   * own declaration and hid it otherwise. That was reversed on the client's
+   * instruction, and the reason is worth keeping — the revenue-code categories
+   * it keyed on describe the operator who RUNS a market, not the trader renting
+   * one stall inside it. So the card was hidden from precisely the people it
+   * exists for, who then had no way to discover it.
    */
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6)
@@ -262,9 +324,65 @@ test('a draft can still choose its clearances, and the grid says which button sp
   await expect(market).toContainText(/optional/i)
   await expect(market).toContainText(/stall in a public or private market/i)
 
-  // Nothing is locked, so no reason is shown: before submission there is
-  // nothing to explain.
+  /*
+   * The reason is the server's sentence, shown verbatim. There is no heading
+   * over it any more: one used to read "These can no longer be changed", which
+   * is right for a stage closed after release and flatly wrong for one that has
+   * not opened yet — and this is the second case, telling an applicant who has
+   * not paid that they had missed their chance.
+   */
+  const reason = page.locator('#clearances-locked')
+  await expect(reason, 'a locked stage explains nothing').toBeVisible()
+  const shownReason = (await reason.textContent())?.trim() ?? ''
+  const apiReason = await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const res = await fetch(`/api/v1/applications/${id}/clearances`, {
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    })
+    return (await res.json()).meta.locked_reason as string | null
+  }, appId)
+  expect(shownReason, 'the locked reason was paraphrased instead of shown verbatim').toBe(apiReason)
+
+  // And nothing can be pressed. The buttons stay reachable — see the test
+  // below for why that is asserted separately and at length.
+  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
+  await expect(apply).toHaveAttribute('aria-disabled', 'true')
+
+  /*
+   * The balance is on screen even while the stage is shut, and that is the less
+   * obvious half of the rule. A locked stage means the first payment has not
+   * cleared, so the balance is exactly what the applicant must pay to open it —
+   * the most actionable number on the page. Hiding it until it stops mattering
+   * would be precisely backwards.
+   */
+  /*
+   * `exact` on the term, because "balance due" also appears in the sentence
+   * above the grid explaining what Apply costs. The <dt> is the ledger; the
+   * paragraph is a description of it, and matching either would let this pass
+   * on a page that had lost the block entirely.
+   */
+  await expect(page.getByText('Balance due', { exact: true })).toBeVisible()
+  await expect(page.getByText(/not released.*balance reaches zero|balance is unpaid/i)).toBeVisible()
+})
+
+test('once the stage is open, the grid says which button spends money and how much', async ({
+  page,
+}) => {
+  await page.goto('/dashboard')
+  const appId = await makePaidApplication(page)
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+
+  const cards = clearanceCards(page)
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
+
+  // Paid, so open: no reason is shown, because there is nothing to explain.
   await expect(page.locator('#clearances-locked')).toHaveCount(0)
+  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
+  await expect(apply).toHaveAttribute('aria-disabled', 'false')
 
   /*
    * The consequence, before either button is pressed. Apply and Submit sit side
@@ -272,17 +390,41 @@ test('a draft can still choose its clearances, and the grid says which button sp
    *
    * The RULE is above the grid, once — it is identical for all six clearances,
    * and the client's *"absurd amount of text"* was six cards each repeating it.
-   *
-   * The AMOUNT is no longer on the card. It printed there until the client saw
-   * the finished grid — a chip, a fee, a tinted panel and three controls per
-   * card, six times over — and said the older, plainer card was better. Every
-   * clearance's fee still lands on the one Tax Order of Payment at Review &
-   * Submit, which is where the money is actually agreed to, and which the last
-   * test in this file asserts end to end.
    */
   await expect(page.getByText(/apply adds that office.s fee/i)).toBeVisible()
   await expect(page.getByText(/submit a copy.*costs nothing/i)).toBeVisible()
-  await expect(cards.first()).not.toContainText(/fee ₱/i)
+
+  /*
+   * The AMOUNT, on the card, before the press. This assertion is the exact
+   * inverse of what stood here on 4 August (`not.toContainText(/fee ₱/i)`), and
+   * the inversion is the reordering itself rather than a change of taste.
+   *
+   * The fee came off these cards on the client's instruction, and the argument
+   * for removing it was that nothing was lost: every clearance's fee landed on
+   * the one Tax Order of Payment at Review & Submit, a later screen where the
+   * money was actually agreed to. There is no later screen now. The Tax Order
+   * of Payment has been raised and paid before this stage opens, so Apply IS
+   * the moment of commitment, and a button that spends an unstated amount is
+   * the defect this guards against.
+   *
+   * Asserted across the grid rather than on one card, because `fee_preview` is
+   * legitimately null for the Market Clearance (its stall rental is set by the
+   * office case by case) and legitimately zero where no revenue-code rule
+   * prices it. All three cases have to say something; none may say nothing.
+   */
+  for (const card of await cards.all()) {
+    await expect(card, 'a clearance card quotes no price at all').toContainText(
+      /fee ₱|no fee assessed|fee set by this office/i,
+    )
+  }
+
+  /*
+   * And the ledger the press moves. Three figures, so the balance is checkable
+   * rather than merely trusted.
+   */
+  await expect(page.getByText(/^assessed$/i)).toBeVisible()
+  await expect(page.getByText(/^paid$/i)).toBeVisible()
+  await expect(page.getByText(/^balance due$/i)).toBeVisible()
 
   /*
    * And no badge on a card nobody has touched. "Not requested" used to sit on
@@ -291,55 +433,30 @@ test('a draft can still choose its clearances, and the grid says which button sp
    * happened six times.
    */
   await expect(cards.first()).not.toContainText(/not requested/i)
-
-  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
-  await expect(apply).toHaveAttribute('aria-disabled', 'false')
 })
 
-test('once the filing is submitted the six are shut, in the API’s own words', async ({ page }) => {
+test('a locked Apply stays reachable, and refuses to do anything', async ({ page }) => {
+  /*
+   * The accessibility half of the lock, split out from the test above because
+   * it is a different claim: not "the stage is shut" but "shutting it did not
+   * make it invisible to anyone navigating by keyboard or screen reader".
+   */
   await page.goto('/dashboard')
-  const shut = await findShut(page)
-  expect(shut, 'no submitted application in this dataset').not.toBeNull()
+  // Unpaid, so shut. Same reason as the test above.
+  const appId = await makeDraft(page)
 
-  await page.goto(`/applications/${shut}/clearances`)
+  await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
     timeout: 30_000,
   })
 
-  /*
-   * Visible, not hidden. The cards are the point of showing a shut stage at
-   * all — this is the record of what the filing asked for.
-   *
-   * A floor rather than an exact count, because item 98 made the number depend
-   * on the filing: the Market Clearance card is on screen only where the
-   * declaration says the applicant trades from a stall, or where they applied
-   * for it anyway. Whichever submitted filing this dataset hands us, the other
-   * five are always there, and pinning "6" would make this test a test of which
-   * application happened to be found.
-   */
   const cards = clearanceCards(page)
-  await expect
-    .poll(() => cards.count(), { timeout: 30_000 })
-    .toBeGreaterThanOrEqual(5)
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
 
-  /*
-   * The reason is the server's sentence, not one written here. The condition
-   * that closes this stage is the API's to state; a second version in the
-   * client would drift the first time the rule moved.
-   */
   const reason = page.locator('#clearances-locked')
   await expect(reason).toBeVisible()
   const shown = (await reason.textContent())?.trim() ?? ''
   expect(shown.length, 'the shut stage shows no reason at all').toBeGreaterThan(20)
-
-  const fromApi = await page.evaluate(async (id) => {
-    const token = localStorage.getItem('biztrack.token.public')
-    const res = await fetch(`/api/v1/applications/${id}/clearances`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    })
-    return (await res.json()).meta.locked_reason as string | null
-  }, shut)
-  expect(shown, 'the locked reason was paraphrased instead of shown verbatim').toBe(fromApi)
 
   /*
    * The buttons stay in the tab order. `disabled` drops a control out of it and
@@ -374,7 +491,8 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
    * check refuses to click an aria-disabled control and would fail here for the
    * wrong reason. What is under test is that the HANDLER refuses — the guard is
    * in the click handler, not only in the styling, so a stray Enter from a
-   * keyboard user on a focusable button cannot change a submitted filing.
+   * keyboard user on a focusable button cannot commit an unpaid filing to a fee
+   * it has no way to settle.
    */
   await apply.dispatchEvent('click')
   await page.waitForTimeout(500)
@@ -389,7 +507,7 @@ test('once the filing is submitted the six are shut, in the API’s own words', 
 
 test('Apply always opens that office’s form, and never un-applies', async ({ page }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
   // SANITARY is one of the four clearances with an applicant-facing sheet, and
   // applying first makes this the purest statement of the property: Apply on an
   // already-applied clearance must open the form and must not undo anything.
@@ -431,7 +549,7 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
 
 test('Submit always opens the upload box, and never removes what is there', async ({ page }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -501,7 +619,7 @@ async function submitCopy(page: Page, confirm: RegExp): Promise<void> {
  */
 test('withdrawing has its own named control, and Apply is never it', async ({ page }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
   await applyFor(page, appId, 'SANITARY')
 
   await page.goto(`/applications/${appId}/clearances`)
@@ -555,7 +673,7 @@ test('changing your mind from Apply to Submit works, and says what it does first
   page,
 }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
   await applyFor(page, appId, 'ZONING')
 
   await page.goto(`/applications/${appId}/clearances`)
@@ -609,7 +727,7 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
   page,
 }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -651,7 +769,7 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
 
 test('what just happened is announced, not only drawn', async ({ page }) => {
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -661,9 +779,12 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
   /*
    * Applying commits the applicant to a fee. A card that changes silently is
    * invisible to a screen reader: they hear the button, then nothing, and have
-   * no way to know they have just added money to a bill they cannot see. The
-   * running balance that used to carry this job is gone with the accrual, so
-   * the live region is the sentence naming what the press did.
+   * no way to know they have just added money to a bill they cannot see.
+   *
+   * The running balance above the grid carries half of this now that fees
+   * accrue again — but only the half a sighted reader gets. A number that
+   * changes elsewhere on the page is not an announcement, so the live region
+   * still has to say what the press did and what it cost.
    *
    * This used to press MARKET, because MARKET was the last clearance with no
    * office sheet and so the last on which Apply stayed put. Checklist item 109
@@ -681,7 +802,12 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
 
   const status = page.getByRole('status').filter({ hasText: /applied for your/i })
   await expect(status).toBeVisible()
-  await expect(status).toContainText(/tax order of payment/i)
+  /*
+   * "balance due", not "Tax Order of Payment". The applicant has already paid
+   * one of those to get to this screen, so naming it here would point at a
+   * settled bill rather than at the number that just moved.
+   */
+  await expect(status).toContainText(/balance due/i)
 })
 
 test('the Market Clearance is offered to everyone, and says who it is for', async ({ page }) => {
@@ -703,7 +829,7 @@ test('the Market Clearance is offered to everyone, and says who it is for', asyn
    * a sixth thing every applicant has to work out is not addressed to them.
    */
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -743,7 +869,7 @@ test('the Market Clearance opens a sheet, and asks which stall it is clearing', 
    * not more.
    */
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -821,7 +947,7 @@ test('applying is reported on the button, and never by a second meaning of it', 
    * toggle — a second click silently un-applied and opened no form.
    */
   await page.goto('/dashboard')
-  const appId = await makeDraft(page)
+  const appId = await makePaidApplication(page)
   await applyFor(page, appId, 'SANITARY')
 
   await page.goto(`/applications/${appId}/clearances`)
@@ -876,185 +1002,251 @@ test('applying is reported on the button, and never by a second meaning of it', 
   await expect(card.getByRole('button', { name: /^apply for the/i })).toHaveCount(0)
 })
 
-test('the wizard puts the clearances last, and one Tax Order of Payment covers them', async ({
+test('the wizard bills the business permit alone, and each clearance accrues after payment', async ({
   page,
 }) => {
   /*
-   * The whole point of the reorder, end to end: choose a clearance on the last
-   * step before Review & Submit, submit, and be charged once for the business
-   * permit and that clearance together.
+   * ── The rule this test asserts, and the one it used to ────────────────────
    *
-   * This is the test the previous arrangement could not have: the six were
-   * only reachable after a payment, so "chosen before the bill" had no
-   * meaning. It is also the one that would catch the office sheets failing to
-   * slot in behind the cards — they are steps of the wizard again, not a panel
-   * swapped in over them.
+   * It was named *"the wizard puts the clearances last, and one Tax Order of
+   * Payment covers them"*, and it asserted exactly that: pick a clearance on
+   * the wizard's step 6, submit, and find both the business permit and that
+   * clearance on a single bill with nothing charged afterwards.
+   *
+   * That rule is inverted (docs/clearances-after-payment.md), so this test is
+   * inverted with it rather than deleted — the property is still "the money
+   * lands where the flow says it does", which is worth just as much pointed the
+   * other way. It walks the whole reordering end to end:
+   *
+   *   1. the wizard has no clearance step, and the bill it produces carries the
+   *      business permit and NO clearance line;
+   *   2. before that bill is paid the stage is shut;
+   *   3. paying opens it;
+   *   4. applying for the fire clearance ADDS its fee — the accrual, which is
+   *      the mechanism the previous arrangement existed to avoid and this one
+   *      is built on.
+   *
+   * The fire clearance, for two reasons. Its office sheet has no required
+   * field, so this stays a test of the money rather than of filling a form in;
+   * and the Fire Code fee is derived (10% of the mayor's permit plus regulatory
+   * fees, RA 9514) rather than matched against a business category, so it lands
+   * on any filing at all — which is what makes step 4's assertion mean
+   * something for whichever business this happens to build.
    */
   await page.goto('/dashboard')
   const appId = await makeCompleteDraft(page)
+
+  /* ── 1. The wizard, with no clearance step and no clearance on its bill ─── */
 
   await page.goto(`/apply?draft=${appId}`)
   // Consent is the one answer the API has no field for, so it is ticked here.
   await page.getByRole('checkbox').first().check()
 
   const map = page.locator('ol[aria-label="Application sections"]')
-  await map.getByRole('button', { name: /lgu clearances/i }).click()
-
-  // Five: the Market Clearance is derived (item 98) and this draft declares no
-  // market category, so its card is not addressed to this applicant.
-  // Six, Market included — it is shown to everyone and labelled optional
-  // rather than derived and hidden. See the item 98 test above for why.
-  const cards = clearanceCards(page)
-  await expect(cards).toHaveCount(6, { timeout: 30_000 })
-
-  /*
-   * Until a clearance is decided the step does not pass — item 76's other
-   * half. Walking past the six without touching them is not a decision.
-   */
-  await expect(page.getByText(/still needed on this part: at least one clearance/i)).toBeVisible()
-
-  /*
-   * The fire clearance, for two reasons. Its sheet has no required field, so
-   * this stays a test of the sheet becoming a STEP rather than of filling one
-   * in; and the Fire Code fee is derived (10% of the mayor's permit plus
-   * regulatory fees, RA 9514) rather than matched against a business category,
-   * so it is on the bill for any filing — which is what makes the assertion at
-   * the end mean something. Apply must open the sheet, never toggle the card
-   * off.
-   */
-  await cards.filter({ hasText: /fire/i }).getByRole('button', { name: /^apply for the/i }).click()
-
-  const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
-  await expect(backToCards, 'Apply did not open the office sheet as a wizard step').toBeVisible()
-  // And the sheet joined the section map, immediately behind the cards.
-  await expect(map.getByRole('button', { name: /fire safety \(fsic\) form/i })).toBeVisible()
-
-  await backToCards.click()
-  await expect(cards.first()).toBeVisible()
-  await expect(page.getByText(/still needed on this part/i)).toBeHidden()
+  await expect(map).toBeVisible({ timeout: 30_000 })
+  await expect(
+    map.getByRole('button', { name: /clearance/i }),
+    'the wizard grew a clearance step back',
+  ).toHaveCount(0)
 
   await map.getByRole('button', { name: /review & submit/i }).click()
-  // The last screen before submission names what was decided, and which way.
-  await expect(page.getByText(/fire.*applied for/i)).toBeVisible()
-  await expect(page.getByText(/one tax order of payment/i)).toBeVisible()
+  /*
+   * The last screen before submission says what is about to happen, and it is
+   * the opposite of what it used to say. It read "Submitting produces one Tax
+   * Order of Payment covering your Business Permit and every clearance below.
+   * Nothing else is charged afterwards." — every clause of which is now false,
+   * and the last one dangerously so.
+   */
+  await expect(page.getByText(/one tax order of payment/i)).toHaveCount(0)
+  await expect(page.getByText(/nothing else is charged/i)).toHaveCount(0)
+  await expect(page.getByText(/once that payment clears/i)).toBeVisible()
+  await expect(page.getByText(/balance reaches zero/i)).toBeVisible()
 
   await page.getByRole('button', { name: /^submit$/i }).click()
   await page.getByRole('button', { name: /^proceed$/i }).click()
   await expect(page.getByText(/tracking/i).first()).toBeVisible({ timeout: 30_000 })
 
-  /*
-   * The bill itself. One Tax Order of Payment, and the fire office's line is
-   * on it — assessed at submit from the permit types chosen on the step that
-   * had just run, with no second charge behind it.
-   */
-  const filed = await page.evaluate(async (id) => {
-    const token = localStorage.getItem('biztrack.token.public')
-    const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
-    const app = (await (await fetch(`/api/v1/applications/${id}`, { headers })).json()).data
-    const fee = (await (await fetch(`/api/v1/applications/${id}/fee`, { headers })).json()).data
-    return {
-      status: app.status as string,
-      permitCodes: (app.permit_types ?? []).map((pt: { code: string }) => pt.code) as string[],
-      lineItems: fee.line_items as { label: string; amount: number }[],
-      total: Number(fee.total_amount),
-    }
-  }, appId)
+  const read = async () =>
+    page.evaluate(async (id) => {
+      const token = localStorage.getItem('biztrack.token.public')
+      const headers = { Accept: 'application/json', Authorization: `Bearer ${token}` }
+      const app = (await (await fetch(`/api/v1/applications/${id}`, { headers })).json()).data
+      const fee = (await (await fetch(`/api/v1/applications/${id}/fee`, { headers })).json()).data
+      return {
+        status: app.status as string,
+        permitCodes: (app.permit_types ?? []).map((pt: { code: string }) => pt.code) as string[],
+        labels: (fee.line_items as { label: string }[])
+          .map((l) => l.label.toLowerCase())
+          .join(' | '),
+        total: Number(fee.total_amount),
+      }
+    }, appId)
 
-  // The choice made on the wizard's last step reached the filing itself.
-  expect(filed.permitCodes, 'the clearance chosen in the wizard is not on the filing').toContain(
-    'FSIC',
-  )
-  // And payment is what is left to do, not something already behind us.
-  expect(filed.status).toBe('pending_payment')
-
-  const labels = filed.lineItems.map((l) => l.label.toLowerCase()).join(' | ')
-  expect(labels, 'the business permit is not on the Tax Order of Payment').toContain(
+  const atSubmit = await read()
+  expect(atSubmit.status).toBe('pending_payment')
+  // The business permit, alone. This is the assertion the old test made the
+  // exact opposite of.
+  expect(atSubmit.permitCodes, 'a clearance reached the filing before payment').toEqual(['BUSINESS'])
+  expect(atSubmit.labels, 'the business permit is not on the Tax Order of Payment').toContain(
     'business permit',
   )
-  expect(labels, 'the fire clearance chosen in the wizard was not billed').toContain(
+  expect(
+    atSubmit.labels,
+    'a clearance was billed on the business permit’s Tax Order of Payment',
+  ).not.toContain('fire safety inspection certificate fee')
+  expect(atSubmit.total).toBeGreaterThan(0)
+
+  /* ── 2. Shut, because the bill is not paid ─────────────────────────────── */
+
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(
+    page.locator('#clearances-locked'),
+    'the stage opened on submission rather than on payment',
+  ).toBeVisible()
+
+  /* ── 3. Paying opens it ────────────────────────────────────────────────── */
+
+  await page.goto(`/applications/${appId}/pay`)
+  await page.getByRole('button', { name: 'Pay Online' }).click()
+  await expect(page.getByText(/receipt|paid/i).first()).toBeVisible({ timeout: 30_000 })
+
+  await page.goto(`/applications/${appId}/clearances`)
+  const cards = clearanceCards(page)
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
+  await expect(
+    page.locator('#clearances-locked'),
+    'the stage stayed shut after the first payment cleared',
+  ).toHaveCount(0)
+
+  /* ── 4. Applying accrues ───────────────────────────────────────────────── */
+
+  const fire = cards.filter({ hasText: /fire/i })
+  // Quoted before the press, which is the whole reason the amount is back on
+  // the card: there is no later screen on which to discover it.
+  await expect(fire).toContainText(/fee ₱/i)
+
+  await fire.getByRole('button', { name: /^apply for the/i }).click()
+  // Apply opens that office's sheet — over the cards now, not as a wizard step.
+  const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
+  await expect(backToCards, 'Apply did not open the office sheet').toBeVisible()
+  await backToCards.click()
+  await expect(cards.first()).toBeVisible()
+
+  const afterApply = await read()
+  expect(afterApply.permitCodes, 'applying did not attach the clearance').toContain('FSIC')
+  expect(afterApply.labels, 'applying for the fire clearance was not billed').toContain(
     'fire safety inspection certificate fee',
   )
-  expect(filed.total).toBeGreaterThan(0)
+  /*
+   * The accrual, stated as a comparison rather than an absolute. The point is
+   * not what the fire fee happens to be — it is derived from this filing's own
+   * mayor's permit — but that the bill GREW after a payment that was supposed
+   * to have settled it. That growth is what the balance block on the screen is
+   * for, and what the release gate holds the permit against.
+   */
+  expect(
+    afterApply.total,
+    'the assessment did not grow when a clearance was applied for',
+  ).toBeGreaterThan(atSubmit.total)
 })
 
 /*
- * CLR-2 — an Apply pressed by mistake must not strand the whole filing.
+ * CLR-2 — an Apply pressed by mistake must not strand the applicant, and must
+ * not leave them paying for it.
  *
- * Applying inserts that clearance's sheet as a wizard STEP behind the cards,
- * and the Market sheet will not be walked past without a market name and a
- * stall number: Next is disabled while anything is missing, and the section map
- * refuses a forward jump over an unfinished step. So a shopfront greengrocer
- * who pressed Apply on the Market card — a card deliberately shown to every
- * business in the city, item 98 — had two options: invent a market they do not
- * trade from, or cancel the filing and retype it. The audit of 2026-08-06 found
- * five real drafts in exactly that state, none of them able to reach Review &
- * Submit.
+ * ── How the trap has changed shape, and why the test survives ─────────────
  *
- * Nothing about the gating was wrong; the sheet's answers really are required.
- * What was missing is the thing the wizard's own comment already assumed
- * ("Withdrawing a clearance removes its sheet"), which had been true until the
- * control was deleted. This walks the trap and then walks out of it.
+ * It used to be a WIZARD trap. Applying inserted that clearance's sheet as a
+ * step behind the cards, and the Market sheet would not be walked past without
+ * a market name and a stall number — so a shopfront greengrocer who pressed
+ * Apply on the Market card had two options: invent a market they do not trade
+ * from, or cancel the filing and retype it. The audit of 2026-08-06 found five
+ * real drafts in exactly that state, none able to reach Review & Submit.
+ *
+ * The sheets are not wizard steps any more, so nothing stands between the
+ * applicant and submission — they have already submitted and paid to get here.
+ * That removes the STRANDING, and it is why this test no longer walks a section
+ * map. It does not remove the mistake, and it makes the other half worse: an
+ * accidental Apply now spends money immediately, against a balance that holds
+ * the permit until it is settled. So the way out matters more than it did, not
+ * less, and what this asserts is that the fee goes back off when it is taken.
  *
  * MARKET rather than SANITARY or OCCUPANCY because it is the one with two
  * required answers and the one the client already objected to being offered
  * universally — the likeliest accidental Apply in the product.
  */
-test('a clearance applied for by mistake can be withdrawn, and its wizard step goes with it', async ({
+test('a clearance applied for by mistake can be withdrawn, and its fee comes back off', async ({
   page,
 }) => {
   await page.goto('/dashboard')
-  const appId = await makeCompleteDraft(page)
+  const appId = await makePaidApplication(page)
 
-  await page.goto(`/apply?draft=${appId}`)
-  await page.getByRole('checkbox').first().check()
-
-  const map = page.locator('ol[aria-label="Application sections"]')
-  await map.getByRole('button', { name: /lgu clearances/i }).click()
-
+  await page.goto(`/applications/${appId}/clearances`)
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6, { timeout: 30_000 })
   const marketCard = cards.filter({ hasText: /market clearance/i })
 
+  const assessed = async () =>
+    page.evaluate(async (id) => {
+      const token = localStorage.getItem('biztrack.token.public')
+      const res = await fetch(`/api/v1/applications/${id}/clearances`, {
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      })
+      const meta = (await res.json()).meta
+      /*
+       * Compared as STRINGS, not parsed to numbers. These arrive already
+       * formatted ("₱10,801.00") and the assertion is "unchanged", for which
+       * the server's own rendering is the strictest possible comparison — a
+       * parse would quietly accept a figure that had changed shape.
+       */
+      return {
+        assessed: String(meta.total_assessed),
+        balance: String(meta.balance_due),
+      }
+    }, appId)
+
+  const before = await assessed()
+
   await marketCard.getByRole('button', { name: /^apply for the/i }).click()
 
-  // The trap, exactly as five real drafts hit it: a step that cannot be
-  // finished, cannot be skipped, and stands between the filing and submission.
-  const marketStep = map.getByRole('button', { name: /market clearance form/i })
-  await expect(marketStep, 'applying did not spawn the sheet as a step').toBeVisible()
-  await expect(page.getByText(/still needed on this part/i)).toContainText(/name of market/i)
+  /*
+   * The sheet opens over the cards, and it still refuses to save without the
+   * two answers it exists to collect. Nothing about that gating was wrong — the
+   * Office of the City Market Administrator cannot act on a request naming
+   * neither a market nor a stall (item 109).
+   */
+  await expect(page.getByRole('heading', { name: /market clearance \(stall holders\)/i })).toBeVisible()
+  await expect(page.getByText(/still needed on this form/i)).toContainText(/name of market/i)
   await expect(page.getByRole('button', { name: /save & back to clearances/i })).toBeDisabled()
 
   /*
-   * The way out, named on the screen you cannot leave. The applicant standing
-   * here is not looking at the cards — this sheet is the one screen the trap
-   * put them on, and it was the one screen that never mentioned them.
+   * The way out, named on the screen the mistake put the applicant on. They are
+   * not looking at the cards — this sheet is where Apply left them, and it was
+   * once the one screen that never mentioned the way back.
    */
   await expect(page.getByText(/applied for this by mistake/i)).toContainText(/withdraw/i)
 
-  // The wizard's plain Back, since Save is refused until the sheet is answered.
-  await page.getByRole('button', { name: /^back$/i }).click()
+  await page.getByRole('button', { name: /back without saving/i }).click()
   await expect(marketCard.first()).toBeVisible()
 
   await marketCard.getByRole('button', { name: /^withdraw your application for the/i }).click()
-
-  // The step goes with the clearance — the thing ApplyWizard's own comment has
-  // assumed all along.
-  await expect(marketStep, 'withdrawing left the sheet in the wizard').toHaveCount(0)
   await expect(marketCard.getByRole('button', { name: /^apply for the/i })).toBeVisible()
 
   /*
-   * And the filing is submittable again. Something still has to be decided on
-   * this step (walking past the six is not a decision), so this applies for the
-   * fire clearance — whose sheet requires nothing — and goes on to the end. The
-   * point is that Review & Submit is REACHABLE, which it was not while MARKET
-   * was on the filing without its answers.
+   * And the money is genuinely back off, which is the assertion that matters
+   * now that applying spends immediately. A withdrawal that left the fee on the
+   * balance would hold the applicant's permit against a clearance they no
+   * longer have — the same defect as the old stranding, one screen further on.
    */
-  await cards.filter({ hasText: /fire/i }).getByRole('button', { name: /^apply for the/i }).click()
-  await page.getByRole('button', { name: /save & back to clearances/i }).click()
+  const after = await assessed()
+  expect(after.assessed, 'withdrawing left the clearance on the assessment').toBe(before.assessed)
+  expect(after.balance, 'withdrawing left its fee on the balance due').toBe(before.balance)
 
-  await map.getByRole('button', { name: /review & submit/i }).click()
-  await expect(page.getByRole('button', { name: /^submit$/i })).toBeEnabled()
-  await expect(page.getByText(/fire.*applied for/i)).toBeVisible()
-  // And the clearance that was withdrawn is not on the filing being submitted.
-  await expect(page.getByText(/market.*applied for/i)).toHaveCount(0)
+  // Said out loud, and it names the balance rather than a settled bill.
+  await expect(
+    page.getByRole('status').filter({ hasText: /withdrew your application/i }),
+  ).toContainText(/balance due/i)
 })

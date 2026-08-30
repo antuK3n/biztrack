@@ -144,3 +144,73 @@ it('offers the applicant a way in before anyone has said anything', function () 
         ->and($row['last_message'])->toBeNull()
         ->and($row['messages_count'])->toBe(0);
 });
+
+/*
+ * "Messaging (make sure the business owner can only contact the correct
+ * offices)". A thread belongs to `(application, department)` now, and these
+ * cover the inbox's half of that: the row has to name the offices, or the
+ * applicant is back to writing into the void and hoping.
+ */
+
+it('names the offices an applicant may talk to on each inbox row', function () {
+    $appId = ownerApplicationId();
+
+    authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
+        ->firstWhere('application_id', $appId);
+
+    /*
+     * Submitted but not paid, so WorkflowService has routed it to nobody and
+     * there are no assignments at all. BPLO is still there — that is the point
+     * of it always being addressable. An applicant whose filing has not been
+     * routed is exactly the applicant with a question and nobody to ask.
+     */
+    expect(collect($row['offices'])->pluck('code')->all())->toBe(['BPLO'])
+        ->and($row['offices'][0]['can_message'])->toBeTrue()
+        ->and($row['offices'][0]['thread_id'])->toBeNull()
+        ->and($row['offices'][0]['messages_count'])->toBe(0);
+});
+
+it('counts each office’s conversation separately on the inbox row', function () {
+    $appId = ownerApplicationId();
+
+    authAs('owner@biztrack.local');
+    $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'First question.'])
+        ->assertCreated();
+    $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Second question.'])
+        ->assertCreated();
+
+    $row = collect($this->getJson('/api/v1/message-threads')->assertOk()->json('data'))
+        ->firstWhere('application_id', $appId);
+
+    // Unaddressed messages go to BPLO — the same assumption the 520 existing
+    // threads were backfilled with, held by MessageThread::booted().
+    $bplo = collect($row['offices'])->firstWhere('code', 'BPLO');
+
+    expect($bplo['messages_count'])->toBe(2)
+        ->and($bplo['thread_id'])->not->toBeNull()
+        ->and($bplo['last_message_at'])->not->toBeNull()
+        ->and($row['messages_count'])->toBe(2);
+});
+
+it('shows an officer which filing and which office a conversation belongs to', function () {
+    $appId = ownerApplicationId();
+
+    authAs('owner@biztrack.local');
+    // Filed, so it has a tracking number — the officer identifies the filing by
+    // that, not by the internal id.
+    $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    $this->postJson("/api/v1/applications/{$appId}/messages", ['body' => 'Good morning.'])
+        ->assertCreated();
+
+    $row = collect(
+        test()->withHeaders(authAs('bplo@biztrack.local'))
+            ->getJson('/api/v1/message-threads?per_page=200')->assertOk()->json('data')
+    )->firstWhere('application_id', $appId);
+
+    expect($row['business_name'])->toBe('Thread Test Bakery')
+        ->and($row['tracking_id'])->not->toBeNull()
+        ->and(collect($row['offices'])->pluck('code'))->toContain('BPLO');
+});

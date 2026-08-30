@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\MessageResource;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\Department;
 use App\Models\Message;
 use App\Models\MessageAttachment;
 use App\Models\MessageThread;
@@ -15,98 +16,238 @@ use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * Per-application message thread (polling, no websockets). Participants are the
- * applicant + any officer with application.view_all. Thin controller — all rows
- * created here with an audit trail; status is never touched.
+ * Messaging (polling, no websockets).
+ *
+ * A conversation is between the applicant on a filing and ONE office —
+ * `message_threads` is keyed on `(application_id, department_id)`. It used to
+ * be keyed on the filing alone, which is what the client's "make sure the
+ * business owner can only contact the correct offices" ran into: a message had
+ * no addressee, so there was no correct office to check for. Item 111 had
+ * already patched the readable half of that by filtering MESSAGES, and said in
+ * this file that one thread per office was the fuller fix but a product
+ * decision. It has been made; this is it. See migration 2026_08_30_000010.
+ *
+ * Two different questions are asked in here and they must not be confused:
+ *
+ *  - may you READ this conversation — ApplicationVisibility::readsThreadOf(),
+ *    the same office boundary as clearances, office sheets and inspection
+ *    findings, so the offices cannot drift apart again;
+ *  - may you ADDRESS this office about this filing — addressableOffices()
+ *    below, which is a fact about the filing's ROUTING, not about the reader.
+ *
+ * Thin controller: rows are created here with an audit trail, status is never
+ * touched.
  */
 class MessageController extends Controller
 {
     public function __construct(private NotificationService $notify) {}
 
     /**
-     * Hide other offices' turns in a shared conversation (checklist item 111).
+     * BPLO, resolved once per request.
      *
-     * `message_threads.application_id` is UNIQUE — one conversation per filing,
-     * by construction (see responsibleAssignment() below, which already works
-     * around it). WorkflowService::routeToDepartments then puts up to six
-     * offices on that one filing, so the sanitary officer, the fire inspector
-     * and the market administrator were all reading the same transcript,
-     * including each other's turns. That is the client's "messages from other
-     * officers in other offices show up", and it is a privacy defect: what the
-     * fire office said to this applicant is the fire office's business.
+     * By CODE and never by a hard-coded id, because department ids are seed
+     * data and differ between the register and a fresh test database.
+     */
+    private ?Department $bplo = null;
+
+    private function bplo(): ?Department
+    {
+        return $this->bplo ??= Department::where('code', 'BPLO')->first();
+    }
+
+    // --- who may be talked to, and about what --------------------------------
+
+    /**
+     * The offices an applicant on THIS filing may write to.
      *
-     * The boundary is drawn on the MESSAGE, not the thread, and deliberately so.
-     * Splitting the schema into one thread per office is the fuller fix, but it
-     * changes the shape of the applicant's inbox — they would go from one
-     * conversation per filing to one per office — and that is a product decision
-     * about their experience, not a leak to be patched silently. Scoping the
-     * rows closes the leak the client reported without pre-empting that call.
+     * The client's requirement, stated as a set: every department holding an
+     * ApplicationAssignment on the filing, PLUS BPLO. Nothing else — an office
+     * with no assignment is not handling this permit and has no business
+     * receiving mail about it, and asking to write to it is refused with a 403
+     * rather than merely left out of a dropdown. A hidden option is a UI
+     * decision; this is the rule.
      *
-     * A scoped office sees exactly two kinds of turn:
+     * Why the assignment and not the permit type: assignments are what
+     * WorkflowService::routeToDepartments creates when a paid filing is routed,
+     * they are what the officer queue reads, and they survive reassignment.
+     * That is exactly the membership test ApplicationVisibility uses for
+     * "is this office on this filing", and using a second one here would let
+     * an office be messageable while being unable to open the filing.
      *
-     *  - the applicant's own, always. They are the other side of every one of
-     *    these conversations, and an office cannot review a filing while being
-     *    unable to read what the applicant told it;
-     *  - its own officers'. Matched through the sender's department rather than
-     *    a column on the message, because that is where the fact lives, and the
-     *    sender is already eager-loaded with `department_id` everywhere.
+     * Why BPLO is always in the set, even on a filing it holds no assignment
+     * for: BPLO coordinates every filing and issues the mayor's permit off the
+     * other offices' clearances, and it is who an applicant writes to when they
+     * do not know who else to ask. Without it, an applicant on a filing that
+     * has not been routed yet — assignments only exist once the fee clears —
+     * would have nobody at all to contact, which is precisely when they most
+     * need to ask.
      *
-     * Deliberately left OUT, and this is the visible trade: BPLO's and the super
-     * admin's turns are hidden from a scoped office too. BPLO is another office
-     * by this rule and the client named no exception for it. Officers coordinate
-     * through the review sheet and requirement requests, not by reading the
-     * applicant's mail, and BPLO itself keeps the whole transcript because it
-     * holds view_any_office. If the LGU later wants BPLO's coordination visible
-     * in-thread, that is one added clause here, not a redesign.
+     * @return Collection<int, Department> keyed by department id
+     */
+    private function addressableOffices(Application $application): Collection
+    {
+        $application->loadMissing('assignments.department');
+
+        $offices = $application->assignments
+            ->map(fn (ApplicationAssignment $a) => $a->department)
+            ->filter()
+            ->keyBy('id');
+
+        if (($bplo = $this->bplo()) && ! $offices->has($bplo->id)) {
+            $offices->put($bplo->id, $bplo);
+        }
+
+        return $offices;
+    }
+
+    /**
+     * The conversations on this filing that this reader may open.
+     *
+     * @return Collection<int, MessageThread>
+     */
+    private function readableThreads(Application $application, User $user): Collection
+    {
+        $application->loadMissing('messageThreads.department');
+
+        return $application->messageThreads
+            ->filter(fn (MessageThread $t) => ApplicationVisibility::readsThreadOf($user, $t->department_id))
+            ->values();
+    }
+
+    /**
+     * The offices this reader sees on this filing: addressable ones they may
+     * read, plus any office they already have a conversation with.
+     *
+     * The second half matters for a filing whose routing changed. An office
+     * that came off the filing after writing to the applicant is no longer
+     * addressable, but the correspondence it already has is still the
+     * applicant's own, and dropping it would delete history from the screen
+     * without deleting it from the database. `can_message` is what separates
+     * "you may read this" from "you may write here".
+     *
+     * @return Collection<int, Department> keyed by department id
+     */
+    private function visibleOffices(Application $application, User $user): Collection
+    {
+        $offices = $this->addressableOffices($application)
+            ->filter(fn (Department $d) => ApplicationVisibility::readsThreadOf($user, $d->id));
+
+        foreach ($this->readableThreads($application, $user) as $thread) {
+            if ($thread->department && ! $offices->has($thread->department_id)) {
+                $offices->put($thread->department_id, $thread->department);
+            }
+        }
+
+        return $offices;
+    }
+
+    /**
+     * Which office a new message is addressed to — refused, not silently
+     * redirected, when the answer is "an office that is not on this filing".
+     *
+     * The default when the caller names nobody:
+     *
+     *  - an officer writes as their own office. That is the only thing they can
+     *    honestly be doing, and it means the existing officer clients keep
+     *    working untouched;
+     *  - anybody else — the applicant, and the super admin, who has no
+     *    department — writes to BPLO. Same assumption as the backfill: BPLO
+     *    coordinates every filing and is the office you write to when you do
+     *    not know which office to ask.
+     *
+     * Both halves of the check are load-bearing. `readsThreadOf` stops the
+     * sanitary officer posting into the fire office's conversation (they may
+     * not even read it), and membership in `addressableOffices` stops anybody —
+     * applicant included — opening a conversation with an office that was never
+     * routed this filing.
+     */
+    private function resolveAddressee(User $user, Application $application, ?int $requested): Department
+    {
+        $offices = $this->addressableOffices($application);
+
+        $targetId = $requested
+            ?? ($user->department_id !== null && $offices->has($user->department_id)
+                ? $user->department_id
+                : $this->bplo()?->id);
+
+        $office = $targetId !== null ? $offices->get($targetId) : null;
+
+        abort_unless(
+            $office !== null && ApplicationVisibility::readsThreadOf($user, $office->id),
+            403,
+            'That office is not handling this application, so it cannot be messaged about it.'
+        );
+
+        return $office;
+    }
+
+    /**
+     * Narrow a message query to the conversations this reader may open.
+     *
+     * This is the item-111 rule, redrawn where it now belongs. It used to be a
+     * per-MESSAGE filter — the applicant's turns, plus turns written by someone
+     * in my own department — because a filing had one shared thread and the
+     * senders were the only thing distinguishing the offices. Two consequences
+     * of that shape are gone with it: BPLO's coordinating turns were invisible
+     * to the offices they were coordinating (there was nowhere to put them),
+     * and the boundary depended on the SENDER's current department, so moving
+     * an officer between offices retroactively moved their old messages.
+     *
+     * The boundary is the thread's office now, which is a fact recorded when
+     * the message was sent and does not move afterwards.
+     *
+     * A reviewer with no department matches nothing — the same fail-closed
+     * posture as ApplicationVisibility::scope(). Note this must be an explicit
+     * `1 = 0` and not `where(department_id, null)`: Laravel turns a null value
+     * into `IS NULL`, which would match exactly the unaddressed threads that
+     * must never be handed out.
      */
     private function scopeMessagesToReader($query, User $user): void
     {
         if (ApplicationVisibility::readsEveryOffice($user)) {
             return;
         }
-        // The applicant reads their own file whole; only office seats are scoped.
+        // The applicant reads their own filing whole; only office seats are scoped.
         if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
             return;
         }
 
         $deptId = $user->department_id;
+        if ($deptId === null) {
+            $query->whereRaw('1 = 0');
 
-        $query->where(function ($q) use ($deptId) {
-            /*
-             * "Sent by the applicant on this filing." Correlated by column so
-             * this works both on a concrete application and inside the inbox's
-             * per-application subqueries, where the applicant differs per row.
-             */
-            $q->whereExists(fn ($sub) => $sub->selectRaw('1')
-                ->from('message_threads as vt')
-                ->join('applications as va', 'va.id', '=', 'vt.application_id')
-                ->whereColumn('vt.id', 'messages.thread_id')
-                ->whereColumn('va.applicant_user_id', 'messages.sender_user_id'));
+            return;
+        }
 
-            // "Sent by one of my own office's people." A reviewer with no
-            // department adds no clause and so sees only the applicant — the
-            // same fail-closed posture ApplicationVisibility::scope() takes.
-            if ($deptId) {
-                $q->orWhereExists(fn ($sub) => $sub->selectRaw('1')
-                    ->from('users as vu')
-                    ->whereColumn('vu.id', 'messages.sender_user_id')
-                    ->where('vu.department_id', $deptId));
-            }
-        });
+        $query->whereExists(fn ($sub) => $sub->selectRaw('1')
+            ->from('message_threads as vt')
+            ->whereColumn('vt.id', 'messages.thread_id')
+            ->where('vt.department_id', $deptId));
     }
 
     /**
      * Inbox for the dedicated Messages page (checklist item 49): one row per
-     * conversation, newest first, named after whoever the reader is talking to.
-     * Applicants see their own applications (including ones with no thread yet,
-     * so they can open the conversation); an officer sees the conversations on
-     * the filings its office may read, which matches the thread check below.
+     * FILING, carrying the offices it can be discussed with.
+     *
+     * Why the filing and not the thread, now that a filing has several: the
+     * inbox has to list a filing NOBODY has written on yet, because that row is
+     * the applicant's way into starting a conversation, and a row that exists
+     * precisely because there is no thread cannot be produced by paging over
+     * threads. Paging over filings keeps that entry point and keeps the page
+     * meta honest — `total` counts filings, and every one of them is a row.
+     * Which office each conversation is with is then said on the row, in
+     * `offices`, rather than being smeared across a list the reader has to
+     * reassemble.
+     *
+     * Applicants see their own applications; an officer sees the filings its
+     * office may read, and only where its own office has something to read.
      */
     public function threads(Request $request): JsonResponse
     {
@@ -128,10 +269,9 @@ class MessageController extends Controller
          * rows are loaded, so the ordering has to move into SQL first — and once
          * it has, the applicant's threadless filings and the officer's threads
          * are the same query with a different WHERE.
-         */
-        /*
-         * Item 111: the inbox row summarises only the turns this reader may
-         * read. Without the same scoping as the transcript, the preview line
+         *
+         * Item 111: the row summarises only the conversations this reader may
+         * open. Without the same scoping as the transcript, the preview line
          * would quote another office's message and the counter would count it —
          * the leak would survive in the list even though opening the thread no
          * longer showed it.
@@ -157,7 +297,7 @@ class MessageController extends Controller
                 'applicant:id,name',
                 'assignments.department',
                 'assignments.officer:id,name',
-                'messageThread:id,application_id',
+                'messageThreads.department',
             ]);
 
         ApplicationVisibility::scope($query, $user);
@@ -166,15 +306,22 @@ class MessageController extends Controller
             /*
              * An office joins a conversation that exists; it does not open one.
              *
-             * "Exists" means "has something this office may read" (item 111), not
-             * merely "has a row". Once another office's turns are hidden, a thread
-             * where only that other office has spoken has nothing in it for this
-             * reader — and listing it would put an inbox row with no messages, no
-             * preview line and a zero count in front of the officer. That is the
+             * "Exists" means "with MY office, and with something in it" — not
+             * merely "this filing has a thread". A filing where only the fire
+             * office has been written to has nothing in it for the sanitary
+             * officer, and listing it would put an inbox row with no messages,
+             * no preview line and a zero count in front of them. That is the
              * leak reappearing as a silhouette: you cannot read what the fire
              * office said, but you can see that it said something and when.
              */
-            $query->whereHas('messageThread.messages', fn ($m) => $this->scopeMessagesToReader($m, $user));
+            $query->whereHas('messageThreads', function ($t) use ($user) {
+                if (! ApplicationVisibility::readsEveryOffice($user)) {
+                    // -1 rather than null: an officer with no office matches
+                    // nothing, instead of matching unaddressed threads.
+                    $t->where('message_threads.department_id', $user->department_id ?? -1);
+                }
+                $t->whereHas('messages');
+            });
         } else {
             /*
              * An applicant who has not said anything yet still needs a way in,
@@ -184,7 +331,7 @@ class MessageController extends Controller
              * row would lose the thread rather than hide it.
              */
             $query->where(fn ($q) => $q
-                ->whereHas('messageThread')
+                ->whereHas('messageThreads')
                 ->orWhere('status', '!=', 'draft'));
         }
 
@@ -195,39 +342,32 @@ class MessageController extends Controller
             ->orderByDesc('applications.id')
             ->paginate($this->perPage($request));
 
-        // One extra query for this page's newest messages beats loading every
-        // message just to render the preview line.
+        /*
+         * Two extra queries for the whole page, rather than per row: what each
+         * readable conversation contains, and the newest turn in it. Loading
+         * every message just to render preview lines is what this replaces.
+         */
         $threadIds = collect($applications->items())
-            ->map(fn (Application $app) => $app->messageThread?->id)
-            ->filter()
+            ->flatMap(fn (Application $app) => $this->readableThreads($app, $user)->pluck('id'))
             ->values();
-        // Newest READABLE message per thread — see scopeMessagesToReader().
-        $latestIds = Message::query()
+
+        $stats = Message::query()
             ->whereIn('thread_id', $threadIds)
             ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
-            ->selectRaw('MAX(id) as id')
+            ->selectRaw('thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at')
             ->groupBy('thread_id')
-            ->pluck('id');
+            ->get()
+            ->keyBy('thread_id');
+
         $latest = Message::with('sender:id,name,department_id')
-            ->whereIn('id', $latestIds)
+            ->whereIn('id', $stats->pluck('last_id')->filter()->all())
             ->get()
             ->keyBy('thread_id');
 
         $rows = collect($applications->items())
-            ->map(fn (Application $app) => $this->threadRow(
-                $app,
-                $user,
-                $isOfficer,
-                $app->messageThread ? $latest->get($app->messageThread->id) : null,
-                (int) $app->messages_count,
-            ))
+            ->map(fn (Application $app) => $this->threadRow($app, $user, $isOfficer, $stats, $latest))
             ->filter()
-            ->values()
-            ->map(function (array $row) {
-                unset($row['sort_key']);
-
-                return $row;
-            });
+            ->values();
 
         return response()->json([
             'data' => $rows,
@@ -240,12 +380,27 @@ class MessageController extends Controller
         ?Application $app,
         User $user,
         bool $isOfficer,
-        ?Message $latest,
-        int $count
+        Collection $stats,
+        Collection $latest
     ): ?array {
         if (! $app) {
             return null;
         }
+
+        $offices = $this->officeRows($app, $user, $stats, $latest);
+
+        /*
+         * The row's preview and counter are the whole filing's readable
+         * correspondence, which for an office IS its own single conversation
+         * and for an applicant is all of theirs. The newest turn wins; which
+         * office it came from is on `offices` beside it.
+         */
+        $newest = collect($offices)
+            ->filter(fn (array $o) => $o['last_message_at'] !== null)
+            ->sortByDesc('last_message_at')
+            ->first();
+        $last = $newest && $newest['thread_id'] ? $latest->get($newest['thread_id']) : null;
+        $count = (int) collect($offices)->sum('messages_count');
 
         return [
             'application_id' => $app->id,
@@ -258,33 +413,84 @@ class MessageController extends Controller
                     'subtitle' => $app->business?->name ?? $app->tracking_id,
                     'is_officer' => false,
                 ]
-                : $this->officeCounterparty($app, $latest),
+                : $this->officeCounterparty($app, $last),
             /*
              * Which office is answerable for this filing (checklist item 73).
              *
-             * The applicant could already read a name off the conversation, but
-             * only obliquely — sometimes an officer's name, sometimes an office,
-             * depending on who happened to have spoken last — so "who am I
-             * actually dealing with about my permit" stayed a guess. This says
-             * it outright, and on both sides: the applicant learns which office
-             * holds their file, and an officer reading the same row learns which
-             * office is on it without opening the review sheet.
+             * Distinct from `offices` below and both are needed. `offices` is
+             * "who you may talk to about this, and what you have said to each";
+             * this is "who is answerable for the permit itself", which is a
+             * question about the REVIEW and is answered from the assignments
+             * whether or not anybody has ever written a word.
              *
-             * ONE office, never the list. A filing is routed to every office
-             * that issues one of its clearances, and printing all of them
-             * answers a question nobody asked. See responsibleAssignment().
+             * ONE office, never the list. See responsibleAssignment().
              */
-            'responsible_office' => $this->responsibleOffice($app, $latest),
+            'responsible_office' => $this->responsibleOffice($app, $last),
+            /*
+             * The addressees, and the point of the whole change: the applicant
+             * picks the office they are writing to from the offices actually on
+             * their filing, and every row says which office it belongs to.
+             */
+            'offices' => $offices,
             'messages_count' => $count,
-            'last_message' => $latest ? [
-                'body' => $latest->body,
-                'sender_name' => $latest->sender?->name,
-                'mine' => $latest->sender_user_id === $user->id,
-                'created_at' => optional($latest->created_at)->toISOString(),
+            'last_message' => $last ? [
+                'body' => $last->body,
+                'sender_name' => $last->sender?->name,
+                'mine' => $last->sender_user_id === $user->id,
+                'created_at' => optional($last->created_at)->toISOString(),
             ] : null,
-            'updated_at' => optional($latest?->created_at ?? $app->updated_at)->toISOString(),
-            'sort_key' => ($latest?->created_at ?? $app->updated_at)?->timestamp ?? 0,
+            'updated_at' => optional($last?->created_at ?? $app->updated_at)->toISOString(),
         ];
+    }
+
+    /**
+     * One row per office this reader may talk to (or has talked to) about this
+     * filing, busiest conversation first.
+     *
+     * The order is deliberate: an applicant chasing a reply wants the office
+     * that just wrote to them, not an alphabetical roster of the city. Offices
+     * with nothing said yet sort last, by name, so the list is stable — and
+     * they are still IN the list, because an office you have never written to
+     * is exactly the one you are about to.
+     *
+     * @return list<array{department_id:int, code:?string, name:string, thread_id:?int, messages_count:int, last_message_at:?string, can_message:bool}>
+     */
+    private function officeRows(
+        Application $app,
+        User $user,
+        Collection $stats,
+        Collection $latest
+    ): array {
+        $addressable = $this->addressableOffices($app);
+        $threads = $this->readableThreads($app, $user)->keyBy('department_id');
+
+        $rows = $this->visibleOffices($app, $user)
+            ->map(function (Department $d) use ($addressable, $threads, $stats, $latest) {
+                $thread = $threads->get($d->id);
+                $stat = $thread ? $stats->get($thread->id) : null;
+
+                return [
+                    'department_id' => $d->id,
+                    'code' => $d->code,
+                    'name' => $d->name,
+                    'thread_id' => $thread?->id,
+                    'messages_count' => (int) ($stat->messages_total ?? 0),
+                    'last_message_at' => $stat
+                        ? optional($latest->get($thread->id)?->created_at)->toISOString()
+                        : null,
+                    'can_message' => $addressable->has($d->id),
+                ];
+            })
+            ->values()
+            ->all();
+
+        // Busiest first, silent offices last by name. Written out rather than
+        // chained because the key is two-part and one of its halves is null for
+        // every office nobody has written to yet.
+        usort($rows, fn (array $a, array $b) => [$b['last_message_at'] ?? '', $a['name']]
+            <=> [$a['last_message_at'] ?? '', $b['name']]);
+
+        return $rows;
     }
 
     /** Who the applicant is talking to: the officer on the file, else the office. */
@@ -321,11 +527,10 @@ class MessageController extends Controller
     }
 
     /**
-     * The assignment this conversation belongs to (checklist item 73).
+     * The assignment answerable for this filing (checklist item 73).
      *
-     * A filing routed to four offices has four assignments and only one thread —
-     * `message_threads.application_id` is unique — so "which office" is a
-     * resolution, not a lookup. In order:
+     * A filing routed to four offices has four assignments, so "which office is
+     * handling my permit" is a resolution, not a lookup. In order:
      *
      *   1. the office of whoever spoke last, if that was an officer. Whoever
      *      just wrote to you is who you are dealing with, and this is the answer
@@ -336,7 +541,10 @@ class MessageController extends Controller
      *
      * Null when nothing is routed yet — a filing that has not been paid for has
      * no assignments at all (see WorkflowService::routeToDepartments), and
-     * naming an office then would be inventing one.
+     * naming an office then would be inventing one. Deliberately NOT "BPLO,
+     * because BPLO is always addressable": being reachable and being
+     * answerable are different claims, and printing BPLO here would tell an
+     * applicant their unrouted filing is being worked on.
      */
     private function responsibleAssignment(Application $app, ?Message $latest): ?ApplicationAssignment
     {
@@ -381,7 +589,19 @@ class MessageController extends Controller
     private const MESSAGE_WINDOW = 200;
 
     /**
-     * One application's conversation, oldest message first.
+     * One conversation, oldest message first.
+     *
+     * `?department_id=` picks the office. Without it the reader gets every
+     * conversation on the filing they may open, merged in time order — which
+     * for an office is its own single conversation and so leaves the officer
+     * clients working exactly as before, and for an applicant is a readable
+     * whole-filing view. Each message names its office (MessageResource), so a
+     * merged transcript is never ambiguous about who said what to whom.
+     *
+     * A department that is neither readable nor on the filing is refused with a
+     * 403 rather than answered with an empty list: "there is nothing here" and
+     * "that is not yours to read" are different facts, and an empty list would
+     * still confirm the filing exists to an office guessing at ids.
      *
      * Bounded to the most recent {@see self::MESSAGE_WINDOW} turns rather than
      * page one of an ascending list. A chat paginated from the top opens on the
@@ -389,34 +609,46 @@ class MessageController extends Controller
      * with `scheduled_at` ascending — technically a page, useless as a view. The
      * window is returned in ascending order so the transcript still reads
      * forwards, and `meta.total` says how many turns exist in all.
-     *
-     * The longest thread on the register is 8 messages, so this changes nothing
-     * anybody can see today; it removes the "load every row" that was one long
-     * dispute away from mattering.
      */
     public function index(Request $request, Application $application): JsonResponse
     {
-        $this->authorizeParticipant($request, $application);
+        $data = $request->validate([
+            'department_id' => ['sometimes', 'nullable', 'integer'],
+        ]);
 
-        $thread = $application->messageThread;
-        if (! $thread) {
-            return response()->json([
-                'data' => [],
-                'meta' => ['total' => 0, 'returned' => 0, 'window' => self::MESSAGE_WINDOW],
-            ]);
+        $this->authorizeParticipant($request, $application);
+        $user = $request->user();
+
+        $offices = $this->officeRowsForFiling($application, $user);
+        $threads = $this->readableThreads($application, $user);
+
+        $requested = $data['department_id'] ?? null;
+        if ($requested !== null) {
+            abort_unless(
+                collect($offices)->contains(fn (array $o) => $o['department_id'] === (int) $requested),
+                403,
+                'That office is not handling this application, so it cannot be messaged about it.'
+            );
+            $threads = $threads->where('department_id', (int) $requested)->values();
         }
 
-        // Item 111: an office reads the applicant's turns and its own, never
-        // another office's. Applied to the count as well as the page, so the
-        // "showing N of M" the client sees is a count of what they may read.
-        $user = $request->user();
-        $total = $thread->messages()
-            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
-            ->count();
-        $messages = $thread->messages()
-            ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
-            ->with(['sender:id,name,department_id', 'attachments'])
-            ->reorder()
+        $meta = fn (int $total, int $returned) => [
+            'total' => $total,
+            'returned' => $returned,
+            'window' => self::MESSAGE_WINDOW,
+            'department_id' => $requested !== null ? (int) $requested : null,
+            'offices' => $offices,
+        ];
+
+        if ($threads->isEmpty()) {
+            return response()->json(['data' => [], 'meta' => $meta(0, 0)]);
+        }
+
+        $threadIds = $threads->pluck('id')->all();
+        $total = Message::whereIn('thread_id', $threadIds)->count();
+        $messages = Message::query()
+            ->whereIn('thread_id', $threadIds)
+            ->with(['sender:id,name,department_id', 'attachments', 'thread:id,department_id', 'thread.department:id,code,name'])
             ->orderByDesc('created_at')
             ->orderByDesc('id')
             ->limit(self::MESSAGE_WINDOW)
@@ -426,12 +658,36 @@ class MessageController extends Controller
 
         return response()->json([
             'data' => MessageResource::collection($messages),
-            'meta' => [
-                'total' => $total,
-                'returned' => $messages->count(),
-                'window' => self::MESSAGE_WINDOW,
-            ],
+            'meta' => $meta($total, $messages->count()),
         ]);
+    }
+
+    /**
+     * The office rows for a single filing, counted on the spot.
+     *
+     * Same shape as the inbox's, built from one grouped query instead of the
+     * page-wide batch — the transcript screen needs the counts to label its
+     * office picker, and duplicating the shape would let the two screens
+     * disagree about what a conversation is.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function officeRowsForFiling(Application $application, User $user): array
+    {
+        $threadIds = $this->readableThreads($application, $user)->pluck('id')->all();
+
+        $stats = Message::query()
+            ->whereIn('thread_id', $threadIds)
+            ->selectRaw('thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at')
+            ->groupBy('thread_id')
+            ->get()
+            ->keyBy('thread_id');
+
+        $latest = Message::whereIn('id', $stats->pluck('last_id')->filter()->all())
+            ->get()
+            ->keyBy('thread_id');
+
+        return $this->officeRows($application, $user, $stats, $latest);
     }
 
     public function store(Request $request, Application $application): JsonResponse
@@ -441,13 +697,33 @@ class MessageController extends Controller
         $data = $request->validate([
             'body' => ['required', 'string', 'max:5000'],
             'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+            /*
+             * Optional, and its absence is not an error: an officer writing
+             * from the review sheet is writing as their own office, and the
+             * applicant who has not chosen is writing to BPLO. What it is NOT
+             * is advisory — resolveAddressee refuses an office that is not on
+             * this filing, so the boundary is enforced here and not in the
+             * dropdown that offers it.
+             */
+            'department_id' => ['sometimes', 'nullable', 'integer'],
         ], [
             'attachment.max' => 'The attachment may not be larger than 10MB.',
             'attachment.mimes' => 'Attach a PDF, JPG, or PNG file.',
         ]);
 
-        $message = DB::transaction(function () use ($request, $application, $data) {
-            $thread = MessageThread::firstOrCreate(['application_id' => $application->id]);
+        $office = $this->resolveAddressee(
+            $request->user(),
+            $application,
+            isset($data['department_id']) ? (int) $data['department_id'] : null
+        );
+
+        $message = DB::transaction(function () use ($request, $application, $data, $office) {
+            // Unique on (application_id, department_id), so this is one row per
+            // office per filing and stays race-safe.
+            $thread = MessageThread::firstOrCreate([
+                'application_id' => $application->id,
+                'department_id' => $office->id,
+            ]);
 
             $message = Message::create([
                 'thread_id' => $thread->id,
@@ -481,12 +757,17 @@ class MessageController extends Controller
          * this skips the ping — sending the message must not 500 because the
          * notification had nowhere to go.
          */
-        if ($recipient = $this->counterparty($request, $application)) {
+        if ($recipient = $this->counterparty($request, $application, $office)) {
             $this->notify->newMessage($application, $recipient);
         }
 
         return response()->json([
-            'data' => new MessageResource($message->load(['sender:id,name,department_id', 'attachments'])),
+            'data' => new MessageResource($message->load([
+                'sender:id,name,department_id',
+                'attachments',
+                'thread:id,department_id',
+                'thread.department:id,code,name',
+            ])),
         ], 201);
     }
 
@@ -498,10 +779,11 @@ class MessageController extends Controller
         $this->authorizeParticipant($request, $app);
 
         /*
-         * Item 111: hiding another office's message but still serving the file
-         * attached to it would leave the leak open behind a guessable id — the
-         * transcript would not show it, and an enumerated attachment id would.
-         * The message this file hangs off has to be one this reader may read.
+         * Item 111: hiding another office's conversation but still serving the
+         * files attached to it would leave the leak open behind a guessable id —
+         * the transcript would not show it, and an enumerated attachment id
+         * would. The message this file hangs off has to be one this reader may
+         * read.
          */
         abort_unless(
             Message::whereKey($attachment->message_id)
@@ -521,6 +803,9 @@ class MessageController extends Controller
      * The applicant, an office the filing was routed to, or BPLO/admin. An
      * office that was never part of the filing is not in the conversation
      * either (checklist item 56).
+     *
+     * This is the coarse door — may you touch this filing's mail at all. Which
+     * of its conversations is a separate, finer question; see readsThreadOf().
      */
     private function authorizeParticipant(Request $request, Application $application): void
     {
@@ -531,13 +816,21 @@ class MessageController extends Controller
         );
     }
 
-    /** The other side of the thread relative to the sender, if there is one. */
-    private function counterparty(Request $request, Application $application): ?User
+    /**
+     * The other side of the thread relative to the sender, if there is one.
+     *
+     * Now that a message is addressed, the applicant's reply pings the office
+     * they actually wrote to rather than whichever officer happened to have
+     * been assigned most recently — sending a question to the fire office and
+     * notifying the sanitary officer is the same defect as the shared thread,
+     * one layer down.
+     */
+    private function counterparty(Request $request, Application $application, Department $office): ?User
     {
         $application->loadMissing('applicant');
-        // Officer sent → notify applicant. Applicant sent → notify the reviewing officer(s).
+        // Officer sent → notify applicant. Applicant sent → notify the office they wrote to.
         if ($request->user()->id === $application->applicant_user_id) {
-            $officer = $this->assignedOfficer($application);
+            $officer = $this->assignedOfficer($application, $office->id);
             if ($officer) {
                 return $officer;
             }
@@ -546,9 +839,23 @@ class MessageController extends Controller
         return $application->applicant;
     }
 
-    private function assignedOfficer(Application $application): ?User
+    /**
+     * Whoever in $departmentId holds this filing, else anybody who does.
+     *
+     * The fallback is deliberate and narrow: a message to an office nobody in
+     * it has picked up yet still has to reach a person, and the applicant is
+     * owed a reply more than the routing is owed purity. BPLO, which is always
+     * addressable, frequently has no named officer on an unrouted filing.
+     */
+    private function assignedOfficer(Application $application, ?int $departmentId = null): ?User
     {
-        $officerId = $application->assignments()
+        $forOffice = $departmentId === null ? null : $application->assignments()
+            ->where('department_id', $departmentId)
+            ->whereNotNull('officer_user_id')
+            ->orderByDesc('assigned_at')
+            ->value('officer_user_id');
+
+        $officerId = $forOffice ?? $application->assignments()
             ->whereNotNull('officer_user_id')
             ->orderByDesc('assigned_at')
             ->value('officer_user_id');

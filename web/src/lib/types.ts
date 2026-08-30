@@ -898,6 +898,18 @@ export interface TranscriptMeta {
   window: number
 }
 
+/**
+ * A message transcript's meta: the window, plus who the conversation is with.
+ *
+ * `department_id` echoes back the office that was asked for, or null when the
+ * caller asked for the whole filing and got every conversation it may read
+ * merged in time order. `offices` is the picker — see MessageOffice.
+ */
+export interface MessageTranscriptMeta extends TranscriptMeta {
+  department_id: number | null
+  offices: MessageOffice[]
+}
+
 /** An analytics payload together with its provenance. Both must reach the screen. */
 export interface Computed<T> {
   data: T
@@ -1692,8 +1704,36 @@ export interface Message {
   id: number
   body: string
   sender: { id: number; name: string; is_officer: boolean }
+  /**
+   * The office this turn is with. A conversation is scoped to
+   * `(application, office)`, so a message has an addressee; null only while the
+   * API did not load the relation, never because the turn has no office.
+   */
+  department: { id: number; code: string | null; name: string } | null
   attachments: MessageAttachment[]
   created_at: string
+}
+
+/**
+ * One office an applicant may hold a conversation with about a filing.
+ *
+ * The list is the offices ACTUALLY on the filing (its assignments) plus BPLO,
+ * which coordinates every filing and is who you write to when you do not know
+ * who else to ask — never a roster of every department in the city. The API
+ * refuses a message to anything outside it; this list is what stops the
+ * applicant being refused in the first place.
+ *
+ * `can_message` is false only for an office that has come OFF the filing since
+ * writing: its correspondence stays readable, but the conversation is closed.
+ */
+export interface MessageOffice {
+  department_id: number
+  code: string | null
+  name: string
+  thread_id: number | null
+  messages_count: number
+  last_message_at: string | null
+  can_message: boolean
 }
 
 /** One conversation row in the Messages inbox (GET /message-threads). */
@@ -1717,6 +1757,16 @@ export interface MessageThreadSummary {
     name: string
     officer: { id: number; name: string } | null
   } | null
+  /**
+   * The conversations this row covers, one per office, busiest first.
+   *
+   * The inbox pages by FILING and not by conversation, because a filing nobody
+   * has written on yet still needs a row — that row IS the way in, and it
+   * cannot come from a list of threads that do not exist. Which office each
+   * conversation is with is said here instead.
+   */
+  offices: MessageOffice[]
+  /** Every readable turn on the filing: for an office, its own conversation. */
   messages_count: number
   last_message: {
     body: string
@@ -1865,14 +1915,18 @@ export interface OfficeForm {
   form_data: Record<string, unknown>
 }
 
-/* ── LGU Clearances (the last step before Review & Submit) ────────────── */
+/* ── LGU Clearances (the stage that opens after the first payment) ────── */
 
 /*
- * The six supporting clearances (docs/clearances-before-payment.md). Each is a
+ * The six supporting clearances (docs/clearances-after-payment.md). Each is a
  * separate transaction with a separate office, a separate fee and a separate
  * outcome, which is why it has a state of its own instead of being a tick on
- * the application — but all six are decided before the filing is submitted,
- * and they are billed on the same Tax Order of Payment as the business permit.
+ * the application.
+ *
+ * They are decided AFTER the business permit has been submitted and paid for,
+ * not before. Each one applied for is re-assessed onto a running balance, and
+ * the permit is not released until that balance reaches zero — which is why
+ * `ClearanceMeta` below carries money and this is not merely a list of states.
  */
 export type ClearanceState = 'available' | 'applied' | 'submitted' | 'issued' | 'rejected'
 
@@ -1927,23 +1981,48 @@ export interface Clearance {
 }
 
 /**
- * The gate, alongside the six rows.
+ * The gate and the ledger, alongside the six rows.
  *
- * `locked_reason` is the sentence the screen shows once the filing has been
- * submitted and the six can no longer be changed. It is shown verbatim and
- * never paraphrased: the condition that closes the stage is the API's to
- * state, and a second sentence written here would drift out of step with it
- * the first time the rule changed.
+ * Contract: docs/clearances-after-payment.md, "API contract for the rebuild".
  *
- * There is no money in here. It used to carry `total_assessed`, `total_paid`
- * and `balance_due`, because a clearance applied for after payment raised a
- * balance the screen had to show and the permit was withheld until it cleared.
- * Nothing accrues now — one assessment at submit, one payment — so the figures
- * would only ever read zero on a stage that is open.
+ * ── The gate ──────────────────────────────────────────────────────────────
+ *
+ * `unlocked` is false until the FIRST payment clears. Before that the stage is
+ * visible but shut — the applicant can see which clearances exist and what
+ * they would cost, and can press nothing.
+ *
+ * `locked_reason` is the sentence the screen shows instead, and it is rendered
+ * VERBATIM. This is not a stylistic preference: the condition that closes this
+ * stage is the server's to state, because only the server knows what has been
+ * submitted, assessed and paid. A sentence written on the screen would be a
+ * second, quieter copy of that rule, and it drifted out of step with the real
+ * one the first time the flow moved. Null is the degenerate case (locked with
+ * no reason given) and the screen falls back rather than inventing a cause.
+ *
+ * ── The ledger ────────────────────────────────────────────────────────────
+ *
+ * Three figures, because a clearance applied for after payment raises a
+ * balance and the permit is not released until that balance reaches zero. The
+ * gate is what makes the accrual real; without it the balance is decoration.
+ *
+ * ALL THREE ARE DISPLAY TEXT, not amounts — "₱10,801.00" — for the same reason
+ * `fee_preview` is: `PermitFees::peso` puts the sign, the separators and the
+ * two decimal places on server-side, and one formatter is how the peso sign
+ * stays in one place. Do NOT hand these to formatMoney(): Number("₱10,801.00")
+ * is NaN and formatMoney answers "₱0.00" for NaN, so a filing with ten thousand
+ * pesos outstanding would render as fully paid. Use `pesoToNumber` (format.ts)
+ * when an actual comparison is needed, which on this screen is exactly once —
+ * "has the balance reached zero".
  */
 export interface ClearanceMeta {
   unlocked: boolean
   locked_reason: string | null
+  /** Everything assessed on this filing so far, business permit included. */
+  total_assessed: string
+  /** What has actually been received against it. */
+  total_paid: string
+  /** The gap. The permit is not released until this reads zero. */
+  balance_due: string
 }
 
 /* ── Public verify ────────────────────────────────────────────────────── */

@@ -11,21 +11,20 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * The LGU clearance stage — the six supporting clearances, chosen before the
- * filing is submitted (docs/clearances-before-payment.md).
+ * The LGU clearance stage — the six supporting clearances, applied for AFTER
+ * the business permit has been paid for (docs/clearances-after-payment.md).
  *
  * Two ways to satisfy a clearance and they are not the same act:
- *   apply — attach the permit type. Its office's fee lines then appear on the
- *           one Tax Order of Payment assessed at submit, and its office is
- *           routed an assignment when that payment clears.
+ *   apply — attach the permit type. The filing is re-assessed on the spot, so
+ *           that office's fee lines join the balance, and the office is routed
+ *           an assignment at that moment.
  *   held  — record the copy the business already holds. No permit type, so no
  *           form, no review and no fee. That asymmetry is the point.
  *
- * `meta` carries no money. It used to report a running balance, because a
- * clearance applied for after payment raised one; nothing here is chargeable
- * before submission and nothing here is open after it, so there is no balance
- * to report. `fee_preview` on each row still quotes what that clearance will
- * add to the assessment, which is the number the applicant actually needs.
+ * `meta` carries the ledger — `total_assessed`, `total_paid`, `balance_due` —
+ * because applying raises a debt in the same request that raises it, and no
+ * permit is released until it reaches zero. `fee_preview` on each row quotes
+ * what pressing Apply would add, before it is pressed.
  *
  * Owner-only, all four writes and the read. An office reviewing a clearance
  * sees it through the assignment it was routed; nobody but the applicant
@@ -230,7 +229,7 @@ class ClearanceController extends Controller
         return $type;
     }
 
-    /** The stage is shut the moment the filing is submitted, and after. */
+    /** The stage is shut until the first payment clears. */
     private function assertUnlocked(Application $application): void
     {
         abort_unless(
@@ -247,10 +246,13 @@ class ClearanceController extends Controller
      * FeeCalculator::assess dereferences `business->lines` without a guard — so
      * a card on one of those filings shows a null `fee_preview` rather than a
      * price. Applying is then agreeing to a charge nobody can quote, and it is
-     * refused with a sentence the applicant can act on. (This guard also used
-     * to be what stopped a 500: apply re-assessed inline. It no longer does —
-     * the assessment happens at submit — so the reason is now the quote, not
-     * the crash.) Reads are not gated by it: the stage still renders.
+     * refused with a sentence the applicant can act on.
+     *
+     * It stops a 500 as well as an unquoted charge, and that is back: apply and
+     * unapply both re-assess inline now, so reaching FeeCalculator with no
+     * business record is a fatal, not a missing figure. Two reasons for one
+     * guard, and either alone would justify it. Reads are not gated by it: the
+     * stage still renders.
      */
     private function assertPriceable(Application $application): void
     {

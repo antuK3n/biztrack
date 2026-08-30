@@ -6,7 +6,7 @@ import { formatBytes, formatDateTime } from '../lib/format'
 import { messages as messagesApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
-import type { Message } from '../lib/types'
+import type { Message, MessageOffice, MessageTranscriptMeta } from '../lib/types'
 
 function PaperclipIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size?: number }) {
   return (
@@ -28,13 +28,26 @@ function PaperclipIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size
 }
 
 /*
- * Shared per-application message thread (v2 messaging contract), used by the
- * applicant ApplicationDetailPage and the officer ReviewPage. Chat-style: the
- * viewer's own bubbles are right-aligned royal and attributed to "You", the
- * other party's are left-aligned white cards behind an avatar and carry the
- * sender's name and role (p52 attribution language). Sender identity is the
- * user id, so the same thread mirrors exactly for whoever is reading it.
- * Polls every 30s while mounted.
+ * Shared message thread, used by the applicant ApplicationDetailPage, the
+ * officer ReviewPage and the dedicated Messages page. Chat-style: the viewer's
+ * own bubbles are right-aligned royal and attributed to "You", the other
+ * party's are left-aligned white cards behind an avatar and carry the sender's
+ * name and role (p52 attribution language). Sender identity is the user id, so
+ * the same thread mirrors exactly for whoever is reading it. Polls every 30s
+ * while mounted.
+ *
+ * A conversation is with an OFFICE, not with a filing — the client's
+ * "make sure the business owner can only contact the correct offices". So the
+ * screen has to say which office, and offer the applicant a choice between the
+ * offices ACTUALLY on their filing. `meta.offices` is that list and it comes
+ * from the API, not from a client-side filter over every department in the
+ * city: the server refuses a message to an office that is not on the filing, so
+ * anything this component offers beyond that list would be an option that only
+ * produces an error.
+ *
+ * An officer sees one office — their own — so the picker collapses to a line
+ * naming it. That line is not decoration: an officer reading a conversation
+ * needs to know they are reading their office's, not the filing's.
  */
 
 const POLL_MS = 30_000
@@ -159,6 +172,81 @@ function Bubble({
 }
 
 /**
+ * Which office this conversation is with — and, when there is a choice, the
+ * choice itself.
+ *
+ * One office is a sentence, not a control: an officer has exactly one
+ * conversation on a filing and giving them a single dead button to press would
+ * be a control that does nothing. Several offices is a real choice, so it gets
+ * real buttons, each carrying how much has been said to that office — an
+ * applicant deciding who to chase wants to see which office they have already
+ * written to twice.
+ */
+function OfficePicker({
+  offices,
+  activeId,
+  onPick,
+}: {
+  offices: MessageOffice[]
+  activeId: number | null
+  onPick: (departmentId: number) => void
+}) {
+  if (offices.length === 0) return null
+
+  if (offices.length === 1) {
+    return (
+      <p className="mb-3 text-xs font-semibold text-royal">
+        Conversation with <span className="font-bold">{offices[0].name}</span>
+      </p>
+    )
+  }
+
+  return (
+    <div className="mb-3">
+      <p id="message-office-label" className="mb-1.5 text-xs font-semibold text-ink-secondary">
+        Which office is this about?
+      </p>
+      <div role="group" aria-labelledby="message-office-label" className="flex flex-wrap gap-2">
+        {offices.map((office) => {
+          const active = office.department_id === activeId
+          return (
+            <button
+              key={office.department_id}
+              type="button"
+              onClick={() => onPick(office.department_id)}
+              aria-pressed={active}
+              /*
+               * Spelled out for a screen reader, because the visible label is
+               * a name with a bare number beside it — "Office of the Building
+               * Official 6" is read as one string and sounds like a room
+               * number rather than a message count.
+               */
+              aria-label={
+                office.messages_count > 0
+                  ? `${office.name}, ${office.messages_count} messages`
+                  : `${office.name}, no messages yet`
+              }
+              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                active
+                  ? 'bg-royal text-white'
+                  : 'bg-royal-tint text-royal hover:bg-royal/15'
+              }`}
+            >
+              {office.name}
+              {office.messages_count > 0 && (
+                <span className={active ? 'ml-1.5 text-white/80' : 'ml-1.5 text-ink-secondary'}>
+                  {office.messages_count}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/**
  * The conversation itself: scrollback plus composer, with no chrome of its own.
  * The in-page panel wraps it in its card; the dedicated Messages page drops it
  * straight into the right-hand pane.
@@ -186,10 +274,19 @@ export function MessageThreadView({
   const isMine = (message: Message) =>
     user ? message.sender.id === user.id : message.sender.is_officer === viewerIsOfficer
 
-  const { data, loading, error, reload, setData } = useAsync<Message[]>(
-    () => messagesApi.list(applicationId),
-    [applicationId],
-  )
+  /*
+   * Null means "whatever the API opens on". The first response names the
+   * offices; the effect below then pins the busiest one, so the applicant lands
+   * in the conversation that has moved most recently rather than on a merged
+   * view of all of them. Pinning it in state rather than deriving it is what
+   * lets them switch away and stay switched.
+   */
+  const [officeId, setOfficeId] = useState<number | null>(null)
+
+  const { data, loading, error, reload, setData } = useAsync<{
+    data: Message[]
+    meta: MessageTranscriptMeta
+  }>(() => messagesApi.listWithMeta(applicationId, officeId), [applicationId, officeId])
 
   const [body, setBody] = useState('')
   const [attachment, setAttachment] = useState<File | null>(null)
@@ -203,7 +300,24 @@ export function MessageThreadView({
     return () => clearInterval(timer)
   }, [reload])
 
-  const list = data ?? []
+  const list = data?.data ?? []
+  const offices = data?.meta.offices ?? []
+  // Depended on by id and not by the array: `offices` is a fresh array on every
+  // render, and an effect that watches it would re-run for ever.
+  const firstOfficeId = offices.length > 0 ? offices[0].department_id : null
+  const active = offices.find((o) => o.department_id === officeId) ?? null
+
+  useEffect(() => {
+    if (officeId === null && firstOfficeId !== null) setOfficeId(firstOfficeId)
+  }, [officeId, firstOfficeId])
+
+  /*
+   * An office that has come off the filing keeps its correspondence readable
+   * and closes to new messages. Saying so is better than a disabled box with no
+   * explanation, and far better than letting them type a message the API will
+   * refuse.
+   */
+  const closed = active !== null && !active.can_message
 
   // Keep the newest message in view when the thread grows.
   useEffect(() => {
@@ -213,11 +327,22 @@ export function MessageThreadView({
   async function send() {
     const text = body.trim()
     if (!text && !attachment) return
+    // Belt and braces with the disabled controls: Enter still fires the handler
+    // on a textarea some browsers let you focus while disabled.
+    if (closed) return
     setSending(true)
     setSendError(null)
     try {
-      const sent = await messagesApi.send(applicationId, text, attachment)
-      setData((prev) => [...(prev ?? []), sent])
+      const sent = await messagesApi.send(applicationId, text, attachment, officeId)
+      /*
+       * Append rather than refetch, so the message appears instantly — but only
+       * onto a transcript that has loaded. With nothing to append to (the first
+       * fetch failed and the reader retried by sending) a refetch is the only
+       * way to get a coherent `meta`, and inventing one would put a made-up
+       * office list on the screen.
+       */
+      if (data) setData({ ...data, data: [...data.data, sent] })
+      else reload()
       setBody('')
       setAttachment(null)
       onSent?.()
@@ -230,6 +355,8 @@ export function MessageThreadView({
 
   return (
     <div className={`flex min-h-0 flex-col ${className}`}>
+      <OfficePicker offices={offices} activeId={officeId} onPick={setOfficeId} />
+
       <div className={`flex-1 space-y-4 overflow-y-auto pr-1 ${scrollClassName}`}>
         {loading ? (
           <p className="py-6 text-center text-sm text-ink-muted">Loading messages…</p>
@@ -242,7 +369,9 @@ export function MessageThreadView({
           </p>
         ) : list.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-muted">
-            No messages yet. Start the conversation below.
+            {active
+              ? `No messages yet. Start the conversation with ${active.name} below.`
+              : 'No messages yet. Start the conversation below.'}
           </p>
         ) : (
           list.map((m) => (
@@ -253,6 +382,12 @@ export function MessageThreadView({
       </div>
 
       <div className="mt-4 border-t border-line pt-4">
+        {closed && (
+          <p className="mb-2 text-xs font-medium text-ink-secondary">
+            {active?.name} is no longer handling this application. You can still read what was
+            said, but not reply.
+          </p>
+        )}
         {sendError && <p className="mb-2 text-xs font-medium text-s-red">{sendError}</p>}
         {attachment && (
           <div className="mb-2 flex items-center gap-2 text-xs text-ink-secondary">
@@ -282,19 +417,23 @@ export function MessageThreadView({
               void send()
             }}
             rows={2}
-            placeholder="Write a message…"
-            aria-label="Message"
+            disabled={closed}
+            placeholder={active ? `Write to ${active.name}…` : 'Write a message…'}
+            aria-label={active ? `Message to ${active.name}` : 'Message'}
             aria-describedby="message-send-hint"
             className="min-w-0 flex-1 resize-none rounded-lg border border-input-border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
           />
           <label
-            className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-lg border border-input-border bg-white text-ink-secondary hover:bg-canvas"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-input-border bg-white text-ink-secondary ${
+              closed ? 'opacity-60' : 'cursor-pointer hover:bg-canvas'
+            }`}
             aria-label="Attach a file"
           >
             <PaperclipIcon size={18} />
             <input
               type="file"
               className="sr-only"
+              disabled={closed}
               onChange={(e) => {
                 setAttachment(e.target.files?.[0] ?? null)
                 e.target.value = ''
@@ -304,7 +443,7 @@ export function MessageThreadView({
           <button
             type="button"
             onClick={() => void send()}
-            disabled={sending || (!body.trim() && !attachment)}
+            disabled={closed || sending || (!body.trim() && !attachment)}
             className="h-10 shrink-0 rounded-lg bg-royal px-5 text-sm font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
           >
             {sending ? 'Sending…' : 'Send'}

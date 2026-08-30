@@ -15,10 +15,10 @@ use Illuminate\Support\Facades\Storage;
  * page, along with the other permits."
  *
  * Until this endpoint existed the copy was reachable from exactly one screen —
- * the clearance stage of the filing it was uploaded to — and that stage only
- * unlocks while the filing is a draft (ClearanceService::isUnlocked). So the
- * moment the applicant submitted their application, their own certificate
- * dropped off the site entirely.
+ * the clearance stage of the filing it was uploaded to — and that stage shuts
+ * the moment the filing is closed (ClearanceService::isUnlocked). So a rejected
+ * or cancelled filing took the applicant's own certificate off the site with
+ * it, and the Profile page is what it is reachable from instead.
  *
  * The tests below are as much about what this endpoint MUST NOT say as about
  * what it says. A submitted copy is the applicant's own document: the City did
@@ -30,15 +30,21 @@ use Illuminate\Support\Facades\Storage;
  */
 
 /**
- * A draft owned by `owner@biztrack.local`, asking for the mayor's permit only —
- * which is the state in which the clearance stage is open.
+ * A filing owned by `owner@biztrack.local`, submitted and PAID — which is the
+ * state in which the clearance stage is open.
+ *
+ * It used to stop at the draft, because the stage opened on a draft. The
+ * ordering is reversed (docs/clearances-after-payment.md): the wizard files the
+ * mayor's permit alone, the Tax Order of Payment for it is settled, and only
+ * then can a copy of a clearance be handed in at all. So the fixture has to pay
+ * before it can upload anything.
  *
  * Deliberately a near-copy of ClearanceStageTest's fixture rather than a shared
  * import: these tests are about what happens to a held copy AFTER the clearance
  * stage is done with it, and coupling them to that file's fixture would mean a
  * change made for a clearance-stage reason silently rewrote this file's premise.
  */
-function heldCopyDraft(string $name = 'Held Copy Cafe'): Application
+function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
 {
     authAs('owner@biztrack.local');
 
@@ -67,6 +73,9 @@ function heldCopyDraft(string $name = 'Held Copy Cafe'): Application
         ],
     ])->assertCreated()->json('data.id');
 
+    test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    test()->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
     return Application::findOrFail($appId);
 }
 
@@ -76,7 +85,7 @@ beforeEach(function () {
 });
 
 it('lists a clearance the applicant submitted a copy of', function () {
-    $app = heldCopyDraft();
+    $app = heldCopyFiling();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
         'file' => UploadedFile::fake()->create('my-sanitary-permit.pdf', 40, 'application/pdf'),
@@ -94,7 +103,7 @@ it('lists a clearance the applicant submitted a copy of', function () {
 });
 
 it('never dresses a submitted copy up as an issued permit', function () {
-    $app = heldCopyDraft();
+    $app = heldCopyFiling();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/held", [
         'file' => UploadedFile::fake()->create('zoning.pdf', 12, 'application/pdf'),
@@ -123,7 +132,7 @@ it('never dresses a submitted copy up as an issued permit', function () {
 });
 
 it('keeps ordinary documentary requirements off the list', function () {
-    $app = heldCopyDraft();
+    $app = heldCopyFiling();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/FSIC/held", [
         'file' => UploadedFile::fake()->create('fsic.pdf', 10, 'application/pdf'),
@@ -145,28 +154,37 @@ it('keeps ordinary documentary requirements off the list', function () {
 });
 
 it('survives the copy outliving the clearance stage', function () {
-    $app = heldCopyDraft();
+    $app = heldCopyFiling();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/CEC/held", [
         'file' => UploadedFile::fake()->create('cec.pdf', 8, 'application/pdf'),
     ])->assertSuccessful();
 
-    $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
-
     /*
-     * The reason this endpoint exists. Submission shuts the clearance stage —
-     * `locked_reason` is non-null from here on — so the screen the copy was
-     * uploaded through can no longer be used to reach it. Profile has to.
+     * The reason this endpoint exists, restated for the reversed ordering.
+     *
+     * The stage used to shut at submission, so that was the moment the copy
+     * fell off the site. It shuts on a closed filing now, so this drives the
+     * filing to the state that actually shuts it — rejection — and asserts the
+     * copy is still reachable from Profile afterwards. Same claim, moved to the
+     * boundary that still exists.
      */
+    authAs('bplo@biztrack.local');
+    $this->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Wrong zone.'])->assertOk();
+
+    authAs('owner@biztrack.local');
+    expect($this->getJson("/api/v1/applications/{$app->id}/clearances")->assertOk()->json('meta.locked_reason'))
+        ->toBeString();
+
     $rows = $this->getJson('/api/v1/permits/held')->assertOk()->json('data');
 
     expect($rows)->toHaveCount(1)
         ->and($rows[0]['permit_type']['code'])->toBe('CEC')
-        ->and($rows[0]['application']['status'])->toBe('pending_payment');
+        ->and($rows[0]['application']['status'])->toBe('rejected');
 });
 
 it('shows an applicant nothing but their own copies', function () {
-    $app = heldCopyDraft();
+    $app = heldCopyFiling();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/MARKET/held", [
         'file' => UploadedFile::fake()->create('market.pdf', 6, 'application/pdf'),
@@ -197,7 +215,7 @@ it('does not let the held route be mistaken for a permit id', function () {
 });
 
 it('names a removed business rather than dropping the copy', function () {
-    $app = heldCopyDraft('Vanishing Copy Co.');
+    $app = heldCopyFiling('Vanishing Copy Co.');
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/OCCUPANCY/held", [
         'file' => UploadedFile::fake()->create('occupancy.pdf', 5, 'application/pdf'),

@@ -112,7 +112,15 @@ it('refuses to submit an amendment that amends nothing', function () {
 });
 
 it('submits once something is actually being amended', function () {
-    $appId = amendmentDraft(['amendment_nature' => true]);
+    /*
+     * An amendment names the permit it amends, the same way a renewal names
+     * the one it renews — "amend my business" tells the counter no more than
+     * "renew my business" does when the shop holds several permits with
+     * different expiry dates. Included here rather than in its own test
+     * because without it this filing no longer submits at all.
+     */
+    $permit = Business::where('name', 'like', 'Nena%')->firstOrFail()->permits()->firstOrFail();
+    $appId = amendmentDraft(['amendment_nature' => true, 'prior_permit_id' => $permit->id]);
 
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 

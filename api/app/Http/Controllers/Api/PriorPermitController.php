@@ -34,6 +34,10 @@ class PriorPermitController extends Controller
                 'prior_permit' => $application->priorPermit
                     ? new PermitResource($application->priorPermit)
                     : null,
+                // Null and "declared none" are different answers and the wizard
+                // has to be able to tell them apart when it reopens a draft:
+                // one restores a ticked escape, the other an open question.
+                'declared_none' => (bool) $application->prior_permit_declared_none,
             ],
         ]);
     }
@@ -49,8 +53,10 @@ class PriorPermitController extends Controller
 
         $data = $request->validate([
             // Null is a real answer: "none of these", for a business whose
-            // paper permits predate the system.
+            // paper permits predate the system. It is only a real answer when
+            // it arrives with the flag below — see the comment there.
             'prior_permit_id' => ['present', 'nullable', 'exists:permits,id'],
+            'declared_none' => ['sometimes', 'boolean'],
         ]);
 
         if (! empty($data['prior_permit_id'])) {
@@ -59,7 +65,21 @@ class PriorPermitController extends Controller
             abort_unless($belongs, 422, 'The selected prior permit does not belong to this business.');
         }
 
-        $application->update(['prior_permit_id' => $data['prior_permit_id'] ?? null]);
+        /*
+         * Naming a permit and declaring there is none are contradictory
+         * answers, so the named permit wins and the flag is cleared rather
+         * than both being stored. An applicant who ticked the escape and then
+         * found their permit in the list has changed their mind, not made two
+         * statements — and a row holding both would make the submit gate below
+         * pass for the wrong reason.
+         */
+        $priorPermitId = $data['prior_permit_id'] ?? null;
+
+        $application->update([
+            'prior_permit_id' => $priorPermitId,
+            'prior_permit_declared_none' => $priorPermitId === null
+                && (bool) ($data['declared_none'] ?? false),
+        ]);
 
         Audit::log('application.prior_permit_set', $application);
 

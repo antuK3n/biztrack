@@ -225,22 +225,106 @@ async function openFromQueue(
 }
 
 /**
+ * Put this office's name to the filing's RA 11032 processing category, if the
+ * sheet is still asking for one. Edit mode must already be on.
+ *
+ * ── Why the narrative has to do this at all ─────────────────────────────────
+ *
+ * The client's rule: "The admin must not approve the application unless an
+ * Application category is chosen." It is enforced twice — ReviewPage draws
+ * Approve shut while the category is unclaimed, and
+ * WorkflowService::requireProcessingCategory refuses the request behind it — so
+ * an officer's first act on a freshly submitted filing is this one, and a
+ * narrative that skipped it would be walking a route the product does not
+ * offer.
+ *
+ * "Unclaimed", not "empty", is the state that matters and is the part that is
+ * easy to get wrong from a test. A filing arrives already showing a tier,
+ * because submit() seeds Ra11032::tierFor's GUESS; what the gate waits for is a
+ * person, which the payload reports as `ra11032.source === 'officer'`. So the
+ * select can read "Complex — 7 working days" and Approve still be shut, and the
+ * thing this function presses is an officer AGREEING with the guess. That saves
+ * the tier already on screen, so it claims the provenance without moving the
+ * statutory deadline by a day.
+ *
+ * ── Why a shut Approve reads as an absent one from here ─────────────────────
+ *
+ * Approve is shut with `aria-disabled` and not `disabled`, deliberately: a
+ * control dropped out of the tab order takes the sentence explaining itself
+ * with it. Playwright's actionability honours `aria-disabled` exactly as a
+ * screen reader does, so `.click()` on the shut button waits for it to open and
+ * then times out — the symptom is "there is no Approve on this page", which is
+ * a true report of what an assistive technology user meets and a misleading one
+ * about what is on the screen. Clearing the gate is the fix; forcing the click
+ * would be the test pretending the client's rule is not there.
+ *
+ * Keyed on the banner rather than on the button's `aria-disabled`, because the
+ * banner is what the officer is actually told and it is the same condition. And
+ * it does nothing at all once the category is claimed: the category belongs to
+ * the FILING, so only the first of the seven offices ever finds work here.
+ */
+async function claimProcessingCategory(page: Page) {
+  const banner = page.locator('#approve-blocked-why')
+  if ((await banner.count()) === 0) return
+
+  const select = page.locator('#ra11032-tier')
+  await expect(
+    select,
+    'Approve is shut for want of a category and the panel offers no way to set one',
+  ).toBeVisible()
+
+  /*
+   * The value already shown, and only failing back to the first real tier for a
+   * filing that genuinely carries none and is therefore showing the
+   * "Not yet categorised" placeholder. Picking a DIFFERENT tier would work too
+   * and would be the wrong thing to write down: it would re-count this filing's
+   * deadline, so every assertion about lateness downstream would be measuring a
+   * clock this helper moved.
+   */
+  const current = await select.inputValue()
+  const tiers = await select
+    .locator('option')
+    .evaluateAll((els) => els.map((el) => (el as HTMLOptionElement).value).filter((v) => v !== ''))
+  await select.selectOption(current || tiers[0])
+
+  const [saved] = await Promise.all([
+    page.waitForResponse(
+      (r) => /\/assignments\/\d+\/classification$/.test(r.url()) && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    ),
+    page.getByRole('button', { name: 'Save category' }).click(),
+  ])
+  expect(
+    saved.status(),
+    `claiming the processing category was refused: ${await saved.text()}`,
+  ).toBe(200)
+
+  // The banner going is the screen's own word that Approve is open again.
+  await expect(
+    banner,
+    'the category was saved and the sheet still says the filing has none',
+  ).toHaveCount(0, { timeout: 20_000 })
+}
+
+/**
  * Press this office's own Approve on a review sheet it already has open.
  *
  * Edit mode first, because that is what turns the decision controls on
- * (checklist item 54) and an officer has to do the same.
+ * (checklist item 54) and an officer has to do the same. Then the category, for
+ * the reasons written over `claimProcessingCategory` — on this narrative that
+ * is one press by BPLO, the first office through, and a no-op for the six after
+ * it.
  *
- * The wait is on the RESPONSE and not on the confirmation dialog, which is the
- * concession this helper makes to a defect reported separately below: on a
- * filing that this approval moves to For Inspection, the dialog never paints at
- * all. Waiting for it would hang every stage of the narrative on one finding.
- * Waiting for the POST is a stronger signal anyway — it is the write itself
- * rather than a screen's report of it, and it carries the status code, so an
- * approval refused with a 422 fails here saying so instead of two assertions
- * later saying the assignment never moved.
+ * The wait is on the RESPONSE and not on the confirmation dialog. Waiting for
+ * the POST is the stronger signal: it is the write itself rather than a
+ * screen's report of it, and it carries the status code, so an approval refused
+ * with a 422 fails here saying so instead of two assertions later saying the
+ * assignment never moved. The dialog gets its own test below, which is where a
+ * regression in the confirmation belongs rather than spread over every stage.
  */
 async function approveOwnReview(page: Page) {
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await claimProcessingCategory(page)
 
   const [response] = await Promise.all([
     page.waitForResponse(
@@ -374,41 +458,18 @@ test('an owner files a business permit with all six clearances behind it', async
     }
 
     /*
-     * The six clearances, through the endpoint the card presses. Attaching the
-     * permit types on the create call would look equivalent and is not:
-     * `ClearanceService::apply` re-runs `FeeCalculator::assess`, so the Tax
-     * Order of Payment this filing is about to be billed for is only correct if
-     * every clearance went through here.
+     * The clearances are NOT applied for here any more.
+     *
+     * They used to be, because the six were chosen inside the wizard and had to
+     * be on the filing before it was submitted. Payment comes first now
+     * (docs/clearances-after-payment.md): the clearance stage is locked until
+     * the first payment clears, so this endpoint would be refused at this point
+     * in the narrative. The loop has moved to test 4, immediately after Pay,
+     * which is where an applicant can really reach it.
+     *
+     * The office sheets moved with it, for the same reason — a sheet is the
+     * second half of applying for a clearance.
      */
-    for (const code of ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET']) {
-      const res = await fetch(`/api/v1/applications/${app.id}/clearances/${code}/apply`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error(`applying for ${code} answered ${res.status}: ${await res.text()}`)
-    }
-
-    /*
-     * Applying inserts each office's sheet as a wizard STEP, and three of the
-     * six will not be walked past without an answer (`officeFormMissing`). They
-     * are filled here for the same reason the rest of the form is: the sheets
-     * have their own spec, and an unfilled one would stop this filing reaching
-     * Review & Submit at all — which is CLR-2, a real trap five live drafts fell
-     * into, and not what this file is testing.
-     */
-    const sheets: Record<string, Record<string, string>> = {
-      SANITARY: { sanitary_classification: 'Food Establishment' },
-      OCCUPANCY: { application_type: 'Full' },
-      MARKET: { market_name: 'Malabon Central Market', stall_no: 'A-12' },
-    }
-    for (const [code, form_data] of Object.entries(sheets)) {
-      const res = await fetch(`/api/v1/applications/${app.id}/office-forms/${code}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ form_data }),
-      })
-      if (!res.ok) throw new Error(`office form ${code} answered ${res.status}: ${await res.text()}`)
-    }
 
     return { id: app.id as number, name }
   })
@@ -426,13 +487,17 @@ test('an owner files a business permit with all six clearances behind it', async
   await expect(map).toBeVisible({ timeout: 30_000 })
 
   /*
-   * Six clearances mean six office sheets slotted in behind the cards, so the
-   * seven-section map is now thirteen. Asserted because the jump below is what
-   * proves the filing is complete: the map refuses a forward jump over an
-   * unfinished section, so reaching Review & Submit in one click IS the
-   * statement that nothing is outstanding.
+   * Six sections, fixed. It was `7 + 6` — seven phases plus one office sheet
+   * per clearance applied for — and that arithmetic is gone with the clearance
+   * step: the wizard is the business permit application alone now, so nothing
+   * can grow this map.
+   *
+   * Still asserted, because the jump below is what proves the filing is
+   * complete: the map refuses a forward jump over an unfinished section, so
+   * reaching Review & Submit in one click IS the statement that nothing is
+   * outstanding.
    */
-  await expect(map.locator('li')).toHaveCount(7 + 6)
+  await expect(map.locator('li')).toHaveCount(6)
 
   await map.getByRole('button', { name: /review & submit/i }).click()
   await page.getByRole('button', { name: /^submit$/i }).click()
@@ -451,15 +516,19 @@ test('an owner files a business permit with all six clearances behind it', async
   remember({ appId, trackingId, businessName })
 
   expect(trackingId, 'a submitted filing always carries a tracking ID').toMatch(/^BIZ-/)
-  // Payment is what is left to do, not something already behind us: the
-  // clearances are chosen before the bill now (docs/clearances-before-payment.md).
+  // Payment is what is left to do, and it is what opens the clearance stage
+  // (docs/clearances-after-payment.md).
   expect(filed.status).toBe('pending_payment')
 
+  /*
+   * The mayor's permit, alone. This asserted all seven codes while the
+   * clearances were chosen in the wizard; they cannot be on the filing at this
+   * point any more, because the stage that attaches them does not open until
+   * the payment below has cleared. The full set is asserted in test 4, after
+   * the applies that really put them there.
+   */
   const codes = filed.permit_types.map((pt) => pt.code).sort()
-  expect(
-    codes,
-    'the filing did not carry the mayor’s permit and all six clearances',
-  ).toEqual([...FILED_CODES].sort())
+  expect(codes, 'a clearance reached the filing before it was paid for').toEqual(['BUSINESS'])
 })
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -596,6 +665,12 @@ test('an unpaid filing does not tell the applicant an office is reviewing it', a
    *
    *     return { tone: 'orange', label: 'For Approval' }
    *
+   * The defect is SMALLER than it was, and no less wrong. It used to be shown
+   * seven times over, because the wizard attached all six clearances before
+   * submission; an unpaid filing now carries the mayor's permit alone, so there
+   * is one chip and one lie on it. The clearances get their chips when they are
+   * applied for, which is after payment, so they can never be in this state.
+   *
    * "For Approval" is not a spare word. It is `ApplicationStatus::UnderReview`'s
    * own label — the exact string the LGU uses for a filing the offices are
    * reading — and `status.ts` is held character-for-character in step with the
@@ -619,10 +694,20 @@ test('an unpaid filing does not tell the applicant an office is reviewing it', a
   const row = page.locator('li').filter({ hasText: businessName }).first()
   await row.getByRole('button', { expanded: false }).first().click()
 
+  /*
+   * One chip, for the mayor's permit. This read `FILED_CODES.length` — all
+   * seven — which was right while the wizard attached the six clearances before
+   * submission and is now wrong: nothing but the business permit can be on an
+   * unpaid filing.
+   *
+   * Corrected rather than relaxed, and the distinction matters on a test whose
+   * whole point is to keep failing. Left at seven it went red on THIS line, on
+   * a setup fact nobody is arguing about, and the defect below — the one the
+   * comment above is about — was never reached. A test that fails for the wrong
+   * reason is a test that stops reporting the right one.
+   */
   const chips = await row.locator('ul > li').allInnerTexts()
-  expect(chips.length, 'the expanded row should draw one chip per permit type').toBe(
-    FILED_CODES.length,
-  )
+  expect(chips.length, 'the expanded row should draw one chip per permit type').toBe(1)
   for (const chip of chips) {
     expect(
       chip,
@@ -652,17 +737,129 @@ test('paying moves the filing into review and into every routed office’s queue
   // into an Alert and leaves the page looking much as it did.
   await expect(page.getByText('Paid', { exact: true })).toBeVisible({ timeout: 30_000 })
 
+  const justPaid = await filing(page, 'public', appId)
+  expect(justPaid.status, 'payment did not move the filing out of pending_payment').toBe(
+    'under_review',
+  )
+
+  /*
+   * ── And NOW the six clearances, which is the reordering ──────────────────
+   *
+   * These applies used to run in test 1, before submission, because the six
+   * were chosen inside the wizard. They run here because that is the first
+   * moment an applicant can reach them: the clearance stage is locked until the
+   * first payment clears (docs/clearances-after-payment.md), so this loop is
+   * the narrative's version of the applicant opening the stage that has just
+   * unlocked and pressing Apply six times.
+   *
+   * Through the endpoint the card presses, not by attaching permit types on an
+   * update. Those look equivalent and are not: `ClearanceService::apply` re-runs
+   * `FeeCalculator::assess`, which is what makes each clearance's fee accrue
+   * onto the balance the permit is withheld against.
+   */
+  await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    }
+    for (const code of ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET']) {
+      const res = await fetch(`/api/v1/applications/${id}/clearances/${code}/apply`, {
+        method: 'POST',
+        headers,
+      })
+      if (!res.ok) {
+        throw new Error(`applying for ${code} answered ${res.status}: ${await res.text()}`)
+      }
+    }
+    /*
+     * The office sheets, which are the second half of applying. Three of the six
+     * will not be saved without an answer (`officeFormMissing`); they are filled
+     * here for the same reason the rest of the form is, so that an unfilled one
+     * is not what this file ends up measuring.
+     */
+    const sheets: Record<string, Record<string, string>> = {
+      SANITARY: { sanitary_classification: 'Food Establishment' },
+      OCCUPANCY: { application_type: 'Full' },
+      MARKET: { market_name: 'Malabon Central Market', stall_no: 'A-12' },
+    }
+    for (const [code, form_data] of Object.entries(sheets)) {
+      const res = await fetch(`/api/v1/applications/${id}/office-forms/${code}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ form_data }),
+      })
+      if (!res.ok) {
+        throw new Error(`office form ${code} answered ${res.status}: ${await res.text()}`)
+      }
+    }
+  }, appId)
+
+  /* ── And the bill those six just raised ────────────────────────────────── */
+
+  /*
+   * The second of the two moments money changes hands
+   * (docs/clearances-after-payment.md, "one ledger, two moments"): the business
+   * permit is paid to submit, and every clearance applied for afterwards
+   * re-assesses onto the same FeeAssessment, so a balance appears behind a
+   * filing that is already under review.
+   *
+   * This is a step of the narrative and not bookkeeping. Rule 6 of that doc —
+   * "the permit is not released while a balance is outstanding" — is enforced by
+   * WorkflowService::isFullyCleared, which answers false on an unsettled filing
+   * whatever the offices have done. Leave it unpaid and every office signs off,
+   * every visit passes, and the filing sits in `for_inspection` with no permits
+   * and nothing left in the product that will ever look at it again except
+   * another payment. That is the gate working; a narrative that never pays is
+   * simply not the journey an applicant takes.
+   *
+   * Through the same screen as the first payment, because it IS the same screen:
+   * `/pay` re-reads the assessment, so the Tax Order of Payment now shows the
+   * clearance lines, and PaymentController::pay charges the BALANCE rather than
+   * the total precisely so that pressing it twice does not bill the mayor's
+   * permit again.
+   */
+  await page.goto(`/applications/${appId}/pay`)
+  await expect(page.getByRole('heading', { name: 'Tax Order of Payment' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.getByRole('button', { name: 'Pay Online' }).click()
+  await expect(
+    page.getByText('Paid', { exact: true }),
+    'the clearances’ balance could not be settled, so no permit can ever be released',
+  ).toBeVisible({ timeout: 30_000 })
+
   const paid = await filing(page, 'public', appId)
-  expect(paid.status, 'payment did not move the filing out of pending_payment').toBe('under_review')
+
+  /*
+   * Settling a balance is not a decision about the filing. It was already under
+   * review when the six were applied for, and paying for them leaves it there —
+   * `onPaymentCompleted` only routes and transitions on the FIRST payment.
+   */
+  expect(paid.status, 'settling the clearance balance moved the filing').toBe('under_review')
+
+  // Every clearance applied for is on the filing, alongside the mayor's permit.
+  expect(
+    paid.permit_types.map((pt) => pt.code).sort(),
+    'the filing did not carry the mayor’s permit and all six clearances',
+  ).toEqual([...FILED_CODES].sort())
 
   /*
    * One assignment per office that issues a permit type on the filing, and
    * every one of them still pending. This is the state the whole of test 5
    * measures movement against, so it is pinned before anybody acts.
+   *
+   * Note what routes them. It was the payment alone — `onPaymentCompleted` ran
+   * `routeToDepartments` over whatever the wizard had attached. Each clearance
+   * now routes to its own office when it is APPLIED FOR (rule 7 of the doc), so
+   * this set is the product of the loop above rather than of the click before
+   * it. Asserted after both, because the narrative needs the same end state
+   * either way.
    */
   expect(
     paid.assignments.map((a) => a.department.code).sort(),
-    'payment did not route the filing to every office on it',
+    'the filing was not routed to every office on it',
   ).toEqual([...OFFICES.map((o) => o.code)].sort())
   for (const office of OFFICES) {
     expect(assignmentOf(paid, office.code), `${office.code}'s review is not open`).toBe('pending')
@@ -1001,33 +1198,32 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
   const second = INSPECTING[1]
 
   /*
-   * ── DEFECT. This test is expected to FAIL, and must not be weakened. ──────
+   * ── The regression guard for a defect this test reported, now fixed ───────
    *
-   * Approving a review ends in a VERIFICATION dialog — "Where would you like to
-   * go?", Home Page or Tracking Page. That is the whole of the officer's
-   * feedback that the decision was recorded, and it is the only thing on the
-   * screen that says so.
+   * Approving a review ends in a VERIFICATION dialog — "Approval recorded",
+   * then Home Page or Tracking Page. That is the whole of the officer's
+   * feedback that the decision landed, and it is the only thing on the screen
+   * that says so.
    *
-   * It appears when BPLO approves and does not appear when any of the six
-   * clearance offices does, and the difference has nothing to do with the
-   * offices. `ReviewPage` sets `showVerification` and calls `reload()`; when the
-   * reloaded filing comes back the component hits its early return —
-   * `if (app.status === 'for_inspection' && !owesReview)` — which renders the
-   * compact inspection box and returns BEFORE the JSX that draws the modal. A
+   * It used to appear when BPLO approved and not when any of the six clearance
+   * offices did, and the difference had nothing to do with the offices. The
+   * modal was the last thing in the review SHEET's own JSX; approving calls
+   * `reload()`, and the reloaded filing sent the sheet down its early return —
+   * `if (app.status === 'for_inspection' && !owesReview)` — which draws the
+   * compact inspection box and returns before the modal is ever reached. A
    * clearance office's approval is exactly what makes both halves of that
-   * condition true, so its own confirmation is unmounted by its own success.
-   * Polled from 150ms after the click, the dialog is never on the page at all.
+   * condition true, so its own confirmation was unmounted by its own success,
+   * and the officer with the most consequential approval in the flow was the
+   * one told nothing.
    *
-   * So the officer with the most consequential approval in the flow — the one
-   * that moved the filing to For Inspection and booked a site visit — is the one
-   * told nothing. The screen changes underneath them and they are left to work
-   * out from the new layout whether the button they pressed did anything. It is
-   * also the sort of thing that reads as a hang on a slow connection, which is
-   * how an officer ends up pressing Approve twice.
+   * The fix was not to teach that branch to draw the dialog too. `ReviewPage`
+   * now owns `showVerification` and renders the modal as a SIBLING of the whole
+   * sheet, so no `return` inside `ReviewSheet` — including the next one somebody
+   * adds — can take it down. This test is what stops it moving back inside.
    *
    * Asserted on the second inspecting office rather than the first, so that the
-   * approval is a real step of the narrative: whether or not the dialog is
-   * there, this office's review is now in, and the stage below expects it.
+   * approval is a real step of the narrative: this office's review is now in,
+   * and the stage below expects it.
    */
   await asOffice(browser, second.account, async (page) => {
     await openFromQueue(page, 'For Approval', narrative)
@@ -1275,27 +1471,28 @@ test('the approved filing offers the permits it produced, not one of them', asyn
   const { appId } = narrative
 
   /*
-   * ── DEFECT. This test is expected to FAIL, and must not be weakened. ──────
+   * ── The regression guard for a defect this test reported, now fixed ───────
    *
-   * The filing issued seven certificates. Its own screen offers one.
+   * The filing issues seven certificates. Its own screen used to offer one.
    *
-   * `ApplicationDetailPage` does `const issuedPermit = app.permits[0]` and then
-   * draws a single eye chip and a single download arrow, both labelled
-   * "Business Permit" and "Download Business Permit" as literal strings — not
-   * from `permit_type.name`. So two things are wrong at once and only one of
-   * them is cosmetic:
+   * `ApplicationDetailPage` did `const issuedPermit = app.permits[0]` and drew
+   * a single eye chip and a single download arrow, both labelled "Business
+   * Permit" and "Download Business Permit" as literal strings — not from
+   * `permit_type.name`. Two things were wrong at once and only one of them was
+   * cosmetic:
    *
-   *  - six of the seven certificates the applicant just paid for have no route
-   *    from the filing that produced them. They are on Profile, so nothing is
+   *  - six of the seven certificates the applicant paid for had no route from
+   *    the filing that produced them. They were on Profile, so nothing was
    *    lost; but the screen that says "Approved" is the screen an applicant goes
-   *    to, and it presents the outcome as a single document;
-   *  - the one it does offer is named unconditionally. `permits[0]` is whatever
+   *    to, and it presented the outcome as a single document;
+   *  - the one it did offer was named unconditionally. `permits[0]` is whatever
    *    `approveAndIssue` inserted first, which is the filing's permit-type order
-   *    and not a guarantee. The first filing whose order puts a clearance ahead
-   *    of the Mayor's Permit shows a Sanitary Permit under a link that says
-   *    "Download Business Permit" — a certificate served under another
-   *    certificate's name, which on a legal instrument is not a label problem.
+   *    and not a guarantee. The first filing whose order put a clearance ahead
+   *    of the Mayor's Permit served a Sanitary Permit under a link that read
+   *    "Download Business Permit" — a certificate under another certificate's
+   *    name, which on a legal instrument is not a label problem.
    *
+   * The card now maps every permit and takes each name from `permit_type.name`.
    * Asserted as a count rather than by inspecting the label, because the count
    * is the user-visible claim: seven were issued, so seven should be reachable.
    */

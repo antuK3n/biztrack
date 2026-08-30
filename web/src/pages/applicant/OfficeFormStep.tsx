@@ -167,14 +167,17 @@ export function hasOfficeForm(code: string): code is OfficeFormCode {
 }
 
 /**
- * The sheets that can strand a filing, and therefore the ones that say how to
- * get off them — CLR-2.
+ * The sheets with a required answer, and therefore the ones that say how to get
+ * off them — CLR-2.
  *
- * Applying for a clearance inserts its sheet as a mandatory step directly
- * behind LGU Clearances. Where the sheet has a required answer, Next is
- * disabled until it is given and the section map refuses to jump forward over
- * it, so an accidental Apply on Market Clearance means a shopfront greengrocer
- * must invent a market name and a stall number or cancel the whole filing.
+ * ── What this used to be, and what it is now ──────────────────────────────
+ *
+ * Applying for a clearance once inserted its sheet as a mandatory STEP of the
+ * wizard, directly behind LGU Clearances. Where the sheet had a required
+ * answer, Next was disabled until it was given and the section map refused to
+ * jump forward over it — so an accidental Apply on Market Clearance meant a
+ * shopfront greengrocer had to invent a market name and a stall number or
+ * cancel the whole filing.
  *
  * Five real drafts were in exactly that state — 4, 5, 7, 3376 and 3379, split
  * across two testers' accounts, none of them able to reach Review & Submit.
@@ -182,10 +185,15 @@ export function hasOfficeForm(code: string): code is OfficeFormCode {
  * register; app 5 needed three (it also carried SANITARY and OCCUPANCY with no
  * saved sheet, which is what an accidental "apply for everything" looks like).
  *
- * The escape is real again (the Withdraw control on the clearance card), and
- * this is the list of sheets that have to POINT AT IT — the applicant who needs
- * it is not looking at the cards, they are looking at the form they cannot
- * finish, which is the one screen that never mentioned the cards.
+ * The stranding itself is gone with the reordering: the sheets are not wizard
+ * steps any more, they open over the clearance cards, and Back without saving
+ * always works. What is left is milder and still worth a sentence — a sheet
+ * that will not SAVE without answers the applicant does not have, on a
+ * clearance they did not mean to apply for and are now being charged for.
+ *
+ * So this list is the sheets that have to POINT AT THE WAY OUT. The applicant
+ * who needs it is not looking at the cards; they are looking at the form they
+ * cannot finish.
  *
  * Derived from officeFormMissing below rather than typed out, so a sheet that
  * gains or loses a required answer cannot fall out of step with the sentence
@@ -761,16 +769,30 @@ function SanitaryFields({
           />
         </div>
         <div className="grid gap-5 sm:grid-cols-2">
-          <div>
-            <FieldLabel>No. of Workers Requiring Health Certificates</FieldLabel>
-            <input
-              inputMode="numeric"
-              value={get(data, 'workers_requiring_health_certs')}
-              onChange={(e) => set('workers_requiring_health_certs', e.target.value)}
-              placeholder="0"
-              className={inputCls}
-            />
-          </div>
+          {/*
+           * Asked once, on the Business & Tax Profile, and asked there because
+           * that is where it is PRICED: the health certificate fee (Sec.
+           * 4D.02) is ₱50 per employee per year against the headcount declared
+           * on the profile, charged only when the applicant says their staff
+           * need certificates.
+           *
+           * This box used to ask for the number a second time, in free text
+           * that nothing read. Two answers to one question is the
+           * capitalization case, and on this sheet it was the bad version of
+           * it: the office would have read one number here and been handed a
+           * Tax Order of Payment computed on another, for the same fee, on the
+           * same filing.
+           */}
+          <DerivedField
+            label={
+              <>
+                No. of Workers Requiring Health Certificates
+                <FromApplicationTag />
+              </>
+            }
+            value={get(data, 'workers_requiring_health_certs')}
+            hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
+          />
           <div>
             <FieldLabel>Water Source</FieldLabel>
             <select
@@ -1146,27 +1168,39 @@ export function OfficeFormSheet({
       <h1 className="mt-1.5 text-2xl font-bold text-ink">{meta.title}</h1>
       <p className="mt-1 text-xs text-ink-muted">Form Ref: {meta.ref}</p>
       {/*
-        CLR-2 — where the exit is, said on the screen you cannot leave.
+        CLR-2 — where the exit is, said on the screen the mistake leads to.
 
         This sheet exists because Apply was pressed on the clearance card, and
-        on the three sheets with required answers it cannot be walked past: Next
-        stays disabled and the section map refuses to skip it. An applicant who
-        pressed Apply by mistake — the Market Clearance card is on the grid for
-        every business in the city — has no reason to guess that the way out is
-        a control on a different step, and the audit found five real drafts
-        stuck here.
+        on the three sheets with required answers it cannot be SAVED without
+        them. An applicant who pressed Apply by mistake — the Market Clearance
+        card is on the grid for every business in the city — has no reason to
+        guess where the way out is. The audit of 2026-08-06 found five real
+        drafts stuck at exactly this point.
+
+        The trap is smaller than it was and the note matters more, which is why
+        it survived the reordering rather than going with the mechanism. It used
+        to be a WIZARD trap: the sheet was a step, Next stayed disabled and the
+        section map refused to skip it, so an unfinished sheet stood between the
+        filing and submission. The sheets are not steps now — this one opens
+        over the clearance cards, and Back without saving always works — so
+        nobody is stranded.
+
+        What replaced the stranding is worse in the one way that counts: Apply
+        now spends money the moment it is pressed, against a balance that holds
+        the permit until it is settled. So the sentence names the fee, which the
+        old one had no need to.
 
         One line of ordinary text under the form reference, not a banner. It is
         addressed to a minority (most people reading this sheet want it), it is
         not an error, and nothing here is wrong — a tinted panel would say
-        otherwise to everyone else. Only on the sheets that can actually block;
-        the rest can simply be left blank and walked past.
+        otherwise to everyone else. Only on the sheets that can actually block a
+        save; the rest can simply be left blank.
       */}
       {officeFormCanBlock(code) && (
         <p className="mt-2 text-xs text-ink-muted">
           Applied for this by mistake? Go back to <span className="font-semibold">LGU Clearances</span>{' '}
-          and press <span className="font-semibold">Withdraw</span> on this card — the section
-          disappears with it, and nothing you have typed here is deleted.
+          and press <span className="font-semibold">Withdraw</span> on this card — its fee comes off
+          your balance due, and nothing you have typed here is deleted.
         </p>
       )}
       <div className="mb-6 mt-3 h-px bg-royal" />

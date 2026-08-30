@@ -114,6 +114,30 @@ owe it annually, if annual is what it is.
 **What we assumed meanwhile.** One fee, charged whenever the sanitary clearance
 is applied for, and nothing charged when a held copy is uploaded.
 
+## A4b. On the CHO sheet, is "No. of Workers Requiring Health Certificates" the same headcount we bill?
+
+The health certificate fee (Sec. 4D.02) is **₱50 per employee per year**,
+computed against the number of employees declared on our Business & Tax Profile
+and charged only when the applicant says their staff need certificates. The
+sanitary sheet then asked for the number a second time, in a box of its own.
+
+**Why it matters.** Two answers to one question is bad enough on its own — it
+is the same fault we fixed on capitalization — but here the two land side by
+side on the same filing: a headcount printed on the City Health Office's own
+sheet, and a Tax Order of Payment computed for a *different* headcount, for
+that same fee. An officer reading "4 workers" beside a bill for five is looking
+at a discrepancy the applicant never made.
+
+**What we assumed meanwhile.** That the box means every employee who must hold
+a certificate, which is what the ordinance bills. So it is no longer typed: the
+sheet now carries the profile's figure read-only, and prints "None" where the
+applicant has said no employee needs one.
+
+**If we are wrong**, it matters twice. If CHO means some narrower subset — the
+office staff of a food establishment excluded, say — then it is a genuinely
+separate question and we should ask it again *and* the fee is billing the wrong
+headcount today.
+
 ## A5. When someone already holds a valid clearance, what does BPLO charge?
 
 Nothing at all? The inspection fee only? The full clearance fee again?
@@ -371,6 +395,40 @@ business's renewable permits and the applicant picks one. The tester said "it
 needs to ask for ID or some sort" and pointed at the BPLS; we interpreted "ID"
 as the permit number.
 
+**A20b. And when the business has no permit in BizTrack?** In year one almost
+every renewal is of a permit the old counter process issued on paper, so the
+picker has always let the applicant past without naming one. It did so
+*silently*: where the list came back empty the question was not asked at all,
+and the filing was written with a null nobody had been shown.
+
+Seven of 756 renewals in the register carry no prior permit, and that is how
+five of them happened — businesses holding nothing, never asked. (One more was
+a business holding three permits where the question was skipped past; the last
+was written directly by `DemoSeeder`.) The trouble is that a null nobody
+answered and a null somebody chose are the same row afterwards, so the register
+cannot tell a renewal of a paper permit from a renewal of nothing.
+
+**What we assumed meanwhile.** The escape stays, but it is now an option in the
+same list as the permits — *"None of these — my permit was issued on paper"* —
+and it has to be ticked. One click, recorded on
+`applications.prior_permit_declared_none`, and submit accepts a renewal or an
+amendment that names a permit **or** declares there is none to name. Nothing
+else.
+
+If BPLO would rather a business with no permit in the register filed as **new**
+instead of as a renewal, say so and the escape goes altogether — that is a
+smaller change than this one, not a larger.
+
+## A20c. Does an amendment also name the permit it amends?
+
+**What we assumed meanwhile.** Yes, the same way a renewal does. An amendment
+alters one permit's record, and "amend my business" tells the counter no more
+than "renew my business" does when the shop holds three permits with three
+expiry dates. Item 50 asked for the choice; we could see no reason it stops at
+renewals, so the amendment dialog now asks the same question. If the paper
+amendment form has no permit-number box, this is one field too many and we will
+take it out.
+
 ## A21. Do our reference numbers need to match a City Hall format?
 
 We invented all of them: applications are `BIZ-2026-00001`, permits are
@@ -415,6 +473,37 @@ Annually and Quarterly only. We would rather offer two modes we can date than
 three we cannot. If the answer is that Semi-Annually is real, this is a small
 change — one option, one pair of dates, one line of help text — and we will
 make it.
+
+---
+
+## A23. What does BPLO call a business's account number, and is it printed on anything the owner receives?
+
+We generate a permanent per-business account number and, until 30 August 2026, formatted it
+`BAN-2026-0001` — BAN for Business Account Number, which is the term we understood the counter to
+use.
+
+**Why we changed it without waiting for you.** This system also has a blacklist: a business carries
+a status, and an administrator can bar one. So "BAN" named two opposite things at once, and the
+meaning an owner meets first — on a number printed against their own business — is the sanction.
+An owner reading `BAN-2026-0001` on their own record can reasonably take it as notice that they have
+been banned. The format is now `BP-2026-0001`, for Business Permit. All 718 existing numbers were
+rewritten keeping their sequence, so `BAN-2026-0042` became `BP-2026-0042`; nothing was renumbered.
+
+**What we need from you.**
+
+1. Is "BAN" the term BPLO actually uses at the counter, in writing, or on anything handed to a
+   business owner? If a business quotes us a BAN over the phone, we want to recognise it.
+2. Does the city already issue a business account number of its own, in its own format? If so ours
+   should match it rather than compete with it, and this becomes a data question rather than a
+   naming one.
+3. Should this number appear on the printed permit at all? It is currently an internal handle. It is
+   also the most useful thing for a clerk to ask for when an owner has lost their receipt — which is
+   the case the adviser raised as requirement 0.6.
+
+**What we assumed meanwhile.** That the word matters more than the letters. The database column is
+still named `ban`, because renaming it is migration risk across every reference for nothing a user
+can see; only the value an owner reads has changed. If you confirm BAN is your term, the fix is the
+label on screen, and the migration that made this change is deliberately reversible.
 
 ---
 

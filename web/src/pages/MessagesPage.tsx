@@ -23,6 +23,17 @@ import type { MessageThreadSummary } from '../lib/types'
  * API resolves ONE office per thread — see MessageController::responsibleOffice
  * — because a filing is routed to every office that issues one of its
  * clearances, and listing four of them is not an answer either.
+ *
+ * ── The list pages by FILING, the pane picks the OFFICE ──────────────────────
+ *
+ * A conversation is with an office now, so a filing routed to four of them has
+ * up to four. The left-hand list still shows one card per filing and the office
+ * choice lives in the pane (MessageThreadView's picker), for two reasons: a
+ * filing NOBODY has written on still needs a card, because that card is how an
+ * applicant starts their first conversation and it cannot come from a list of
+ * threads that do not exist; and an applicant thinks in permits — "my bakery" —
+ * not in offices, so the filing is the right thing to scan for and the office
+ * is the right thing to choose once you are inside it.
  */
 
 type Sort = 'recent' | 'oldest'
@@ -88,6 +99,32 @@ function ThreadCard({
       ? thread.counterparty.subtitle
       : null
 
+  /*
+   * Which office's mail this is, for an officer reading the staff inbox.
+   *
+   * An officer's counterparty is the applicant, so `is_officer` false on the
+   * counterparty means the READER is the officer — the row is otherwise silent
+   * about which office the conversation belongs to, which for BPLO (who reads
+   * every office's) is genuinely ambiguous. Applicants are not shown this: they
+   * already have "Handled by" above, and naming the same office twice on one
+   * card reads as two facts.
+   */
+  const readerIsOfficer = !thread.counterparty.is_officer
+  const withOffices = readerIsOfficer
+    ? thread.offices
+        .filter((o) => o.messages_count > 0)
+        .map((o) => o.name)
+        /*
+         * Not when it is the office already named above. On most of BPLO's
+         * rows "Handled by BPLO" and "Conversation with BPLO" are the same
+         * office, and printing it twice reads as two facts. Compared against
+         * `responsible_office.name` and not against `handledBy`, which is the
+         * rendered line and may carry an officer's name after the office.
+         */
+        .filter((name) => name !== thread.responsible_office?.name)
+    : []
+  const conversationOffices = withOffices.length > 0 ? withOffices.join(' · ') : null
+
   return (
     <li>
       <button
@@ -114,6 +151,11 @@ function ThreadCard({
           {handledBy && (
             <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
               Handled by {handledBy}
+            </span>
+          )}
+          {conversationOffices && (
+            <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
+              Conversation with {conversationOffices}
             </span>
           )}
           <span className="mt-0.5 block truncate text-sm text-ink-secondary">{preview}</span>
@@ -158,6 +200,9 @@ export function MessagesPage() {
             // applicant chasing a health clearance searches "sanitary".
             t.responsible_office?.name,
             t.responsible_office?.officer?.name,
+            // And the offices the filing is actually being discussed with,
+            // which are not always the one answerable for it.
+            ...t.offices.map((o) => o.name),
           ]
             .filter(Boolean)
             .some((field) => (field as string).toLowerCase().includes(needle)),
@@ -251,7 +296,41 @@ export function MessagesPage() {
    *   - not routed at all → say that, rather than imply an office exists.
    */
   const paneOffice = selected ? officeLine(selected, selected.counterparty.name) : null
-  const paneOfficeIsTitle = Boolean(paneOffice) && paneOffice === selected?.counterparty.name
+  /*
+   * The office is now never the pane's title — see paneTitle below — so the old
+   * "don't print it under itself" case is gone with it. What is left is the
+   * fact it was standing in for: a routed filing whose office has not put
+   * anybody's name on it yet. That is worth saying outright rather than leaving
+   * the reader to notice the missing half of the line.
+   */
+  const paneOfficerPending = Boolean(paneOffice) && !selected?.responsible_office?.officer
+
+  /*
+   * What to call the open pane — and why it stopped being the counterparty.
+   *
+   * The API names an applicant's conversation after whoever is on the other
+   * side, falling back to the lead office when no officer has picked the filing
+   * up. That was fine while a filing had one conversation. It is actively
+   * misleading now that the pane also carries an office PICKER: a filing routed
+   * to BPLO and the fire office opened with "Business Permits and Licensing
+   * Office" in bold at the top and "Bureau of Fire Protection" selected two
+   * lines below, which reads as a contradiction and is really two different
+   * facts wearing the same shape — who is handling the permit, and who you are
+   * writing to.
+   *
+   * So when the fallback has fired — the name is one of the filing's offices
+   * rather than a person — the pane is titled after the FILING, which is what
+   * is actually constant across every conversation in it. A real officer's name
+   * still wins: "Liza Reyes" is who you are talking to and the picker beneath
+   * says which office she is answering for.
+   */
+  const titledAfterAnOffice =
+    selected !== null && selected.offices.some((o) => o.name === selected.counterparty.name)
+  const paneTitle = selected
+    ? (titledAfterAnOffice
+        ? (selected.business_name ?? selected.tracking_id ?? selected.counterparty.name)
+        : selected.counterparty.name)
+    : ''
 
   /*
    * "Central Perk · BIZ-2026-00005", never the same value twice — and never a
@@ -265,29 +344,35 @@ export function MessagesPage() {
           (part, i, all): part is string =>
             Boolean(part) &&
             all.indexOf(part) === i &&
-            part !== selected.responsible_office?.name,
+            part !== selected.responsible_office?.name &&
+            // …nor the title, which is now sometimes the business name itself,
+            // nor an office — the picker below names the office, and on an
+            // unrouted filing the API's fallback subtitle IS an office name.
+            part !== paneTitle &&
+            !selected.offices.some((o) => o.name === part),
         )
         .join(' · ')
     : ''
 
   const pane = selected ? (
     <section
-      aria-label={`Conversation with ${selected.counterparty.name}`}
+      aria-label={`Messages about ${paneTitle}`}
       className="flex min-h-[32rem] flex-col overflow-hidden rounded-xl bg-white shadow-card lg:h-[calc(100dvh-9rem)]"
     >
       <header className="flex items-center gap-3 bg-royal-tint px-5 py-4">
         <Avatar size={38} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-bold text-ink">{selected.counterparty.name}</p>
+          <p className="truncate text-base font-bold text-ink">{paneTitle}</p>
           <p className="truncate text-xs font-semibold text-royal">
-            {paneOffice && !paneOfficeIsTitle ? (
-              <>Handled by {paneOffice}</>
+            {paneOffice ? (
+              <>
+                Handled by {paneOffice}
+                {paneOfficerPending && (
+                  <span className="font-medium text-ink-muted"> · no officer assigned yet</span>
+                )}
+              </>
             ) : (
-              <span className="font-medium text-ink-muted">
-                {paneOffice
-                  ? 'This office has not assigned an officer yet'
-                  : 'Not yet assigned to an office'}
-              </span>
+              <span className="font-medium text-ink-muted">Not yet assigned to an office</span>
             )}
           </p>
           {paneSubtitle && (

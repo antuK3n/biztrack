@@ -66,9 +66,102 @@ it('accepts "none of these" for a business whose permits predate the system', fu
 
     $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
         'prior_permit_id' => null,
-    ])->assertOk()->assertJsonPath('data.prior_permit_id', null);
+        'declared_none' => true,
+    ])->assertOk()
+        ->assertJsonPath('data.prior_permit_id', null)
+        ->assertJsonPath('data.declared_none', true);
 
     expect(Application::findOrFail($appId)->prior_permit_id)->toBeNull();
+});
+
+/*
+ * ── The seven renewals of nothing ────────────────────────────────────────────
+ *
+ * 749 of 756 renewals in the register name the permit they renew. The seven
+ * that do not are all the same failure wearing three costumes: five drafts on
+ * businesses holding no permit at all, one on a business holding three where
+ * the question was skipped, one written straight in by DemoSeeder. None of them
+ * was ever REFUSED, because a null prior permit was accepted as an answer
+ * without anybody having to give it.
+ *
+ * The escape stays — year one is mostly renewals of paper permits — but it has
+ * to be taken rather than fallen into.
+ */
+
+it('refuses to submit a renewal that names no permit and does not say why', function () {
+    ['application_id' => $appId] = renewalDraft();
+
+    $this->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('prior_permit_id');
+
+    expect(Application::findOrFail($appId)->status->value)->toBe('draft');
+});
+
+it('refuses to submit an amendment that names no permit either', function () {
+    // An amendment alters one permit's record. Which one is the same question.
+    authAs('owner@biztrack.local');
+    $business = Business::where('name', 'like', 'Nena%')->firstOrFail();
+
+    $appId = $this->postJson('/api/v1/applications', [
+        'business_id' => $business->id,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        'amendment_location' => true,
+    ])->assertCreated()->json('data.id');
+
+    $this->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('prior_permit_id');
+});
+
+it('submits a renewal that names its permit', function () {
+    ['business' => $business] = renewalDraft();
+    ['application_id' => $appId] = renewalDraft($business->permits()->firstOrFail()->id);
+
+    $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+});
+
+it('submits a renewal of a paper permit once the applicant says so out loud', function () {
+    ['application_id' => $appId] = renewalDraft();
+
+    $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
+        'prior_permit_id' => null,
+        'declared_none' => true,
+    ])->assertOk();
+
+    $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+});
+
+it('drops the "no permit" declaration the moment a permit is named', function () {
+    // Two contradictory statements, not two answers. The named permit wins, so
+    // the submit gate can never pass on a row asserting both.
+    ['application_id' => $appId, 'business' => $business] = renewalDraft();
+
+    $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
+        'prior_permit_id' => null,
+        'declared_none' => true,
+    ])->assertOk();
+
+    $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
+        'prior_permit_id' => $business->permits()->firstOrFail()->id,
+        'declared_none' => true,
+    ])->assertOk()->assertJsonPath('data.declared_none', false);
+
+    expect(Application::findOrFail($appId)->prior_permit_declared_none)->toBeFalse();
+});
+
+it('reopens the question when a named permit is cleared without an explanation', function () {
+    // Clearing the choice is not the same as declaring there is nothing to
+    // choose. Left as an open question, this draft cannot submit.
+    ['business' => $business] = renewalDraft();
+    ['application_id' => $appId] = renewalDraft($business->permits()->firstOrFail()->id);
+
+    $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
+        'prior_permit_id' => null,
+    ])->assertOk()->assertJsonPath('data.declared_none', false);
+
+    $this->postJson("/api/v1/applications/{$appId}/submit")->assertStatus(422);
 });
 
 it('refuses a permit that belongs to a different business', function () {
