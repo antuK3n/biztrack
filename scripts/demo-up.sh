@@ -37,7 +37,11 @@ if lsof -nP -iTCP:8787 -sTCP:LISTEN 2>/dev/null | grep -q '0\.0\.0\.0:8787'; the
 fi
 
 rm -f "$LOGS/tunnel.log"
-nohup cloudflared tunnel --url http://localhost:5180 >"$LOGS/tunnel.log" 2>&1 &
+# 127.0.0.1, not localhost: demo-deploy.sh finds the live tunnel by reading this
+# command line back out of `ps`, so the two scripts have to spell the loopback
+# the same way. Spelled differently, a tunnel raised here was invisible to the
+# next deploy, which then exited silently under `set -euo pipefail`.
+nohup cloudflared tunnel --url http://127.0.0.1:5180 >"$LOGS/tunnel.log" 2>&1 &
 
 for _ in $(seq 1 45); do
   URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$LOGS/tunnel.log" 2>/dev/null | head -1) || true
