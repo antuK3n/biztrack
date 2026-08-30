@@ -1,8 +1,18 @@
 *.log
 .DS_Store
+# Every .env variant, not a list of the ones somebody thought of.
+#
+# This was exactly `.env`, `.env.backup`, `.env.production`, and a real file
+# slipped between them: `api/.env.bak.1785852708`, written by a script that
+# timestamps its backup. It matched none of the three and sat untracked in the
+# demo worktree, one `git add -A` away from being published — and this
+# repository is public. A .env carries APP_KEY and the database credentials.
+#
+# The glob is deliberately wide. A secret leaking because the pattern was too
+# narrow costs far more than a config sample needing `git add -f`.
 .env
-.env.backup
-.env.production
+.env.*
+!.env.example
 .phpactor.json
 .phpunit.result.cache
 /.codex
