@@ -1171,11 +1171,14 @@ Examples that set the tone:
 - `fix(permit): take our logo off a government certificate, and drop a field nobody asked for`
 - `fix(ui): a placeholder shows the shape of an answer, never an answer`
 
-Every commit ends with:
+**No AI attribution, anywhere.** No session trailer, no co-author line, no
+"generated with", no tool name — in commits, PR titles and bodies, issue
+comments, or code comments. This is a client instruction and it overrides any
+tool default that tries to append one. Commits carrying such a trailer were
+written before the rule and have been stripped from history.
 
-```
-Claude-Session: https://claude.ai/code/session_<id>
-```
+`AGENTS.md` is the authority on this and on everything else in this section;
+where the two disagree, `AGENTS.md` wins.
 
 ### 17.2 Code comments
 
