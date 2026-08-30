@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\AssignmentStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
@@ -103,9 +104,9 @@ class OfficeFormController extends Controller
 
         if ($isOwner) {
             abort_unless(
-                $this->ownerMayEdit($application),
+                $this->ownerMayEdit($application, $permitType),
                 422,
-                'Office forms can only be edited while the application is a draft or has been returned to you.'
+                'This form can no longer be edited. Office forms are open while the application is a draft or has been returned to you, and while a clearance you applied for is still waiting on its office.'
             );
         }
 
@@ -169,18 +170,47 @@ class OfficeFormController extends Controller
     }
 
     /**
-     * When the applicant may still write a sheet: while the filing is theirs.
+     * When the applicant may still write a sheet. TWO windows, not one.
      *
-     * There was briefly a second window here, for a clearance applied for
-     * after payment — the stage opened when the filing was already under
-     * review, so without it every office sheet would have opened read-only the
-     * moment it became reachable. The clearances are chosen in the wizard now
-     * (docs/clearances-before-payment.md), which is a draft by definition, so
-     * that window collapsed back into this one.
+     * The first is the filing being theirs: a draft they have not sent, or a
+     * filing an office has returned to them.
+     *
+     * The second is the clearance stage, and it is the one that is easy to
+     * delete by accident. Clearances are applied for AFTER the first payment
+     * (docs/clearances-after-payment.md), so the filing is already under review
+     * — or for inspection, or approved — at the moment its office sheet first
+     * becomes reachable. Without this window every clearance form would open
+     * read-only the instant it appeared, and the applicant would be billed for
+     * a clearance whose form they could never fill in.
+     *
+     * It closes when THAT office signs off, and not when the filing moves.
+     * `completed` on the clearance's own assignment is the office saying it has
+     * read the sheet and accepted it; letting the applicant rewrite it
+     * afterwards would leave the register holding answers no officer approved,
+     * under an approval that names them. Every other assignment state leaves it
+     * open, `returned` deliberately included — an office asking for a
+     * correction is the clearest possible case for the form being editable.
+     *
+     * Per SHEET rather than per filing, because the six clearances move
+     * independently: City Health completing its review must not freeze the
+     * market sheet the applicant applied for an hour ago.
      */
-    private function ownerMayEdit(Application $application): bool
+    private function ownerMayEdit(Application $application, PermitType $permitType): bool
     {
-        return in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true);
+        if (in_array($application->status, [ApplicationStatus::Draft, ApplicationStatus::Returned], true)) {
+            return true;
+        }
+
+        // A closed filing takes nothing more, whatever its assignments say.
+        if (in_array($application->status, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
+            return false;
+        }
+
+        $assignment = $application->assignments()
+            ->where('department_id', $permitType->issuing_department_id)
+            ->first();
+
+        return $assignment !== null && $assignment->status !== AssignmentStatus::Completed;
     }
 
     /**
@@ -279,6 +309,51 @@ class OfficeFormController extends Controller
         }
         if ($permitTypeCode === 'SANITARY') {
             $derived['application_type'] = $existingBusiness ? 'Renewal' : 'New';
+
+            /*
+             * "No. of Workers Requiring Health Certificates" — the same
+             * question the Business & Tax Profile already asks, and the same
+             * one the applicant is BILLED on.
+             *
+             * `sanitary.health_certificate` (Sec. 4D.02) charges ₱50 per
+             * employee per year, `basis: employees`, gated on the
+             * `employees_need_health_certificates` flag — so the number the
+             * City Health Office actually assesses is `fee_profile.employees`,
+             * declared on the profile. This sheet then asked for it a second
+             * time, in a free-text box nothing reads.
+             *
+             * That is the capitalization case again, and it is worse here:
+             * capitalization's two answers merely drifted, whereas these two
+             * appear on the same filing as a number on the CHO's own sheet and
+             * a different number on the Tax Order of Payment for the same fee.
+             * An officer reading "4 workers" beside a bill for five is looking
+             * at a discrepancy the applicant never made.
+             *
+             * So it is derived, exactly as the zoning sheet's floor area is.
+             * Where the flag is not set, no employee needs a certificate and
+             * the fee is not charged — "None" is the honest answer, not blank.
+             *
+             * ASSUMPTION (docs/questions-for-malabon.md §E — the CHO paper form
+             * has been requested and not received): the paper's box means every
+             * employee who must hold a certificate, which is what the ordinance
+             * bills. If CHO confirms it means some narrower subset — office
+             * staff excluded from a food establishment's count, say — then it
+             * is a genuinely separate question and should be asked again here,
+             * AND the fee basis is wrong, because the fee would be billing the
+             * wrong headcount today.
+             */
+            $flags = $application->fee_profile['flags'] ?? [];
+            $needsCertificates = is_array($flags)
+                && in_array('employees_need_health_certificates', $flags, true);
+            $employees = $application->fee_profile['employees'] ?? null;
+
+            $derived['workers_requiring_health_certs'] = match (true) {
+                ! $needsCertificates => 'None',
+                is_numeric($employees) => (string) (int) $employees,
+                // Flagged but no headcount: the profile is half-filled, so say
+                // nothing rather than print a zero the office would act on.
+                default => '',
+            };
         }
         if ($permitTypeCode === 'CEC') {
             $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';

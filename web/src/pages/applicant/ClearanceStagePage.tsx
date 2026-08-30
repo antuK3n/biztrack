@@ -4,7 +4,7 @@ import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal } from '../../components/ui/Proto'
-import { businessName, formatBytes } from '../../lib/format'
+import { businessName, formatBytes, pesoToNumber } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, clearances, officeForms } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -20,30 +20,41 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
 
 /*
- * ── LGU Clearances · the last thing decided before Review & Submit ─────────
+ * ── LGU Clearances · the stage that opens once the first payment clears ────
  *
- * Settled with the client on 4 August 2026; the reasoning is in
- * docs/clearances-before-payment.md and this screen is the half the applicant
- * sees. Checklist item 76 asked for the six "at the last part before submitting
- * the application", and that is now literally where they are: the wizard's step
- * 6 of 7, with each chosen clearance's office sheet slotted in behind it.
+ * Decided with the client on 28 August 2026: payment first, clearances after.
+ * The reasoning is docs/clearances-after-payment.md and this screen is the half
+ * the applicant sees. The flow around it:
  *
- * This lived for one day as a stage that opened AFTER the first payment, with a
- * running balance, a second payment and a gate holding the permit until it
- * cleared. All of that is deleted. Two things about it are worth remembering
- * rather than rediscovering:
+ *     wizard (business permit only) → submit → Tax Order of Payment #1 → PAID
+ *         → THIS STAGE unlocks
+ *         → Apply adds that office's fee to a running balance
+ *         → the permit is released when the balance reaches zero
  *
- *   The balance block that used to sit above these cards is gone because
- *   nothing accrues. Every clearance chosen here is billed on the one Tax
- *   Order of Payment assessed at submit, so a ledger on this screen would only
- *   ever read zero — and a zero that really means "not assessed yet" reads as
- *   "these are free".
+ * This is the screen the whole reordering exists for, and three things on it
+ * are consequences of the ordering rather than decoration.
  *
- *   `fee_preview` stays, and matters more than the ledger ever did. It is what
- *   this clearance will ADD to that Tax Order of Payment, quoted before the
- *   button is pressed.
+ *   THE LOCK. Before the first payment this stage is visible but shut. Visible
+ *   matters: an applicant who cannot see the clearances cannot plan for them,
+ *   and "where do I get my sanitary permit" is the question this page answers
+ *   even when it cannot yet be acted on. The reason it is shut comes from the
+ *   API (`meta.locked_reason`) and is printed VERBATIM — see the render below
+ *   for why a sentence written here would be wrong.
  *
- * Two properties of this screen are load-bearing rather than stylistic:
+ *   THE BALANCE. Fees accrue here, which they did not when everything was
+ *   priced at submit. Applying moves a number on this very screen, so that
+ *   number has to be on this screen. A stage that charged the applicant and
+ *   showed them nothing would be taking money in the dark.
+ *
+ *   THE PRICE ON THE CARD. `fee_preview` is what applying WOULD add, quoted
+ *   before the button is pressed. It was taken off the cards when one Tax Order
+ *   of Payment covered everything and the amount could honestly be deferred to
+ *   Review & Submit. There is no later screen to defer to now — pressing Apply
+ *   IS the moment of commitment — so the amount is back, in the lightest
+ *   treatment the card has.
+ *
+ * Two further properties are load-bearing and predate the reordering. They
+ * survived it unchanged and must keep surviving:
  *
  *   1. Apply always opens that office's form. Submit always opens the upload
  *      box. NEITHER TOGGLES. Both were toggles in the wizard and both were
@@ -54,16 +65,35 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  *      have their own labelled controls, well away from the two that create.
  *
  *   2. The two buttons have very different consequences. Apply adds that
- *      office's fee to what the applicant will be charged; Submit costs
- *      nothing, because nothing is being issued. A card that showed them as a
- *      matched pair without saying so would be hiding the only difference that
- *      matters.
+ *      office's fee to the balance; Submit costs nothing, because nothing is
+ *      being issued. A card that showed them as a matched pair without saying
+ *      so would be hiding the only difference that matters.
  *
- *   3. Six cards side by side read as six things you are supposed to do. They
- *      are not: the step's rule is that ONE of them is decided, and no card is
- *      individually required. Where a clearance is only for a particular kind
- *      of premises, the card has to say so on its face — see APPLICABILITY
- *      below and checklist item 98.
+ * ── Assumptions built in here, taken rather than asked ────────────────────
+ *
+ * The client's instruction was to assume the best fit and not ask. Three
+ * assumptions are load-bearing on this screen; all three are listed in
+ * docs/clearances-after-payment.md and none is confirmed by BPLO.
+ *
+ *   A. THE STAGE UNLOCKS ON THE FIRST PAYMENT CLEARING, not on submission.
+ *      This screen does not decide that — `meta.unlocked` does — but every
+ *      piece of copy on it is written as though payment is the gate, so if the
+ *      server ever unlocks on submission instead, the wording here is wrong
+ *      before the behaviour is.
+ *
+ *   B. A REJECTED CLEARANCE DOES NOT KILL THE BUSINESS PERMIT. It stands as
+ *      its own failed item — which is why `state === 'rejected'` renders a
+ *      panel on ONE card and nothing anywhere near the filing as a whole. Same
+ *      open question as checklist item 80 (`AssignmentStatus` has no
+ *      `Rejected` case) and it should be answered once for both.
+ *
+ *   C. APPLYING AFTER THE PERMIT IS RELEASED is allowed by the data model but
+ *      is NOT surfaced here. A business that adds a food line in June needs a
+ *      sanitary permit it did not need in January, and nothing in the schema
+ *      forbids it — but no control on this screen offers it, and the stage
+ *      relocks behind whatever `locked_reason` the server gives. Building the
+ *      route in without a decision from BPLO would be guessing at what it
+ *      costs and what it renews.
  */
 
 /*
@@ -168,8 +198,18 @@ export const MARKET_CATEGORIES = [
  * since asked for it to be derived rather than shown to everyone, and rather
  * than asked of everyone as a yes/no.
  *
- * The signal is available in time. The category and the stall count are both
- * declared on Business & Tax Profile, step 5, and the clearances are step 6.
+ * NOT CURRENTLY CALLED, and that is pre-existing rather than part of the
+ * payment-first reordering. The derivation was tried and reversed — every card
+ * is on the grid again (see the note above `visibleRows`) — because these
+ * categories name the operator who RUNS a market, not the trader who rents a
+ * stall inside it, so it hid the card from exactly the people it exists for.
+ * Kept, unused, because the reasoning below is the record of why a derived
+ * checklist is the wrong instrument here, and it is the first thing anyone will
+ * reach for again.
+ *
+ * The signal is at least available in time: the category and the stall count
+ * are both declared on the wizard's Business & Tax Profile step, which now runs
+ * a whole submission and a payment before this stage opens.
  *
  * ── The reason this reveals and never restricts ────────────────────────────
  *
@@ -205,13 +245,21 @@ export function marketClearanceApplies(
 /**
  * What this clearance costs. The number, and as little around it as possible.
  *
+ * On the card again, and now unavoidable. It came off when one Tax Order of
+ * Payment covered everything: the amount could be deferred to Review & Submit,
+ * which was the screen where money was actually agreed to. With the clearances
+ * after payment there is no later screen — pressing Apply re-assesses the
+ * filing and moves the balance printed above these cards — so the amount has to
+ * be legible at the moment of the press. A button that spends an unstated
+ * amount is the defect this prevents.
+ *
  * *"There's an absurd amount of text here."* This used to return a full
  * sentence, in six variants — one for each combination of priced/free/unpriced
  * and applied/not — and it was printed on every card. Six cards each carrying
  * two sentences of identical fee rules is the wall the client was looking at.
- * The RULE (Apply costs, Submit does not) is now stated once above the grid,
- * where it belongs, because it is the same on all six. What is left here is the
- * one thing that actually differs between the cards, which is the amount.
+ * The RULE (Apply costs, Submit does not) is stated once above the grid, where
+ * it belongs, because it is the same on all six. What is left here is the one
+ * thing that actually differs between the cards, which is the amount.
  *
  * The variants collapsed too. The sentences distinguished "what applying would
  * add" from "what this is costing you" because `fee_preview` flips meaning once
@@ -245,81 +293,60 @@ export function feeAmount(preview: string | null): string {
   return `Fee ${preview}`
 }
 
+/**
+ * Two props, down from four, because there is one caller now.
+ *
+ * `onOpenOfficeForm` and `onRowsChange` are gone. Both existed for the wizard:
+ * the first sent Apply to a sheet the WIZARD owned as a step of its own rather
+ * than letting this component swap what it was drawing, and the second pushed
+ * the six rows back up so the wizard could work out which sheets were steps and
+ * whether its clearance step passed. The wizard has no clearance step, so
+ * neither has a caller.
+ *
+ * Losing them makes the sheet handling unconditional, which is the real win:
+ * `formCode` is now the only way a sheet opens, so there is exactly one path
+ * through Apply instead of two that had to be kept in step.
+ */
 interface ClearanceStageProps {
   applicationId: number
   /** The business as every office sheet carries it, for the sheets opened here. */
   business: CarriedOverBusiness
-  /**
-   * Where Apply sends the applicant when that office has a form sheet.
-   *
-   * Omitted on the standalone route, which renders the sheet inline over the
-   * cards. Supplied by the wizard, where each sheet is a step of its own
-   * slotted in behind this one — so Apply moves the wizard rather than swapping
-   * what this component is drawing.
-   */
-  onOpenOfficeForm?: (code: OfficeFormCode) => void
-  /**
-   * The six rows, every time they change. The wizard needs them: which office
-   * sheets exist as steps, and whether the step passes at all, are both read
-   * off which clearances have been decided.
-   */
-  onRowsChange?: (rows: Clearance[]) => void
-  /**
-   * Whether the filing's own answers say this applicant is a market business —
-   * `marketClearanceApplies()` above, item 98.
-   *
-   * Passed in rather than fetched because the two callers hold the declaration
-   * in different shapes and at different freshnesses: the standalone route has
-   * the SAVED `fee_profile` off the application, while the wizard has the
-   * profile the applicant is still typing, one step back. Reading the saved
-   * copy inside the wizard would miss a category entered thirty seconds ago and
-   * not yet autosaved, which is exactly when it matters.
-   *
-   * Defaults to false — hidden — because that is the answer for almost every
-   * business in the city, and a card shown by default is a card the applicant
-   * has to work out is not addressed to them.
-   */
 }
 
-/**
- * True when at least one clearance has been decided — checklist item 76's
- * other half, and the rule that makes this step a decision rather than a
- * screen to walk past.
+/*
+ * `anyClearanceDecided` has been deleted, and the rule with it.
  *
- * Either half of the card satisfies it. Apply means "issue me one"; Submit
- * means "I already hold this, here is the copy". They are opposites in what
- * they ask the office to do and identical in what they tell us — that this
- * clearance has been dealt with — so requiring one or the other, rather than
- * Apply specifically, is what stops the rule from forcing an applicant to
- * apply for a certificate already in their hand.
+ * It answered "has at least one of the six been decided", and the wizard's LGU
+ * Clearances step would not let the applicant past until it was true — item
+ * 76's other half, on the argument that a file reaching BPLO with no clearance
+ * named is one the counter sends back.
  *
- * `.some` and not a set of codes, and that is the whole of item 98's answer.
- * The rule has never named a clearance and must not learn to: a filing satisfies
- * it with Zoning alone, and the Market Clearance is only ever one of six ways to
- * satisfy it, never one of the six things needed. If this ever has to become
- * "these specific clearances, for this kind of business", that is BPLO deciding
- * the six rather than the applicant choosing them — A1 in
- * docs/questions-for-malabon.md, and not a thing to arrive at by tightening this
- * line.
+ * Nothing can ask that question any more and get a meaningful answer. The
+ * clearances are decided after the business permit has been submitted AND paid
+ * for, so at every moment when the old rule used to run, the honest answer is
+ * "none, and none could be". There is no step left for it to gate.
+ *
+ * If a requirement genuinely exists that particular clearances must be held
+ * before a permit issues, it belongs on the release gate next to the
+ * balance-due check — both are conditions on the permit coming OUT, not on the
+ * application going in. It is also A1 in docs/questions-for-malabon.md
+ * (does the applicant choose the six, or does BPLO determine them from the line
+ * of business and location?), and it must not be answered by quietly
+ * reintroducing a checklist here.
  */
-export function anyClearanceDecided(rows: Clearance[]): boolean {
-  return rows.some((r) => r.state !== 'available' || r.held_document !== null)
-}
 
 /**
- * The cards, the lock, and every write behind them.
+ * The cards, the ledger, the lock, and every write behind them.
  *
- * Rendered in two places from one definition: the wizard's LGU Clearances step
- * and the standalone `/applications/:id/clearances` route below. They must not
- * drift — the Apply/Submit semantics are the kind of thing that grows a second,
- * subtly different copy the moment there are two of them.
+ * Rendered from exactly one place — the route below. It was two (the wizard's
+ * LGU Clearances step was the other) and was kept as one definition so the
+ * Apply/Submit semantics could not drift into two subtly different copies.
+ * That pressure is gone, but it stays a separate component: the route around
+ * it is a header and a business lookup, and the day this needs mounting
+ * somewhere else the seam should already exist rather than be cut out of a
+ * page under deadline.
  */
-export function ClearanceStage({
-  applicationId,
-  business,
-  onOpenOfficeForm,
-  onRowsChange,
-}: ClearanceStageProps) {
+export function ClearanceStage({ applicationId, business }: ClearanceStageProps) {
   /* The six rows. Reloaded whole after every mutation — see the note on
    * `clearances` in resources.ts for why a single row is not enough. */
   const [rows, setRows] = useState<Clearance[] | null>(null)
@@ -381,39 +408,35 @@ export function ClearanceStage({
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  const publish = useCallback(
-    (next: Clearance[]) => {
-      setRows(next)
-      onRowsChange?.(next)
-    },
-    [onRowsChange],
-  )
-
+  /*
+   * `publish` is gone: it was `setRows` plus a call up to the wizard's
+   * `onRowsChange`, and with no parent listening it was setState wearing a hat.
+   * Every write below now calls setRows directly.
+   */
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
     try {
       const result = await clearances.list(applicationId)
-      publish(result.data)
+      setRows(result.data)
       setMeta(result.meta)
     } catch (err) {
       setLoadError(err)
     } finally {
       setLoading(false)
     }
-  }, [applicationId, publish])
+  }, [applicationId])
 
   useEffect(() => {
     void load()
   }, [load])
 
   /*
-   * Saved office-form payloads, only when this component renders the sheets
-   * itself. The wizard fetches its own, because there the sheets are steps it
-   * owns and their answers ride on its autosave.
+   * Saved office-form payloads. Unconditional now — this component always
+   * renders the sheets, because the wizard that used to own them as steps of
+   * its own no longer has a clearance step to hang them off.
    */
   useEffect(() => {
-    if (onOpenOfficeForm) return
     let active = true
     officeForms
       .list(applicationId)
@@ -437,7 +460,7 @@ export function ClearanceStage({
     return () => {
       active = false
     }
-  }, [applicationId, onOpenOfficeForm])
+  }, [applicationId])
 
   const unlocked = meta?.unlocked ?? false
 
@@ -451,7 +474,10 @@ export function ClearanceStage({
     setActionError(null)
     try {
       const result = await action()
-      publish(result.data)
+      setRows(result.data)
+      // The ledger moves on every mutation, not just the row that was pressed:
+      // applying re-assesses the whole filing. Setting rows without meta is how
+      // a fee gets charged above a balance that has not budged.
       setMeta(result.meta)
       setNote(what)
       return true
@@ -525,16 +551,22 @@ export function ClearanceStage({
          * about.
          */
         removingCopy
-          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. This office’s fee joins your Tax Order of Payment.`
-          : `Applied for your ${row.permit_type.name}. Its fee joins your Tax Order of Payment.`,
+          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. This office’s fee has been added to your balance due.`
+          : `Applied for your ${row.permit_type.name}. Its fee has been added to your balance due.`,
         () => clearances.apply(applicationId, code),
       )
       if (!ok) return
     }
+    /*
+     * One path to the sheet, not two. This used to branch: hand the code up to
+     * the wizard if it had asked to own the sheet, otherwise render it here.
+     * The wizard's half is gone, so the sheet always opens over these cards —
+     * and Apply's promise ("always opens that office's form") is now kept by a
+     * single line that cannot get out of step with a second implementation.
+     */
     if (hasOfficeForm(code)) {
       setFormError(null)
-      if (onOpenOfficeForm) onOpenOfficeForm(code)
-      else setFormCode(code)
+      setFormCode(code)
     }
   }
 
@@ -558,16 +590,28 @@ export function ClearanceStage({
    * NOT a second meaning of Apply — that was the original bug (aabbf21) and
    * making this a toggle again would restore it.
    *
-   * Nothing is destroyed here. The permit type is detached, its fee comes off
-   * an assessment that has not been written yet, and the office sheet's saved
-   * answers stay exactly where they are (ClearanceService::unapply says why),
-   * so re-applying costs one click and loses nothing. That is the whole reason
-   * this needs no confirmation while Apply-over-a-copy does.
+   * Nothing is destroyed here. The permit type is detached, the filing is
+   * re-assessed without it, and the office sheet's saved answers stay exactly
+   * where they are (ClearanceService::unapply says why), so re-applying costs
+   * one click and loses nothing. That is the whole reason this needs no
+   * confirmation while Apply-over-a-copy does.
+   *
+   * It used to say the fee came off "an assessment that has not been written
+   * yet", which was true while everything was priced at submit. It is not now:
+   * the balance above these cards is live, and withdrawing takes the fee back
+   * off it. Still free and still reversible — but only up to the point the
+   * office acts, which is what unapply's `officeHasActed` guard is for.
+   *
+   * NOT MODELLED, and this is the place it would show up: whether a clearance
+   * fee already PAID is refundable when the applicant withdraws. Right now the
+   * balance simply falls, and if it falls below what has been paid the filing
+   * is in credit with nothing on any screen offering it back. Listed as an open
+   * question in docs/clearances-after-payment.md; it needs BPLO, not a guess.
    */
   async function onUnapply(row: Clearance) {
     await runAction(
       row.permit_type.code,
-      `Withdrew your application for the ${row.permit_type.name}. Its fee is off your Tax Order of Payment${
+      `Withdrew your application for the ${row.permit_type.name}. Its fee is off your balance due${
         row.has_office_form ? ', and its form section is off this application' : ''
       }.`,
       () => clearances.unapply(applicationId, row.permit_type.code),
@@ -634,7 +678,10 @@ export function ClearanceStage({
         withdrawn = true
       }
       const result = await clearances.submitHeld(applicationId, code, file)
-      publish(result.data)
+      setRows(result.data)
+      // The ledger moves on every mutation, not just the row that was pressed:
+      // applying re-assesses the whole filing. Setting rows without meta is how
+      // a fee gets charged above a balance that has not budged.
       setMeta(result.meta)
       setNote(
         switching
@@ -722,11 +769,14 @@ export function ClearanceStage({
    *
    * Shown, labelled with who it is for (APPLICABILITY, tied to the buttons via
    * aria-describedby so it is heard before either is pressed), and optional —
-   * which is what the step's rule already was: no single card is required.
+   * which every card is: no single clearance is required by this stage.
    *
-   * `marketShown` still computes above. It no longer gates the grid, but it
-   * answers "does this look like market trade", and its reveal control stays
-   * as the fallback for anyone the derivation misses.
+   * There is no `marketShown` and no reveal control. Both were removed with the
+   * derivation; `marketClearanceApplies` survives above, uncalled, as the
+   * record of why. Nothing filters this list, which is what `visibleRows = rows`
+   * says — kept as a named binding rather than inlining `rows` into the map,
+   * because "which rows the applicant sees" is a question this screen has
+   * answered three different ways and will be asked again.
    */
   const visibleRows = rows
 
@@ -778,16 +828,43 @@ export function ClearanceStage({
     )
   }
 
+  /*
+   * Has everything assessed on this filing been paid?
+   *
+   * The one place a formatted peso string has to become a number. `balance_due`
+   * arrives as display text ("₱1,650.00") from `PermitFees::peso`, so this is
+   * `pesoToNumber` and never `Number()` — Number("₱1,650.00") is NaN, and NaN
+   * compared against zero is false, which would silently report every filing as
+   * still owing. See the note on ClearanceMeta.
+   *
+   * `> 0` rather than `!== 0`, because an overpayment is a negative balance and
+   * nothing is being withheld for it. NaN — an unreadable figure — falls
+   * through to false as well, which is the right way round: the screen says
+   * nothing about a release gate it cannot evaluate rather than telling an
+   * applicant they owe money we failed to parse.
+   */
+  const balance = pesoToNumber(meta.balance_due)
+  const owesMoney = Number.isFinite(balance) && balance > 0
+
   return (
     <div>
       {/*
-        The lock, in the API's own words.
+        The lock, in the API's own words and ONLY the API's own words.
 
-        `locked_reason` is shown verbatim. The condition that closes this stage
-        is the server's to state — it knows what has been submitted and what has
-        not — and a sentence written here would be a second, quieter version of
-        the rule that drifted out of step with the real one the first time it
-        moved.
+        `locked_reason` is printed verbatim, with no heading over it. There used
+        to be one — "These can no longer be changed" — and it was safe only while
+        this stage had a single reason to be shut. It has two now, and they are
+        opposites: before the first payment clears the stage has not opened YET,
+        and after the permit is released it is closed for good. A fixed heading
+        is guaranteed to be wrong about one of them, and "these can no longer be
+        changed" told an applicant who had not paid that they had missed their
+        chance.
+
+        The server knows which case it is in, because it knows what has been
+        submitted, assessed and paid. So it supplies the sentence and the screen
+        supplies nothing. The fallback below is deliberately contentless: it
+        names no cause, because a locked stage with no reason given is a server
+        bug and inventing a cause would hide it.
       */}
       {!unlocked && (
         <div
@@ -795,21 +872,96 @@ export function ClearanceStage({
           className="mb-6 flex gap-2.5 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm text-blue-800"
         >
           <InfoCircleIcon size={20} className="mt-px shrink-0" />
-          <div className="min-w-0">
-            <p className="font-semibold">These can no longer be changed</p>
-            {/*
-              One copy of the sentence, and it is the one the buttons point at.
-              An earlier version repeated it under the cards as the
-              aria-describedby target, which put the same paragraph on screen
-              twice — a sighted reader saw it duplicated and a screen-reader
-              user heard it once as a banner and again on every button.
-            */}
-            <p id="clearances-locked" className="mt-0.5">
-              {meta.locked_reason ?? 'This stage is no longer open.'}
-            </p>
-          </div>
+          {/*
+            One copy of the sentence, and it is the one the buttons point at
+            through aria-describedby. An earlier version repeated it under the
+            cards as the describedby target, which put the same paragraph on
+            screen twice — a sighted reader saw it duplicated and a
+            screen-reader user heard it once as a banner and again on every
+            button.
+          */}
+          <p id="clearances-locked" className="min-w-0">
+            {meta.locked_reason ?? 'This stage is not open.'}
+          </p>
         </div>
       )}
+
+      {/*
+        ── The ledger ────────────────────────────────────────────────────────
+
+        Money accrues on this screen, so the running total belongs on it. This
+        block did not exist when every clearance was billed on one Tax Order of
+        Payment assessed at submit — there was nothing to accrue and the figures
+        would have read zero — and it is back because that is no longer true:
+        each Apply re-assesses the filing and moves `balance_due`.
+
+        Shown while LOCKED as well as unlocked, which is the less obvious half.
+        A locked stage means the first payment has not cleared, and the balance
+        is then exactly what the applicant must pay to open it — the single most
+        actionable number on the page. Hiding it until it stops mattering would
+        be precisely backwards.
+
+        The three figures are printed as the server formatted them and are never
+        re-formatted here. One formatter, server-side (`PermitFees::peso`), is
+        how the peso sign, the separators and the two decimal places stay in
+        agreement across the screens that show them.
+
+        `tnum` on the amounts: lining figures so the three of them stack into a
+        column the eye can subtract down, rather than three strings of different
+        widths.
+      */}
+      <div className="mb-6 rounded-xl bg-white px-5 py-4 shadow-card">
+        <dl className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
+          <div>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Assessed
+            </dt>
+            <dd className="tnum mt-0.5 text-base font-semibold text-ink">{meta.total_assessed}</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Paid</dt>
+            <dd className="tnum mt-0.5 text-base font-semibold text-ink">{meta.total_paid}</dd>
+          </div>
+          <div>
+            {/*
+              The balance is the one that decides something, so it is the one
+              that is bigger and coloured. The other two are here to make it
+              checkable — a balance with no assessed and paid beside it is a
+              number the applicant has to trust rather than one they can verify.
+            */}
+            <dt className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              Balance due
+            </dt>
+            <dd
+              className={`tnum mt-0.5 text-xl font-bold ${owesMoney ? 'text-royal' : 'text-s-green'}`}
+            >
+              {meta.balance_due}
+            </dd>
+          </div>
+        </dl>
+        {/*
+          The gate, stated wherever the balance is. Without this sentence the
+          balance is decoration: a number that goes up when you press Apply and
+          never says what it is holding.
+
+          Two versions rather than one hedged sentence, because "your permit is
+          released when this reaches zero" read against a zero balance is a
+          promise the applicant cannot tell they have already met.
+        */}
+        <p className="mt-3 text-sm text-ink-secondary">
+          {owesMoney ? (
+            <>
+              Your Business Permit is <span className="font-semibold text-ink">not released</span>{' '}
+              until this balance reaches zero. Each clearance you apply for adds its fee here.
+            </>
+          ) : (
+            <>
+              Nothing is outstanding. Applying for a clearance below adds its fee here, and your
+              Business Permit is not released while a balance is unpaid.
+            </>
+          )}
+        </p>
+      </div>
 
       {actionError && (
         <div className="mb-6">
@@ -830,19 +982,20 @@ export function ClearanceStage({
 
         What is left is the asymmetry, and only the asymmetry. Apply spends
         money and Submit does not; it is the only thing on this screen a person
-        can get materially wrong, so it is the one thing said in full. The
-        sentences that went: "you are billed once after you submit" (true, and
-        already the subject of the Review & Submit step that follows), and
-        "where a clearance is only for a particular kind of premises, its card
-        says who it is for" (which was an instruction for reading the screen
-        rather than anything about the applicant's business — and is moot now
-        that item 98 keeps the one such card off the grid entirely).
+        can get materially wrong, so it is the one thing said in full.
+
+        It used to say Apply adds the fee "to your Tax Order of Payment", which
+        was true when one assessment at submit covered everything. It is not any
+        more: the applicant has already paid a Tax Order of Payment to get here,
+        and what Apply moves is the balance in the block above. Naming the thing
+        that visibly changes is also what makes the press checkable — the
+        applicant can watch the number they were quoted appear.
       */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
         Choose the ones your business needs.{' '}
         <span className="font-semibold text-ink">Apply</span> adds that office&rsquo;s fee to your
-        Tax Order of Payment; <span className="font-semibold text-ink">Submit</span> a copy of one
-        you already hold costs nothing.
+        balance due; <span className="font-semibold text-ink">Submit</span> a copy of one you
+        already hold costs nothing.
       </p>
 
       {/*
@@ -913,22 +1066,39 @@ export function ClearanceStage({
               )}
 
               {/*
-                One line, and only for the cards it is true of: pressing Apply
-                adds a section to the form above rather than finishing anything
-                here. That is the single thing about this card a person cannot
-                work out by looking at it.
+                What this one costs — see feeAmount() for the two traps in it.
 
-                The fee used to print here. It went with the rest of the card's
-                furniture on the client's instruction — the grid had grown a
-                status chip, an amount, a tinted panel and three controls per
-                card, and had stopped being scannable. The amount is not lost:
-                every clearance's fee lands on the one Tax Order of Payment at
-                Review & Submit, which is the screen where money is actually
-                being agreed to.
+                The amount came off these cards once, on the client's
+                instruction: the grid had grown a status chip, a fee, a tinted
+                panel and three controls per card, and had stopped being
+                scannable. The argument for removing it was that nothing was
+                lost, because every clearance's fee landed on the one Tax Order
+                of Payment at Review & Submit — a later screen where the money
+                was actually agreed to.
+
+                That later screen no longer exists. The Tax Order of Payment has
+                been raised and paid before this stage opens, so Apply IS the
+                moment of commitment and there is nowhere downstream to read the
+                price. It is back as one quiet line, in the same weight as the
+                form note beside it, not as the panel that was thrown out.
+              */}
+              <p className="tnum mt-2 text-xs font-semibold text-ink-secondary">
+                {feeAmount(row.fee_preview)}
+              </p>
+
+              {/*
+                One line, and only for the cards it is true of: pressing Apply
+                opens that office's own form. That is the single thing about
+                this card a person cannot work out by looking at it.
+
+                It read "Adds its own application form section above" while the
+                sheets were steps of the wizard sitting behind the cards. There
+                is no "above" now — the sheet opens over this grid — so it says
+                what actually happens.
               */}
               {row.has_office_form && (
-                <p className="mt-2 text-xs text-ink-muted">
-                  Adds its own application form section above.
+                <p className="mt-1 text-xs text-ink-muted">
+                  Applying opens this office&rsquo;s own form.
                 </p>
               )}
 
@@ -1219,10 +1389,10 @@ export function ClearanceStage({
             alternatives, and until now only one direction resolved itself.
 
             Stated plainly rather than as a warning. Nothing is destroyed —
-            withdrawing detaches a permit type from a draft whose bill has not
-            been written, and the office sheet's answers are kept — so a red
-            panel here would make a free, reversible change look like the
-            deletion happening in the OTHER dialog, which really is one.
+            withdrawing detaches a permit type, the filing is re-assessed
+            without it, and the office sheet's answers are kept — so a red panel
+            here would make a free, reversible change look like the deletion
+            happening in the OTHER dialog, which really is one.
           */}
           {heldPrompt.state === 'applied' && (
             <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
@@ -1232,7 +1402,7 @@ export function ClearanceStage({
               <p className="mt-1 text-xs leading-relaxed text-blue-800">
                 Your application to{' '}
                 {heldPrompt.permit_type.department?.name ?? 'the issuing office'} is withdrawn, its
-                fee comes off your Tax Order of Payment
+                fee comes off your balance due
                 {heldPrompt.has_office_form ? ', and its form section leaves this application' : ''}
                 . Nothing you have typed into that form is deleted — press Apply again and it is
                 still there.
@@ -1329,7 +1499,7 @@ export function ClearanceStage({
           </p>
           <p className="mt-3 text-center text-sm text-ink-secondary">
             A clearance is either one you already hold or one you are asking this office to issue,
-            never both — and applying adds this office’s fee to your Tax Order of Payment.
+            never both — and applying adds this office’s fee to your balance due.
           </p>
         </ProtoModal>
       )}
@@ -1338,13 +1508,19 @@ export function ClearanceStage({
 }
 
 /**
- * The standalone route, `/applications/:id/clearances`.
+ * The route, `/applications/:id/clearances`.
  *
- * The clearances are a wizard step now, so this is not where they are normally
- * chosen — it is how a filing that has left the applicant's hands shows what
- * was chosen, and says in the server's own words why it can no longer change.
- * It stays writable for a draft, because a draft opened at this address is
- * genuinely still open and refusing it would be a lie the API does not tell.
+ * Not "the standalone route" any more — this is THE place the six are chosen.
+ * It was a secondary view of a decision made inside the wizard; the wizard has
+ * no clearance step now, so every applicant arrives here, and they arrive after
+ * paying for their business permit.
+ *
+ * It stays reachable BEFORE that payment, deliberately, rendering locked. The
+ * alternative was a 404 or a redirect, and both answer "where do I get my
+ * sanitary permit?" with silence. Locked-and-visible answers it: here, this is
+ * what it costs, and this (in the server's words) is what has to happen first.
+ * Whether the controls actually work is `meta.unlocked`'s business, not this
+ * route's.
  */
 export function ClearanceStagePage() {
   const { id = '' } = useParams()
@@ -1398,10 +1574,15 @@ export function ClearanceStagePage() {
       <div className="mb-6 h-px bg-ink/40" />
 
       {/*
-        Item 98's derivation, from the SAVED profile — which is the right one
-        here. This route is how a filing that has left the applicant's hands
-        shows what was chosen, so the declaration on record is the declaration
-        that matters. The wizard passes the one being typed instead.
+        The business comes off the SAVED application, and there is no longer a
+        second caller holding a fresher copy. That used to be the wizard, which
+        passed the profile the applicant was still typing because a category
+        entered thirty seconds ago and not yet autosaved was exactly the case
+        that mattered.
+
+        Nothing is unsaved by the time anyone gets here: this stage opens after
+        the filing has been submitted and paid for, so the record IS the
+        freshest copy. One source, and it is the authoritative one.
       */}
       <ClearanceStage applicationId={application.id} business={carriedOver} />
     </div>

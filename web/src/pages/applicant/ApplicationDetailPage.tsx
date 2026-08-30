@@ -643,26 +643,37 @@ export function ApplicationDetailPage() {
           */}
         {status !== 'draft' && <OfficeVisits app={app} />}
 
-        {/* ── LGU Clearances · what this filing asked for ────────────────
+        {/* ── LGU Clearances · the stage after this filing is paid for ───
           *
-          * The clearances are chosen in the wizard now, as the last step
-          * before Review & Submit, so this is no longer a stage still to come:
-          * it is the record of what was decided. The link goes to the same
-          * screen, which states in the API's own words why the six can no
-          * longer be changed.
+          * A stage still to come, which is what it was before 4 August and is
+          * again. This block briefly described a decision already made in the
+          * wizard ("every one you chose is billed on this filing"), and both
+          * halves of that are now false: nothing is chosen in the wizard, and
+          * nothing is billed until the applicant applies here.
+          *
+          * So the link is forward-looking, and the sentence says the two things
+          * an applicant cannot work out from the filing itself — that applying
+          * costs money, and that the balance is what holds their permit.
           *
           * Shown on a rejected or cancelled filing too, because that screen has
           * a specific sentence for each ("file a new application if you still
           * need these clearances") and a link that quietly disappears when a
-          * filing fails teaches nothing. Not shown on a draft: a draft belongs
-          * in the wizard, where the cards are editable and a read-only copy of
-          * them would be the wrong door.
+          * filing fails teaches nothing.
+          *
+          * Not shown on a draft, and the reason has changed with the flow. It
+          * used to be that a draft belonged in the wizard where the cards were
+          * editable. Now it is that a draft has not been submitted, let alone
+          * paid, so the stage is two events away — and pointing at a locked
+          * screen from the one page where the applicant still has work to do
+          * would be sending them away from it.
           */}
         {status !== 'draft' && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             <p className="mt-1 text-sm text-ink-secondary">
-              Each goes to its own office, and every one you chose is billed on this filing.
+              These open once your Business Permit payment clears. Each goes to its own office, and
+              each one you apply for adds its fee to your balance — your permit is released when
+              that balance reaches zero.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}

@@ -58,29 +58,51 @@ class PaymentController extends Controller
         ]);
 
         /*
-         * One payment is the flow; a second is still allowed to be possible.
+         * TWO payments are the flow, and this endpoint serves both
+         * (docs/clearances-after-payment.md, "one ledger, two moments").
          *
-         * The Tax Order of Payment now covers the whole filing — business
-         * permit and every clearance chosen — and settling it is what moves the
-         * application into review. That is the only payment an applicant should
-         * ever make (docs/clearances-before-payment.md).
+         * The first settles the business permit's Tax Order of Payment and
+         * moves the filing into review — and, the part not visible from here,
+         * opens the LGU clearance stage. Every clearance applied for after that
+         * re-assesses onto the same FeeAssessment, so a balance appears behind
+         * a filing that is already under review, and settling it is the second
+         * payment.
          *
-         * The endpoint is nonetheless not restricted to `pending_payment`, and
-         * that is deliberate rather than left over. An officer can adjust an
-         * assessment upward after payment (WorkflowService::adjustFee), and the
-         * last time this endpoint refused everything outside `pending_payment`
-         * the result was a balance the applicant could see, could not pay, and
-         * which blocked the permit they were waiting for. Refusing a payment
-         * for money the system says is owed is the failure mode worth avoiding.
+         * This is why the endpoint is NOT restricted to `pending_payment`, and
+         * the restriction must not come back. The last build of this design had
+         * it, and the result was a balance the applicant could see, that the
+         * release gate in WorkflowService::approveAndIssue was withholding their
+         * permit over, and that no screen in the product could pay. Refusing
+         * money the system itself says is owed is the failure mode worth
+         * avoiding; an officer adjusting an assessment upward after payment
+         * (WorkflowService::adjustFee) produces the same shape.
          *
-         * A terminal filing is still refused. There is nothing to buy on a
-         * rejected or cancelled application.
+         * `$awaitingFirstPayment` is what distinguishes them, and it has to be
+         * a status test rather than a balance test: on the first payment the
+         * balance and the assessment total are the same number, so a
+         * balance-only rule could not tell "nothing has been paid yet" from
+         * "everything has".
+         *
+         * A CLOSED filing is still refused, and closed here means rejected or
+         * cancelled — not `isTerminal()`, which also covers Approved. That
+         * distinction is load bearing: a clearance may be applied for on an
+         * approved filing (ClearanceService::isUnlocked says so, and says why),
+         * which raises a balance on a filing `isTerminal()` calls closed. The
+         * applicant would then owe money the endpoint refused to take, which is
+         * precisely the unpayable-balance bug named above wearing a different
+         * status. There is genuinely nothing to buy on a rejection.
          */
         $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
         $balanceDue = PermitFees::balance($application->fresh())['balance_due'];
         $awaitingFirstPayment = $application->status === ApplicationStatus::PendingPayment;
 
-        if (! $awaitingFirstPayment && $application->status->isTerminal()) {
+        $closed = in_array(
+            $application->status,
+            [ApplicationStatus::Rejected, ApplicationStatus::Cancelled],
+            true
+        );
+
+        if (! $awaitingFirstPayment && $closed) {
             throw ValidationException::withMessages([
                 'status' => ['This application is closed, so there is nothing left to pay.'],
             ]);

@@ -154,6 +154,10 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
+            // The ticked escape, carried on the create call so a draft opened
+            // from the identify dialog already holds the answer given there
+            // rather than waiting on the follow-up PUT to land.
+            'prior_permit_declared_none' => ['sometimes', 'boolean'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
@@ -180,6 +184,11 @@ class ApplicationController extends Controller
             'title' => $this->cleanTitle($data['title'] ?? null),
             'status' => ApplicationStatus::Draft,
             'prior_permit_id' => $data['prior_permit_id'] ?? null,
+            // Contradictory answers resolve the same way they do in
+            // PriorPermitController: a named permit wins and the escape is not
+            // recorded, so the submit gate can never pass on both at once.
+            'prior_permit_declared_none' => empty($data['prior_permit_id'])
+                && (bool) ($data['prior_permit_declared_none'] ?? false),
             'payment_mode' => $data['payment_mode'] ?? 'annual',
             'fee_profile' => $data['fee_profile'] ?? null,
             ...$this->amendmentAttributes($data, $data['application_type']),
@@ -282,6 +291,41 @@ class ApplicationController extends Controller
         ) {
             throw ValidationException::withMessages([
                 'has_amendments' => ['Choose what is being amended: ownership, location, nature of business, or something else you specify.'],
+            ]);
+        }
+
+        /*
+         * A renewal of nothing is not a renewal.
+         *
+         * `prior_permit_id` is what makes a renewal a renewal and an amendment
+         * an amendment: it names the permit being carried forward or altered.
+         * 749 of 756 renewals in the register carry it. The seven that do not
+         * got there because null was accepted as an answer without anyone ever
+         * having to give it — five on businesses holding no permit at all, one
+         * where the question was simply skipped past, and one written directly
+         * by DemoSeeder.
+         *
+         * The escape is still open and still needed: in year one most renewals
+         * are of permits issued on paper, and those businesses have nothing in
+         * the register to name. But it now has to be TAKEN — the applicant
+         * ticks "no BizTrack permit" — rather than fallen into. That is the
+         * whole difference between the two states this gate can tell apart and
+         * a bare null could not.
+         *
+         * At submit rather than create, for the same reason as the amendment
+         * gate above: drafts autosave half-answered by design. And on the
+         * server as well as in the wizard, because the browser is not the only
+         * way into this endpoint.
+         */
+        if (
+            in_array($application->application_type, [ApplicationType::Renewal, ApplicationType::Amendment], true)
+            && $application->prior_permit_id === null
+            && ! $application->prior_permit_declared_none
+        ) {
+            $verb = $application->application_type === ApplicationType::Renewal ? 'renewing' : 'amending';
+
+            throw ValidationException::withMessages([
+                'prior_permit_id' => ["Say which permit you are {$verb} — pick it from your permits, or tell us this business has no permit issued through BizTrack."],
             ]);
         }
 

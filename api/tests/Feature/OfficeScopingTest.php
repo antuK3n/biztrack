@@ -175,13 +175,26 @@ it('keeps the whole register for BPLO and the super admin', function (string $em
         ->assertOk();
 })->with(['bplo@biztrack.local', 'admin@biztrack.local']);
 
+/** The id of an office by its code — ids are seed data and move. */
+function officeId(string $code): int
+{
+    return Department::where('code', $code)->value('id');
+}
+
 it('shows an office only the message threads on filings it is part of', function () {
     $mine = fileRoutedApplication('Scoping Thread Mine', ['BUSINESS', 'SANITARY']);
     $theirs = fileRoutedApplication('Scoping Thread Theirs', ['BUSINESS', 'FSIC']);
 
+    // A thread is addressed to an office now, so the applicant names one. The
+    // filing boundary under test is unchanged: sanitary cannot even open the
+    // FSIC filing, let alone its correspondence.
     $owner = authAs('owner@biztrack.local');
-    test()->withHeaders($owner)->postJson("/api/v1/applications/{$mine['id']}/messages", ['body' => 'Hello CHO.'])->assertCreated();
-    test()->withHeaders($owner)->postJson("/api/v1/applications/{$theirs['id']}/messages", ['body' => 'Hello BFP.'])->assertCreated();
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$mine['id']}/messages", [
+        'body' => 'Hello CHO.', 'department_id' => officeId('CHO'),
+    ])->assertCreated();
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$theirs['id']}/messages", [
+        'body' => 'Hello BFP.', 'department_id' => officeId('BFP'),
+    ])->assertCreated();
 
     $threads = collect(
         test()->withHeaders(authAs('sanitary@biztrack.local'))
@@ -528,9 +541,29 @@ it('will not let an office record an issuance date on another office’s sheet',
 it('hides another office’s message turn but keeps the applicant’s', function () {
     $app = sharedFiling('Item111 Messages Cafe');
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Applicant speaking'])
-        ->assertCreated();
+    /*
+     * Item 111 was fixed twice. The first fix filtered MESSAGES inside one
+     * shared thread — an office saw the applicant's turns and its own — and
+     * that is what this case used to assert. The thread is scoped to an office
+     * now, so the applicant's turns are addressed too, and this asserts the
+     * stronger thing: what the applicant said to the fire office is no more the
+     * health office's business than what the fire office said back.
+     *
+     * The applicant's word to MY office is still mine to read. An office cannot
+     * review a filing while unable to read what the applicant told it.
+     */
+    $owner = authAs('owner@biztrack.local');
+    test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Applicant to health', 'department_id' => officeId('CHO'),
+        ])->assertCreated();
+    test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Applicant to fire', 'department_id' => officeId('BFP'),
+        ])->assertCreated();
+
+    // An office writes as itself without naming anybody — there is only one
+    // conversation it could possibly be in.
     test()->withHeaders(authAs('fire@biztrack.local'))
         ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Fire office speaking'])
         ->assertCreated();
@@ -544,22 +577,120 @@ it('hides another office’s message turn but keeps the applicant’s', function
     )->pluck('body');
 
     $sanitary = $bodies('sanitary@biztrack.local');
-    expect($sanitary)->toContain('Applicant speaking')
+    expect($sanitary)->toContain('Applicant to health')
         ->and($sanitary)->toContain('Health office speaking')
-        ->and($sanitary)->not->toContain('Fire office speaking');
+        ->and($sanitary)->not->toContain('Fire office speaking')
+        ->and($sanitary)->not->toContain('Applicant to fire');
 
-    // Cuts both ways, and the applicant still reads the whole conversation.
-    expect($bodies('fire@biztrack.local'))->not->toContain('Health office speaking');
+    // Cuts both ways, and the applicant still reads all of their own mail.
+    expect($bodies('fire@biztrack.local'))
+        ->not->toContain('Health office speaking')
+        ->not->toContain('Applicant to health');
     expect($bodies('owner@biztrack.local'))
         ->toContain('Fire office speaking')->toContain('Health office speaking');
+});
+
+it('names the office every message turn belongs to', function () {
+    // A merged transcript is only readable if each turn says who it is with:
+    // the old shared thread's ambiguity was that it did not.
+    $app = sharedFiling('Item111 Addressee Cafe');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Applicant to fire', 'department_id' => officeId('BFP'),
+        ])->assertCreated()
+        ->assertJsonPath('data.department.code', 'BFP');
+
+    $codes = collect(
+        test()->withHeaders(authAs('fire@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data')
+    )->pluck('department.code');
+
+    expect($codes)->toContain('BFP');
+});
+
+it('refuses an applicant writing to an office that is not on their filing', function () {
+    // The client's requirement, and the reason for the whole change: a hidden
+    // option is a UI decision, so the refusal has to be the API's.
+    $app = fileRoutedApplication('Scoping Wrong Office Cafe', ['BUSINESS', 'SANITARY']);
+    $owner = authAs('owner@biztrack.local');
+
+    test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Let me talk to the fire office.', 'department_id' => officeId('BFP'),
+        ])
+        ->assertForbidden()
+        ->assertJsonPath('message', 'That office is not handling this application, so it cannot be messaged about it.');
+
+    // Reading one is refused on the same terms — an empty list would still
+    // confirm the office is reachable.
+    test()->withHeaders($owner)
+        ->getJson("/api/v1/applications/{$app['id']}/messages?department_id=".officeId('BFP'))
+        ->assertForbidden();
+
+    // The offices that ARE on it are accepted, BPLO included: it coordinates
+    // every filing and is who you write to when you do not know who to ask.
+    foreach (['CHO', 'BPLO'] as $code) {
+        test()->withHeaders($owner)
+            ->postJson("/api/v1/applications/{$app['id']}/messages", [
+                'body' => "Question for {$code}.", 'department_id' => officeId($code),
+            ])->assertCreated();
+    }
+});
+
+it('offers an applicant only the offices actually on their filing', function () {
+    $app = fileRoutedApplication('Scoping Offer Cafe', ['BUSINESS', 'SANITARY']);
+
+    $offices = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('meta.offices')
+    );
+
+    // Routed to BPLO and CHO, so those two and no others — a dropdown of every
+    // department in the city would be the wrong shape.
+    expect($offices->pluck('code')->sort()->values()->all())->toBe(['BPLO', 'CHO'])
+        ->and($offices->pluck('can_message')->all())->each->toBeTrue();
+});
+
+it('will not let one office post into another office’s conversation', function () {
+    // The mirror of the read rule. An office that cannot read a conversation
+    // must not be able to put words into it either — writing there would leak
+    // in the other direction, planting the health office's remarks in front of
+    // the applicant under the fire office's heading.
+    $app = sharedFiling('Item111 Cross Post Cafe');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Speaking for the fire office.', 'department_id' => officeId('BFP'),
+        ])->assertForbidden();
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Speaking for myself.', 'department_id' => officeId('CHO'),
+        ])->assertCreated();
+});
+
+it('shows an officer only its own office among a filing’s conversations', function () {
+    $app = sharedFiling('Item111 Offer Cafe');
+
+    $codes = fn (string $email) => collect(
+        test()->withHeaders(authAs($email))
+            ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('meta.offices')
+    )->pluck('code')->sort()->values()->all();
+
+    expect($codes('sanitary@biztrack.local'))->toBe(['CHO'])
+        ->and($codes('fire@biztrack.local'))->toBe(['BFP'])
+        // BPLO coordinates, so it sees every conversation on the filing.
+        ->and($codes('bplo@biztrack.local'))->toBe(['BFP', 'BPLO', 'CHO']);
 });
 
 it('does not quote another office’s message in the inbox preview', function () {
     $app = sharedFiling('Item111 Inbox Cafe');
 
     test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$app['id']}/messages", ['body' => 'Applicant speaking'])
-        ->assertCreated();
+        ->postJson("/api/v1/applications/{$app['id']}/messages", [
+            'body' => 'Applicant speaking', 'department_id' => officeId('CHO'),
+        ])->assertCreated();
     // The newest turn overall belongs to the office that must stay hidden, so an
     // unscoped preview would put it straight on the other office's inbox row.
     test()->withHeaders(authAs('fire@biztrack.local'))
@@ -574,7 +705,10 @@ it('does not quote another office’s message in the inbox preview', function ()
     expect($row)->not->toBeNull()
         ->and($row['last_message']['body'])->toBe('Applicant speaking')
         // The counter is part of the leak: it must count only readable turns.
-        ->and($row['messages_count'])->toBe(1);
+        ->and($row['messages_count'])->toBe(1)
+        // And the row says which office it is with, so the officer knows the
+        // conversation is theirs rather than inferring it from the silence.
+        ->and(collect($row['offices'])->pluck('code')->all())->toBe(['CHO']);
 });
 
 it('refuses an attachment hanging off another office’s message', function () {

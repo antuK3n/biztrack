@@ -32,6 +32,7 @@ import type {
   InspectionResult,
   Message,
   MessageThreadSummary,
+  MessageTranscriptMeta,
   Notification,
   OfficeForm,
   OfficerRequest,
@@ -51,7 +52,6 @@ import type {
   RiskAction,
   RiskBand,
   TimelineEntry,
-  TranscriptMeta,
 } from './types'
 
 /*
@@ -253,6 +253,16 @@ export interface AmendmentAnswers {
   amendment_other?: string | null
 }
 
+/**
+ * Which permit a renewal or amendment is for — and, when it is for none of
+ * them, whether that was said or merely never asked.
+ */
+export interface PriorPermitChoice {
+  prior_permit_id: number | null
+  prior_permit: Permit | null
+  declared_none: boolean
+}
+
 export const applications = {
   /**
    * Filings visible to the caller, newest first.
@@ -278,6 +288,13 @@ export const applications = {
     permit_type_ids: number[]
     /** Set on renewal/amendment to link the prior permit (v2). */
     prior_permit_id?: number
+    /**
+     * The applicant's ticked "this business has no BizTrack permit" — the
+     * year-one escape for permits issued on paper. Sent instead of, never
+     * alongside, `prior_permit_id`: submit accepts either, and a bare null is
+     * no longer an answer to the question.
+     */
+    prior_permit_declared_none?: boolean
     /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
     fee_profile?: FeeProfile
     /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
@@ -302,13 +319,19 @@ export const applications = {
    * business holds several permits with different expiry dates, so the choice
    * outlives the moment the draft was created and has to be re-readable.
    */
-  priorPermit: (id: number) =>
-    unwrap<{ prior_permit_id: number | null; prior_permit: Permit | null }>(
-      api.get(`/applications/${id}/prior-permit`),
-    ),
-  setPriorPermit: (id: number, priorPermitId: number | null) =>
-    unwrap<{ prior_permit_id: number | null; prior_permit: Permit | null }>(
-      api.put(`/applications/${id}/prior-permit`, { prior_permit_id: priorPermitId }),
+  priorPermit: (id: number) => unwrap<PriorPermitChoice>(api.get(`/applications/${id}/prior-permit`)),
+  /**
+   * `declaredNone` is what tells a skipped question from an answered one. Both
+   * used to arrive as `prior_permit_id: null`, so a renewal nobody had asked
+   * looked exactly like a renewal of a paper permit — which is how seven
+   * renewals of nothing reached the register.
+   */
+  setPriorPermit: (id: number, priorPermitId: number | null, declaredNone = false) =>
+    unwrap<PriorPermitChoice>(
+      api.put(`/applications/${id}/prior-permit`, {
+        prior_permit_id: priorPermitId,
+        declared_none: priorPermitId === null && declaredNone,
+      }),
     ),
   reject: (id: number, reason: string) =>
     unwrap<Application>(api.post(`/applications/${id}/reject`, { reason })),
@@ -317,27 +340,43 @@ export const applications = {
     unwrap<FeeAssessment>(api.post(`/applications/${id}/fee/adjust`, { line_items, total_amount })),
 }
 
-/* ── LGU Clearances (the last wizard step before Review & Submit) ─────── */
+/* ── LGU Clearances (the stage that opens once the first payment clears) ── */
 
 /**
  * The six supporting clearances for one application.
  *
- * Contract: docs/clearances-before-payment.md. Every mutation here resolves to
- * the WHOLE list rather than the row it touched, even though the API also
- * returns the row on its own. That is deliberate and it is about money: each
- * card quotes what applying will add to the Tax Order of Payment, computed
- * through `FeeCalculator::assess`, and the Fire Code fee is 10% of the mayor's
- * permit plus regulatory fees (RA 9514) — so applying for one clearance can
- * move ANOTHER clearance's `fee_preview`. Patching the single returned row
- * into local state would leave the other five quoting prices the assessment no
- * longer agrees with, and a wrong price on a button that spends the
- * applicant's money is the worst kind of stale.
+ * Contract: docs/clearances-after-payment.md, "API contract for the rebuild".
+ *
+ * Every mutation here resolves to the WHOLE list-plus-meta rather than the row
+ * it touched, even though the API also returns the row on its own. That is
+ * deliberate and it is about money, for two separate reasons that both bite.
+ *
+ *   The FEES INTERACT. Each card quotes what applying will add, computed
+ *   through `FeeCalculator::assess`, and the Fire Code fee is 10% of the
+ *   mayor's permit plus regulatory fees (RA 9514) — so applying for one
+ *   clearance moves ANOTHER clearance's `fee_preview`. Patching the single
+ *   returned row into local state would leave the other five quoting prices
+ *   the assessment no longer agrees with, and a wrong price on a button that
+ *   spends the applicant's money is the worst kind of stale.
+ *
+ *   The BALANCE lives in `meta`, not in any row. Applying accrues, so every
+ *   mutation changes `total_assessed` and `balance_due` — and the balance is
+ *   the thing holding the permit. A response that updated a card but not the
+ *   ledger above it would show a fee charged and a balance that had not moved.
+ *
+ * `apply` is the one to be careful with. The doc describes it as "re-assesses,
+ * returns the clearance row + new balance": it is a WRITE that re-prices the
+ * filing, not a selection, which is why the screen confirms before pressing it
+ * over a held copy and why nothing here retries it.
  */
 export const clearances = {
-  /** The six rows plus `meta` (whether the stage is still open to change). */
+  /**
+   * The six rows plus `meta` — the gate (`unlocked`, `locked_reason`) and the
+   * ledger (`total_assessed`, `total_paid`, `balance_due`).
+   */
   list: (applicationId: number) =>
     unwrapMeta<Clearance[], ClearanceMeta>(api.get(`/applications/${applicationId}/clearances`)),
-  /** Ask this office to issue the clearance. Its fee joins the assessment. */
+  /** Ask this office to issue the clearance. Its fee joins the balance due. */
   apply: async (applicationId: number, code: string) => {
     await api.post(`/applications/${applicationId}/clearances/${code}/apply`)
     return clearances.list(applicationId)
@@ -425,33 +464,60 @@ export const messages = {
   threadsPage: (params: PageParams = {}) =>
     unwrapPaged<MessageThreadSummary>(api.get('/message-threads', { params })),
   /**
-   * One conversation, oldest message first.
+   * One conversation, oldest message first, with its meta.
+   *
+   * `departmentId` picks the office the conversation is with. Omitting it asks
+   * for the whole filing — every conversation the reader may open, merged in
+   * time order — which for an officer is their own office's and nothing else.
+   *
+   * The meta is not optional detail: it carries `offices`, the only list of
+   * offices this applicant may open a conversation with, so there is no
+   * bare-array variant of this call. One that dropped the meta would leave the
+   * caller unable to say who the transcript is with.
    *
    * Bounded to the most recent `meta.window` turns rather than page one of an
    * ascending list, so the transcript always ends on the latest message.
    */
-  list: (applicationId: number) =>
-    unwrap<Message[]>(api.get(`/applications/${applicationId}/messages`)),
-  /** Same conversation, keeping the transcript meta (total vs returned). */
-  listWithMeta: async (applicationId: number): Promise<{ data: Message[]; meta: TranscriptMeta }> => {
-    const res = await api.get<{ data: Message[]; meta: TranscriptMeta }>(
+  listWithMeta: async (
+    applicationId: number,
+    departmentId?: number | null,
+  ): Promise<{ data: Message[]; meta: MessageTranscriptMeta }> => {
+    const res = await api.get<{ data: Message[]; meta: MessageTranscriptMeta }>(
       `/applications/${applicationId}/messages`,
+      { params: departmentId ? { department_id: departmentId } : {} },
     )
     return { data: res.data.data, meta: res.data.meta }
   },
-  /** Send a message; optional attachment is posted as multipart. */
-  send: (applicationId: number, body: string, attachment?: File | null) => {
+  /**
+   * Send a message; optional attachment is posted as multipart.
+   *
+   * `departmentId` is the addressee. Leaving it off is not a shortcut for "any
+   * office" — the API addresses it to the sender's own office, or to BPLO for
+   * an applicant, and refuses outright anything that is not on the filing.
+   */
+  send: (
+    applicationId: number,
+    body: string,
+    attachment?: File | null,
+    departmentId?: number | null,
+  ) => {
     if (attachment) {
       const form = new FormData()
       form.append('body', body)
       form.append('attachment', attachment)
+      if (departmentId) form.append('department_id', String(departmentId))
       return unwrap<Message>(
         api.post(`/applications/${applicationId}/messages`, form, {
           headers: { 'Content-Type': 'multipart/form-data' },
         }),
       )
     }
-    return unwrap<Message>(api.post(`/applications/${applicationId}/messages`, { body }))
+    return unwrap<Message>(
+      api.post(`/applications/${applicationId}/messages`, {
+        body,
+        ...(departmentId ? { department_id: departmentId } : {}),
+      }),
+    )
   },
   /** Attachment save-to-disk (the resource's download_url carries no bearer). */
   attachmentDownload: (id: number, filename: string) =>

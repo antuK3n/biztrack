@@ -1212,7 +1212,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const officeRecord = [
     { label: 'Date of Receipt', value: formatDate(app.submitted_at) },
     { label: 'Received by', value: data.officer?.name ?? '' },
-    { label: 'Business Account No. (BAN)', value: business.ban ?? '' },
+    { label: 'Business Account No.', value: business.ban ?? '' },
     { label: 'PSIC Code', value: business.lines?.[0]?.psic_code?.code ?? '' },
   ]
   const feeValue = feeInput ?? String(app.fee_assessment?.total_amount ?? '')

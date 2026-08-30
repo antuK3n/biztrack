@@ -137,6 +137,38 @@ final class ApplicationVisibility
     }
 
     /**
+     * May this reader see ONE office's conversation with the applicant?
+     *
+     * The fourth instance of the same shape — office forms, issued clearances,
+     * inspection findings, and now messages — and deliberately the same code,
+     * for the same reason readsPermitOf delegates here: it would be incoherent
+     * to hide the FSIC questionnaire and the FSIC itself from the sanitary
+     * officer while letting them read what the fire office wrote to the
+     * applicant about it. One boundary, stated once, or the offices drift apart
+     * again the way they did between OfficeFormController and
+     * ApplicationResource.
+     *
+     * The three readers who keep everything are unchanged: the applicant (every
+     * one of these conversations is theirs, and they are the other side of all
+     * of them), BPLO and the super admin (ANY_OFFICE — BPLO cannot issue the
+     * mayor's permit without seeing what each office asked for), and the office
+     * the thread is with.
+     *
+     * Fails closed on a null department on either side: a reviewer with no
+     * office matches nothing, which is the posture scope() takes.
+     *
+     * NOTE this answers "may you READ it", which is not the same question as
+     * "may the applicant ADDRESS it". Reading is settled by the thread that
+     * exists; addressing is settled by whether the office is on the filing at
+     * all, and that lives in MessageController::addressableOffices() because it
+     * is a fact about the filing's routing rather than about the reader.
+     */
+    public static function readsThreadOf(?User $user, ?int $threadDepartmentId): bool
+    {
+        return self::readsOfficeSheet($user, $threadDepartmentId);
+    }
+
+    /**
      * May this reader see the WRITTEN-UP half of one site visit? (INS-8)
      *
      * The third instance of the same shape, and the third time the rule was

@@ -15,9 +15,11 @@ use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\Payment;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\User;
 use App\Support\Audit;
 use App\Support\Numbering;
+use App\Support\PermitFees;
 use App\Support\Ra11032;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -73,6 +75,20 @@ class WorkflowService
      * see FeeCalculator). Applications without a fee profile — or profiles
      * matching no rules — fall back to the legacy per-permit-type flat fee
      * so pre-existing data keeps working.
+     *
+     * Called at TWO moments now, and it needs to know about neither of them.
+     * `submit()` calls it over the permit types the wizard filed — the business
+     * permit alone, since the clearance stage is shut until payment — and
+     * ClearanceService::apply/unapply call it again over the permit types the
+     * filing carries after a clearance was added or withdrawn. Because
+     * FeeCalculator gates every rule on the requested permit types, the second
+     * assessment differs from the first by exactly that clearance's lines.
+     *
+     * `updateOrCreate` on `application_id` is what makes the accrual work: one
+     * assessment row per filing, rewritten in place, so `total_assessed` minus
+     * the payments ledger is the balance. A second row would leave every reader
+     * of "what does this filing cost" — the receipt, the fee panel, the
+     * balance, the revenue analytics — with two answers.
      */
     public function assessFees(Application $app): FeeAssessment
     {
@@ -99,7 +115,16 @@ class WorkflowService
         );
     }
 
-    /** draft → submitted → pending_payment (auto fee assessment). */
+    /**
+     * draft → submitted → pending_payment (auto fee assessment).
+     *
+     * The assessment written here covers the BUSINESS PERMIT alone, and that is
+     * the ordering rather than a property of this method: the clearance stage
+     * is locked until the first payment clears, so a filing arriving here
+     * carries the outcome permit and nothing else. Anything a clearance costs
+     * joins this same assessment later, when the applicant applies for it
+     * (ClearanceService::apply).
+     */
     public function submit(Application $app): Application
     {
         return DB::transaction(function () use ($app) {
@@ -293,23 +318,33 @@ class WorkflowService
     }
 
     /**
-     * Payment completed → under_review → route to owning departments.
+     * A payment cleared. Which payment it was decides what happens next.
      *
-     * One payment, once, and nothing after it. There used to be a second
-     * branch here: a later payment meant a clearance balance being settled, and
-     * it called `releaseIfSettled()` to retry an issuance the balance gate in
-     * approveAndIssue() had refused. Both are gone with the accrual — the
-     * clearances are chosen before submission now, so the Tax Order of Payment
-     * settled here covers the whole filing and no balance can appear behind it.
-     * Do not reintroduce either; see docs/clearances-before-payment.md.
+     * TWO branches, because there are two moments money changes hands
+     * (docs/clearances-after-payment.md, "one ledger, two moments"):
+     *
+     *  - the FIRST payment settles the business permit's Tax Order of Payment.
+     *    The filing moves into review, its offices are routed, and — the part
+     *    that is not visible from here — ClearanceService::isUnlocked starts
+     *    answering true, so the six clearances open.
+     *  - a LATER payment settles a balance raised by a clearance applied for
+     *    after that. Nothing about the filing's status changes: it is already
+     *    under review, or for inspection, or sitting with every office signed
+     *    off and its permits withheld by the release gate. That last case is
+     *    why `releaseIfSettled()` is called — the offices have finished, the
+     *    money has now landed, and nothing else in the system will ever look
+     *    at this filing again to notice. Without it the applicant pays the
+     *    balance and their permit stays unissued forever.
      */
     public function onPaymentCompleted(Payment $payment): void
     {
-        if ($payment->application->status !== ApplicationStatus::PendingPayment) {
+        $app = $payment->application;
+
+        if ($app->status !== ApplicationStatus::PendingPayment) {
+            $this->releaseIfSettled($app);
+
             return;
         }
-
-        $app = $payment->application;
 
         DB::transaction(function () use ($app) {
             $this->transition($app, ApplicationStatus::UnderReview, 'Payment received. Routed for review.');
@@ -320,15 +355,16 @@ class WorkflowService
     /**
      * One assignment per department that owns a requested permit type.
      *
-     * This is where every clearance is routed to its office, because by the
-     * time it runs the applicant has chosen them all: the clearance stage is
-     * the last step before Review & Submit, and its permit types are on the
-     * filing before this is reached. ClearanceService::apply deliberately does
-     * NOT route at the moment a card is ticked — `assigned_at` is the start of
-     * the office's service-time clock that ProcessingTimeAnalytics,
-     * StaffingSimulation and DashboardAnalytics all measure, and starting it
-     * inside somebody's unfinished draft would charge the office for the days
-     * the applicant spent typing.
+     * Runs once, when the first payment clears, over whatever the filing asks
+     * for at that moment — which under this ordering is the business permit
+     * alone. Every clearance is applied for afterwards and routes itself
+     * (routeClearance below), so this is no longer the only door into the
+     * assignments table and must not be written as though it were.
+     *
+     * `firstOrCreate` rather than `create` for that reason: the two paths can
+     * legitimately want the same office. Re-routing an office that already has
+     * a row would reset `assigned_at` and hand it a fresh service-time clock on
+     * work it started days ago.
      */
     public function routeToDepartments(Application $app): void
     {
@@ -342,17 +378,90 @@ class WorkflowService
         }
     }
 
-    /*
-     * `routeClearance()` and `withdrawClearanceRouting()` used to sit here.
+    /**
+     * Route ONE clearance to its office, at the moment it is applied for.
      *
-     * They raised and deleted a single office's assignment at the moment a
-     * clearance card was ticked or unticked, which was necessary while the
-     * stage opened after payment — the filing was already under review, so
-     * routeToDepartments had been and gone. It is not necessary now: the
-     * clearances are all chosen before submission, so the set of offices is
-     * complete by the time routeToDepartments runs, and un-applying leaves
-     * nothing behind to delete.
+     * Rule 7 of docs/clearances-after-payment.md. The clearance stage opens
+     * after payment, so `routeToDepartments` has already been and gone by the
+     * time a clearance is chosen; without this the applicant would be billed
+     * for a clearance no office was ever told to work.
+     *
+     * Only on a filing whose first payment has cleared, which is also the only
+     * state ClearanceService lets `apply` be reached in. Stated here as well
+     * because `assigned_at` is the start of the office's measured service time
+     * (ProcessingTimeAnalytics, StaffingSimulation, DashboardAnalytics), and a
+     * future caller that routed an unpaid filing would silently charge the
+     * office for every day before the money arrived. The gate belongs next to
+     * the clock it protects.
+     *
+     * `firstOrCreate`, so a clearance whose office is already on the filing
+     * joins that office's existing queue item rather than resetting its clock.
      */
+    public function routeClearance(Application $app, PermitType $type): void
+    {
+        if ($type->issuing_department_id === null || ! PermitFees::hasClearedPayment($app)) {
+            return;
+        }
+
+        ApplicationAssignment::firstOrCreate(
+            ['application_id' => $app->id, 'department_id' => $type->issuing_department_id],
+            ['status' => AssignmentStatus::Pending, 'assigned_at' => now()]
+        );
+    }
+
+    /**
+     * Un-apply: take that office's assignment back off the filing.
+     *
+     * Two refusals, and both are about not deleting something real:
+     *
+     *  - another permit type still on the filing issues from the same office.
+     *    Assignments are keyed per DEPARTMENT, not per permit type, so deleting
+     *    the row would take the other clearance's review with it. Every seeded
+     *    clearance has its own office today, so this is defence against a
+     *    future LGU's seed rather than a live case — but the failure it
+     *    prevents is an office silently losing a live queue item.
+     *  - the office has already picked the work up. `officeHasActed` in
+     *    ClearanceService refuses the withdrawal upstream for exactly this, so
+     *    reaching here with a started assignment means a caller bypassed it;
+     *    the remarks an officer has typed are not something a cancel button
+     *    gets to erase.
+     */
+    public function withdrawClearanceRouting(Application $app, PermitType $type): void
+    {
+        if ($type->issuing_department_id === null) {
+            return;
+        }
+
+        $app->loadMissing('permitTypes');
+        $stillNeeded = $app->permitTypes
+            ->contains(fn (PermitType $pt) => $pt->issuing_department_id === $type->issuing_department_id);
+        if ($stillNeeded) {
+            return;
+        }
+
+        ApplicationAssignment::where('application_id', $app->id)
+            ->where('department_id', $type->issuing_department_id)
+            ->where('status', AssignmentStatus::Pending->value)
+            ->delete();
+    }
+
+    /**
+     * The balance cleared — release permits the gate was holding, if any.
+     *
+     * The counterpart to the release gate in approveAndIssue(). The offices
+     * finish their reviews on their own schedule and the applicant settles the
+     * balance on theirs, so either can be the last to happen; whichever it is
+     * has to be the one that issues. `isFullyCleared` already asks both
+     * questions — every review done, every visit passed, nothing outstanding —
+     * so this is a re-ask of the same question at the other moment, and not a
+     * second copy of the rule.
+     */
+    public function releaseIfSettled(Application $app): void
+    {
+        if ($this->isFullyCleared($app)) {
+            $this->approveAndIssue($app);
+        }
+    }
 
     /**
      * A filing may not be approved until somebody has said which tier it is.
@@ -660,6 +769,29 @@ class WorkflowService
             return false;
         }
 
+        /*
+         * Money, and it is a "not yet" here rather than a refusal.
+         *
+         * approveAndIssue() throws on an outstanding balance, because a caller
+         * that asks for permits to be minted on a filing that owes money has
+         * asked for something wrong and should be told. This path is different:
+         * both callers are an officer approving their own review or an
+         * inspector recording their own visit, and neither of them is doing
+         * anything wrong. The filing simply waits — parked in the status it is
+         * already in — until the applicant settles the balance, at which point
+         * onPaymentCompleted → releaseIfSettled() asks this same question again
+         * and issues.
+         *
+         * Getting this wrong is the bug the last build of this design shipped:
+         * with the refusal on this path, approving the last review threw inside
+         * the transaction that had just marked it completed, so the officer got
+         * a 422 and their own sign-off rolled back — an office locked out of
+         * finishing its work by somebody else's unpaid bill.
+         */
+        if (PermitFees::hasOutstandingBalance($app)) {
+            return false;
+        }
+
         $app->load('assignments');
 
         $everyReviewDone = $app->assignments->every(
@@ -915,17 +1047,30 @@ class WorkflowService
     /**
      * Terminal: approve and issue one permit per requested permit type.
      *
-     * There is no balance check here, and there should not be one.
+     * ── The release gate ──────────────────────────────────────────────────────
      *
-     * It briefly refused to release anything while money was owed, because a
-     * clearance applied for after the first payment accrued onto the same
-     * FeeAssessment and something had to make that accrual real. Nothing
-     * accrues now: every clearance is chosen before submission, the filing is
-     * assessed once, and it cannot reach review at all until that one Tax Order
-     * of Payment has cleared. A gate here would only ever fire on an officer
-     * adjusting the assessment upward after payment — which is a conversation
-     * with the applicant, not a reason to withhold a permit the offices have
-     * already approved.
+     * Rule 6 of docs/clearances-after-payment.md, and the reason the accrual is
+     * not decoration: no permit leaves this building while the filing owes
+     * money. A clearance applied for after the first payment adds its office's
+     * fee lines to the assessment, and this is the only thing in the system
+     * that makes the applicant settle them — without it they could apply for a
+     * Fire Safety Inspection Certificate, have BFP work it, collect the
+     * certificate, and never pay the ₱881.
+     *
+     * A hard throw, and a ValidationException so the caller gets a 422 carrying
+     * a sentence rather than a stack trace. Both automatic callers reach this
+     * through isFullyCleared(), which asks the same question first and answers
+     * "not yet" instead — so in ordinary operation this never fires. It is here
+     * for the direct caller: minting a legal instrument is not an act that
+     * should be able to skip the check by choosing a different entry point.
+     *
+     * ASSUMPTION, recorded because the client asked for a best fit rather than
+     * a question: the gate is on the FILING, not per permit. A filing owing
+     * money for its sanitary clearance does not get its Mayor's Permit either,
+     * even though the Mayor's Permit was paid for in full at submission.
+     * Issuing per-permit against a per-filing ledger would need the payments to
+     * be attributed to individual permit types, which the schema does not do
+     * and which nobody has asked for.
      *
      * ── The processing-category gate, restated at the till ────────────────────
      *
@@ -953,6 +1098,16 @@ class WorkflowService
     public function approveAndIssue(Application $app): void
     {
         $this->requireProcessingCategory($app);
+
+        if (PermitFees::hasOutstandingBalance($app)) {
+            $balance = PermitFees::balance($app);
+            throw ValidationException::withMessages([
+                'balance_due' => [
+                    'This application still owes '.PermitFees::peso($balance['balance_due'])
+                    .' on the clearances applied for after payment. Permits are released once the balance is settled.',
+                ],
+            ]);
+        }
 
         DB::transaction(function () use ($app) {
             $app->loadMissing('permitTypes');

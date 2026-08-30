@@ -53,12 +53,34 @@ class Numbering
         ));
     }
 
+    /**
+     * The business's permanent account number — `BP-YYYY-NNNN`.
+     *
+     * The column is still `ban` (Business Account Number, which is what a BPLO
+     * counter actually calls it) but the VALUE no longer says so. It read
+     * `BAN-2026-0001`, and this product has a real blacklist: `businesses`
+     * carries a `status` alongside this column, and the admin side has a
+     * blacklist modal. So the same three letters meant two opposite things in
+     * one system, one of them a sanction — and the one an owner meets first, on
+     * their own record, is the wrong one. "BAN-2026-0001" reads as a notice
+     * that you have been banned.
+     *
+     * `BP-` for Business Permit: unambiguous, and it sits in the same family as
+     * the permit numbers already on the certificate. Not `MCB-`, which is taken
+     * by the Mayor's permit itself — reusing it would blur the account number
+     * with one of the permits hanging off it.
+     *
+     * The column name stays because renaming it is migration risk across 718
+     * rows and every reference to it, for no gain a user can see. If BPLO
+     * confirms they print "BAN" on something the owner receives, the fix is the
+     * on-screen LABEL, not this value — see docs/questions-for-malabon.md.
+     */
     public static function ban(): string
     {
         $year = now()->year;
 
-        return sprintf('BAN-%d-%04d', $year, self::next(
-            Business::withTrashed(), 'ban', "BAN-{$year}-"
+        return sprintf('BP-%d-%04d', $year, self::next(
+            Business::withTrashed(), 'ban', "BP-{$year}-"
         ));
     }
 

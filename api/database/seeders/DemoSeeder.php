@@ -96,7 +96,17 @@ class DemoSeeder extends Seeder
             'gender' => 'F', 'is_primary' => true,
         ]);
 
+        /*
+         * Nena's story opens on a renewal, and what it renewed was one of the
+         * old paper permits — there is nothing earlier in this register for it
+         * to point at. Said out loud rather than left as a bare null: a null
+         * prior permit no longer stands on its own, and this seeder writing one
+         * in silence is where the first of the seven renewals-of-nothing came
+         * from. Demo data that could not pass the submit gate teaches the wrong
+         * shape to everything read off it.
+         */
         $app1 = $this->application($b1, $owner, ApplicationType::Renewal, ApplicationStatus::Approved, [$businessPt], now()->subDays(20));
+        $app1->update(['prior_permit_declared_none' => true]);
         $this->history($app1, [
             [null, 'draft', $owner], ['draft', 'submitted', $owner], ['submitted', 'pending_payment', null],
             ['pending_payment', 'under_review', null], ['under_review', 'approved', $bploStaff],

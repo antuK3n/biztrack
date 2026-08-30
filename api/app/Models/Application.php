@@ -47,6 +47,20 @@ class Application extends Model
          */
         'has_amendments', 'amendment_ownership', 'amendment_location',
         'amendment_nature', 'amendment_other',
+        /*
+         * The applicant saying, in as many words, that there is no BizTrack
+         * permit to point at — their last one was issued on paper by the old
+         * counter process. That is the ordinary case in year one, and the
+         * renewal flow has always allowed `prior_permit_id` to stay null for it.
+         *
+         * What it did not do was tell that apart from never having asked. Both
+         * looked like null, so a renewal that named nothing because the question
+         * was skipped was indistinguishable from one that named nothing because
+         * there was nothing to name — and seven filings in the register are the
+         * first kind wearing the second's clothes. Recording the declaration is
+         * what lets submit refuse silence without also refusing the escape.
+         */
+        'prior_permit_declared_none',
     ];
 
     protected $casts = [
@@ -64,6 +78,7 @@ class Application extends Model
         'amendment_ownership' => 'boolean',
         'amendment_location' => 'boolean',
         'amendment_nature' => 'boolean',
+        'prior_permit_declared_none' => 'boolean',
     ];
 
     /**
@@ -154,9 +169,17 @@ class Application extends Model
         return $this->belongsTo(Permit::class, 'prior_permit_id');
     }
 
-    public function messageThread(): HasOne
+    /**
+     * The conversations on this filing — one per office, never one per filing.
+     *
+     * This was `messageThread(): HasOne` while `message_threads.application_id`
+     * was unique. It is plural now because a filing routed to six offices is
+     * six separate conversations, and the singular relation would have handed
+     * every caller an arbitrary one of them.
+     */
+    public function messageThreads(): HasMany
     {
-        return $this->hasOne(MessageThread::class);
+        return $this->hasMany(MessageThread::class);
     }
 
     public function officerRequests(): HasMany
