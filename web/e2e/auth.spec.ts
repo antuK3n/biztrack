@@ -90,8 +90,15 @@ test('an LGU account is turned away from the citizen portal, and told where to g
   )
 
   expect(result.status).toBe(409)
-  expect(result.body.portal).toBe('staff')
-  expect(String(result.body.message)).toMatch(/staff portal/i)
+  /*
+   * The refusal must not name the other door. It used to ship `portal: 'staff'`
+   * and a message reading "…sign in through the staff portal", which the page
+   * turned into a "Go there now" link. The client asked for a refusal and
+   * nothing more, so the absence is what is asserted — a helpful `portal` key
+   * could be reintroduced tomorrow and nothing else here would catch it.
+   */
+  expect(result.body.portal).toBeUndefined()
+  expect(String(result.body.message)).not.toMatch(/staff|portal|admin/i)
 })
 
 test('a business owner is turned away from the staff portal', async ({ page }) => {

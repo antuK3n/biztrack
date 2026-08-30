@@ -10,7 +10,6 @@ import {
   SESSION_EXPIRED_KEY,
   api,
   homePathFor,
-  loginPathFor,
   portalForPath,
   toApiError,
 } from '../../lib/api'
@@ -42,7 +41,6 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
-  const [wrongPortal, setWrongPortal] = useState(false)
   const formRef = useRef<HTMLFormElement>(null)
   const lastPath = useRef(location.pathname)
 
@@ -64,7 +62,6 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     if (lastPath.current === location.pathname) return
     lastPath.current = location.pathname
     setFormError(null)
-    setWrongPortal(false)
     setSessionExpired(false)
     setErrors({})
   }, [location.pathname])
@@ -90,7 +87,6 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     setLoading(true)
     setFormError(null)
     setSessionExpired(false)
-    setWrongPortal(false)
     try {
       const { data } = await api.post<{ data: { token: string; user: User } }>('/auth/login', {
         email: email.trim(),
@@ -111,13 +107,21 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     } catch (error) {
       const apiError = toApiError(error)
       if (apiError.status === 409) {
-        // Right credentials, wrong door. Send them to the other one.
+        /*
+         * Right credentials, wrong door — refused, and left there.
+         *
+         * This was a warning headed "Use the other sign-in page" with a link
+         * to the other portal. The client asked for it to be an error and
+         * nothing more: a sign-in page should not send somebody to the staff
+         * site, and it should not tell a stranger which site their guess
+         * belongs to. The server now answers both directions identically, so
+         * there is nothing here to key a destination off even if we wanted one.
+         */
         setFormError({
-          variant: 'warning',
-          title: 'Use the other sign-in page',
+          variant: 'error',
+          title: "We couldn't sign you in",
           body: apiError.message,
         })
-        setWrongPortal(true)
       } else if (apiError.status === 429) {
         setFormError({
           variant: 'warning',
@@ -172,27 +176,20 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             For your security, sessions end after 12 hours. Sign in again to continue.
           </Alert>
         )}
+        {/*
+          No cross-portal link here any more. A "Go there now" anchor used to
+          follow the message on a 409, and it was removed on the client's
+          instruction: a refused sign-in should not offer the other site.
+
+          The comment it carried is worth keeping if one ever comes back — it
+          had to be an anchor rather than a <Link>, because the two portals are
+          separate sites with separate sessions and a router push changes the
+          path without remounting, leaving the tab holding one site's store
+          while the address bar claims the other.
+        */}
         {formError && (
           <Alert variant={formError.variant} title={formError.title}>
             {formError.body}
-            {wrongPortal && (
-              <>
-                {' '}
-                {/*
-                  An anchor, not a <Link>. The two portals are separate sites
-                  with separate sessions, and a router push would change the
-                  path without remounting — leaving this tab holding the other
-                  site's store while the address bar claims otherwise. A real
-                  navigation makes the destination bootstrap its own session.
-                */}
-                <a
-                  href={loginPathFor(staff ? 'public' : 'staff')}
-                  className="font-bold text-royal hover:underline"
-                >
-                  Go there now.
-                </a>
-              </>
-            )}
           </Alert>
         )}
 
