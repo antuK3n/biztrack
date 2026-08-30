@@ -117,6 +117,19 @@ fix(apply): ask for capital once, and say what the category actually is
 fix(ui): a placeholder shows the shape of an answer, never an answer
 ```
 
+**No AI attribution. Ever. [J — client instruction, 2026-08-30]**
+
+No `Claude-Session:` trailer, no `Co-Authored-By: Claude`, no "generated with"
+line, no tool name in the subject or body — in commits, PR titles, PR bodies,
+issue comments, or code comments. This holds even when the tool's own defaults
+add one; the client's instruction overrides the default.
+
+The message is about the change, not about what typed it. Attribution tells a
+reader nothing they can act on, and on a repo that is submitted as coursework it
+is noise at best.
+
+Applies to work you did and to work you are relaying from a subagent.
+
 ---
 
 ## 2. The five rules that prevent damage
