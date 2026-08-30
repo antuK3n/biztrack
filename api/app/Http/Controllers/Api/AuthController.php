@@ -162,17 +162,34 @@ class AuthController extends Controller
             return response()->json(['message' => 'Your account is deactivated. Contact the City BPLO.'], 403);
         }
 
-        // Wrong door. Say which one is right, but only after the password has
-        // already checked out, so this can't be used to enumerate staff accounts.
+        /*
+         * Wrong door. Refused, and deliberately without saying which door is
+         * right.
+         *
+         * This used to name the other portal and ship a `portal` field so the
+         * sign-in page could offer a "Go there now" link. The client asked for
+         * that to stop: a refusal should be a refusal, not an invitation to the
+         * other site.
+         *
+         * The same wording answers both directions, which also closes a small
+         * disclosure. Two different sentences told an unauthenticated visitor
+         * on the citizen page that the address they had just typed belongs to
+         * an LGU staff account — a fact about somebody else's account, handed
+         * over for the price of one guess at a password that then failed to
+         * matter. One sentence says only "not here", which is all the person
+         * typing needs and all a stranger should get.
+         *
+         * Still 409 rather than 422: the credentials are correct, so this is a
+         * conflict with where they were used, not a bad password. The status
+         * carries that distinction for the API's own consumers without the
+         * response body spelling it out on screen.
+         */
         $user->loadMissing('roles');
         if ($this->isStaff($user) !== ($portal === 'staff')) {
             RateLimiter::clear($key);
 
             return response()->json([
-                'message' => $portal === 'staff'
-                    ? 'This is the LGU staff sign-in. Business owners sign in on the main BizTrack page.'
-                    : 'LGU staff accounts sign in through the staff portal.',
-                'portal' => $portal === 'staff' ? 'public' : 'staff',
+                'message' => 'This account cannot sign in here.',
             ], 409);
         }
 

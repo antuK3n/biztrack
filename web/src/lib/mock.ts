@@ -192,13 +192,14 @@ function handle(config: InternalAxiosRequestConfig): MockResponse {
       const wantsStaff = body.portal === 'staff'
       const isStaff = !user.roles.includes('business_owner')
       if (isStaff !== wantsStaff) {
+        // One sentence for both directions, and no `portal` hint — see the
+        // note in AuthController. Naming the other door turned a refusal into
+        // an invitation, and the two different sentences told an
+        // unauthenticated visitor which kind of account the address belongs to.
         return {
           status: 409,
           data: {
-            message: wantsStaff
-              ? 'This is the LGU staff sign-in. Business owners sign in on the main BizTrack page.'
-              : 'LGU staff accounts sign in through the staff portal.',
-            portal: wantsStaff ? 'public' : 'staff',
+            message: 'This account cannot sign in here.',
             errors: {},
           },
         }

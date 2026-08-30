@@ -24,14 +24,29 @@ it('lets an officer in through the staff portal', function () {
     ])->assertOk()->assertJsonPath('data.user.email', 'bplo@biztrack.local');
 });
 
-it('turns staff away from the public sign-in and names the right door', function () {
+/*
+ * These three used to assert the opposite of what they assert now.
+ *
+ * The refusal named the other door and shipped a `portal` field so the sign-in
+ * page could offer a "Go there now" link. The client asked for that to stop —
+ * a refused sign-in should not invite anyone to the other site — so the tests
+ * that pinned the hint now pin its absence, which is the part that can regress
+ * silently: a helpful `portal` key could be added back tomorrow and nothing
+ * else in the suite would notice.
+ *
+ * The identical wording in both directions is the second half of it. Two
+ * different sentences told an unauthenticated visitor which KIND of account an
+ * address belongs to, on the strength of a password that then went unused.
+ */
+it('turns staff away from the public sign-in without naming the other door', function () {
     $this->postJson('/api/v1/auth/login', [
         'email' => 'bplo@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'public',
     ])
         ->assertStatus(409)
-        ->assertJsonPath('portal', 'staff');
+        ->assertJsonMissingPath('portal')
+        ->assertJsonPath('message', 'This account cannot sign in here.');
 });
 
 it('turns the super admin away from the public sign-in', function () {
@@ -39,7 +54,9 @@ it('turns the super admin away from the public sign-in', function () {
         'email' => 'admin@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'public',
-    ])->assertStatus(409)->assertJsonPath('portal', 'staff');
+    ])
+        ->assertStatus(409)
+        ->assertJsonMissingPath('portal');
 });
 
 it('turns a business owner away from the staff sign-in', function () {
@@ -49,7 +66,25 @@ it('turns a business owner away from the staff sign-in', function () {
         'portal' => 'staff',
     ])
         ->assertStatus(409)
-        ->assertJsonPath('portal', 'public');
+        ->assertJsonMissingPath('portal');
+});
+
+it('answers both wrong doors with the same sentence', function () {
+    // The disclosure this closes: a different message per direction is a
+    // readable signal about an account the caller has not authenticated as.
+    $staffOnPublic = $this->postJson('/api/v1/auth/login', [
+        'email' => 'bplo@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'public',
+    ])->assertStatus(409)->json('message');
+
+    $ownerOnStaff = $this->postJson('/api/v1/auth/login', [
+        'email' => 'owner@biztrack.local',
+        'password' => 'biztrack1',
+        'portal' => 'staff',
+    ])->assertStatus(409)->json('message');
+
+    expect($ownerOnStaff)->toBe($staffOnPublic);
 });
 
 it('defaults to the public portal when none is given', function () {
