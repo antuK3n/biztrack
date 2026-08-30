@@ -89,9 +89,9 @@ If the developer declines, drop it — do not re-ask on the same piece of work.
 
 | Branch | |
 |---|---|
-| `main` | protected; client-only |
-| `dev` | shared working branch |
-| `demo` | **pinned**; what the tester tunnel serves |
+| `main` | **protected on GitHub [V]** — PRs required, force-push and deletion blocked, linear history. Client merges. |
+| `dev` | shared working branch; **what the tunnel deploys from** |
+| `demo` | **pinned**; fast-forwarded from `dev`, never from `main` |
 | `backup/all-work-c50fbb4` | 17 commits, explicit backup — do not delete |
 | `feat/demo-autofill` | PR #50 **closed, not merged** — holds real work |
 
@@ -352,7 +352,16 @@ Builds the **pinned `demo` worktree** as a bundle — not the dev server — ser
 Laravel on `:8082` with `APP_DEBUG=false` and `vite preview` on `:5180`, then
 opens a Cloudflare quick tunnel.
 
-- Fast-forward first: `git -C ../biztrack-demo merge --ff-only main`
+- **Always deploy from `dev`. Never from `main` unless the client says so
+  explicitly. [J — client instruction, 2026-08-30]**
+
+  ```bash
+  git -C ../biztrack-demo merge --ff-only dev
+  ```
+
+  `main` is the reviewed, merged history and moves only when the client merges a
+  PR; `dev` is what is actually being tested. Deploying `main` would put testers
+  on work that is by definition older than the work they are being asked to test.
 - **A redeploy drops every open tester session and mints a new URL.** Confirm
   before doing it unless asked.
 - `APP_DEBUG=false` stays off while the tunnel is public — a stack trace on a

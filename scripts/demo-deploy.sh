@@ -42,9 +42,20 @@ listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 # and every grep for a port silently finds nothing. A detector that always
 # answers "no tunnel" would send this script straight back to the guesswork
 # below, which is the failure it exists to prevent.
+# Matches `localhost` as well as `127.0.0.1`, because the two scripts that raise
+# a tunnel disagree on how to spell the loopback: demo-up.sh passes
+# `http://localhost:5180`, this script passes `http://127.0.0.1:$NEW_WEB`.
+# Matching only the dotted form made a tunnel raised by demo-up.sh invisible
+# here, so LIVE_WEB came back empty and — under `set -euo pipefail` — the empty
+# pipeline exited the whole deploy with no message at all. A deploy that does
+# nothing and says nothing is worse than one that fails loudly.
+#
+# `|| true` for the same reason: grep exits 1 when it matches nothing, which is
+# the ordinary cold-start case and must not be fatal.
 tunnelled() {
   ps -eo pid,command 2>/dev/null | grep "[c]loudflared tunnel --url" \
-    | grep -oE '127\.0\.0\.1:(5180|5181)' | grep -oE '5180|5181' | head -1
+    | grep -oE '(127\.0\.0\.1|localhost):(5180|5181)' \
+    | grep -oE '5180|5181' | head -1 || true
 }
 
 # Which slot is serving now? Default to B when nothing is up, so a cold start
