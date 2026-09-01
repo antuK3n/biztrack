@@ -15,9 +15,16 @@ import type { Barangay } from '../../lib/types'
  * geometry and no georeference we can compute against, so there is no honest way
  * to turn a pin or a street address into "your lot is C-2". Tracing polygons off
  * pixels would produce an answer, and a wrong one would tell an applicant their
- * site conforms when the city says it does not — which is the failure the
- * comment on MALABON_BOUNDS in ApplyWizard refuses for the city boundary, for
- * the same reason.
+ * site conforms when the city says it does not.
+ *
+ * Note that having real boundaries now changes nothing here. `lib/malabonGeo.ts`
+ * carries city and barangay polygons, so a pin can be placed in a barangay — but
+ * a barangay is not a zone. The zones are the coloured areas WITHIN each sheet,
+ * and those are still only pixels. And even with zone polygons the answer would
+ * not follow: the ordinance itself cannot be resolved into a conformance verdict
+ * (`docs/zoning-ordinance/README.md` sets out the four independent reasons, from
+ * a Fishpond Zone that lists no uses at all to inheritance chains that omit a
+ * zone). Better geometry moves this no closer to a verdict.
  *
  * So: no verdict, no "your zone is", no conforming/non-conforming, no colour
  * that reads as a pass. The list is a list of what the barangay contains

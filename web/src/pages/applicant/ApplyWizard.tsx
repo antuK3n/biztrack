@@ -2701,6 +2701,16 @@ export function ApplyWizard() {
       priorPermitId,
       renewablePermits,
       amendmentChosen,
+      /*
+       * The barangay check reads this, so it belongs here.
+       *
+       * It happens to change in lockstep with `form.barangay_id`, which is
+       * already a dependency, so leaving it out worked by luck rather than by
+       * design — and only for as long as `barangayName` stays derived from the
+       * form. If it ever comes from somewhere else the gate would go stale and
+       * keep refusing a barangay the applicant has already corrected.
+       */
+      barangayName,
     ],
   )
 

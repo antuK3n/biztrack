@@ -590,9 +590,13 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
    * honest check is whether the point is anywhere near the city — and the
    * message must not imply more than that was looked at.
    */
-  await page.getByRole('checkbox').first().check()
-  await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  /*
+   * Through the trade picker, not just past consent. The map is inert until a
+   * line of business is chosen, so a test that clicks it first is clicking a
+   * locked map and would pass on the wrong reason — no refusal, because no
+   * pin was ever attempted.
+   */
+  await goToZoningStep(page)
 
   /*
    * By class, not by its accessible name, because it has none: MapPicker sets
@@ -623,6 +627,190 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   // Never claim a check that was not made.
   await expect(refusal).not.toContainText(/water|river|sea|zoning verdict/i)
   await expect(page.getByText(/pinned at/i)).toBeHidden()
+})
+
+test('a neighbouring city inside the old bounding box is refused', async ({ page }) => {
+  /*
+   * The regression this exists to hold down. The check used to be a rectangle
+   * — 14.645–14.700 N, 120.930–120.985 E — and Caloocan's Monumento at
+   * 14.6540/120.9840 sits inside it, so the form accepted it. A tester found
+   * that by pinning Caloocan and Valenzuela.
+   *
+   * Driven through the page's own module rather than the map, because clicking
+   * a specific lat/lng is not something Playwright can do — pixel-to-coordinate
+   * depends on zoom and viewport, and a test that computed it would be
+   * asserting its own arithmetic. This asserts the predicate the click handler
+   * and the step gate both call.
+   */
+  const verdicts = await page.evaluate(async () => {
+    const geo = await import('/src/lib/malabonGeo.ts')
+    return {
+      // All four corners of the old box, and two real neighbouring cities.
+      monumento: geo.withinMalabon(14.654, 120.984),
+      valenzuela: geo.withinMalabon(14.7, 120.97),
+      boxNE: geo.withinMalabon(14.699, 120.984),
+      boxSW: geo.withinMalabon(14.646, 120.931),
+      // And a real Malabon address east of where the old box stopped.
+      cityHall: geo.withinMalabon(14.6572, 120.9573),
+    }
+  })
+
+  expect(verdicts.monumento).toBe(false)
+  expect(verdicts.valenzuela).toBe(false)
+  expect(verdicts.boxNE).toBe(false)
+  expect(verdicts.boxSW).toBe(false)
+  // The point of the change is not "refuse more" — it is "refuse the right set".
+  expect(verdicts.cityHall).toBe(true)
+})
+
+test('the map does not take a pin until a line of business is chosen, and says so', async ({
+  page,
+}) => {
+  /*
+   * The zoning verdict is given against a trade, not a coordinate — the step's
+   * own copy says so — so a pin dropped before the trade answers half a
+   * question. The lock has to be visible and explained, not just inert: a map
+   * that silently ignores clicks reads as broken.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await expect(map).toBeVisible()
+
+  // The map is still SHOWN — it is the explanation of what is being asked for.
+  // Hiding it until a trade is picked would make the step look empty.
+  await expect(page.getByText(/choose your line of business above/i)).toBeVisible()
+
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  /*
+   * And it opens once the trade exists. Same click, different outcome — which
+   * is what proves the lock was the cause and not some unrelated failure to
+   * register the click.
+   */
+  const search = page.getByLabel(/search for the one line of business/i)
+  await search.click()
+  await search.fill('sari-sari')
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+  await page.locator('#psic-results button').first().click()
+
+  await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+})
+
+test('a pin that contradicts the chosen barangay is refused, and names both', async ({ page }) => {
+  /*
+   * The checklist asked that mismatched barangays not be allowed. The message
+   * has to name the barangay the pin actually landed in, or the applicant is
+   * told they are wrong and left to guess where.
+   */
+  await goToZoningStep(page)
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  // Centre of the map is Malabon City Hall, which is in Longos.
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+
+  /*
+   * Now claim a different barangay and try to leave. The pin has not moved, so
+   * the click handler never re-runs — this is exactly the ordering that would
+   * slip past a check living only in onPick, and it is the ordering an
+   * applicant who pins first and fills the address afterwards will use.
+   */
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Tugatog' })
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+
+  /*
+   * The step will not let go. Asserted as "Next is unavailable and the reason
+   * is on screen" rather than by clicking it — with every other field answered,
+   * this mismatch is the only thing holding the step, so a disabled Next here
+   * means the barangay check and nothing else.
+   */
+  const next = page.getByRole('button', { name: /^next$/i })
+  await expect(next).toBeDisabled()
+  const stillNeeded = page.getByText(/still needed on this part/i)
+  await expect(stillNeeded).toBeVisible()
+  // Names both sides of the disagreement: the one claimed, and the one the pin
+  // is really in. Either could be the mistake, and the applicant picks.
+  await expect(stillNeeded).toContainText(/Tugatog/)
+  await expect(stillNeeded).toContainText(/Longos/)
+
+  // Correcting the barangay to the one the pin is actually in lets it through,
+  // which is what proves the block was the barangay and not a stuck form.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(next).toBeEnabled()
+  await next.click()
+  await page.getByRole('button', { name: /proceed to application/i }).click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test('the map offers satellite imagery as well as streets', async ({ page }) => {
+  /*
+   * Many Malabon alleys are unnamed on OSM, so for a lot of applicants the roof
+   * is the only thing they can recognise. Streets stay the default because it
+   * is the layer that names things.
+   */
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  /*
+   * Leaflet's layers control renders collapsed — the radios exist in the DOM
+   * but are hidden behind a stack icon until the pointer is over it, so
+   * getByRole finds nothing without this. Hovering is what a user does, so
+   * driving it that way also proves the control is actually reachable and not
+   * merely present.
+   */
+  await page.locator('.leaflet-control-layers').hover()
+  await expect(page.locator('.leaflet-control-layers-expanded')).toBeVisible()
+
+  const streets = page.getByRole('radio', { name: /street map/i })
+  const satellite = page.getByRole('radio', { name: /satellite/i })
+  await expect(streets).toBeChecked()
+  await expect(satellite).not.toBeChecked()
+
+  await satellite.check()
+  await expect(satellite).toBeChecked()
+  // Esri tiles, and the attribution that using them is conditional on.
+  await expect(page.locator('img.leaflet-tile[src*="arcgisonline"]').first()).toBeVisible()
+  await expect(page.getByText(/esri/i).first()).toBeVisible()
+})
+
+test('the city border and the barangay the applicant chose are drawn on the map', async ({
+  page,
+}) => {
+  /*
+   * Refusing a pin against a boundary nobody can see is a puzzle, not a
+   * validation. The border is drawn so the rule is visible before it bites,
+   * and the chosen barangay is filled so "inside the highlighted area" — which
+   * the refusal message says — refers to something on screen.
+   */
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  // 21 barangays plus the city outline, all as SVG paths Leaflet renders.
+  const shapes = map.locator('path.leaflet-interactive, svg path')
+  expect(await shapes.count()).toBeGreaterThanOrEqual(22)
+
+  /*
+   * The fill is what distinguishes the chosen barangay from the other twenty,
+   * so it is the thing worth asserting: before a barangay is chosen nothing is
+   * filled, after one is chosen exactly one thing is.
+   */
+  const filled = map.locator('svg path[fill-opacity="0.1"]')
+  await expect(filled).toHaveCount(0)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(filled).toHaveCount(1)
 })
 
 test('the barangay’s zoning map shows what the map draws, and never a verdict', async ({
@@ -788,14 +976,41 @@ async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
 async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
   await goToZoningStep(page, type)
 
-  // Centre of the map is Malabon City Hall, so this pin is always inside.
+  /*
+   * Clicking the middle of the map pins whatever the map is centred on, and
+   * that is NOT the same place on every path. A new filing opens on Malabon
+   * City Hall (Longos); a renewal opens on the coordinates already held for the
+   * business it renews, which for the seeded one is in Catmon.
+   */
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
   await map.click()
   await expect(page.getByText(/pinned at/i)).toBeVisible()
 
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  /*
+   * The barangay is derived from where the pin actually landed, rather than
+   * hardcoded, because the step now refuses a pin that contradicts it.
+   *
+   * This said 'Acacia' while pinning City Hall, which is in Longos — the exact
+   * mismatch the step now exists to catch. Replacing it with a hardcoded
+   * 'Longos' would have fixed the new-filing path and left the renewal path
+   * broken, since that one pins Catmon. Asking the same module the app asks
+   * keeps the helper correct wherever the centre moves to, including if the
+   * seeded business is ever re-placed.
+   */
+  const pinned = await page.getByText(/pinned at/i).innerText()
+  const coords = pinned.match(/(-?[\d.]+),\s*(-?[\d.]+)/)
+  expect(coords).not.toBeNull()
+  const barangay = await page.evaluate(
+    async ([lat, lng]) => {
+      const geo = await import('/src/lib/malabonGeo.ts')
+      return geo.barangayContaining(lat, lng)
+    },
+    [Number(coords![1]), Number(coords![2])],
+  )
+  expect(barangay).not.toBeNull()
+  await page.getByLabel(/barangay name/i).selectOption({ label: barangay as string })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 
@@ -933,7 +1148,16 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
 
   /* ── and the modal it used to live in no longer carries it ─────────────── */
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  /*
+   * Longos, and not Acacia as this said until the pin gained a barangay.
+   *
+   * These helpers pin the centre of the map, which is Malabon City Hall, which
+   * is in Longos. Naming Acacia there was the exact mismatch the step now
+   * refuses — a pin in one barangay filed under another — so the old value was
+   * not arbitrary test data, it was the bug. Keep this in step with
+   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
@@ -1122,7 +1346,16 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
 
   // And the step still goes on, all the way through the conformity modal.
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  /*
+   * Longos, and not Acacia as this said until the pin gained a barangay.
+   *
+   * These helpers pin the centre of the map, which is Malabon City Hall, which
+   * is in Longos. Naming Acacia there was the exact mismatch the step now
+   * refuses — a pin in one barangay filed under another — so the old value was
+   * not arbitrary test data, it was the bug. Keep this in step with
+   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
