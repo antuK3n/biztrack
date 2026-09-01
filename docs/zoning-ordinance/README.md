@@ -57,10 +57,17 @@ inconsistency is the reason that was the right call, not merely a cautious one.
 
 ## What the ordinance *does* settle
 
-- **Overlay zones exist and we model none of them.** Flood (all 21 barangays),
+- **Overlay zones exist, and we now model all three.** Flood (all 21 barangays),
   Heritage (Baritan, Concepcion, Hulong Duhat, Ibaba, San Agustin),
   Eco-Tourism (Dampalit). Confirmed twice over: Art. IV §5's right-hand column
-  and Annex C's map index agree.
+  and Annex C's map index agree. They are held in `zoning_overlays` /
+  `barangay_zoning_overlay` — deliberately not as rows in
+  `zoning_classifications`, since an overlay lies *over* a base zone rather than
+  being one (see the migration `2026_09_01_000020`). Codes keyed on Art. V's
+  spellings, which contradict Art. IV's; the disagreement is recorded in
+  `docs/questions-for-malabon.md` C7 rather than resolved by us. Heritage
+  follows Annex C's five barangays, not the §5 table's eight — see the next
+  section for why that table cannot be read per row.
 - **Easement Zone is real, regulated (§2.14), and on no map.** It is designated
   in §2 but absent from §5's per-barangay table, because it is functional —
   determined by proximity to waterways. Our 19 seeded classifications correctly

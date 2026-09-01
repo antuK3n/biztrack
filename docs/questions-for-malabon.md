@@ -795,10 +795,39 @@ that silently passed everything would be worse than none. Under the Water Code
 there is a legal easement along waterways; if that layer exists the check
 becomes real.
 
-## C7. Is there a flood-hazard or no-build overlay the city already uses?
+## C7. Is there a flood-hazard or no-build overlay the city already uses? — PARTLY ANSWERED
 
 **Why it matters.** If a site cannot be permitted, saying so before the
 applicant pays is the whole value of putting the map first in the flow.
+
+**There is an overlay, and it is city-wide.** City Ordinance No. 24-2018 Art. IV
+§3 designates three overlay zones, and BizTrack now holds them beside the 19 base
+classifications from C4: **Flood over all 21 barangays**, **Heritage** over
+Baritan, Concepcion, Hulong Duhat, Ibaba and San Agustin, and **Eco-Tourism**
+over Dampalit. The applicant's zoning card names them and quotes what the
+ordinance adds; it still renders no verdict, for the reasons in C1 and C5.
+
+Three things to check when you look at it:
+
+- **The ordinance gives two sets of codes and they disagree.** Art. IV §3 writes
+  LSD-OZ / HTG-OZ / ET-OZ; Art. V §4 writes FLD-OZ / HTG-OZ / ETM-OZ. Only
+  Heritage matches. **We key on Art. V's** — FLD-OZ, HTG-OZ, ETM-OZ — because
+  Art. V is where the overlay's regulations are written. Tell us which set is
+  official and we will relabel; the codes are ours and nothing depends on them.
+- **Heritage: five barangays or eight?** Annex C's map index gives five, which is
+  what we recorded. Art. IV §5's table appears to give eight — the five plus
+  Bayan-bayanan, Dampalit and Flores — but that table's overlay column runs out
+  of alignment in the Institutional block, so we may be misreading it rather than
+  the ordinance disagreeing with itself. Which is right?
+- **Flood covering all 21 barangays is a designation over areas, not over
+  properties.** We hold no flood-susceptibility layer and the card says nothing
+  about any applicant's lot. If the CLUP 2018-2027 susceptibility assessment
+  Art. V §4.1 cites exists as data, that is the layer this question was really
+  asking for.
+
+**What is still open:** a *no-build* layer. An overlay that adds construction
+requirements is not the same as one that refuses a site, and nothing in the
+ordinance's three overlays refuses one.
 
 ## C8. Can we have the city's actual boundary?
 
