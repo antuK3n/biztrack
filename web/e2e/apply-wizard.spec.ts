@@ -657,19 +657,52 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
    * list ever shows Dampalit's neighbours' zones, the seeder has stopped
    * distinguishing the subject barangay from the washed-out surround.
    */
-  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
-  await expect(card.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+  /*
+   * The two lists are addressed separately, by their own accessible names,
+   * which is the assertion as much as it is the plumbing: a base zone found in
+   * the overlay list, or an overlay in the zone list, fails here. Scoping also
+   * keeps a description that happens to mention fishponds from answering a
+   * question about the Fishpond classification.
+   */
+  const zoneList = card.getByRole('list', { name: /classifications? drawn on barangay/i })
+  const overlayList = card.getByRole('list', { name: /overlay zones? over barangay/i })
+
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+
+  /*
+   * Dampalit is the one barangay carrying two overlays — Flood, which the
+   * ordinance puts over all 21, and Eco-Tourism over its fishponds — so it is
+   * where a merged list would be visible.
+   */
+  await expect(overlayList.getByRole('listitem')).toHaveCount(2)
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Eco-Tourism Overlay Zone' })).toBeVisible()
+  // Heritage is not designated over Dampalit, so it must not appear on it.
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Heritage' })).toBeHidden()
+  // And no overlay leaks into the classification list, which is the whole point
+  // of their being separate rows in a separate table.
+  await expect(zoneList.getByRole('listitem').filter({ hasText: /overlay/i })).toBeHidden()
 
   // Switching barangay switches the sheet — the card answers the picker.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
   await expect(img).toHaveAttribute('src', '/zoning-maps/acacia.png')
-  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+  // Acacia carries Flood alone — the overlay block answers the picker too.
+  await expect(overlayList.getByRole('listitem')).toHaveCount(1)
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
 
   // CPDO decides, and the card says so where the applicant reads it.
-  await expect(card).toContainText(/cpdo confirms the classification that applies to your exact/i)
+  await expect(card).toContainText(
+    /cpdo confirms the classifications and overlays that apply to your exact/i,
+  )
 
-  // And it never claims to have decided anything itself.
+  // And it never claims to have decided anything itself. The overlays bring one
+  // more thing it must not say: Flood is a designation over an area, so any
+  // wording that turns it into a finding about this applicant's lot is the same
+  // invented verdict in a more frightening register.
   await expect(card).not.toContainText(/conforming|non-conforming|allowed use|your zone is/i)
+  await expect(card).not.toContainText(/your (property|lot|site) (is|may be) (at risk|prone|in a flood)/i)
 })
 
 /**

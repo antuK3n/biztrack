@@ -23,6 +23,28 @@ import type { Barangay } from '../../lib/types'
  * that reads as a pass. The list is a list of what the barangay contains
  * somewhere. CPDO confirms which one covers a specific location.
  *
+ * ── Overlay zones ────────────────────────────────────────────────────────────
+ *
+ * The same rule, and one extra trap. City Ordinance No. 24-2018 Art. IV §3
+ * designates three overlay zones — Flood over all 21 barangays, Heritage over
+ * five, Eco-Tourism over Dampalit. An overlay is a "transparent zone overlain on
+ * a Base Zone" (Art. V §4): it lies over the base zones rather than being one of
+ * them, so it gets its own block below the classification list and is never
+ * mixed into it.
+ *
+ * The trap is Flood. It is a designation the ordinance makes over an area, and
+ * it must not be dressed as a warning about the applicant's property — not red,
+ * not an alert role, no icon that reads as caution. We do not know where their
+ * lot is (no geometry, same as above), so "your site floods" is not ours to say
+ * and would be the same invented verdict in a more frightening register. The
+ * block states what the ordinance designates and what regulations the overlay
+ * carries, and stops there.
+ *
+ * When we hold no overlay rows for a barangay the block renders nothing at all,
+ * rather than "no overlays". Absence in our data is not a finding, and printed
+ * as one it would read as "no flood zone here", which is a claim about a
+ * property that nobody has made.
+ *
  * If the vector data ever arrives (asked for in `docs/questions-for-malabon.md`
  * C2), a real per-location check becomes a contained change and this panel can
  * gain an answer. Until then, adding one here would be inventing it.
@@ -33,6 +55,7 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
   if (barangay === null) return null
 
   const zones = barangay.zoning_classifications
+  const overlays = barangay.zoning_overlays
   const mapPath = barangay.zoning_map_path
 
   return (
@@ -51,9 +74,14 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
         * it and stacked restatement is what reads as machine-written.
         */}
       <p className="mt-1 text-sm leading-relaxed text-ink-secondary">
+        {/*
+          * Amended to say "classifications and overlays" rather than gaining a
+          * second CPDO sentence beside the overlay block: one line covers both,
+          * and stacked restatement is what reads as machine-written.
+          */}
         The City Planning and Development Office&rsquo;s proposed zoning map for 2018&ndash;2027.
-        CPDO confirms the classification that applies to your exact location when it reviews
-        your zoning clearance.
+        CPDO confirms the classifications and overlays that apply to your exact location when
+        it reviews your zoning clearance.
       </p>
 
       {mapPath !== null && !broken && (
@@ -117,7 +145,7 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
 
       {zones.length > 0 && (
         <div className="mt-4">
-          <h4 className="text-[13px] font-semibold text-ink">
+          <h4 id="barangay-zone-list-heading" className="text-[13px] font-semibold text-ink">
             {/*
              * "Name both numbers." "Zones on this map" would be vague about
              * whose map; naming the barangay ties the count to the sheet above.
@@ -126,7 +154,13 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
               ? `The one classification drawn on Barangay ${barangay.name}`
               : `The ${zones.length} classifications drawn on Barangay ${barangay.name}`}
           </h4>
-          <ul className="mt-2 flex flex-wrap gap-2">
+          {/*
+            * Named by its own heading. There are two lists on this card now and
+            * "repeated controls need distinct accessible names" applies to them
+            * as much as to buttons: a screen-reader user landing on the second
+            * list has to be told it is the overlays and not more of the zones.
+            */}
+          <ul aria-labelledby="barangay-zone-list-heading" className="mt-2 flex flex-wrap gap-2">
             {zones.map((z) => (
               <li
                 key={z.code}
@@ -154,6 +188,48 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
         <p className="mt-4 text-sm text-ink-secondary">
           We haven&rsquo;t recorded the classifications for this barangay yet.
         </p>
+      )}
+
+      {overlays.length > 0 && (
+        /*
+         * Set apart from the classification list on four counts at once, because
+         * an applicant mistaking an overlay for a base zone is the failure this
+         * block exists to avoid: it sits in its own bordered panel, under its
+         * own heading, as full-width rows rather than pills, each row carrying
+         * the word "Overlay" as text. Never Color Alone — remove every colour
+         * here and the two lists are still plainly different things.
+         *
+         * Royal, not red. #bd0000 is for errors and destructive actions; a
+         * designation made by ordinance is neither, and a Flood overlay printed
+         * in red would read as a warning about this applicant's lot, which is
+         * precisely the verdict we cannot make.
+         */
+        <div className="mt-5 rounded-xl border border-royal/30 bg-royal-tint px-4 py-3">
+          <h4 id="barangay-overlay-list-heading" className="text-[13px] font-semibold text-ink">
+            {overlays.length === 1
+              ? `The one overlay zone over Barangay ${barangay.name}`
+              : `The ${overlays.length} overlay zones over Barangay ${barangay.name}`}
+          </h4>
+          <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+            City Ordinance No. 24-2018 lays these over parts of the barangay, adding a layer
+            of rules on top of the zone beneath.
+          </p>
+          <ul aria-labelledby="barangay-overlay-list-heading" className="mt-2.5 space-y-2">
+            {overlays.map((o) => (
+              <li
+                key={o.code}
+                className="rounded-lg border border-dashed border-royal/40 bg-white px-3 py-2"
+              >
+                <p className="text-xs font-semibold text-royal">{o.name}</p>
+                {o.description !== null && (
+                  <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">
+                    {o.description}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   )

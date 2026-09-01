@@ -57,6 +57,22 @@ export interface ZoningClassification {
   legend_color: string | null
 }
 
+/**
+ * One overlay zone designated by City Ordinance No. 24-2018 (Art. IV §3).
+ *
+ * Its own type, and not a `ZoningClassification` with a flag, because the two
+ * are different things: a classification is one of the base zones drawn on
+ * CPDO's sheet, an overlay is a transparent layer of extra rules lying over
+ * whatever base zone is beneath it. A barangay has both at once. Keeping them
+ * apart in the type is what stops one being rendered in a list of the other.
+ */
+export interface ZoningOverlay {
+  code: string
+  name: string
+  /** What the overlay is and what rules it adds, from the ordinance. */
+  description: string | null
+}
+
 export interface Barangay {
   id: number
   name: string
@@ -73,6 +89,15 @@ export interface Barangay {
    * ApplyWizard for the same refusal about the city boundary.
    */
   zoning_classifications: ZoningClassification[]
+  /**
+   * The overlays the ordinance designates over this barangay, in the
+   * ordinance's order. Not part of the list above and not merged into it: an
+   * overlay lies over the base zones rather than being one of them.
+   *
+   * Same refusal as above — it says the ordinance designates the overlay
+   * somewhere in this barangay, never that it covers a particular property.
+   */
+  zoning_overlays: ZoningOverlay[]
 }
 
 export interface PsicCode {
