@@ -15,10 +15,36 @@ use Illuminate\Http\JsonResponse;
  */
 class ReferenceController extends Controller
 {
+    /**
+     * The 21 barangays, each with its official CPDO zoning sheet and the
+     * classifications that sheet shows.
+     *
+     * The zoning payload rides along here rather than on an endpoint of its own
+     * because the wizard already loads this list at mount and the applicant picks
+     * a barangay from it — a second round trip would buy nothing. It is ~7 KB for
+     * all 21.
+     *
+     * `zoning_classifications` is what the barangay's map DRAWS, not what any
+     * address IS. The sheets are rasters and hold no geometry, so no per-location
+     * answer exists to send and none is sent; CPDO determines the classification
+     * for a specific site during processing. Any consumer that starts presenting
+     * this as a verdict is reading it wrong.
+     */
     public function barangays(): JsonResponse
     {
+        $barangays = Barangay::with('zoningClassifications')->orderBy('name')->get();
+
         return response()->json([
-            'data' => Barangay::orderBy('name')->get(['id', 'name']),
+            'data' => $barangays->map(fn (Barangay $b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'zoning_map_path' => $b->zoning_map_path,
+                'zoning_classifications' => $b->zoningClassifications->map(fn ($z) => [
+                    'code' => $z->code,
+                    'name' => $z->name,
+                    'legend_color' => $z->legend_color,
+                ])->values(),
+            ]),
         ]);
     }
 

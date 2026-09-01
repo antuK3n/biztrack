@@ -40,6 +40,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * every caller. Re-importing ClearanceStage or OfficeFormSheet here would be
  * the first move back to the arrangement this replaced.
  */
+import BarangayZoningMap from './BarangayZoningMap'
 import {
   LocationInsightsPanel,
   useLocationInsights,
@@ -2233,7 +2234,15 @@ export function ApplyWizard() {
     }
     return [...map.values()]
   }, [permitTypes, applicationType])
-  const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
+  /*
+   * The whole row, not just the name: the zoning step now also needs the
+   * barangay's CPDO map path and the classifications drawn on it, and both ride
+   * along on the same reference payload. `barangayName` stays as the narrower
+   * thing the zoning modal already reads, rather than making that dialog reach
+   * into an object for one field.
+   */
+  const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
+  const barangayName = selectedBarangay?.name
 
   /*
    * The first line of business the applicant declared, when they have one. It
@@ -4786,6 +4795,21 @@ export function ApplyWizard() {
                   <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
+
+              {/*
+                * CPDO's own sheet for whichever barangay was just picked.
+                *
+                * Directly under the picker, not beside the map: it answers the
+                * question the applicant has at the moment they choose ("what is
+                * my barangay zoned for?"), and it changes when the answer to
+                * that question changes. Gated on a selection because there is no
+                * sensible default sheet — twenty-one maps and no barangay chosen
+                * is a gallery, not an answer.
+                *
+                * It shows and lists. It does not decide — see the component.
+                */}
+              {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
+
               <div>
                 <label className="block">
                 <FieldLabel>Locational Group/Landmark</FieldLabel>
