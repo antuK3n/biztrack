@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import { checkPin, withinMalabon } from '../../lib/malabonGeo'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -187,47 +188,28 @@ const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120',
 /*
  * ── Item 86 · where a pin may be dropped ──────────────────────────────────
  *
- * A bounding box around Malabon City, and deliberately nothing more.
+ * This used to be a bounding box, and the box has been replaced by the real
+ * city polygon — see `lib/malabonGeo.ts` for the check and
+ * `lib/malabonGeo.data.ts` for where the boundaries came from and how they
+ * were verified before being trusted.
  *
- * The system holds no zone polygons and no coastline (the comments on the
- * zoning step and the zoning modal have said so since the step was built), so
- * the only thing that can be checked here honestly is whether the point is
- * anywhere near the city at all. The box is drawn from the coordinates the repo
- * already uses for Malabon — the map's default centre at Malabon City Hall
- * (14.6572, 120.9573), the seeded demo businesses (14.6690/120.9560,
- * 14.6712/120.9605), the analytics heat-map centre (14.669, 120.957) and the
- * analytics history seeder's 14.655–14.685 spread — widened to the city's
- * roughly 6 km × 6 km extent so that a real address near a boundary is not
- * refused. Every coordinate already in the repo falls inside it.
+ * The box was wrong in both directions, which is why it went. A rectangle
+ * around an irregular delta city admits its neighbours, and a tester duly
+ * pinned Caloocan and Valenzuela and was accepted. It was also too tight: it
+ * ran 120.930–120.985 E while Malabon actually reaches 120.921 and 121.001, so
+ * genuine addresses near the east and west edges were being refused.
  *
- * What this does NOT do, and what the applicant is therefore never told it
- * does: it does not prove the pin is inside the city limits (a bounding box
- * around an irregular city necessarily includes slivers of Navotas, Caloocan
- * and Valenzuela), and it does not detect water. Malabon is a river delta —
- * the Tullahan, the Tenejeros-Tanza and the fishpond belt run through it — so
- * "not on water" cannot be answered without a coastline or hydrography layer,
- * which would mean an external service (an OSM/Overpass water query, or a
- * shipped GeoJSON of the city). Neither exists here, and a water check that
- * silently passed everything would be worse than none: it would put the city's
- * name behind a guarantee nobody made. CPDO still evaluates the actual location
- * during processing, which is what the step has always said.
+ * What is checked now is containment in the city outline, and separately
+ * whether the pin agrees with the barangay chosen from the dropdown. What is
+ * still NOT checked, and still never claimed: this does not detect water.
+ * Malabon is a river delta — the Tullahan, the Tenejeros-Tanza and the fishpond
+ * belt run through it — and the boundary set carries no hydrography, so a pin
+ * in the middle of a river is inside the city and passes. Nor does any of this
+ * decide zoning: the ordinance itself cannot be automated into a conformance
+ * answer (`docs/zoning-ordinance/README.md` sets out why), so CPDO evaluates
+ * the actual location during processing, which is what the step has always
+ * said.
  */
-const MALABON_BOUNDS = {
-  minLat: 14.645,
-  maxLat: 14.7,
-  minLng: 120.93,
-  maxLng: 120.985,
-}
-
-/** True when a pin is inside the Malabon bounding box described above. */
-function withinMalabon(latitude: number, longitude: number): boolean {
-  return (
-    latitude >= MALABON_BOUNDS.minLat &&
-    latitude <= MALABON_BOUNDS.maxLat &&
-    longitude >= MALABON_BOUNDS.minLng &&
-    longitude <= MALABON_BOUNDS.maxLng
-  )
-}
 
 /*
  * There is no StepNode type any more, and no `stepKey`.
@@ -2639,6 +2621,24 @@ export function ApplyWizard() {
           else if (!withinMalabon(form.latitude, form.longitude)) {
             missing.push('A pin within Malabon')
           }
+          /*
+           * The pin and the barangay are checked against each other HERE as
+           * well as in the click handler, because the click handler only ever
+           * sees one order of events.
+           *
+           * An applicant can drop a valid pin in Acacia and then change the
+           * barangay dropdown to Tonsuya, and nothing re-runs onPick — the pin
+           * did not move. Renewals and reopened drafts arrive with both values
+           * already set and no click at all. Without this the mismatch the
+           * checklist asked us to prevent survives by the simple trick of
+           * answering the two questions in the other order.
+           */
+          else if (barangayName !== undefined) {
+            const verdict = checkPin(form.latitude, form.longitude, barangayName)
+            if (verdict.kind === 'wrong-barangay') {
+              missing.push(`A pin inside ${barangayName} (it is currently in ${verdict.actual ?? 'neither'})`)
+            }
+          }
           // Only when renting: the API enforces the same three with required_if.
           if (form.is_rented) {
             if (!form.lessor_name.trim()) missing.push("Lessor's Name")
@@ -4573,18 +4573,23 @@ export function ApplyWizard() {
        * processing. The copy here says "zoning clearance", never "Mayor's
        * permit" (user-testing feedback).
        *
-       * The one thing it does decide is item 86: a pin nowhere near Malabon is
-       * refused outright, because no amount of CPDO review makes a business in
-       * another city licensable here. That is a bounding-box check and nothing
-       * more — see MALABON_BOUNDS.
+       * The two things it does decide: a pin outside Malabon is refused
+       * outright, because no amount of CPDO review makes a business in another
+       * city licensable here; and a pin that contradicts the barangay chosen
+       * from the dropdown is refused, because one of the two is then wrong and
+       * neither the applicant nor CPDO gains from storing both. Those are
+       * geometry checks against the city and barangay polygons — see
+       * `lib/malabonGeo.ts` — and nothing more. They say where the premises
+       * are, never whether the trade is allowed there.
        */}
       {phase === 'address' && (
         <div>
           <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
           <div className="mb-2 h-px bg-ink/40" />
           <p className="mb-6 text-xs text-ink-secondary">
-            Pin your location and enter your address. The pin must fall inside Malabon. CPDO evaluates
-            your zoning clearance from it during processing.
+            Pin your location and enter your address. The pin must fall inside Malabon, and inside
+            the barangay you select below. CPDO evaluates your zoning clearance from it during
+            processing.
           </p>
 
           {/*
@@ -4673,17 +4678,50 @@ export function ApplyWizard() {
                  * while the next lookup is in flight.
                  */
                 radiusM={insightsRadiusM}
+                highlightBarangay={barangayName ?? null}
+                /*
+                 * The map does not open for business until a trade is chosen.
+                 *
+                 * The zoning verdict is given against a line of business, not a
+                 * coordinate — the sentence directly above the picker says so —
+                 * so a pin dropped first is an answer to half a question. It
+                 * also lets Location Insights compare like with like from the
+                 * very first lookup, instead of counting every business near the
+                 * pin and then silently changing its mind once a PSIC group
+                 * exists.
+                 */
+                lockedReason={
+                  form.lines.length === 0
+                    ? 'Choose your line of business above, then click the map to drop a pin.'
+                    : null
+                }
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
                    * stored and argued with later. The wording names exactly what
-                   * was checked (is it near Malabon) and no more: this cannot
-                   * tell land from water, so it never says it did. See
-                   * MALABON_BOUNDS for what the check is and is not.
+                   * was checked and no more: this cannot tell land from water,
+                   * so it never says it did.
+                   *
+                   * The barangay mismatch is refused here too, and phrased to
+                   * leave both ways out open — the pin may be wrong, or the
+                   * dropdown may be. Naming the barangay the pin actually fell
+                   * in is what makes the message actionable; "that is the wrong
+                   * barangay" alone would send someone hunting. See
+                   * BARANGAY_TOLERANCE_M for why a near-miss is accepted
+                   * silently rather than argued with.
                    */
-                  if (!withinMalabon(lat, lng)) {
+                  const verdict = checkPin(lat, lng, barangayName ?? null)
+                  if (verdict.kind === 'outside-city') {
                     setPinError(
                       `That point (${lat}, ${lng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                    )
+                    return
+                  }
+                  if (verdict.kind === 'wrong-barangay') {
+                    setPinError(
+                      verdict.actual !== null
+                        ? `That pin is in ${verdict.actual}, but you selected ${barangayName}. Move the pin into ${barangayName} — the highlighted area — or change your barangay above.`
+                        : `That pin is about ${verdict.metres} m outside ${barangayName}. Move it into the highlighted area, or change your barangay above.`,
                     )
                     return
                   }
