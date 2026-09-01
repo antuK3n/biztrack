@@ -4593,6 +4593,33 @@ export function ApplyWizard() {
           </p>
 
           {/*
+            * Says where the other five clearances went, on the step where they
+            * are missed.
+            *
+            * A tester reported them "missing" and asked for them back. They
+            * were not deleted — they moved out of this wizard and onto
+            * /applications/:id/clearances when payment went first, which Review
+            * & Submit does explain. But Review is the LAST step, and this is
+            * the step whose heading says "Zoning Clearance", so this is where
+            * somebody looking for the clearances looks and concludes they are
+            * gone. Answering only at the end answers after the alarm.
+            *
+            * The six are named rather than counted, because "six LGU
+            * clearances" does not let an applicant check whether the one THEY
+            * need is among them. Not a link: there is no application to link to
+            * until this filing is submitted.
+            */}
+          <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
+            <p className="text-xs text-ink-secondary">
+              <span className="font-semibold text-ink">Applying for the other clearances?</span> Fire,
+              Sanitary, Building/Occupancy, Environmental, Market and this Zoning clearance are no
+              longer part of this form. Submit first and pay your Business Permit fee — the six then
+              open together under <span className="font-semibold text-ink">LGU Clearances</span> on
+              your application, and you apply only for the ones you need.
+            </p>
+          </div>
+
+          {/*
             * Item 69 — the one and only Line of Business question.
             *
             * It belongs on this screen because the zoning verdict is about a
