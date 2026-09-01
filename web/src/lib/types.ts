@@ -42,9 +42,37 @@ export interface RegisterPayload {
 
 /* ── Reference lookups (wizard) ───────────────────────────────────────── */
 
+/**
+ * One entry from the classification legend printed on CPDO's zoning sheets.
+ *
+ * Held on the server (`zoning_classifications`) rather than as a union type here
+ * on purpose: the maps are *proposed* for a plan period ending 2027, so an
+ * ordinance can add or rename one, and a TypeScript union would make that a
+ * deploy. Treat these strings as data, not as a closed set to switch on.
+ */
+export interface ZoningClassification {
+  code: string
+  name: string
+  /** The legend swatch as #rrggbb, or null for a classification with no swatch. */
+  legend_color: string | null
+}
+
 export interface Barangay {
   id: number
   name: string
+  /**
+   * Path to the barangay's official CPDO sheet under the web root, e.g.
+   * `/zoning-maps/acacia.png`. Null where no sheet is on file — a barangay
+   * without one must render as "no map", not as a broken image.
+   */
+  zoning_map_path: string | null
+  /**
+   * What that sheet DRAWS, in the legend's order. Not what any given address
+   * is: the maps are rasters with no geometry, so nothing here answers "is my
+   * site conforming". CPDO decides that. See the comment on MALABON_BOUNDS in
+   * ApplyWizard for the same refusal about the city boundary.
+   */
+  zoning_classifications: ZoningClassification[]
 }
 
 export interface PsicCode {

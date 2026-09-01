@@ -625,6 +625,53 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   await expect(page.getByText(/pinned at/i)).toBeHidden()
 })
 
+test('the barangay’s zoning map shows what the map draws, and never a verdict', async ({
+  page,
+}) => {
+  /*
+   * CPDO's 21 sheets are raster images with no geometry behind them, so this
+   * card is allowed to show a picture and list what is drawn on it — and
+   * nothing narrower. The negative assertions are the point of the test: the
+   * moment somebody derives "your lot is C-2" from a pixel, this goes red.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  // Nothing to show before a barangay is chosen — twenty-one maps and no
+  // selection is a gallery, not an answer.
+  const card = page.getByRole('region', { name: /zoning map for barangay/i })
+  await expect(card).toBeHidden()
+
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Dampalit' })
+  await expect(card).toBeVisible()
+
+  // The right sheet for the barangay picked, loaded rather than 404ing.
+  const img = card.getByRole('img')
+  await expect(img).toHaveAttribute('src', '/zoning-maps/dampalit.png')
+  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0)
+
+  /*
+   * Read off Dampalit's own sheet: the fishpond belt is what the barangay is,
+   * and Fishpond and Mangrove appear on no other sheet but Muzon's. If this
+   * list ever shows Dampalit's neighbours' zones, the seeder has stopped
+   * distinguishing the subject barangay from the washed-out surround.
+   */
+  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
+  await expect(card.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+
+  // Switching barangay switches the sheet — the card answers the picker.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  await expect(img).toHaveAttribute('src', '/zoning-maps/acacia.png')
+  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+
+  // CPDO decides, and the card says so where the applicant reads it.
+  await expect(card).toContainText(/cpdo confirms the classification that applies to your exact/i)
+
+  // And it never claims to have decided anything itself.
+  await expect(card).not.toContainText(/conforming|non-conforming|allowed use|your zone is/i)
+})
+
 /**
  * Item 110 — answer the identity dialog a renewal or amendment opens with.
  *
