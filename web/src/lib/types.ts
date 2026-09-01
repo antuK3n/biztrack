@@ -85,8 +85,9 @@ export interface Barangay {
   /**
    * What that sheet DRAWS, in the legend's order. Not what any given address
    * is: the maps are rasters with no geometry, so nothing here answers "is my
-   * site conforming". CPDO decides that. See the comment on MALABON_BOUNDS in
-   * ApplyWizard for the same refusal about the city boundary.
+   * site conforming". CPDO decides that. See the docblock on
+   * `BarangayZoningMap.tsx` for why real city and barangay polygons in
+   * `lib/malabonGeo.ts` do not change that.
    */
   zoning_classifications: ZoningClassification[]
   /**
@@ -145,10 +146,10 @@ export interface Address {
   city?: string
   /**
    * BPLO form item A5. Not asked: every location this system will license is
-   * inside Malabon (the map pin is bounds-checked against MALABON_BOUNDS), and
-   * Malabon has exactly one postal code — 1470. A question with one possible
-   * answer is not a question. The API defaults it the same way the schema
-   * already defaults `city` and `province`.
+   * inside Malabon (the map pin is checked against the city polygon in
+   * `lib/malabonGeo.ts`), and Malabon has exactly one postal code — 1470. A
+   * question with one possible answer is not a question. The API defaults it the
+   * same way the schema already defaults `city` and `province`.
    */
   postal_code?: string | null
   /** BPLO form item A6, the landline. Blank for most sole proprietors. */

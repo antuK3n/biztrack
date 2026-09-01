@@ -162,6 +162,19 @@ const BARANGAY_SELECTED: L.PathOptions = {
   color: '#3242ca',
   weight: 2,
   opacity: 0.9,
+  /*
+   * `fill: true` is stated, and leaving it out was a bug worth keeping a note
+   * about.
+   *
+   * react-leaflet applies pathOptions with Path.setStyle(), which MERGES into
+   * the layer's existing options rather than replacing them. Every barangay
+   * starts life styled with BARANGAY_LINE, which sets `fill: false`. Switching
+   * to these options without saying `fill: true` therefore left the old `false`
+   * in place: fillColor and fillOpacity were both applied and both ignored, and
+   * the chosen barangay never filled. Setting it explicitly is what makes the
+   * two styles inverses of each other instead of one-way.
+   */
+  fill: true,
   fillColor: '#3242ca',
   fillOpacity: 0.1,
 }
