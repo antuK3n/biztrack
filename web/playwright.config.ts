@@ -23,7 +23,20 @@ import { defineConfig, devices } from '@playwright/test'
  * so that forgetting to set it fails safe.
  */
 
-const BASE_URL = process.env.E2E_BASE_URL ?? 'http://localhost:5199'
+/*
+ * 127.0.0.1, not localhost, and it has to match how e2e-stack.sh binds Vite.
+ *
+ * "localhost" is two addresses on this machine — ::1 and 127.0.0.1 — and which
+ * one a client tries first is not ours to decide. e2e-stack.sh now passes
+ * `--host 127.0.0.1`, so naming the address here means both ends are talking
+ * about the same socket instead of relying on a fallback to find each other.
+ *
+ * Change one of these two and change the other. The failure when they disagree
+ * does not look like a networking problem: the suite simply cannot reach a
+ * server that is plainly running, and the port reads as free to half the tools
+ * you check it with.
+ */
+const BASE_URL = process.env.E2E_BASE_URL ?? 'http://127.0.0.1:5199'
 
 export default defineConfig({
   testDir: './e2e',
