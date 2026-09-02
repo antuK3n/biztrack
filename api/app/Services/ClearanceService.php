@@ -393,13 +393,22 @@ class ClearanceService
      * stage opens, so a clearance applied for afterwards would otherwise sit on
      * the filing with no office ever seeing it.
      *
-     * The objection to apply-time routing under the old ordering was real and
-     * no longer applies: `assigned_at` starts the service-time clock that
-     * ProcessingTimeAnalytics, StaffingSimulation and DashboardAnalytics
-     * measure an office by, and stamping it inside somebody's unfinished draft
-     * charged the office for the days the applicant spent typing. There is no
-     * draft here. The stage opens on a paid filing, so `assigned_at` is stamped
-     * the moment the office genuinely has work.
+     * The objection to apply-time routing under the old ordering was real:
+     * `assigned_at` starts the service-time clock that ProcessingTimeAnalytics,
+     * StaffingSimulation and DashboardAnalytics measure an office by, and
+     * stamping it inside somebody's unfinished draft charged the office for the
+     * days the applicant spent typing.
+     *
+     * What answers it is NOT that this stage only opens on a paid filing — it
+     * no longer does, since the gate moved to submission (see `isUnlocked`).
+     * It is that `WorkflowService::routeClearance` refuses to route at all
+     * until `PermitFees::hasClearedPayment`, so applying while unpaid attaches
+     * the permit type and its fee and creates no assignment. The office is
+     * given the work by `routeToDepartments` when the payment clears, and
+     * `assigned_at` is stamped then.
+     *
+     * That guard is therefore load-bearing, and it is the thing to check before
+     * anyone concludes an unpaid filing can be pushed into an office queue.
      */
     public function apply(Application $application, PermitType $type): void
     {
