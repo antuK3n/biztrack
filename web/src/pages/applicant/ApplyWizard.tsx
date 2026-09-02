@@ -2624,16 +2624,34 @@ export function ApplyWizard() {
           /*
            * The pin and the barangay are checked against each other HERE as
            * well as in the click handler, because the click handler only ever
-           * sees one order of events.
+           * sees one order of events: an applicant can drop a valid pin in
+           * Acacia and then change the dropdown to Tonsuya, and nothing re-runs
+           * onPick — the pin did not move.
            *
-           * An applicant can drop a valid pin in Acacia and then change the
-           * barangay dropdown to Tonsuya, and nothing re-runs onPick — the pin
-           * did not move. Renewals and reopened drafts arrive with both values
-           * already set and no click at all. Without this the mismatch the
-           * checklist asked us to prevent survives by the simple trick of
-           * answering the two questions in the other order.
+           * ── Why this is gated on `touched.barangay_id` ────────────────────
+           *
+           * Because the register is full of filings whose pin and barangay
+           * already disagree, and blocking on those punishes the applicant for
+           * our history. Nothing checked this until now, so pins were dropped
+           * anywhere the old bounding box allowed: of 788 addresses on file
+           * only 61 sit inside their own barangay, 543 are off by a median of
+           * 1.4 km, and 184 are not in Malabon at all. A renewal prefills both
+           * values from that record, so an unconditional check here would stop
+           * essentially every renewal dead on section 2, with a message about a
+           * pin the applicant never placed.
+           *
+           * So the rule is: we enforce what the applicant ENTERS, not what we
+           * handed them. Touching the barangay means they have answered the
+           * question and the answer must be consistent. Leaving the prefill
+           * alone lets a legacy filing through — the map still draws their
+           * barangay and their pin, so the disagreement is visible and fixable,
+           * and CPDO checks the site regardless.
+           *
+           * A NEW filing is unaffected: its barangay starts empty, so it cannot
+           * be submitted without being touched. Moving the pin is covered by
+           * onPick, which refuses a mismatch at the moment of the click.
            */
-          else if (barangayName !== undefined) {
+          else if (barangayName !== undefined && touched.barangay_id) {
             const verdict = checkPin(form.latitude, form.longitude, barangayName)
             if (verdict.kind === 'wrong-barangay') {
               missing.push(`A pin inside ${barangayName} (it is currently in ${verdict.actual ?? 'neither'})`)
@@ -2711,6 +2729,15 @@ export function ApplyWizard() {
        * keep refusing a barangay the applicant has already corrected.
        */
       barangayName,
+      /*
+       * And the flag that decides whether that check runs at all. Unlike
+       * `barangayName` this one does NOT move with anything else already
+       * listed: it flips once, on first blur of the barangay field, while
+       * `form.barangay_id` may not change at that moment at all. Omitted, the
+       * gate would keep using the pre-blur answer and let a mismatch the
+       * applicant just created walk straight through.
+       */
+      touched.barangay_id,
     ],
   )
 
@@ -4090,8 +4117,8 @@ export function ApplyWizard() {
               */}
               {priorPermitChoice && (
                 <p className="mt-2 text-xs text-ink-secondary">
-                  Renewing its clearances comes after this — once you have paid for the business
-                  permit, the LGU clearances open and you apply for the ones you need.
+                  Renewing its clearances comes after this — once you submit, the LGU clearances
+                  open and you apply for the ones you need.
                 </p>
               )}
             </div>
@@ -4622,10 +4649,10 @@ export function ApplyWizard() {
           <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
             <p className="text-xs text-ink-secondary">
               <span className="font-semibold text-ink">Applying for the other clearances?</span> Fire,
-              Sanitary, Building/Occupancy, Environmental, Market and this Zoning clearance are no
-              longer part of this form. Submit first and pay your Business Permit fee — the six then
-              open together under <span className="font-semibold text-ink">LGU Clearances</span> on
-              your application, and you apply only for the ones you need.
+              Sanitary, Building/Occupancy, Environmental, Market and this Zoning clearance are not
+              part of this form. Submit this application and all six open together under{' '}
+              <span className="font-semibold text-ink">LGU Clearances</span>, where you apply only
+              for the ones you need and fill in each office’s sheet.
             </p>
           </div>
 
@@ -4800,6 +4827,42 @@ export function ApplyWizard() {
                 </p>
               )}
               {/*
+                * A disagreement the applicant did not cause, said out loud.
+                *
+                * A renewal prefills its pin and its barangay from the business
+                * on record, and most records disagree — nothing checked this
+                * until now, so only 61 of 788 addresses on file sit inside their
+                * own barangay. The step deliberately does NOT block on a
+                * prefill (see the gate in `missingFor`), because refusing to let
+                * someone renew over a pin they never placed is our history
+                * charged to them.
+                *
+                * But silence is the wrong other extreme: it leaves a known-wrong
+                * location to be carried into a zoning clearance. So it is stated
+                * and left to them. Deliberately NOT `role="alert"` and not the
+                * error red — nothing has gone wrong here and the applicant is
+                * not being stopped; #bd0000 is reserved for what actually blocks
+                * (DESIGN.md, "Red Means Stop"). It reads as amber-free plain
+                * text with a bold lead-in, so it survives greyscale.
+                */}
+              {form.latitude !== null &&
+                form.longitude !== null &&
+                barangayName !== undefined &&
+                !touched.barangay_id &&
+                pinError === null &&
+                (() => {
+                  const verdict = checkPin(form.latitude, form.longitude, barangayName)
+                  if (verdict.kind !== 'wrong-barangay') return null
+                  return (
+                    <p className="bg-white px-4 pb-2.5 text-xs text-ink-secondary">
+                      <span className="font-semibold text-ink">Check this location.</span> The saved
+                      pin sits in {verdict.actual ?? 'no barangay we can identify'}, but this
+                      application says {barangayName}. Click the map to move the pin, or change the
+                      barangay below — whichever is wrong.
+                    </p>
+                  )
+                })()}
+              {/*
                 * The pin locates the premises; it does not clear them. Said
                 * plainly so the boundary check above is not mistaken for a
                 * verdict on the site itself — there are no zone polygons and no
@@ -4853,7 +4916,23 @@ export function ApplyWizard() {
                 <FieldLabel required>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
-                  onChange={(e) => update('barangay_id', e.target.value)}
+                  /*
+                   * Marked touched on CHANGE as well as on blur, and the change
+                   * is the one that matters.
+                   *
+                   * Picking from a dropdown is answering the question — there
+                   * is no half-typed state to be patient about, which is the
+                   * only reason the other fields wait for blur. The pin/barangay
+                   * check keys off this flag to tell an answer the applicant
+                   * gave from a value we prefilled for them, so relying on blur
+                   * alone let someone change the barangay to one their pin
+                   * contradicts and walk on, provided they never focused
+                   * anything else before pressing Next.
+                   */
+                  onChange={(e) => {
+                    update('barangay_id', e.target.value)
+                    touch('barangay_id')
+                  }}
                   onBlur={() => touch('barangay_id')}
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.barangay_id)}
@@ -5373,9 +5452,9 @@ export function ApplyWizard() {
               same promise.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              Submitting produces a Tax Order of Payment for your Business Permit. Once that payment
-              clears, the six LGU clearances open for you to apply for — each one you apply for adds
-              its own fee, and your permit is released when the balance reaches zero.
+              Submitting produces a Tax Order of Payment for your Business Permit, and opens the six
+              LGU clearances for you to apply for — each one you apply for adds its own fee, and
+              your permit is released when the balance reaches zero.
             </p>
             {priorPermitChoice && (
               <p className="tnum mt-6 text-sm text-ink-secondary">

@@ -141,8 +141,15 @@ async function makeCompleteDraft(page: Page): Promise<number> {
           tin: '123-456-789-000',
           address: {
             line1: '2 Playwright St.',
-            barangay_id: barangays[0].id,
-            // Inside the Malabon bounding box the address step checks.
+            /*
+             * Longos by name, not `barangays[0]`. There is no bounding box any
+             * more: the address step checks the real city polygon AND that the
+             * pin agrees with the chosen barangay. These coordinates are Malabon
+             * City Hall, which is in Longos; Acacia — first alphabetically — is
+             * about 1.5 km off and would now be refused.
+             */
+            barangay_id: (barangays.find((b: { name: string }) => b.name === 'Longos') ?? barangays[0])
+              .id,
             latitude: 14.6572,
             longitude: 120.9573,
           },
@@ -1059,7 +1066,15 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
    */
   await expect(page.getByText(/one tax order of payment/i)).toHaveCount(0)
   await expect(page.getByText(/nothing else is charged/i)).toHaveCount(0)
-  await expect(page.getByText(/once that payment clears/i)).toBeVisible()
+  /*
+   * It said "once that payment clears" until the gate moved off the money.
+   * Submitting is what opens the six now, so promising the applicant that a
+   * payment opens them would be the same kind of false clause as the two
+   * asserted absent above — and this one would send them to a Pay screen
+   * looking for a door that is already open.
+   */
+  await expect(page.getByText(/once that payment clears/i)).toHaveCount(0)
+  await expect(page.getByText(/opens the six LGU clearances/i)).toBeVisible()
   await expect(page.getByText(/balance reaches zero/i)).toBeVisible()
 
   await page.getByRole('button', { name: /^submit$/i }).click()
@@ -1096,29 +1111,44 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
   ).not.toContain('fire safety inspection certificate fee')
   expect(atSubmit.total).toBeGreaterThan(0)
 
-  /* ── 2. Shut, because the bill is not paid ─────────────────────────────── */
+  /* ── 2. Open on submission, with the bill still outstanding ────────────── */
 
+  /*
+   * This step asserted the opposite until 2026-09-02: the stage was shut here
+   * and only the first cleared payment opened it. Payment in this build is a
+   * dummy, so nothing ever cleared it — the six were unreachable and testers
+   * twice reported them as missing outright.
+   *
+   * What the billing half of this test proves is untouched by that: the Tax
+   * Order of Payment at submission still covers the business permit ALONE
+   * (asserted just above), and each clearance still accrues its own fee when
+   * applied for (asserted below). The money still works the same way; it just
+   * no longer bars the door.
+   */
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
     timeout: 30_000,
   })
+  const cards = clearanceCards(page)
+  await expect(cards).toHaveCount(6, { timeout: 30_000 })
   await expect(
     page.locator('#clearances-locked'),
-    'the stage opened on submission rather than on payment',
-  ).toBeVisible()
+    'the stage stayed shut on a submitted filing',
+  ).toHaveCount(0)
+  // Open AND unpaid at once — which is the whole change.
+  expect(atSubmit.total).toBeGreaterThan(0)
 
-  /* ── 3. Paying opens it ────────────────────────────────────────────────── */
+  /* ── 3. Paying changes the balance and not the gate ────────────────────── */
 
   await page.goto(`/applications/${appId}/pay`)
   await page.getByRole('button', { name: 'Pay Online' }).click()
   await expect(page.getByText(/receipt|paid/i).first()).toBeVisible({ timeout: 30_000 })
 
   await page.goto(`/applications/${appId}/clearances`)
-  const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6, { timeout: 30_000 })
   await expect(
     page.locator('#clearances-locked'),
-    'the stage stayed shut after the first payment cleared',
+    'the stage shut itself after the first payment cleared',
   ).toHaveCount(0)
 
   /* ── 4. Applying accrues ───────────────────────────────────────────────── */

@@ -403,7 +403,15 @@ test('an owner files a business permit with all six clearances behind it', async
           tin: '123-456-789-000',
           address: {
             line1: '3 Playwright St.',
-            barangay_id: barangays[0].id,
+            /*
+             * Longos by name, not `barangays[0]`. These coordinates are Malabon
+             * City Hall, which is in Longos; the first barangay alphabetically
+             * is Acacia, about 1.5 km away. The zoning step now refuses a pin
+             * that contradicts its barangay, so the old pairing left this filing
+             * permanently stuck on section 2 with no way to submit.
+             */
+            barangay_id: (barangays.find((b: { name: string }) => b.name === 'Longos') ?? barangays[0])
+              .id,
             latitude: 14.6572,
             longitude: 120.9573,
           },
