@@ -671,7 +671,7 @@ export function ApplicationDetailPage() {
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once your Business Permit payment clears. Each goes to its own office, and
+              These open once this application is submitted. Each goes to its own office, and
               each one you apply for adds its fee to your balance — your permit is released when
               that balance reaches zero.
             </p>

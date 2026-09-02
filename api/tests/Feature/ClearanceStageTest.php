@@ -251,39 +251,43 @@ it('keeps the stage shut on a draft, and says how to open it', function () {
 
     expect($meta['unlocked'])->toBeFalse()
         ->and($meta['locked_reason'])->toBeString()
-        // Names both steps, in order: submit, then settle.
-        ->and($meta['locked_reason'])->toContain('submit')
-        ->and($meta['locked_reason'])->toContain('Tax Order of Payment');
+        // Names the one step that opens it. It used to name settling the Tax
+        // Order of Payment as a second step, and that stopped being true when
+        // the gate moved off the money.
+        ->and($meta['locked_reason'])->toContain('submit');
 });
 
 /*
- * RENAMED from "shuts the stage the moment the filing is submitted, with a
- * reason that says the choice is made". Submission is no longer what shuts the
- * stage — it never opened — and the reason must point at the payment rather
- * than tell the applicant their choice is already made.
+ * REPLACES "keeps the stage shut while the Tax Order of Payment is unsettled".
+ *
+ * That rule is gone, and it is worth saying why rather than deleting quietly.
+ * Payment in this build is a dummy, so `hasClearedPayment` was false forever:
+ * the gate never opened, and testers twice reported the six clearances as
+ * missing outright. The ordering the client asked for survives — the bill is
+ * still raised and still assessed — but it no longer blocks.
  */
-it('keeps the stage shut while the Tax Order of Payment is unsettled', function () {
+it('opens the stage on submission, with the bill still outstanding', function () {
     $app = submittedClearanceApplication();
 
     $meta = clearanceMeta($app);
 
-    expect($meta['unlocked'])->toBeFalse()
-        ->and($meta['locked_reason'])->toBeString()
-        // Not "your clearances were decided when you submitted". Nothing has
-        // been decided; the applicant has a bill to settle.
-        ->and($meta['locked_reason'])->toContain('payment clears')
+    expect($meta['unlocked'])->toBeTrue()
+        ->and($meta['locked_reason'])->toBeNull()
+        // The point of the change: open AND unpaid at the same time. If this
+        // balance were zero the test would prove nothing about the gate.
         ->and($meta['balance_due'])->toBeGreaterThan(0);
 });
 
-it('opens the stage the moment the first payment clears', function () {
+it('leaves the stage open once the first payment clears', function () {
     $app = submittedClearanceApplication();
 
-    expect(clearanceMeta($app)['unlocked'])->toBeFalse();
+    expect(clearanceMeta($app)['unlocked'])->toBeTrue();
 
     $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
     $meta = clearanceMeta($app);
 
+    // Paying changes the balance and nothing about the gate.
     expect($meta['unlocked'])->toBeTrue()
         ->and($meta['locked_reason'])->toBeNull()
         ->and($meta['balance_due'])->toBe(0.0);
@@ -317,8 +321,15 @@ it('keeps the stage open on a filing an office returned for revision', function 
  * refusal now runs the other way round: submission is not what closes the
  * stage, an unsettled Tax Order of Payment is what has not yet opened it.
  */
-it('refuses every write until the first payment has cleared', function () {
-    $app = submittedClearanceApplication();
+/*
+ * RENAMED from "refuses every write until the first payment has cleared". The
+ * gate moved off the money, so a submitted-but-unpaid filing now accepts these
+ * writes — that is the whole point of the change. A DRAFT still refuses them,
+ * and it is the case worth holding down: a clearance applied for against a
+ * draft would raise a balance on a filing that may never be sent.
+ */
+it('refuses every write while the application is still a draft', function () {
+    $app = draftClearanceApplication();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
     $this->deleteJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertStatus(422);
@@ -326,12 +337,25 @@ it('refuses every write until the first payment has cleared', function () {
         'file' => UploadedFile::fake()->create('zoning.pdf', 20, 'application/pdf'),
     ])->assertStatus(422);
 
-    // Nothing leaked through: no permit type attached, no document stored, and
-    // — the one that matters most — the assessment the applicant is about to
-    // pay was not rewritten under them.
+    // Nothing leaked through: no permit type attached and no document stored.
+    //
+    // The assessment is NOT checked here the way it was when this test ran on a
+    // submitted filing: a draft has no Tax Order of Payment to rewrite, so
+    // `topOrderLabels` has no FeeAssessment to read and throws. Its absence is
+    // the stronger statement anyway.
     expect($app->fresh()->permitTypes->pluck('code'))->not->toContain('ZONING')
-        ->and(ApplicationDocument::where('application_id', $app->id)->count())->toBe(0)
-        ->and(topOrderLabels($app))->not->toContain('locational clearance');
+        ->and(ApplicationDocument::where('application_id', $app->id)->count())->toBe(0);
+});
+
+it('accepts an application for a clearance on a submitted filing that is unpaid', function () {
+    $app = submittedClearanceApplication();
+
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+
+    // Applied for, and the fee joined the bill rather than being waived — the
+    // gate moved, the money did not stop mattering.
+    expect($app->fresh()->permitTypes->pluck('code'))->toContain('ZONING')
+        ->and(clearanceMeta($app)['balance_due'])->toBeGreaterThan(0);
 });
 
 it('keeps the stage shut on a filing that was rejected', function () {
@@ -1223,11 +1247,12 @@ it('refuses a payment when the filing owes nothing', function () {
 });
 
 /*
- * RENAMED from "opens the stage for the service, and only for a draft". The
- * service-level statement of the reversed rule: a draft is shut with a sentence
- * saying what to do, and the first cleared payment is what opens it.
+ * The service-level statement of the rule, walked through the whole lifecycle
+ * in one test so the transition is visible rather than inferred: shut on a
+ * draft with a sentence saying what to do, open from submission onward, and
+ * paying changes nothing about the gate.
  */
-it('opens the stage for the service only once the first payment has cleared', function () {
+it('opens the stage for the service at submission, and payment does not move it', function () {
     $service = app(ClearanceService::class);
     $app = draftClearanceApplication('Service Level Cafe');
 
@@ -1236,9 +1261,11 @@ it('opens the stage for the service only once the first payment has cleared', fu
 
     $this->postJson("/api/v1/applications/{$app->id}/submit")->assertOk();
 
+    // Open here — before a peso has moved. This is the assertion the tester's
+    // "the permits are all gone" report comes down to.
     $submitted = $app->fresh();
-    expect($service->isUnlocked($submitted))->toBeFalse()
-        ->and($service->lockedReason($submitted))->toBeString();
+    expect($service->isUnlocked($submitted))->toBeTrue()
+        ->and($service->lockedReason($submitted))->toBeNull();
 
     $this->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 
