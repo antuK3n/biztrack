@@ -19,12 +19,13 @@ import {
   ProtoModal,
   inputCls,
 } from '../../components/ui/Proto'
-import { formatBytes, formatDate } from '../../lib/format'
+import { formatBytes, formatDate, formatMoney } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import {
   applications,
   businesses,
   documents,
+  payments,
   reference,
 } from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
@@ -63,12 +64,30 @@ import type {
   BusinessPayload,
   DocumentType,
   OcrSuggestions,
+  Payment,
+  PaymentMethod,
   Permit,
   PrefillResult,
   PsicCode,
 } from '../../lib/types'
 
 type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 'review'
+
+/*
+ * The same three PayPage offers, deliberately duplicated rather than shared.
+ *
+ * Two screens take a payment now and they must offer the same choices, but the
+ * list is three literals and a shared constant would put a module dependency
+ * between the wizard and the pay page for the sake of nine words. If a fourth
+ * method ever appears — or these come from the API, which is where they belong
+ * — both lists move together. `PaymentMethod` is the type that keeps them
+ * honest in the meantime: adding a case there breaks whichever list forgot it.
+ */
+const PAY_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: 'gcash', label: 'GCash' },
+  { value: 'maya', label: 'Maya' },
+  { value: 'card', label: 'Card' },
+]
 /*
  * ── What this wizard is, and why the clearances are not in it ──────────────
  *
@@ -1893,6 +1912,14 @@ export function ApplyWizard() {
   const [uploadingType, setUploadingType] = useState<number | null>(null)
   const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
+  /*
+   * How the applicant is settling the Tax Order of Payment, chosen on Review &
+   * Submit rather than on a screen of its own. Defaults to GCash, matching
+   * PayPage — that screen still exists for anyone who lands unpaid.
+   */
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('gcash')
+  const [receipt, setReceipt] = useState<Payment | null>(null)
+  const [payError, setPayError] = useState<string | null>(null)
 
   /*
    * Item 59 — "I already hold this clearance, here is the copy" — moved out
@@ -3505,12 +3532,43 @@ export function ApplyWizard() {
     }
   }
 
+  /*
+   * Submit and settle the Tax Order of Payment in one press.
+   *
+   * It used to submit and stop, which left the applicant at a success screen,
+   * then a separate Pay screen, then a second success screen, and only then the
+   * six clearances — four screens to finish one filing. The client's words:
+   * "it should be here the payment already. shouldn't be another step that I
+   * first need to submit."
+   *
+   * The order the LGU asked for is unchanged. The Tax Order of Payment is still
+   * raised by submission and still covers the business permit alone; the six
+   * clearances still accrue their own fees afterwards. Only the walk between
+   * the two is gone.
+   *
+   * ── Why the payment failure is not treated as a submit failure ────────────
+   *
+   * These are two writes and the first one is not undoable. Once `submit()`
+   * returns, the filing EXISTS with a tracking ID and a bill — so if the
+   * payment then fails, throwing away that fact and showing "submission
+   * failed" would be a lie that also loses the applicant their tracking ID.
+   * The filing is reported as submitted, the payment error is carried to the
+   * success screen, and the applicant is pointed at the Pay screen to finish.
+   * That state is not exotic: an unpaid submitted filing is exactly what the
+   * flow produced before this change.
+   */
   async function submit() {
     if (!applicationId) return
     setSaving(true)
     setSubmitError(null)
+    setPayError(null)
     try {
       const app = await applications.submit(applicationId)
+      try {
+        setReceipt(await payments.pay(app.id, payMethod))
+      } catch (err) {
+        setPayError(toApiError(err).message)
+      }
       setTracking(app.tracking_id)
     } catch (err) {
       setSubmitError(toApiError(err).message)
@@ -3798,26 +3856,66 @@ export function ApplyWizard() {
    * has not been given one for, and writes a real one on the first keystroke.
    */
 
-  /* Success screen after submit (kept). */
+  /*
+   * The one screen after Submit & Pay, and the last one before the clearances.
+   *
+   * It carries the tracking ID (the only thing here the applicant cannot get
+   * back any other way), what was paid, and the way onward. The clearances are
+   * the FIRST action rather than a link at the bottom: the six were reported
+   * missing by two testers, and the moment they open is this one.
+   */
   if (tracking) {
     return (
       <div className="mx-auto max-w-lg py-10 text-center">
         <span className="mx-auto flex h-16 w-16 items-center justify-center text-s-green">
           <CheckCircleFilledIcon size={64} />
         </span>
-        <h1 className="mt-4 text-2xl font-bold text-ink">Application submitted</h1>
+        <h1 className="mt-4 text-2xl font-bold text-ink">
+          {receipt ? 'Submitted and paid' : 'Application submitted'}
+        </h1>
         <p className="mt-2 text-sm text-ink-secondary">
           Keep this tracking ID. You can follow every step of processing on your Track page.
         </p>
         <p className="display-serif mt-6 rounded-2xl bg-white px-4 py-4 text-xl text-ink shadow-card">
           {tracking}
         </p>
-        <div className="mt-7 flex justify-center gap-3">
-          <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
-            Track this application
+        {receipt && (
+          <p className="tnum mt-3 text-sm text-ink-secondary">
+            Paid {formatMoney(receipt.amount)} &middot; ref {receipt.reference_number}
+          </p>
+        )}
+        {/*
+          * Submitted but not paid. Not an error state for the FILING — that
+          * succeeded and has a tracking ID above — so this is a next step, not
+          * a failure banner. It still uses the alert role because it appeared
+          * unexpectedly and changes what the applicant has to do.
+          */}
+        {payError !== null && (
+          <div role="alert" className="mt-4 rounded-xl border border-line-strong bg-white px-4 py-3 text-left">
+            <p className="text-sm font-semibold text-ink">The payment didn&rsquo;t go through</p>
+            <p className="mt-1 text-xs text-ink-secondary">{payError}</p>
+            <button
+              type="button"
+              onClick={() => navigate(`/applications/${applicationId}/pay`)}
+              className="mt-2 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+            >
+              Settle the Tax Order of Payment
+            </button>
+          </div>
+        )}
+        <p className="mt-6 text-sm text-ink-secondary">
+          Your six LGU clearances are open. Apply for the ones your business needs — each adds its
+          own fee, and your permit is released when your balance reaches zero.
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
+          <PillButton onClick={() => navigate(`/applications/${applicationId}/clearances`)}>
+            Apply for LGU Clearances
           </PillButton>
-          <PillButton className="bg-white !text-royal border-2 border-royal hover:bg-royal-tint" onClick={() => navigate('/applications')}>
-            All applications
+          <PillButton
+            className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
+            onClick={() => navigate(`/applications/${applicationId}`)}
+          >
+            Track this application
           </PillButton>
         </div>
       </div>
@@ -5452,10 +5550,61 @@ export function ApplyWizard() {
               same promise.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              Submitting produces a Tax Order of Payment for your Business Permit, and opens the six
-              LGU clearances for you to apply for — each one you apply for adds its own fee, and
-              your permit is released when the balance reaches zero.
+              This raises the Tax Order of Payment for your Business Permit and settles it now, then
+              opens the six LGU clearances — each one you apply for adds its own fee, and your
+              permit is released when the balance reaches zero.
             </p>
+
+            {/*
+              * Paying happens here, not on a screen of its own.
+              *
+              * The applicant used to submit, land on a success screen, navigate
+              * to Pay, pay, land on a second success screen, and only then reach
+              * the clearances. Four screens to finish one filing, and the client
+              * said so: "it should be here the payment already."
+              *
+              * Only the method is asked for. The AMOUNT is not shown, and that
+              * is not an oversight to fix by guessing: the Tax Order of Payment
+              * is raised by submission, so before the press there is no assessed
+              * total to quote. Printing the draft's own fee working here would
+              * be showing a number the LGU has not issued, and if the two ever
+              * differed the applicant would have been quoted the wrong one. The
+              * receipt on the next screen carries the figure the city actually
+              * charged.
+              *
+              * Radios, not buttons: this is one choice among three, and a radio
+              * group is what a screen reader announces as such. Never Color
+              * Alone — the selected chip carries a filled dot and a border
+              * weight change, not just a tint.
+              */}
+            <fieldset className="mt-8 w-full max-w-md">
+              <legend className="mb-2 text-sm font-medium text-ink">Pay with</legend>
+              <div className="flex flex-wrap justify-center gap-2">
+                {PAY_METHODS.map((m) => {
+                  const selected = payMethod === m.value
+                  return (
+                    <label
+                      key={m.value}
+                      className={`inline-flex cursor-pointer items-center gap-2 rounded-full border-2 px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-royal-tint text-royal'
+                          : 'border-line-strong bg-white text-ink-secondary hover:bg-canvas'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="pay-method"
+                        value={m.value}
+                        checked={selected}
+                        onChange={() => setPayMethod(m.value)}
+                        className="h-3.5 w-3.5 accent-royal"
+                      />
+                      {m.label}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
             {priorPermitChoice && (
               <p className="tnum mt-6 text-sm text-ink-secondary">
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
@@ -5510,7 +5659,12 @@ export function ApplyWizard() {
                 disabled={saving || !consent}
                 className="min-w-28"
               >
-                Submit
+                {/*
+                  * "Submit & Pay", because it now does both. A button labelled
+                  * "Submit" that also takes a payment is the kind of surprise
+                  * this form exists to avoid.
+                  */}
+                {saving ? 'Submitting…' : 'Submit & Pay'}
               </PillButton>
             )}
             {stepIndex > 0 && (
@@ -5670,7 +5824,16 @@ export function ApplyWizard() {
             void submit()
           }}
         >
-          <p className="py-4 text-center text-lg">Are you sure you want to submit this application?</p>
+          {/*
+            * Names the payment, because the press now takes one. "Are you sure
+            * you want to submit this application?" was true and is no longer
+            * complete, and a confirmation that under-describes what it confirms
+            * is worse than none.
+            */}
+          <p className="py-4 text-center text-lg">
+            Submit this application and pay the Business Permit fee with{' '}
+            {PAY_METHODS.find((m) => m.value === payMethod)?.label ?? payMethod}?
+          </p>
         </ProtoModal>
       )}
 
