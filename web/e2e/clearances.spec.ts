@@ -1077,7 +1077,7 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
   await expect(page.getByText(/opens the six LGU clearances/i)).toBeVisible()
   await expect(page.getByText(/balance reaches zero/i)).toBeVisible()
 
-  await page.getByRole('button', { name: /^submit$/i }).click()
+  await page.getByRole('button', { name: /^submit & pay$/i }).click()
   await page.getByRole('button', { name: /^proceed$/i }).click()
   await expect(page.getByText(/tracking/i).first()).toBeVisible({ timeout: 30_000 })
 
@@ -1098,7 +1098,19 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
     }, appId)
 
   const atSubmit = await read()
-  expect(atSubmit.status).toBe('pending_payment')
+  /*
+   * NOT `pending_payment` any more, and that is the point of the button.
+   *
+   * "Submit & Pay" raises the Tax Order of Payment and settles it in one press,
+   * so the filing never rests in the unpaid state the applicant used to have to
+   * navigate to a second screen to clear. The unpaid middle still exists in the
+   * data model and is still asserted — flow-lifecycle submits via the API
+   * precisely so it can observe it — but it is no longer a place the wizard
+   * leaves anyone standing.
+   */
+  expect(atSubmit.status, 'Submit & Pay left the filing awaiting payment').not.toBe(
+    'pending_payment',
+  )
   // The business permit, alone. This is the assertion the old test made the
   // exact opposite of.
   expect(atSubmit.permitCodes, 'a clearance reached the filing before payment').toEqual(['BUSINESS'])
@@ -1110,6 +1122,13 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
     'a clearance was billed on the business permit’s Tax Order of Payment',
   ).not.toContain('fire safety inspection certificate fee')
   expect(atSubmit.total).toBeGreaterThan(0)
+  /*
+   * Settled by the one press. The receipt is on the screen the applicant is
+   * standing on, which is what makes this a payment rather than a silent
+   * charge — DESIGN.md's rule that money is never moved without showing it.
+   */
+  await expect(page.getByText(/submitted and paid/i)).toBeVisible()
+  await expect(page.getByText(/paid ₱/i)).toBeVisible()
 
   /* ── 2. Open on submission, with the bill still outstanding ────────────── */
 
@@ -1135,23 +1154,21 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
     page.locator('#clearances-locked'),
     'the stage stayed shut on a submitted filing',
   ).toHaveCount(0)
-  // Open AND unpaid at once — which is the whole change.
+  // The bill was real before it was settled — otherwise the accrual asserted
+  // below would be measuring movement from nothing.
   expect(atSubmit.total).toBeGreaterThan(0)
 
-  /* ── 3. Paying changes the balance and not the gate ────────────────────── */
+  /*
+   * There is no separate "now go and pay" step here any more.
+   *
+   * It navigated to /pay and pressed Pay Online, which is exactly the walk the
+   * client asked to be removed — and it now fails outright, because Submit &
+   * Pay already settled the bill and the Pay screen correctly refuses a filing
+   * that owes nothing. The screen still exists for a filing that arrives
+   * unpaid by some other route; flow-lifecycle drives it there.
+   */
 
-  await page.goto(`/applications/${appId}/pay`)
-  await page.getByRole('button', { name: 'Pay Online' }).click()
-  await expect(page.getByText(/receipt|paid/i).first()).toBeVisible({ timeout: 30_000 })
-
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(cards).toHaveCount(6, { timeout: 30_000 })
-  await expect(
-    page.locator('#clearances-locked'),
-    'the stage shut itself after the first payment cleared',
-  ).toHaveCount(0)
-
-  /* ── 4. Applying accrues ───────────────────────────────────────────────── */
+  /* ── 3. Applying accrues ───────────────────────────────────────────────── */
 
   const fire = cards.filter({ hasText: /fire/i })
   // Quoted before the press, which is the whole reason the amount is back on
