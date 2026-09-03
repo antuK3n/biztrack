@@ -852,8 +852,14 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
    * keeps a description that happens to mention fishponds from answering a
    * question about the Fishpond classification.
    */
-  const zoneList = card.getByRole('list', { name: /classifications? drawn on barangay/i })
-  const overlayList = card.getByRole('list', { name: /overlay zones? over barangay/i })
+  /*
+   * Both headings dropped the barangay name when the card was trimmed — it was
+   * already in the card's own heading two lines above, and saying it three
+   * times is what made this read as a document rather than a form field. The
+   * names still distinguish the two lists, which is all these selectors need.
+   */
+  const zoneList = card.getByRole('list', { name: /classifications? on this map/i })
+  const overlayList = card.getByRole('list', { name: /overlays? over this barangay/i })
 
   await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
   await expect(zoneList.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
@@ -880,10 +886,17 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
   await expect(overlayList.getByRole('listitem')).toHaveCount(1)
   await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
 
-  // CPDO decides, and the card says so where the applicant reads it.
-  await expect(card).toContainText(
-    /cpdo confirms the classifications and overlays that apply to your exact/i,
-  )
+  /*
+   * CPDO decides, and the card still says so.
+   *
+   * The sentence was cut down — it ran to three lines naming the office in full
+   * and spelling out "the classifications and overlays that apply to your exact
+   * location when it reviews your zoning clearance". What is asserted is the
+   * part that has to survive any rewording: that CPDO is named as the decider.
+   * Matching the old wording verbatim made this a test of the copy rather than
+   * of the promise.
+   */
+  await expect(card).toContainText(/cpdo confirms what applies to your exact location/i)
 
   // And it never claims to have decided anything itself. The overlays bring one
   // more thing it must not say: Flood is a designation over an area, so any
