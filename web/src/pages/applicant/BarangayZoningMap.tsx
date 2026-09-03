@@ -36,8 +36,8 @@ import type { Barangay } from '../../lib/types'
  * designates three overlay zones — Flood over all 21 barangays, Heritage over
  * five, Eco-Tourism over Dampalit. An overlay is a "transparent zone overlain on
  * a Base Zone" (Art. V §4): it lies over the base zones rather than being one of
- * them, so it gets its own block below the classification list and is never
- * mixed into it.
+ * them, so it gets its own heading and list below the classifications and is
+ * never mixed into them.
  *
  * The trap is Flood. It is a designation the ordinance makes over an area, and
  * it must not be dressed as a warning about the applicant's property — not red,
@@ -75,20 +75,17 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
       </h3>
 
       {/*
-        * One sentence, and it does two jobs: it dates the map the applicant is
-        * looking at, and it says who decides. "Say it once" — the classification
-        * list below adds no second disclaimer, because this line already covers
-        * it and stacked restatement is what reads as machine-written.
+        * One line, and it still does both jobs: dates the sheet, and says who
+        * decides. It ran to three lines naming the office in full and spelling
+        * out "classifications and overlays that apply to your exact location
+        * when it reviews your zoning clearance" — all true, none of it load
+        * bearing. This card is one field in a long form; the applicant is
+        * placing a pin, not reading a briefing. "CPDO decides" is the whole of
+        * the disclaimer and it survives the cut.
         */}
-      <p className="mt-1 text-sm leading-relaxed text-ink-secondary">
-        {/*
-          * Amended to say "classifications and overlays" rather than gaining a
-          * second CPDO sentence beside the overlay block: one line covers both,
-          * and stacked restatement is what reads as machine-written.
-          */}
-        The City Planning and Development Office&rsquo;s proposed zoning map for 2018&ndash;2027.
-        CPDO confirms the classifications and overlays that apply to your exact location when
-        it reviews your zoning clearance.
+      <p className="mt-1 text-sm text-ink-secondary">
+        CPDO&rsquo;s proposed map for 2018&ndash;2027. CPDO confirms what applies to your exact
+        location.
       </p>
 
       {mapPath !== null && !broken && (
@@ -134,8 +131,8 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
         </a>
       )}
       {mapPath !== null && !broken && (
-        <p className="mt-1.5 text-xs text-ink-secondary">
-          Opens the full sheet, with CPDO&rsquo;s own legend and scale, in a new tab.
+        <p className="mt-1.5 text-xs text-ink-muted">
+          Opens the full sheet in a new tab.
         </p>
       )}
 
@@ -154,12 +151,12 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
         <div className="mt-4">
           <h4 id="barangay-zone-list-heading" className="text-[13px] font-semibold text-ink">
             {/*
-             * "Name both numbers." "Zones on this map" would be vague about
-             * whose map; naming the barangay ties the count to the sheet above.
+             * The count stays; the barangay name goes. It read "The 6
+             * classifications drawn on Barangay Baritan" three lines under a
+             * heading that already says "Zoning map for Barangay Baritan" —
+             * naming it twice is what made the card feel like a document.
              */}
-            {zones.length === 1
-              ? `The one classification drawn on Barangay ${barangay.name}`
-              : `The ${zones.length} classifications drawn on Barangay ${barangay.name}`}
+            {zones.length === 1 ? 'Classification on this map' : `${zones.length} classifications on this map`}
           </h4>
           {/*
             * Named by its own heading. There are two lists on this card now and
@@ -211,31 +208,59 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
          * in red would read as a warning about this applicant's lot, which is
          * precisely the verdict we cannot make.
          */
-        <div className="mt-5 rounded-xl border border-royal/30 bg-royal-tint px-4 py-3">
+        <div className="mt-4">
           <h4 id="barangay-overlay-list-heading" className="text-[13px] font-semibold text-ink">
-            {overlays.length === 1
-              ? `The one overlay zone over Barangay ${barangay.name}`
-              : `The ${overlays.length} overlay zones over Barangay ${barangay.name}`}
+            {overlays.length === 1 ? 'Overlay over this barangay' : `${overlays.length} overlays over this barangay`}
           </h4>
-          <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
-            City Ordinance No. 24-2018 lays these over parts of the barangay, adding a layer
-            of rules on top of the zone beneath.
-          </p>
-          <ul aria-labelledby="barangay-overlay-list-heading" className="mt-2.5 space-y-2">
+          <ul aria-labelledby="barangay-overlay-list-heading" className="mt-2 flex flex-wrap gap-2">
             {overlays.map((o) => (
               <li
                 key={o.code}
-                className="rounded-lg border border-dashed border-royal/40 bg-white px-3 py-2"
+                className="inline-flex items-center gap-2 rounded-full border border-dashed border-royal/50 bg-royal-tint px-3 py-1 text-xs font-medium text-royal"
               >
-                <p className="text-xs font-semibold text-royal">{o.name}</p>
-                {o.description !== null && (
-                  <p className="mt-0.5 text-xs leading-relaxed text-ink-secondary">
-                    {o.description}
-                  </p>
-                )}
+                {o.name}
               </li>
             ))}
           </ul>
+          {/*
+            * The ordinance's explanation, folded away.
+            *
+            * It used to be a bordered panel with a heading, a sentence about
+            * Ordinance 24-2018, and a two-to-three line paragraph per overlay —
+            * roughly half the card, for something most applicants will never
+            * read. Collapsed, it costs one line and is still one click away for
+            * the applicant who wants to know what "Heritage" means.
+            *
+            * <details> rather than a custom disclosure: it is keyboard operable,
+            * announces its own expanded state, and works before React hydrates.
+            *
+            * The distinction from base zones is now carried by the dashed pill,
+            * the royal tint, the separate heading and the word "overlay" in it —
+            * four signals, none of them colour alone, which is what the earlier
+            * full-width rows were for. An applicant still cannot mistake one for
+            * a base zone.
+            *
+            * Still not red, and still no alert role. Flood here is a designation
+            * the ordinance makes over an area, not a finding about this
+            * applicant's lot — we have no geometry and "your site floods" is not
+            * ours to say.
+            */}
+          {overlays.some((o) => o.description !== null) && (
+            <details className="group mt-2">
+              <summary className="cursor-pointer list-none text-xs font-medium text-royal underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal">
+                What these overlays mean
+              </summary>
+              <div className="mt-2 space-y-1.5 border-l-2 border-royal/25 pl-3">
+                {overlays.map((o) =>
+                  o.description === null ? null : (
+                    <p key={o.code} className="text-xs leading-relaxed text-ink-secondary">
+                      <span className="font-semibold text-ink">{o.name}.</span> {o.description}
+                    </p>
+                  ),
+                )}
+              </div>
+            </details>
+          )}
         </div>
       )}
     </section>
