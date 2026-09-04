@@ -141,8 +141,15 @@ async function makeCompleteDraft(page: Page): Promise<number> {
           tin: '123-456-789-000',
           address: {
             line1: '2 Playwright St.',
-            barangay_id: barangays[0].id,
-            // Inside the Malabon bounding box the address step checks.
+            /*
+             * Longos by name, not `barangays[0]`. There is no bounding box any
+             * more: the address step checks the real city polygon AND that the
+             * pin agrees with the chosen barangay. These coordinates are Malabon
+             * City Hall, which is in Longos; Acacia — first alphabetically — is
+             * about 1.5 km off and would now be refused.
+             */
+            barangay_id: (barangays.find((b: { name: string }) => b.name === 'Longos') ?? barangays[0])
+              .id,
             latitude: 14.6572,
             longitude: 120.9573,
           },
@@ -1059,10 +1066,18 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
    */
   await expect(page.getByText(/one tax order of payment/i)).toHaveCount(0)
   await expect(page.getByText(/nothing else is charged/i)).toHaveCount(0)
-  await expect(page.getByText(/once that payment clears/i)).toBeVisible()
+  /*
+   * It said "once that payment clears" until the gate moved off the money.
+   * Submitting is what opens the six now, so promising the applicant that a
+   * payment opens them would be the same kind of false clause as the two
+   * asserted absent above — and this one would send them to a Pay screen
+   * looking for a door that is already open.
+   */
+  await expect(page.getByText(/once that payment clears/i)).toHaveCount(0)
+  await expect(page.getByText(/opens the six LGU clearances/i)).toBeVisible()
   await expect(page.getByText(/balance reaches zero/i)).toBeVisible()
 
-  await page.getByRole('button', { name: /^submit$/i }).click()
+  await page.getByRole('button', { name: /^submit & pay$/i }).click()
   await page.getByRole('button', { name: /^proceed$/i }).click()
   await expect(page.getByText(/tracking/i).first()).toBeVisible({ timeout: 30_000 })
 
@@ -1083,7 +1098,19 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
     }, appId)
 
   const atSubmit = await read()
-  expect(atSubmit.status).toBe('pending_payment')
+  /*
+   * NOT `pending_payment` any more, and that is the point of the button.
+   *
+   * "Submit & Pay" raises the Tax Order of Payment and settles it in one press,
+   * so the filing never rests in the unpaid state the applicant used to have to
+   * navigate to a second screen to clear. The unpaid middle still exists in the
+   * data model and is still asserted — flow-lifecycle submits via the API
+   * precisely so it can observe it — but it is no longer a place the wizard
+   * leaves anyone standing.
+   */
+  expect(atSubmit.status, 'Submit & Pay left the filing awaiting payment').not.toBe(
+    'pending_payment',
+  )
   // The business permit, alone. This is the assertion the old test made the
   // exact opposite of.
   expect(atSubmit.permitCodes, 'a clearance reached the filing before payment').toEqual(['BUSINESS'])
@@ -1095,33 +1122,53 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
     'a clearance was billed on the business permit’s Tax Order of Payment',
   ).not.toContain('fire safety inspection certificate fee')
   expect(atSubmit.total).toBeGreaterThan(0)
+  /*
+   * Settled by the one press. The receipt is on the screen the applicant is
+   * standing on, which is what makes this a payment rather than a silent
+   * charge — DESIGN.md's rule that money is never moved without showing it.
+   */
+  await expect(page.getByText(/submitted and paid/i)).toBeVisible()
+  await expect(page.getByText(/paid ₱/i)).toBeVisible()
 
-  /* ── 2. Shut, because the bill is not paid ─────────────────────────────── */
+  /* ── 2. Open on submission, with the bill still outstanding ────────────── */
 
+  /*
+   * This step asserted the opposite until 2026-09-02: the stage was shut here
+   * and only the first cleared payment opened it. Payment in this build is a
+   * dummy, so nothing ever cleared it — the six were unreachable and testers
+   * twice reported them as missing outright.
+   *
+   * What the billing half of this test proves is untouched by that: the Tax
+   * Order of Payment at submission still covers the business permit ALONE
+   * (asserted just above), and each clearance still accrues its own fee when
+   * applied for (asserted below). The money still works the same way; it just
+   * no longer bars the door.
+   */
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
     timeout: 30_000,
   })
-  await expect(
-    page.locator('#clearances-locked'),
-    'the stage opened on submission rather than on payment',
-  ).toBeVisible()
-
-  /* ── 3. Paying opens it ────────────────────────────────────────────────── */
-
-  await page.goto(`/applications/${appId}/pay`)
-  await page.getByRole('button', { name: 'Pay Online' }).click()
-  await expect(page.getByText(/receipt|paid/i).first()).toBeVisible({ timeout: 30_000 })
-
-  await page.goto(`/applications/${appId}/clearances`)
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(6, { timeout: 30_000 })
   await expect(
     page.locator('#clearances-locked'),
-    'the stage stayed shut after the first payment cleared',
+    'the stage stayed shut on a submitted filing',
   ).toHaveCount(0)
+  // The bill was real before it was settled — otherwise the accrual asserted
+  // below would be measuring movement from nothing.
+  expect(atSubmit.total).toBeGreaterThan(0)
 
-  /* ── 4. Applying accrues ───────────────────────────────────────────────── */
+  /*
+   * There is no separate "now go and pay" step here any more.
+   *
+   * It navigated to /pay and pressed Pay Online, which is exactly the walk the
+   * client asked to be removed — and it now fails outright, because Submit &
+   * Pay already settled the bill and the Pay screen correctly refuses a filing
+   * that owes nothing. The screen still exists for a filing that arrives
+   * unpaid by some other route; flow-lifecycle drives it there.
+   */
+
+  /* ── 3. Applying accrues ───────────────────────────────────────────────── */
 
   const fire = cards.filter({ hasText: /fire/i })
   // Quoted before the press, which is the whole reason the amount is back on

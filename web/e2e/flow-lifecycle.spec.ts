@@ -403,7 +403,15 @@ test('an owner files a business permit with all six clearances behind it', async
           tin: '123-456-789-000',
           address: {
             line1: '3 Playwright St.',
-            barangay_id: barangays[0].id,
+            /*
+             * Longos by name, not `barangays[0]`. These coordinates are Malabon
+             * City Hall, which is in Longos; the first barangay alphabetically
+             * is Acacia, about 1.5 km away. The zoning step now refuses a pin
+             * that contradicts its barangay, so the old pairing left this filing
+             * permanently stuck on section 2 with no way to submit.
+             */
+            barangay_id: (barangays.find((b: { name: string }) => b.name === 'Longos') ?? barangays[0])
+              .id,
             latitude: 14.6572,
             longitude: 120.9573,
           },
@@ -499,10 +507,34 @@ test('an owner files a business permit with all six clearances behind it', async
    */
   await expect(map.locator('li')).toHaveCount(6)
 
+  /*
+   * Walked to Review & Submit, then submitted through the API rather than by
+   * pressing the button.
+   *
+   * The wizard's own button is "Submit & Pay" now — it raises the Tax Order of
+   * Payment and settles it in one press, which is what the client asked for.
+   * That is deliberately NOT used here, because this file's whole narrative is
+   * the unpaid middle: tests 2 through 5 assert that an unpaid filing shows as
+   * awaiting payment, is routed to nobody, tells the applicant no office is
+   * reviewing it, and only enters the queues when the payment clears. Paying at
+   * submit would delete the state those four tests are about.
+   *
+   * So the wizard is still driven to the last step — reaching it is what proves
+   * the filing is complete — and the transition it now performs in one press is
+   * split back apart here so the middle can be observed. The button's combined
+   * behaviour has its own test; see "Submit & Pay settles the bill in one
+   * press" in clearances.spec.ts.
+   */
   await map.getByRole('button', { name: /review & submit/i }).click()
-  await page.getByRole('button', { name: /^submit$/i }).click()
-  await page.getByRole('button', { name: /^proceed$/i }).click()
-  await expect(page.getByText(/tracking/i).first()).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByRole('button', { name: /^submit & pay$/i })).toBeEnabled()
+  await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const res = await fetch(`/api/v1/applications/${id}/submit`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) throw new Error(`submit answered ${res.status}`)
+  }, appId)
 
   const filed = await filing(page, 'public', appId)
   const trackingId = await page.evaluate(async (id) => {

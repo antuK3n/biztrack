@@ -243,29 +243,38 @@ class ClearanceService
     // --- unlocking -----------------------------------------------------------
 
     /**
-     * The stage opens when the FIRST payment clears, and not before.
+     * The stage opens when the application is SUBMITTED.
      *
-     * ── Why the first payment and not submission ──────────────────────────────
+     * ── It used to be the first cleared payment, and that was wrong here ──────
      *
-     * ASSUMPTION, taken deliberately and recorded here so it can be argued
-     * with: the client said "payment first, then the others", and the honest
-     * reading of "first" is the money, not the paperwork. Unlocking at
-     * submission would open a chargeable stage on a filing the LGU has not been
-     * paid a peso for, so an applicant could apply for six clearances, route
-     * six offices, and abandon the filing before settling anything. The first
-     * payment is the point at which the applicant has committed and the offices
-     * can safely be given work.
+     * The reasoning for the money gate is kept because it is still the right
+     * reasoning for a system that takes money: unlocking at submission opens a
+     * chargeable stage on a filing the LGU has not been paid a peso for, so an
+     * applicant could apply for six clearances, route six offices, and abandon
+     * the filing before settling anything.
      *
-     * ── Why the ledger and not the status ─────────────────────────────────────
+     * It was wrong because payment in this build is a DUMMY. Nothing clears it,
+     * so `hasClearedPayment` was false forever, every filing stayed locked, and
+     * the six clearances were not "behind a gate" — they were unreachable. Two
+     * separate testers reported them as missing and asked for them back. A gate
+     * nobody can pass is indistinguishable from a deleted feature, and the
+     * argument above is worth nothing if it protects a balance that no real
+     * money ever reaches.
      *
-     * `PermitFees::hasClearedPayment` rather than a `status !== PendingPayment`
-     * test or a new `clearances_unlocked` column. The stage is about money, so
-     * it asks the money. A column would be a second copy of a fact the payments
-     * table already states, and the first time the two disagreed the applicant
-     * would be looking at a stage that says one thing and a bill that says
-     * another.
+     * The client's ordering is intact: the business permit is applied for
+     * first, the Tax Order of Payment is still raised and still assessed, and
+     * the clearances still come after. Only the blocking is gone — "just make
+     * the payment kinda a nonsense step" (2026-09-02).
      *
-     * ── The two statuses that stay shut even after paying ─────────────────────
+     * WHEN PAYMENT BECOMES REAL, revisit this line, and put the question to
+     * BPLO rather than answering it here: may an unpaid filing hold clearances?
+     * If the answer is no, the restoration is `PermitFees::hasClearedPayment`
+     * and the paragraph above is the argument for it.
+     *
+     * ── The statuses that stay shut ───────────────────────────────────────────
+     *
+     * Draft, because a draft is not yet an application; a clearance applied for
+     * against one would raise a balance on a filing that may never be sent.
      *
      * Rejected and Cancelled. There is nothing to apply for under a filing the
      * LGU has closed, and a clearance applied for on one would raise a balance
@@ -280,18 +289,40 @@ class ClearanceService
      * It is allowed here and not surfaced on the screen; if BPLO says a closed
      * filing is closed, this is the one line that changes.
      *
-     * Returned is open, and that is the deliberate reversal of the old rule. A
-     * returned filing has already paid, so it is past the gate; it is also the
-     * one moment an office has told the applicant something is missing, and
-     * "you also need a locational clearance" is a thing offices say.
+     * Returned is open. It is the one moment an office has told the applicant
+     * something is missing, and "you also need a locational clearance" is a
+     * thing offices say.
+     */
+    /*
+     * ── The gate is submission, not payment [client instruction, 2026-09-02] ──
+     *
+     * This asked `PermitFees::hasClearedPayment()` and that made the six
+     * clearances unreachable in practice. Payment in this build is a dummy: no
+     * money moves and nothing clears it, so the gate never opened, every filing
+     * sat locked, and testers reported the other permits as simply GONE. A gate
+     * that no one can pass is indistinguishable from a deleted feature.
+     *
+     * The ORDER the client asked for on 28 August is unchanged — the business
+     * permit is applied for first, the Tax Order of Payment is still raised and
+     * still assessed, and the clearances still come after it. What changed is
+     * that the payment no longer BLOCKS: "just make the payment kinda a
+     * nonsense step" (2026-09-02). Submitting is what opens the stage.
+     *
+     * Draft stays closed, and that is the order surviving rather than an
+     * oversight: a draft is not yet an application, and a clearance applied for
+     * against one would raise a balance on a filing that may never be sent.
+     *
+     * When payment becomes real, this is the one line to reconsider — and the
+     * question to put to BPLO then is whether an unpaid filing may hold
+     * clearances at all, not whether this line should quietly go back.
      */
     public function isUnlocked(Application $application): bool
     {
-        if (in_array($application->status, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
-            return false;
-        }
-
-        return PermitFees::hasClearedPayment($application);
+        return ! in_array($application->status, [
+            ApplicationStatus::Draft,
+            ApplicationStatus::Rejected,
+            ApplicationStatus::Cancelled,
+        ], true);
     }
 
     /**
@@ -311,19 +342,16 @@ class ClearanceService
         }
 
         return match ($application->status) {
-            ApplicationStatus::Draft => 'Finish and submit this application first, then settle the Tax Order of Payment for your business permit. The six LGU clearances open here the moment that payment clears.',
-            ApplicationStatus::Submitted => 'Your Tax Order of Payment is being prepared. Settle it and the six LGU clearances open here — you can apply for them one at a time, and each one’s fee is added to your balance.',
-            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment for your business permit. The six LGU clearances open here the moment that payment clears.',
+            ApplicationStatus::Draft => 'Finish and submit this application first. The six LGU clearances open here as soon as it is submitted, and you can apply for them one at a time — each one’s fee is added to your balance.',
             ApplicationStatus::Rejected => 'This application was not approved, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             ApplicationStatus::Cancelled => 'This application was cancelled, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             /*
-             * Under review, for inspection, returned, approved with no cleared
-             * payment behind them. Not reachable through the product — a filing
-             * only leaves `pending_payment` by paying — but reachable in the
-             * register, where officers have moved filings by hand. Say the true
-             * thing rather than assume it away.
+             * Unreachable: `isUnlocked` now returns true for every status not
+             * matched above, so this arm exists only so the method is total. It
+             * says something true and useless rather than throwing, because a
+             * status added to the enum later must not take the screen down.
              */
-            default => 'The LGU clearances open once the first payment on this application has cleared. Ours shows nothing settled yet — contact the BPLO if you have already paid.',
+            default => 'These clearances are not open on this application yet.',
         };
     }
 
@@ -365,13 +393,22 @@ class ClearanceService
      * stage opens, so a clearance applied for afterwards would otherwise sit on
      * the filing with no office ever seeing it.
      *
-     * The objection to apply-time routing under the old ordering was real and
-     * no longer applies: `assigned_at` starts the service-time clock that
-     * ProcessingTimeAnalytics, StaffingSimulation and DashboardAnalytics
-     * measure an office by, and stamping it inside somebody's unfinished draft
-     * charged the office for the days the applicant spent typing. There is no
-     * draft here. The stage opens on a paid filing, so `assigned_at` is stamped
-     * the moment the office genuinely has work.
+     * The objection to apply-time routing under the old ordering was real:
+     * `assigned_at` starts the service-time clock that ProcessingTimeAnalytics,
+     * StaffingSimulation and DashboardAnalytics measure an office by, and
+     * stamping it inside somebody's unfinished draft charged the office for the
+     * days the applicant spent typing.
+     *
+     * What answers it is NOT that this stage only opens on a paid filing — it
+     * no longer does, since the gate moved to submission (see `isUnlocked`).
+     * It is that `WorkflowService::routeClearance` refuses to route at all
+     * until `PermitFees::hasClearedPayment`, so applying while unpaid attaches
+     * the permit type and its fee and creates no assignment. The office is
+     * given the work by `routeToDepartments` when the payment clears, and
+     * `assigned_at` is stamped then.
+     *
+     * That guard is therefore load-bearing, and it is the thing to check before
+     * anyone concludes an unpaid filing can be pushed into an office queue.
      */
     public function apply(Application $application, PermitType $type): void
     {

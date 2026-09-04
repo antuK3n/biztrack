@@ -15,10 +15,49 @@ use Illuminate\Http\JsonResponse;
  */
 class ReferenceController extends Controller
 {
+    /**
+     * The 21 barangays, each with its official CPDO zoning sheet and the
+     * classifications that sheet shows.
+     *
+     * The zoning payload rides along here rather than on an endpoint of its own
+     * because the wizard already loads this list at mount and the applicant picks
+     * a barangay from it — a second round trip would buy nothing. It is ~7 KB for
+     * all 21.
+     *
+     * `zoning_classifications` is what the barangay's map DRAWS, not what any
+     * address IS. The sheets are rasters and hold no geometry, so no per-location
+     * answer exists to send and none is sent; CPDO determines the classification
+     * for a specific site during processing. Any consumer that starts presenting
+     * this as a verdict is reading it wrong.
+     *
+     * `zoning_overlays` is a separate key and not more entries in that list,
+     * because an overlay is not one of the base classifications — it lies over
+     * them (City Ordinance No. 24-2018 Art. V §4). Merging the two would let a
+     * consumer print "Flood Overlay Zone" in a list of the zones drawn on the
+     * sheet, which is neither what the sheet draws nor what the overlay means.
+     * The same limit applies to both: designated somewhere in this barangay, not
+     * a finding about a location.
+     */
     public function barangays(): JsonResponse
     {
+        $barangays = Barangay::with(['zoningClassifications', 'zoningOverlays'])->orderBy('name')->get();
+
         return response()->json([
-            'data' => Barangay::orderBy('name')->get(['id', 'name']),
+            'data' => $barangays->map(fn (Barangay $b) => [
+                'id' => $b->id,
+                'name' => $b->name,
+                'zoning_map_path' => $b->zoning_map_path,
+                'zoning_classifications' => $b->zoningClassifications->map(fn ($z) => [
+                    'code' => $z->code,
+                    'name' => $z->name,
+                    'legend_color' => $z->legend_color,
+                ])->values(),
+                'zoning_overlays' => $b->zoningOverlays->map(fn ($o) => [
+                    'code' => $o->code,
+                    'name' => $o->name,
+                    'description' => $o->description,
+                ])->values(),
+            ]),
         ]);
     }
 
