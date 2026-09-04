@@ -676,27 +676,104 @@ wording was restored, with CPDO's final say kept as the one honest line. **We
 need this decided either way** — it determines whether we build a real
 conformance check or remove the claim.
 
-## C2. Does the city have a zoning map in digital form?
+## C2. Does the city have a zoning map in digital form? — PARTLY ANSWERED
 
 A shapefile, GeoJSON, KML, a CAD drawing, or a QGIS/ArcGIS project.
 
-**Why it matters.** This is the single ask that would turn C1's screen honest.
-With boundaries, the system can answer the question it is currently pretending
-to answer.
+**What arrived.** Twenty-one **images**, one per barangay: *"Brgy. &lt;Name&gt;
+Proposed Zoning Map 2018 – 2027"*, City of Malabon, 1:3,000 (Santulan's sheet is
+1:6,000), coordinate system **Luzon 1911 / Philippine Zone III**, prepared by the
+City Planning and Development Department, 2017. They are now shipped in the app
+and shown to the applicant on the Location &amp; Zoning step (see C4 for what we
+read off them).
 
-## C3. If not digital — is there an authoritative printed zoning map, and the Zoning Ordinance / Comprehensive Land Use Plan behind it?
+**What is still open, and it is the part that matters:** these are rasters. A
+picture cannot be asked "what is the zoning at this address".
 
-**Why it matters.** Even a scan plus the ordinance text would let us classify by
-barangay, which is a real answer, instead of by coordinate, which today is no
-answer at all.
+- **May we have the vector data behind these sheets** — the shapefile
+  (`.shp`/`.dbf`/`.prj`) or a GeoJSON export? The sheets were clearly produced
+  from a GIS project; we are asking for its layers, not for the plot.
+- **Which coordinate reference system is it in?** The sheets say Luzon 1911 /
+  Philippine Zone III (PRS92 zone III, EPSG:3123, would be the modern
+  equivalent). We need the `.prj` or a plain statement, because we display on a
+  web map in WGS84 and a wrong assumption puts every boundary in the wrong place
+  by a few hundred metres — which is exactly the kind of error that looks
+  plausible.
+- **Is the 2018–2027 *proposed* map the one actually in force?** The sheets say
+  PROPOSED. If the ordinance in effect is an older map, or if this one was
+  adopted with amendments, then what we are showing applicants is a draft and we
+  need to label it as one or replace it.
 
-## C4. What zone classifications does Malabon use, and which business activities are allowed in each?
+**Why it matters.** With the polygons and the CRS, a real per-location check
+becomes a **contained change** — a geometry table and a point-in-polygon lookup
+behind the same screen — and C1 stops being a wording problem. Without them,
+tracing zones off pixels is guesswork, and a wrong guess tells an applicant their
+site conforms when the city says it does not.
 
-C-1, C-2, R-1, I-1, institutional, and so on.
+**What we assumed meanwhile.** Nothing about any specific address. The step
+shows the barangay's official sheet and lists the classifications drawn on it,
+and says CPDO confirms the classification for the exact location. No conformity
+result is computed, displayed or implied anywhere from these maps.
 
-**Why it matters.** That table is the other half of a real conformance check.
-We already collect the applicant's line of business on the same screen, so the
-moment we have the table the check becomes genuine.
+## C3. If not digital — is there an authoritative printed zoning map, and the Zoning Ordinance / Comprehensive Land Use Plan behind it? — HALF ANSWERED
+
+**The map half is answered:** the 21 sheets in C2 are it.
+
+**The ordinance half is not.** We still have no Zoning Ordinance or
+Comprehensive Land Use Plan text. Please send whichever is current, with its
+number and date.
+
+**Why it matters.** The sheets show *where* each classification is. Only the
+ordinance says *what each classification permits* — which is C4's second half,
+and the half a conformance check actually runs on.
+
+## C4. What zone classifications does Malabon use, and which business activities are allowed in each? — HALF ANSWERED
+
+**The list is answered, by the maps themselves.** Every one of the 21 sheets
+carries the same 19-entry classification legend, and BizTrack now holds those 19
+as reference data:
+
+| | |
+|---|---|
+| Residential | R-1 · R-2 Basic · R-2 Max · R-3 Basic · R-3 Max · CMP |
+| Commercial | C-1 · C-2 · C-3 · CBD · General Commercial Zone |
+| Industrial | I-1 · I-2 |
+| Institutional | Institutional |
+| Other | Fishpond · Parks and Recreation · Mangrove · Utilities · Cemetery |
+
+(The grouping in the left column is ours, for reading; the legend prints the 19
+in that order without headings. NLEX, RAILROAD, ROADS, WATERWAYS_2, MANILA BAY
+and the two boundary layers also appear on the sheets — we have treated those as
+map furniture rather than classifications. **Tell us if any of them is meant to
+be a zone.**)
+
+We also recorded, per barangay, which of the 19 its own sheet draws, by reading
+each of the 21 maps. Two things to check when you look at it:
+
+- **R-2 Basic against R-2 Max is our weakest reading.** On the sheets they are
+  the same fill colour, and the only difference is a hairline outline that every
+  lot line drawn across it breaks. We can find the outline but not close the
+  polygon, so we have recorded **both** on every sheet where that outline wraps
+  R-2 fill — which is all of them except Acacia and Potrero. If that is wrong in
+  either direction, the vector data in C2 is what settles it.
+- **A classification covering only a small area may have been missed.** We left
+  out anything under roughly 250 pixels, which at 1:3,000 is a small parcel and
+  not nothing — Tinajeros, for instance, has a patch of General Commercial Zone
+  just below that line which we did not record. The lists are a starting point
+  for your correction, not an assertion.
+- **Santulan's sheet is different in kind** (a lower-resolution JPEG at 1:6,000,
+  with its own legend), so its list is the least certain of the 21. Is that sheet
+  a different vintage from the other twenty?
+
+**What is still open:** the second half of the original question — **which
+business activities are allowed in each classification**. That table is what a
+conformance check runs on, and it is not on the maps.
+
+**What we assumed meanwhile.** The 19 classifications and the per-barangay lists
+are held as **editable rows**, not as code, precisely because they came off a
+*proposed* map that we expect you to correct — changing one is a data edit, not
+a new release. The applicant is shown their barangay's map and the list of what
+it draws; nothing is said about their particular address.
 
 ## C5. Is a per-location conformance answer appropriate to automate at all, or must CPDO always rule case by case?
 
@@ -718,10 +795,39 @@ that silently passed everything would be worse than none. Under the Water Code
 there is a legal easement along waterways; if that layer exists the check
 becomes real.
 
-## C7. Is there a flood-hazard or no-build overlay the city already uses?
+## C7. Is there a flood-hazard or no-build overlay the city already uses? — PARTLY ANSWERED
 
 **Why it matters.** If a site cannot be permitted, saying so before the
 applicant pays is the whole value of putting the map first in the flow.
+
+**There is an overlay, and it is city-wide.** City Ordinance No. 24-2018 Art. IV
+§3 designates three overlay zones, and BizTrack now holds them beside the 19 base
+classifications from C4: **Flood over all 21 barangays**, **Heritage** over
+Baritan, Concepcion, Hulong Duhat, Ibaba and San Agustin, and **Eco-Tourism**
+over Dampalit. The applicant's zoning card names them and quotes what the
+ordinance adds; it still renders no verdict, for the reasons in C1 and C5.
+
+Three things to check when you look at it:
+
+- **The ordinance gives two sets of codes and they disagree.** Art. IV §3 writes
+  LSD-OZ / HTG-OZ / ET-OZ; Art. V §4 writes FLD-OZ / HTG-OZ / ETM-OZ. Only
+  Heritage matches. **We key on Art. V's** — FLD-OZ, HTG-OZ, ETM-OZ — because
+  Art. V is where the overlay's regulations are written. Tell us which set is
+  official and we will relabel; the codes are ours and nothing depends on them.
+- **Heritage: five barangays or eight?** Annex C's map index gives five, which is
+  what we recorded. Art. IV §5's table appears to give eight — the five plus
+  Bayan-bayanan, Dampalit and Flores — but that table's overlay column runs out
+  of alignment in the Institutional block, so we may be misreading it rather than
+  the ordinance disagreeing with itself. Which is right?
+- **Flood covering all 21 barangays is a designation over areas, not over
+  properties.** We hold no flood-susceptibility layer and the card says nothing
+  about any applicant's lot. If the CLUP 2018-2027 susceptibility assessment
+  Art. V §4.1 cites exists as data, that is the layer this question was really
+  asking for.
+
+**What is still open:** a *no-build* layer. An overlay that adds construction
+requirements is not the same as one that refuses a site, and nothing in the
+ordinance's three overlays refuses one.
 
 ## C8. Can we have the city's actual boundary?
 

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import { checkPin, withinMalabon } from '../../lib/malabonGeo'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -18,12 +19,13 @@ import {
   ProtoModal,
   inputCls,
 } from '../../components/ui/Proto'
-import { formatBytes, formatDate } from '../../lib/format'
+import { formatBytes, formatDate, formatMoney } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import {
   applications,
   businesses,
   documents,
+  payments,
   reference,
 } from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
@@ -40,6 +42,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
  * every caller. Re-importing ClearanceStage or OfficeFormSheet here would be
  * the first move back to the arrangement this replaced.
  */
+import BarangayZoningMap from './BarangayZoningMap'
 import {
   LocationInsightsPanel,
   useLocationInsights,
@@ -61,6 +64,8 @@ import type {
   BusinessPayload,
   DocumentType,
   OcrSuggestions,
+  Payment,
+  PaymentMethod,
   Permit,
   PrefillResult,
   PsicCode,
@@ -84,6 +89,22 @@ type BasePhase =
   | 'documents'
   | 'fees'
   | 'review'
+
+/*
+ * The same three PayPage offers, deliberately duplicated rather than shared.
+ *
+ * Two screens take a payment now and they must offer the same choices, but the
+ * list is three literals and a shared constant would put a module dependency
+ * between the wizard and the pay page for the sake of nine words. If a fourth
+ * method ever appears — or these come from the API, which is where they belong
+ * — both lists move together. `PaymentMethod` is the type that keeps them
+ * honest in the meantime: adding a case there breaks whichever list forgot it.
+ */
+const PAY_METHODS: { value: PaymentMethod; label: string }[] = [
+  { value: 'gcash', label: 'GCash' },
+  { value: 'maya', label: 'Maya' },
+  { value: 'card', label: 'Card' },
+]
 /*
  * ── What this wizard is, and why the clearances are not in it ──────────────
  *
@@ -204,47 +225,28 @@ const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120',
 /*
  * ── Item 86 · where a pin may be dropped ──────────────────────────────────
  *
- * A bounding box around Malabon City, and deliberately nothing more.
+ * This used to be a bounding box, and the box has been replaced by the real
+ * city polygon — see `lib/malabonGeo.ts` for the check and
+ * `lib/malabonGeo.data.ts` for where the boundaries came from and how they
+ * were verified before being trusted.
  *
- * The system holds no zone polygons and no coastline (the comments on the
- * zoning step and the zoning modal have said so since the step was built), so
- * the only thing that can be checked here honestly is whether the point is
- * anywhere near the city at all. The box is drawn from the coordinates the repo
- * already uses for Malabon — the map's default centre at Malabon City Hall
- * (14.6572, 120.9573), the seeded demo businesses (14.6690/120.9560,
- * 14.6712/120.9605), the analytics heat-map centre (14.669, 120.957) and the
- * analytics history seeder's 14.655–14.685 spread — widened to the city's
- * roughly 6 km × 6 km extent so that a real address near a boundary is not
- * refused. Every coordinate already in the repo falls inside it.
+ * The box was wrong in both directions, which is why it went. A rectangle
+ * around an irregular delta city admits its neighbours, and a tester duly
+ * pinned Caloocan and Valenzuela and was accepted. It was also too tight: it
+ * ran 120.930–120.985 E while Malabon actually reaches 120.921 and 121.001, so
+ * genuine addresses near the east and west edges were being refused.
  *
- * What this does NOT do, and what the applicant is therefore never told it
- * does: it does not prove the pin is inside the city limits (a bounding box
- * around an irregular city necessarily includes slivers of Navotas, Caloocan
- * and Valenzuela), and it does not detect water. Malabon is a river delta —
- * the Tullahan, the Tenejeros-Tanza and the fishpond belt run through it — so
- * "not on water" cannot be answered without a coastline or hydrography layer,
- * which would mean an external service (an OSM/Overpass water query, or a
- * shipped GeoJSON of the city). Neither exists here, and a water check that
- * silently passed everything would be worse than none: it would put the city's
- * name behind a guarantee nobody made. CPDO still evaluates the actual location
- * during processing, which is what the step has always said.
+ * What is checked now is containment in the city outline, and separately
+ * whether the pin agrees with the barangay chosen from the dropdown. What is
+ * still NOT checked, and still never claimed: this does not detect water.
+ * Malabon is a river delta — the Tullahan, the Tenejeros-Tanza and the fishpond
+ * belt run through it — and the boundary set carries no hydrography, so a pin
+ * in the middle of a river is inside the city and passes. Nor does any of this
+ * decide zoning: the ordinance itself cannot be automated into a conformance
+ * answer (`docs/zoning-ordinance/README.md` sets out why), so CPDO evaluates
+ * the actual location during processing, which is what the step has always
+ * said.
  */
-const MALABON_BOUNDS = {
-  minLat: 14.645,
-  maxLat: 14.7,
-  minLng: 120.93,
-  maxLng: 120.985,
-}
-
-/** True when a pin is inside the Malabon bounding box described above. */
-function withinMalabon(latitude: number, longitude: number): boolean {
-  return (
-    latitude >= MALABON_BOUNDS.minLat &&
-    latitude <= MALABON_BOUNDS.maxLat &&
-    longitude >= MALABON_BOUNDS.minLng &&
-    longitude <= MALABON_BOUNDS.maxLng
-  )
-}
 
 /*
  * There is no StepNode type any more, and no `stepKey`.
@@ -2318,6 +2320,14 @@ export function ApplyWizard() {
   const [uploadingType, setUploadingType] = useState<number | null>(null)
   const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
+  /*
+   * How the applicant is settling the Tax Order of Payment, chosen on Review &
+   * Submit rather than on a screen of its own. Defaults to GCash, matching
+   * PayPage — that screen still exists for anyone who lands unpaid.
+   */
+  const [payMethod, setPayMethod] = useState<PaymentMethod>('gcash')
+  const [receipt, setReceipt] = useState<Payment | null>(null)
+  const [payError, setPayError] = useState<string | null>(null)
 
   /*
    * Item 59 — "I already hold this clearance, here is the copy" — moved out
@@ -2648,7 +2658,15 @@ export function ApplyWizard() {
     }
     return [...map.values()]
   }, [permitTypes, applicationType])
-  const barangayName = barangays.find((b) => String(b.id) === form.barangay_id)?.name
+  /*
+   * The whole row, not just the name: the zoning step now also needs the
+   * barangay's CPDO map path and the classifications drawn on it, and both ride
+   * along on the same reference payload. `barangayName` stays as the narrower
+   * thing the zoning modal already reads, rather than making that dialog reach
+   * into an object for one field.
+   */
+  const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
+  const barangayName = selectedBarangay?.name
 
   /*
    * The first line of business the applicant declared, when they have one. It
@@ -3098,6 +3116,42 @@ export function ApplyWizard() {
           else if (!withinMalabon(form.latitude, form.longitude)) {
             missing.push('A pin within Malabon')
           }
+          /*
+           * The pin and the barangay are checked against each other HERE as
+           * well as in the click handler, because the click handler only ever
+           * sees one order of events: an applicant can drop a valid pin in
+           * Acacia and then change the dropdown to Tonsuya, and nothing re-runs
+           * onPick — the pin did not move.
+           *
+           * ── Why this is gated on `touched.barangay_id` ────────────────────
+           *
+           * Because the register is full of filings whose pin and barangay
+           * already disagree, and blocking on those punishes the applicant for
+           * our history. Nothing checked this until now, so pins were dropped
+           * anywhere the old bounding box allowed: of 788 addresses on file
+           * only 61 sit inside their own barangay, 543 are off by a median of
+           * 1.4 km, and 184 are not in Malabon at all. A renewal prefills both
+           * values from that record, so an unconditional check here would stop
+           * essentially every renewal dead on section 2, with a message about a
+           * pin the applicant never placed.
+           *
+           * So the rule is: we enforce what the applicant ENTERS, not what we
+           * handed them. Touching the barangay means they have answered the
+           * question and the answer must be consistent. Leaving the prefill
+           * alone lets a legacy filing through — the map still draws their
+           * barangay and their pin, so the disagreement is visible and fixable,
+           * and CPDO checks the site regardless.
+           *
+           * A NEW filing is unaffected: its barangay starts empty, so it cannot
+           * be submitted without being touched. Moving the pin is covered by
+           * onPick, which refuses a mismatch at the moment of the click.
+           */
+          else if (barangayName !== undefined && touched.barangay_id) {
+            const verdict = checkPin(form.latitude, form.longitude, barangayName)
+            if (verdict.kind === 'wrong-barangay') {
+              missing.push(`A pin inside ${barangayName} (it is currently in ${verdict.actual ?? 'neither'})`)
+            }
+          }
           // Only when renting: the API enforces the same three with required_if.
           if (form.is_rented) {
             if (!form.lessor_name.trim()) missing.push("Lessor's Name")
@@ -3196,6 +3250,25 @@ export function ApplyWizard() {
        */
       amendment,
       priorPermitAnswered,
+      /*
+       * The barangay check reads this, so it belongs here.
+       *
+       * It happens to change in lockstep with `form.barangay_id`, which is
+       * already a dependency, so leaving it out worked by luck rather than by
+       * design — and only for as long as `barangayName` stays derived from the
+       * form. If it ever comes from somewhere else the gate would go stale and
+       * keep refusing a barangay the applicant has already corrected.
+       */
+      barangayName,
+      /*
+       * And the flag that decides whether that check runs at all. Unlike
+       * `barangayName` this one does NOT move with anything else already
+       * listed: it flips once, on first blur of the barangay field, while
+       * `form.barangay_id` may not change at that moment at all. Omitted, the
+       * gate would keep using the pre-blur answer and let a mismatch the
+       * applicant just created walk straight through.
+       */
+      touched.barangay_id,
     ],
   )
 
@@ -4027,12 +4100,43 @@ export function ApplyWizard() {
     }
   }
 
+  /*
+   * Submit and settle the Tax Order of Payment in one press.
+   *
+   * It used to submit and stop, which left the applicant at a success screen,
+   * then a separate Pay screen, then a second success screen, and only then the
+   * six clearances — four screens to finish one filing. The client's words:
+   * "it should be here the payment already. shouldn't be another step that I
+   * first need to submit."
+   *
+   * The order the LGU asked for is unchanged. The Tax Order of Payment is still
+   * raised by submission and still covers the business permit alone; the six
+   * clearances still accrue their own fees afterwards. Only the walk between
+   * the two is gone.
+   *
+   * ── Why the payment failure is not treated as a submit failure ────────────
+   *
+   * These are two writes and the first one is not undoable. Once `submit()`
+   * returns, the filing EXISTS with a tracking ID and a bill — so if the
+   * payment then fails, throwing away that fact and showing "submission
+   * failed" would be a lie that also loses the applicant their tracking ID.
+   * The filing is reported as submitted, the payment error is carried to the
+   * success screen, and the applicant is pointed at the Pay screen to finish.
+   * That state is not exotic: an unpaid submitted filing is exactly what the
+   * flow produced before this change.
+   */
   async function submit() {
     if (!applicationId) return
     setSaving(true)
     setSubmitError(null)
+    setPayError(null)
     try {
       const app = await applications.submit(applicationId)
+      try {
+        setReceipt(await payments.pay(app.id, payMethod))
+      } catch (err) {
+        setPayError(toApiError(err).message)
+      }
       setTracking(app.tracking_id)
     } catch (err) {
       setSubmitError(toApiError(err).message)
@@ -4354,26 +4458,66 @@ export function ApplyWizard() {
    * has not been given one for, and writes a real one on the first keystroke.
    */
 
-  /* Success screen after submit (kept). */
+  /*
+   * The one screen after Submit & Pay, and the last one before the clearances.
+   *
+   * It carries the tracking ID (the only thing here the applicant cannot get
+   * back any other way), what was paid, and the way onward. The clearances are
+   * the FIRST action rather than a link at the bottom: the six were reported
+   * missing by two testers, and the moment they open is this one.
+   */
   if (tracking) {
     return (
       <div className="mx-auto max-w-lg py-10 text-center">
         <span className="mx-auto flex h-16 w-16 items-center justify-center text-s-green">
           <CheckCircleFilledIcon size={64} />
         </span>
-        <h1 className="mt-4 text-2xl font-bold text-ink">Application submitted</h1>
+        <h1 className="mt-4 text-2xl font-bold text-ink">
+          {receipt ? 'Submitted and paid' : 'Application submitted'}
+        </h1>
         <p className="mt-2 text-sm text-ink-secondary">
           Keep this tracking ID. You can follow every step of processing on your Track page.
         </p>
         <p className="display-serif mt-6 rounded-2xl bg-white px-4 py-4 text-xl text-ink shadow-card">
           {tracking}
         </p>
-        <div className="mt-7 flex justify-center gap-3">
-          <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
-            Track this application
+        {receipt && (
+          <p className="tnum mt-3 text-sm text-ink-secondary">
+            Paid {formatMoney(receipt.amount)} &middot; ref {receipt.reference_number}
+          </p>
+        )}
+        {/*
+          * Submitted but not paid. Not an error state for the FILING — that
+          * succeeded and has a tracking ID above — so this is a next step, not
+          * a failure banner. It still uses the alert role because it appeared
+          * unexpectedly and changes what the applicant has to do.
+          */}
+        {payError !== null && (
+          <div role="alert" className="mt-4 rounded-xl border border-line-strong bg-white px-4 py-3 text-left">
+            <p className="text-sm font-semibold text-ink">The payment didn&rsquo;t go through</p>
+            <p className="mt-1 text-xs text-ink-secondary">{payError}</p>
+            <button
+              type="button"
+              onClick={() => navigate(`/applications/${applicationId}/pay`)}
+              className="mt-2 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+            >
+              Settle the Tax Order of Payment
+            </button>
+          </div>
+        )}
+        <p className="mt-6 text-sm text-ink-secondary">
+          Your six LGU clearances are open. Apply for the ones your business needs — each adds its
+          own fee, and your permit is released when your balance reaches zero.
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
+          <PillButton onClick={() => navigate(`/applications/${applicationId}/clearances`)}>
+            Apply for LGU Clearances
           </PillButton>
-          <PillButton className="bg-white !text-royal border-2 border-royal hover:bg-royal-tint" onClick={() => navigate('/applications')}>
-            All applications
+          <PillButton
+            className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
+            onClick={() => navigate(`/applications/${applicationId}`)}
+          >
+            Track this application
           </PillButton>
         </div>
       </div>
@@ -4673,8 +4817,8 @@ export function ApplyWizard() {
               */}
               {priorPermitChoice && (
                 <p className="mt-2 text-xs text-ink-secondary">
-                  Renewing its clearances comes after this — once you have paid for the business
-                  permit, the LGU clearances open and you apply for the ones you need.
+                  Renewing its clearances comes after this — once you submit, the LGU clearances
+                  open and you apply for the ones you need.
                 </p>
               )}
             </div>
@@ -5166,19 +5310,51 @@ export function ApplyWizard() {
        * processing. The copy here says "zoning clearance", never "Mayor's
        * permit" (user-testing feedback).
        *
-       * The one thing it does decide is item 86: a pin nowhere near Malabon is
-       * refused outright, because no amount of CPDO review makes a business in
-       * another city licensable here. That is a bounding-box check and nothing
-       * more — see MALABON_BOUNDS.
+       * The two things it does decide: a pin outside Malabon is refused
+       * outright, because no amount of CPDO review makes a business in another
+       * city licensable here; and a pin that contradicts the barangay chosen
+       * from the dropdown is refused, because one of the two is then wrong and
+       * neither the applicant nor CPDO gains from storing both. Those are
+       * geometry checks against the city and barangay polygons — see
+       * `lib/malabonGeo.ts` — and nothing more. They say where the premises
+       * are, never whether the trade is allowed there.
        */}
       {phase === 'address' && (
         <div>
           <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
           <div className="mb-2 h-px bg-ink/40" />
           <p className="mb-6 text-xs text-ink-secondary">
-            Pin your location and enter your address. The pin must fall inside Malabon. CPDO evaluates
-            your zoning clearance from it during processing.
+            Pin your location and enter your address. The pin must fall inside Malabon, and inside
+            the barangay you select below. CPDO evaluates your zoning clearance from it during
+            processing.
           </p>
+
+          {/*
+            * Says where the other five clearances went, on the step where they
+            * are missed.
+            *
+            * A tester reported them "missing" and asked for them back. They
+            * were not deleted — they moved out of this wizard and onto
+            * /applications/:id/clearances when payment went first, which Review
+            * & Submit does explain. But Review is the LAST step, and this is
+            * the step whose heading says "Zoning Clearance", so this is where
+            * somebody looking for the clearances looks and concludes they are
+            * gone. Answering only at the end answers after the alarm.
+            *
+            * The six are named rather than counted, because "six LGU
+            * clearances" does not let an applicant check whether the one THEY
+            * need is among them. Not a link: there is no application to link to
+            * until this filing is submitted.
+            */}
+          <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
+            <p className="text-xs text-ink-secondary">
+              <span className="font-semibold text-ink">Applying for the other clearances?</span> Fire,
+              Sanitary, Building/Occupancy, Environmental, Market and this Zoning clearance are not
+              part of this form. Submit this application and all six open together under{' '}
+              <span className="font-semibold text-ink">LGU Clearances</span>, where you apply only
+              for the ones you need and fill in each office’s sheet.
+            </p>
+          </div>
 
           {/*
             * Item 69 — the one and only Line of Business question.
@@ -5266,17 +5442,50 @@ export function ApplyWizard() {
                  * while the next lookup is in flight.
                  */
                 radiusM={insightsRadiusM}
+                highlightBarangay={barangayName ?? null}
+                /*
+                 * The map does not open for business until a trade is chosen.
+                 *
+                 * The zoning verdict is given against a line of business, not a
+                 * coordinate — the sentence directly above the picker says so —
+                 * so a pin dropped first is an answer to half a question. It
+                 * also lets Location Insights compare like with like from the
+                 * very first lookup, instead of counting every business near the
+                 * pin and then silently changing its mind once a PSIC group
+                 * exists.
+                 */
+                lockedReason={
+                  form.lines.length === 0
+                    ? 'Choose your line of business above, then click the map to drop a pin.'
+                    : null
+                }
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
                    * stored and argued with later. The wording names exactly what
-                   * was checked (is it near Malabon) and no more: this cannot
-                   * tell land from water, so it never says it did. See
-                   * MALABON_BOUNDS for what the check is and is not.
+                   * was checked and no more: this cannot tell land from water,
+                   * so it never says it did.
+                   *
+                   * The barangay mismatch is refused here too, and phrased to
+                   * leave both ways out open — the pin may be wrong, or the
+                   * dropdown may be. Naming the barangay the pin actually fell
+                   * in is what makes the message actionable; "that is the wrong
+                   * barangay" alone would send someone hunting. See
+                   * BARANGAY_TOLERANCE_M for why a near-miss is accepted
+                   * silently rather than argued with.
                    */
-                  if (!withinMalabon(lat, lng)) {
+                  const verdict = checkPin(lat, lng, barangayName ?? null)
+                  if (verdict.kind === 'outside-city') {
                     setPinError(
                       `That point (${lat}, ${lng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                    )
+                    return
+                  }
+                  if (verdict.kind === 'wrong-barangay') {
+                    setPinError(
+                      verdict.actual !== null
+                        ? `That pin is in ${verdict.actual}, but you selected ${barangayName}. Move the pin into ${barangayName} — the highlighted area — or change your barangay above.`
+                        : `That pin is about ${verdict.metres} m outside ${barangayName}. Move it into the highlighted area, or change your barangay above.`,
                     )
                     return
                   }
@@ -5317,6 +5526,42 @@ export function ApplyWizard() {
                   {pinError}
                 </p>
               )}
+              {/*
+                * A disagreement the applicant did not cause, said out loud.
+                *
+                * A renewal prefills its pin and its barangay from the business
+                * on record, and most records disagree — nothing checked this
+                * until now, so only 61 of 788 addresses on file sit inside their
+                * own barangay. The step deliberately does NOT block on a
+                * prefill (see the gate in `missingFor`), because refusing to let
+                * someone renew over a pin they never placed is our history
+                * charged to them.
+                *
+                * But silence is the wrong other extreme: it leaves a known-wrong
+                * location to be carried into a zoning clearance. So it is stated
+                * and left to them. Deliberately NOT `role="alert"` and not the
+                * error red — nothing has gone wrong here and the applicant is
+                * not being stopped; #bd0000 is reserved for what actually blocks
+                * (DESIGN.md, "Red Means Stop"). It reads as amber-free plain
+                * text with a bold lead-in, so it survives greyscale.
+                */}
+              {form.latitude !== null &&
+                form.longitude !== null &&
+                barangayName !== undefined &&
+                !touched.barangay_id &&
+                pinError === null &&
+                (() => {
+                  const verdict = checkPin(form.latitude, form.longitude, barangayName)
+                  if (verdict.kind !== 'wrong-barangay') return null
+                  return (
+                    <p className="bg-white px-4 pb-2.5 text-xs text-ink-secondary">
+                      <span className="font-semibold text-ink">Check this location.</span> The saved
+                      pin sits in {verdict.actual ?? 'no barangay we can identify'}, but this
+                      application says {barangayName}. Click the map to move the pin, or change the
+                      barangay below — whichever is wrong.
+                    </p>
+                  )
+                })()}
               {/*
                 * The pin locates the premises; it does not clear them. Said
                 * plainly so the boundary check above is not mistaken for a
@@ -5371,7 +5616,23 @@ export function ApplyWizard() {
                 <FieldLabel required>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
-                  onChange={(e) => update('barangay_id', e.target.value)}
+                  /*
+                   * Marked touched on CHANGE as well as on blur, and the change
+                   * is the one that matters.
+                   *
+                   * Picking from a dropdown is answering the question — there
+                   * is no half-typed state to be patient about, which is the
+                   * only reason the other fields wait for blur. The pin/barangay
+                   * check keys off this flag to tell an answer the applicant
+                   * gave from a value we prefilled for them, so relying on blur
+                   * alone let someone change the barangay to one their pin
+                   * contradicts and walk on, provided they never focused
+                   * anything else before pressing Next.
+                   */
+                  onChange={(e) => {
+                    update('barangay_id', e.target.value)
+                    touch('barangay_id')
+                  }}
                   onBlur={() => touch('barangay_id')}
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.barangay_id)}
@@ -5388,6 +5649,21 @@ export function ApplyWizard() {
                   <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
+
+              {/*
+                * CPDO's own sheet for whichever barangay was just picked.
+                *
+                * Directly under the picker, not beside the map: it answers the
+                * question the applicant has at the moment they choose ("what is
+                * my barangay zoned for?"), and it changes when the answer to
+                * that question changes. Gated on a selection because there is no
+                * sensible default sheet — twenty-one maps and no barangay chosen
+                * is a gallery, not an answer.
+                *
+                * It shows and lists. It does not decide — see the component.
+                */}
+              {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
+
               <div>
                 <label className="block">
                 <FieldLabel>Locational Group/Landmark</FieldLabel>
@@ -6088,10 +6364,61 @@ export function ApplyWizard() {
               same promise.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              Submitting produces a Tax Order of Payment for your Business Permit. Once that payment
-              clears, the six LGU clearances open for you to apply for — each one you apply for adds
-              its own fee, and your permit is released when the balance reaches zero.
+              This raises the Tax Order of Payment for your Business Permit and settles it now, then
+              opens the six LGU clearances — each one you apply for adds its own fee, and your
+              permit is released when the balance reaches zero.
             </p>
+
+            {/*
+              * Paying happens here, not on a screen of its own.
+              *
+              * The applicant used to submit, land on a success screen, navigate
+              * to Pay, pay, land on a second success screen, and only then reach
+              * the clearances. Four screens to finish one filing, and the client
+              * said so: "it should be here the payment already."
+              *
+              * Only the method is asked for. The AMOUNT is not shown, and that
+              * is not an oversight to fix by guessing: the Tax Order of Payment
+              * is raised by submission, so before the press there is no assessed
+              * total to quote. Printing the draft's own fee working here would
+              * be showing a number the LGU has not issued, and if the two ever
+              * differed the applicant would have been quoted the wrong one. The
+              * receipt on the next screen carries the figure the city actually
+              * charged.
+              *
+              * Radios, not buttons: this is one choice among three, and a radio
+              * group is what a screen reader announces as such. Never Color
+              * Alone — the selected chip carries a filled dot and a border
+              * weight change, not just a tint.
+              */}
+            <fieldset className="mt-8 w-full max-w-md">
+              <legend className="mb-2 text-sm font-medium text-ink">Pay with</legend>
+              <div className="flex flex-wrap justify-center gap-2">
+                {PAY_METHODS.map((m) => {
+                  const selected = payMethod === m.value
+                  return (
+                    <label
+                      key={m.value}
+                      className={`inline-flex cursor-pointer items-center gap-2 rounded-full border-2 px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-royal-tint text-royal'
+                          : 'border-line-strong bg-white text-ink-secondary hover:bg-canvas'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="pay-method"
+                        value={m.value}
+                        checked={selected}
+                        onChange={() => setPayMethod(m.value)}
+                        className="h-3.5 w-3.5 accent-royal"
+                      />
+                      {m.label}
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
             {priorPermitChoice && (
               <p className="tnum mt-6 text-sm text-ink-secondary">
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
@@ -6146,7 +6473,12 @@ export function ApplyWizard() {
                 disabled={saving || !consent}
                 className="min-w-28"
               >
-                Submit
+                {/*
+                  * "Submit & Pay", because it now does both. A button labelled
+                  * "Submit" that also takes a payment is the kind of surprise
+                  * this form exists to avoid.
+                  */}
+                {saving ? 'Submitting…' : 'Submit & Pay'}
               </PillButton>
             )}
             {stepIndex > 0 && (
@@ -6306,7 +6638,16 @@ export function ApplyWizard() {
             void submit()
           }}
         >
-          <p className="py-4 text-center text-lg">Are you sure you want to submit this application?</p>
+          {/*
+            * Names the payment, because the press now takes one. "Are you sure
+            * you want to submit this application?" was true and is no longer
+            * complete, and a confirmation that under-describes what it confirms
+            * is worse than none.
+            */}
+          <p className="py-4 text-center text-lg">
+            Submit this application and pay the Business Permit fee with{' '}
+            {PAY_METHODS.find((m) => m.value === payMethod)?.label ?? payMethod}?
+          </p>
         </ProtoModal>
       )}
 
