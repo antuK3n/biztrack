@@ -1875,6 +1875,13 @@ export interface AmendmentDetails {
   nature: boolean
   /** The "Others (specify)" text; non-empty text IS the tick. */
   other: string | null
+  /**
+   * Section A3 of the renewal/amendment form — the structure the business
+   * changed FROM and TO. Null unless A1 was answered Yes, which is the same
+   * "never asked" vs "asked and answered no" distinction the whole block draws.
+   */
+  from_registration_type: string | null
+  to_registration_type: string | null
   /** Ready-to-render labels, e.g. `['Location', 'Others: new co-owner']`. */
   summary: string[]
 }

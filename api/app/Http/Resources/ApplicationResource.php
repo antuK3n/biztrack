@@ -31,12 +31,23 @@ class ApplicationResource extends JsonResource
              * no" — and neither has to special-case the type to tell them
              * apart.
              */
-            'amendments' => $this->application_type === ApplicationType::Amendment ? [
+            'amendments' => in_array(
+                $this->application_type,
+                [ApplicationType::Amendment, ApplicationType::Renewal],
+                true
+            ) ? [
                 'has_amendments' => (bool) $this->has_amendments,
                 'ownership' => (bool) $this->amendment_ownership,
                 'location' => (bool) $this->amendment_location,
                 'nature' => (bool) $this->amendment_nature,
                 'other' => $this->amendment_other,
+                /*
+                 * Section A3. Null unless A1 was Yes, which is the same "never
+                 * asked" vs "asked and answered no" distinction the block above
+                 * draws for the type as a whole.
+                 */
+                'from_registration_type' => $this->amendment_from_registration_type,
+                'to_registration_type' => $this->amendment_to_registration_type,
                 // Rendered as-is by the officer sheet; built here so the label
                 // wording for "Nature of Business" has exactly one home.
                 'summary' => $this->resource->amendmentKinds(),

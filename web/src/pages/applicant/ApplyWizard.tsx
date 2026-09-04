@@ -66,7 +66,24 @@ import type {
   PsicCode,
 } from '../../lib/types'
 
-type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 'review'
+type BasePhase =
+  | 'privacy'
+  /*
+   * Section A of MCG-BPLO-FO-002 v2.0 — renewals only.
+   *
+   * "Do you have any changes or amendments in the previous business
+   * registration?" is the first thing the paper asks after the instructions,
+   * and everything printed after it is conditional on the answer. It is a STEP
+   * and not a block on another step because that conditionality is the whole
+   * point: a No ends the form, and a step that can end the form is not a
+   * paragraph inside one.
+   */
+  | 'amendments'
+  | 'address'
+  | 'business'
+  | 'documents'
+  | 'fees'
+  | 'review'
 /*
  * ── What this wizard is, and why the clearances are not in it ──────────────
  *
@@ -142,6 +159,7 @@ const BASE_PHASES: BasePhase[] = ['privacy', 'address', 'business', 'documents',
 
 const BASE_LABELS: Record<BasePhase, string> = {
   privacy: 'Data Privacy Consent',
+  amendments: 'Changes Since Last Permit',
   business: 'Business Information',
   address: 'Location & Zoning',
   documents: 'Documentary Requirements',
@@ -366,18 +384,46 @@ const EMPTY: FormState = {
  * for a change of ownership, and only the filing knows which is which.
  */
 interface AmendmentState {
+  /*
+   * ── Section A1 of MCG-BPLO-FO-002 v2.0 ──────────────────────────────────
+   *
+   * "Do you have any changes or amendments in the previous business
+   * registration?" — the first question the renewal form asks, and the one
+   * that decides whether any of the rest of section A is asked at all.
+   *
+   * Three states, not two. `null` is "not answered yet", and it has to be
+   * distinguishable from `false`: a renewal that reaches Confirm without the
+   * question having been put is the same silent-null bug that
+   * `prior_permit_declared_none` exists to prevent one field over. No is a
+   * click, not a default fallen into.
+   *
+   * An AMENDMENT never shows A1 — a filing whose whole purpose is to amend
+   * has already answered Yes by existing — so this stays null there and the
+   * A2 ticks alone carry the answer, exactly as before.
+   */
+  hasChanges: boolean | null
   ownership: boolean
   location: boolean
   nature: boolean
   /** "Others (specify)" — the text is the tick; blank means not ticked. */
   other: string
+  /*
+   * Section A3: "Amendment: From ___ To ___". Blank means not chosen. Only
+   * reachable under a Yes at A1, and the API writes both back to null when A1
+   * is No, so a changed mind cannot leave a conversion behind it.
+   */
+  fromRegistrationType: string
+  toRegistrationType: string
 }
 
 const EMPTY_AMENDMENT: AmendmentState = {
+  hasChanges: null,
   ownership: false,
   location: false,
   nature: false,
   other: '',
+  fromRegistrationType: '',
+  toRegistrationType: '',
 }
 
 /**
@@ -385,10 +431,35 @@ const EMPTY_AMENDMENT: AmendmentState = {
  * "Others (specify)" is not here: it is a text field that ticks itself, so it
  * is rendered separately rather than pretending to be a fourth checkbox.
  */
-const AMENDMENT_KINDS: { key: 'ownership' | 'location' | 'nature'; label: string }[] = [
-  { key: 'ownership', label: 'Ownership' },
-  { key: 'location', label: 'Location' },
-  { key: 'nature', label: 'Nature of Business' },
+const AMENDMENT_KINDS: {
+  key: 'ownership' | 'location' | 'nature'
+  label: string
+  /**
+   * Which section of the form this tick opens, in the applicant's words.
+   *
+   * On a renewal the A2 boxes decide how long the rest of the form is (see
+   * `sequence`), so the box has to say what it costs to tick it. Without this
+   * the applicant discovers the consequence one step later, which is the
+   * wrong order to learn it in.
+   */
+  opens: string
+}[] = [
+  {
+    key: 'ownership',
+    label: 'Ownership',
+    opens: 'Opens Business Information — registration, TIN, owner details.',
+  },
+  {
+    key: 'location',
+    // The paper's own wording: "Location or Address of Business".
+    label: 'Location or Address of Business',
+    opens: 'Opens Location & Zoning — the address and the map pin.',
+  },
+  {
+    key: 'nature',
+    label: 'Nature of Business',
+    opens: 'Opens Business Information — your lines of business and PSIC codes.',
+  },
 ]
 
 /* ── Economic Organization (BPLO item B6) ───────────────────────────────── */
@@ -1239,6 +1310,22 @@ function LinesStep({
  * filing against. Nothing here is written until Confirm, which is the whole
  * point of holding it in one object rather than editing the wizard as we go.
  */
+/**
+ * A paper permit attached in the identify dialog, standing in for a form the
+ * applicant did not tick.
+ *
+ * The permit type is what makes the file readable to an office: uploaded with
+ * it, the API names the attachment after that clearance (`HELD_SANITARY` and
+ * friends) instead of filing it as one more untitled PDF in Documentary
+ * Requirements. Without it, the sanitary officer gets a document called
+ * "scan_0012.pdf" and no reason to believe it is theirs.
+ */
+interface PaperCopy {
+  permitTypeId: number
+  permitTypeName: string
+  file: File
+}
+
 interface FilingIdentity {
   businessId: number
   /**
@@ -1247,6 +1334,30 @@ interface FilingIdentity {
    * BizTrack permit to point at, and in year one that is the common case.
    */
   permitId: number | null
+  /**
+   * Every permit this filing covers, primary first.
+   *
+   * `permitId` above is the primary and still keys the renewal chain; this is
+   * the whole answer. A shop renewing its Mayor's Permit, Sanitary Permit and
+   * FSIC makes one visit to the counter and files once, and a dialog that
+   * could only take one of the three left the other two unrecorded — the
+   * offices then had no filing to attach their review to.
+   *
+   * Empty when the escape is ticked, which is the same state `permitId: null`
+   * describes; the two never disagree because one is derived from the other.
+   */
+  permitIds: number[]
+  /**
+   * Paper copies attached in the dialog for permit types NOT ticked above.
+   *
+   * Held as files rather than uploaded on the spot because the dialog runs
+   * BEFORE the draft exists — on entry there is no application id to attach
+   * anything to. The wizard flushes these to the draft the moment it has one,
+   * through the same `documents.upload(..., permitTypeId)` path the LGU
+   * Clearances stage uses for a certificate the applicant already holds, so
+   * the reviewing office reads them off the list it already reads.
+   */
+  paperCopies: PaperCopy[]
   /**
    * Which kind of `null` this is: the applicant having TICKED "no BizTrack
    * permit", or the question simply never having been put.
@@ -1296,6 +1407,7 @@ function IdentifyFilingModal({
   applicationType,
   ownedBusinesses,
   businessesLoading,
+  permitTypes,
   initial,
   mode,
   confirming,
@@ -1306,9 +1418,16 @@ function IdentifyFilingModal({
   applicationType: 'renewal' | 'amendment'
   ownedBusinesses: Business[]
   businessesLoading: boolean
+  /**
+   * The reference list, only so an untick`ed permit's upload can carry the
+   * right `permit_type_id`. A permit embeds its type as `{ code, name }`; the
+   * id lives here.
+   */
+  permitTypes: { id: number; code: string; name: string }[]
   initial: {
     businessId: number | null
     permitId: number | null
+    permitIds: number[]
     declaredNone: boolean
     amendment: AmendmentState
   }
@@ -1325,8 +1444,23 @@ function IdentifyFilingModal({
 }) {
   const verb = applicationType === 'renewal' ? 'renewing' : 'amending'
   const [businessId, setBusinessId] = useState<number | null>(initial.businessId)
-  const [permitId, setPermitId] = useState<number | null>(initial.permitId)
+  /*
+   * The ticked permits, primary first. Order is the answer's own: the first
+   * tick is the permit the renewal chain keys on, so re-ticking to change your
+   * mind about which is primary is just unticking and ticking again.
+   */
+  const [permitIds, setPermitIds] = useState<number[]>(
+    initial.permitIds.length > 0
+      ? initial.permitIds
+      : initial.permitId !== null
+        ? [initial.permitId]
+        : [],
+  )
   const [declaredNone, setDeclaredNone] = useState(initial.declaredNone)
+  /** Paper copies attached for permit types not ticked, keyed by type id. */
+  const [paperCopies, setPaperCopies] = useState<Record<number, PaperCopy>>({})
+  /** Per-row rejection message from `fileRejection` — too big, wrong type. */
+  const [uploadErrors, setUploadErrors] = useState<Record<number, string>>({})
   const [amendment, setAmendment] = useState<AmendmentState>(initial.amendment)
   const [prefill, setPrefill] = useState<PrefillResult | null>(null)
   const [loadingPermits, setLoadingPermits] = useState(false)
@@ -1368,10 +1502,8 @@ function IdentifyFilingModal({
          * when the list still contains it is what makes reopening this dialog
          * to change something else non-destructive.
          */
-        setPermitId((current) =>
-          current !== null && (result.renewable_permits ?? []).some((p) => p.id === current)
-            ? current
-            : null,
+        setPermitIds((current) =>
+          current.filter((id) => (result.renewable_permits ?? []).some((p) => p.id === id)),
         )
       })
       .catch((err) => {
@@ -1388,6 +1520,50 @@ function IdentifyFilingModal({
   const permits = prefill?.renewable_permits ?? []
   const amendmentChosen =
     amendment.ownership || amendment.location || amendment.nature || amendment.other.trim() !== ''
+
+  /*
+   * ── Which forms are covered, and which need a file instead ──────────────
+   *
+   * A permit TYPE is covered when one of this business's permits of that type
+   * is ticked. Anything left over is a form the applicant is renewing without
+   * a BizTrack record to renew from — held on paper by the old counter
+   * process, which in year one is the ordinary case rather than the exception.
+   *
+   * Keyed on the type and not on the permit because that is the question being
+   * asked. Two expired Sanitary Permits from two different years are one
+   * sanitary form; making the applicant upload a copy per row would ask for
+   * the same certificate twice.
+   */
+  const coveredCodes = new Set(
+    permits.filter((p) => permitIds.includes(p.id)).map((p) => p.permit_type?.code),
+  )
+  /*
+   * Matched through the reference list rather than off the permit itself: a
+   * permit embeds `permit_type` as `{ code, name }` with no id, and the upload
+   * needs the id. The code is the stable join — it is what the seeder, the fee
+   * rules and the clearance endpoints all key on.
+   *
+   * A type the reference list does not know is dropped rather than offered
+   * with a guessed id, because an upload carrying the wrong permit type files
+   * the certificate under another office.
+   */
+  const uncoveredTypes = Array.from(
+    permits
+      .reduce((acc, p) => {
+        const t = p.permit_type
+        if (!t || coveredCodes.has(t.code) || acc.has(t.code)) return acc
+        const known = permitTypes.find((pt) => pt.code === t.code)
+        if (known) acc.set(t.code, { id: known.id, name: known.name })
+        return acc
+      }, new Map<string, { id: number; name: string }>())
+      .values(),
+  )
+  const coveredTypeIds = new Set(
+    permits
+      .filter((p) => permitIds.includes(p.id))
+      .map((p) => permitTypes.find((pt) => pt.code === p.permit_type?.code)?.id)
+      .filter((id): id is number => typeof id === 'number'),
+  )
 
   /*
    * Why Confirm will not get you out of here yet — in the order the questions
@@ -1407,7 +1583,7 @@ function IdentifyFilingModal({
    * register are exactly that. Ticking the escape is still one click; the
    * difference is that it is now a click.
    */
-  const answeredPriorPermit = permitId !== null || declaredNone
+  const answeredPriorPermit = permitIds.length > 0 || declaredNone
   const blocked: { reason: string; focus: () => void } | null =
     businessId === null
       ? {
@@ -1420,11 +1596,18 @@ function IdentifyFilingModal({
           ? {
               reason:
                 permits.length > 0
-                  ? `Choose which permit you are ${verb} — or say this business has none issued through BizTrack.`
+                  ? `Tick every permit you are ${verb} — or say this business has none issued through BizTrack.`
                   : `Confirm this business has no permit issued through BizTrack, so we know what you are ${verb}.`,
-              focus: () => permitsRef.current?.querySelector('button')?.focus(),
+              focus: () => permitsRef.current?.querySelector('input')?.focus(),
             }
-          : applicationType === 'amendment' && !amendmentChosen
+          : /*
+             * Section A is not asked here any more — it is the wizard's own
+             * step, after Data Privacy, because a No there ends the form and a
+             * question that can end the form does not belong in the dialog
+             * that opens it. This dialog asks one thing: which permits, or a
+             * paper copy instead.
+             */
+            applicationType === 'amendment' && !amendmentChosen
             ? {
                 reason:
                   'Tick at least one thing you are amending. An amendment that amends nothing is not a filing the BPLO can act on.',
@@ -1442,12 +1625,26 @@ function IdentifyFilingModal({
       return
     }
     if (businessId === null || !prefill) return
-    onConfirm({ businessId, permitId, declaredNone: permitId === null && declaredNone, amendment, prefill })
+    onConfirm({
+      businessId,
+      // Primary is the first tick; the set is the whole answer.
+      permitId: permitIds[0] ?? null,
+      permitIds,
+      // Only the copies for types still untick`ed at Confirm. Attaching a file
+      // and then ticking the permit itself is a change of mind, not two
+      // answers, so the stale file does not ride along.
+      paperCopies: Object.values(paperCopies).filter((c) => !coveredTypeIds.has(c.permitTypeId)),
+      declaredNone: permitIds.length === 0 && declaredNone,
+      amendment,
+      prefill,
+    })
   }
 
   return (
     <ProtoModal
-      title={applicationType === 'renewal' ? 'WHICH PERMIT ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'}
+      title={
+        applicationType === 'renewal' ? 'WHICH PERMITS ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'
+      }
       wide
       cancelLabel={mode === 'entry' ? 'Not now' : 'Keep what I had'}
       confirmLabel={confirming ? 'Opening…' : 'Continue'}
@@ -1457,7 +1654,7 @@ function IdentifyFilingModal({
     >
       <p className="text-sm leading-relaxed text-ink-secondary">
         {applicationType === 'renewal'
-          ? 'A business can hold several permits with different expiry dates, so a renewal has to name the one it is for. We fill the rest of the form in from it.'
+          ? 'Two ways to do this: tick the permits you are renewing, or upload a permit you already hold outside BizTrack. Either way we fill the rest of the form in from it.'
           : 'Say which record you are amending and what about it is changing. We fill the rest of the form in from it.'}
       </p>
 
@@ -1501,7 +1698,10 @@ function IdentifyFilingModal({
       {/* ── 2. Which permit ──────────────────────────────────────────────── */}
       {businessId !== null && (
         <div className="mt-5">
-          <FieldLabel required>Which permit are you {verb}?</FieldLabel>
+          <FieldLabel required>Which permits are you {verb}?</FieldLabel>
+          <p className="mb-2 text-xs text-ink-secondary">
+            Tick every permit this filing covers. You can choose more than one.
+          </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
           ) : loadError ? (
@@ -1512,12 +1712,11 @@ function IdentifyFilingModal({
           ) : (
             <ul
               ref={permitsRef}
-              role="radiogroup"
-              aria-label={`Which permit are you ${verb}?`}
+              aria-label={`Which permits are you ${verb}?`}
               className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
             >
               {permits.map((p) => {
-                const chosen = permitId === p.id
+                const chosen = permitIds.includes(p.id)
                 const days = p.days_until_expiry
                 // Never colour alone: the word says expired or not.
                 const state =
@@ -1531,27 +1730,36 @@ function IdentifyFilingModal({
                 return (
                   // Presentational so the radios are the radiogroup's own
                   // children, not list items wrapping them.
-                  <li key={p.id} role="presentation">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={chosen}
-                      onClick={() => {
-                        setPermitId(chosen ? null : p.id)
-                        // Naming a permit and declaring there is none are
-                        // contradictory, so one unsets the other rather than
-                        // both being held at once. The server resolves it the
-                        // same way, but the radios have to LOOK exclusive.
-                        setDeclaredNone(false)
-                      }}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  <li key={p.id}>
+                    <label
+                      className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
                         chosen ? 'bg-input' : 'hover:bg-royal-tint'
                       }`}
                     >
-                      <span
-                        className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                          chosen ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
+                      <input
+                        type="checkbox"
+                        checked={chosen}
+                        onChange={() => {
+                          /*
+                           * Appended, never inserted: the first tick is the
+                           * primary and the renewal chain is keyed on it, so
+                           * the order the applicant ticked in IS the answer.
+                           * Untick-and-retick is how you change which is
+                           * primary, which is the only honest way to say it
+                           * without a second control asking the same thing.
+                           */
+                          setPermitIds((current) =>
+                            current.includes(p.id)
+                              ? current.filter((id) => id !== p.id)
+                              : [...current, p.id],
+                          )
+                          // Naming a permit and declaring there is none are
+                          // contradictory, so one unsets the other rather than
+                          // both being held at once. The server resolves it the
+                          // same way, but the boxes have to LOOK consistent.
+                          setDeclaredNone(false)
+                        }}
+                        className="h-4 w-4 shrink-0 accent-royal"
                       />
                       {/*
                        * Number, type and validity dates together, because one
@@ -1572,7 +1780,7 @@ function IdentifyFilingModal({
                           {state.label}
                         </span>
                       )}
-                    </button>
+                    </label>
                   </li>
                 )
               })}
@@ -1598,23 +1806,23 @@ function IdentifyFilingModal({
                * because it is the same question — and one click is not a
                * burden, it is the difference between an answer and a gap.
                */}
-              <li role="presentation">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={declaredNone}
-                  onClick={() => {
-                    setDeclaredNone((d) => !d)
-                    setPermitId(null)
-                  }}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+              <li>
+                <label
+                  className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
                     declaredNone ? 'bg-input' : 'hover:bg-royal-tint'
                   }`}
                 >
-                  <span
-                    className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                      declaredNone ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                    }`}
+                  <input
+                    type="checkbox"
+                    checked={declaredNone}
+                    onChange={() => {
+                      setDeclaredNone((d) => !d)
+                      // Still exclusive with the list above, even though the
+                      // list is no longer exclusive within itself: "none of
+                      // these" and "these three" cannot both be true.
+                      setPermitIds([])
+                    }}
+                    className="h-4 w-4 shrink-0 accent-royal"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold text-ink">
@@ -1627,12 +1835,129 @@ function IdentifyFilingModal({
                       from there.
                     </span>
                   </span>
-                </button>
+                </label>
               </li>
             </ul>
           )}
+
+          {/*
+           * ── The other half of the question: a file where there is no tick ──
+           *
+           * Every permit type this business holds that is NOT ticked above is a
+           * form being renewed without a BizTrack record behind it. The counter
+           * asks for the paper copy in that case, so this does too — beside the
+           * tick it stands in for, rather than three steps later under
+           * Documentary Requirements where the connection to this question is
+           * lost.
+           *
+           * Optional on purpose. A permit left unticked because the applicant
+           * is simply not renewing it this year is an ordinary answer, and
+           * demanding a file for it would make "no" impossible to say. What
+           * this offers is a place to put the copy, not a gate.
+           */}
+          {!loadingPermits && uncoveredTypes.length > 0 && (
+            <div className="mt-4 rounded-lg border border-input-border bg-royal-tint/40 p-4">
+              <p className="text-[13px] font-semibold text-ink">
+                Not renewing one through BizTrack? Attach the paper copy.
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                {uncoveredTypes.length === 1
+                  ? 'One permit type is not ticked above.'
+                  : `${uncoveredTypes.length} permit types are not ticked above.`}{' '}
+                Attaching the certificate you hold lets that office review it with this filing.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {uncoveredTypes.map((t) => {
+                  const held = paperCopies[t.id]
+                  const rejected = uploadErrors[t.id]
+                  return (
+                    <li
+                      key={t.id}
+                      className="flex flex-wrap items-center gap-3 rounded-lg border border-input-border bg-white px-4 py-2.5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-ink">{t.name}</span>
+                        {held ? (
+                          <span className="block truncate text-xs text-ink-secondary">
+                            {held.file.name} · {formatBytes(held.file.size)}
+                          </span>
+                        ) : rejected ? (
+                          <span role="alert" className="block text-xs font-medium text-s-red">
+                            {rejected}
+                          </span>
+                        ) : (
+                          <span className="block text-xs text-ink-secondary">
+                            No copy attached — optional
+                          </span>
+                        )}
+                      </span>
+                      {/*
+                       * A label wrapping a hidden input, not a button that
+                       * clicks one: the label IS the control, so it is
+                       * reachable and announced without the click-forwarding
+                       * that leaves a screen reader with a button that says
+                       * nothing about what it opens.
+                       */}
+                      <label className="shrink-0 cursor-pointer rounded-lg border border-royal px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:bg-royal-tint">
+                        {held ? 'Replace' : 'Upload'}
+                        <span className="sr-only"> paper copy of {t.name}</span>
+                        <input
+                          type="file"
+                          accept={ACCEPT_ATTR}
+                          className="sr-only"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            // Let the same file be picked twice — after a
+                            // rejection the input would otherwise be inert.
+                            e.target.value = ''
+                            if (!file) return
+                            const why = fileRejection(file)
+                            if (why) {
+                              setUploadErrors((m) => ({ ...m, [t.id]: why }))
+                              setPaperCopies((m) => {
+                                const next = { ...m }
+                                delete next[t.id]
+                                return next
+                              })
+                              return
+                            }
+                            setUploadErrors((m) => {
+                              const next = { ...m }
+                              delete next[t.id]
+                              return next
+                            })
+                            setPaperCopies((m) => ({
+                              ...m,
+                              [t.id]: { permitTypeId: t.id, permitTypeName: t.name, file },
+                            }))
+                          }}
+                        />
+                      </label>
+                      {held && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaperCopies((m) => {
+                              const next = { ...m }
+                              delete next[t.id]
+                              return next
+                            })
+                          }
+                          className="shrink-0 text-xs font-semibold text-ink-secondary underline"
+                        >
+                          Remove
+                          <span className="sr-only"> paper copy of {t.name}</span>
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
+
 
       {/*
        * ── 3. What is being amended (items 82/84) ───────────────────────────
@@ -1688,6 +2013,69 @@ function IdentifyFilingModal({
               />
             </label>
           </div>
+
+          {/*
+           * ── A3 · "Amendment: From ___ To ___" ──────────────────────────
+           *
+           * Shown under Ownership because that is the tick it belongs to: the
+           * paper's From/To row lists the four legal structures, and a change
+           * of structure IS a change of ownership. Ticking Location does not
+           * make a sole proprietorship into a corporation, so asking there
+           * would be asking a question with no answer.
+           *
+           * Not required even when Ownership is ticked. Ownership also covers
+           * a new co-owner or a transferred proprietorship, neither of which
+           * changes the structure — forcing a From/To would make those
+           * applicants invent a conversion that did not happen.
+           */}
+          {amendment.ownership && (
+            <div className="mt-3 rounded-lg border border-input-border bg-white px-4 py-3">
+              <p className="text-[13px] font-semibold text-ink">
+                Did the business structure change?
+              </p>
+              <p className="mt-1 text-xs text-ink-secondary">
+                Only if it converted from one legal form to another. Leave both blank otherwise.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {(
+                  [
+                    { key: 'fromRegistrationType' as const, label: 'From' },
+                    { key: 'toRegistrationType' as const, label: 'To' },
+                  ]
+                ).map((side) => (
+                  <label key={side.key} className="block">
+                    <FieldLabel>{side.label}</FieldLabel>
+                    <select
+                      className={inputCls}
+                      value={amendment[side.key]}
+                      onChange={(e) =>
+                        setAmendment((a) => ({ ...a, [side.key]: e.target.value }))
+                      }
+                    >
+                      <option value="">Not changing</option>
+                      {REGISTRATION_TYPES.map((rt) => (
+                        <option key={rt.value} value={rt.value}>
+                          {rt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {/*
+               * A conversion to the structure it already is is not a
+               * conversion. Said rather than blocked: it is a slip worth
+               * naming, not a filing worth refusing, and the BPLO can read
+               * "from corporation to corporation" for the typo it is.
+               */}
+              {amendment.fromRegistrationType !== '' &&
+                amendment.fromRegistrationType === amendment.toRegistrationType && (
+                  <p className="mt-2 text-xs font-medium text-ink">
+                    From and To are the same structure — check which one changed.
+                  </p>
+                )}
+            </div>
+          )}
         </fieldset>
       )}
 
@@ -1745,6 +2133,13 @@ export function ApplyWizard() {
    */
   const [visited, setVisited] = useState<string[]>([BASE_PHASES[0]])
   const markVisited = (key: string) => setVisited((v) => (v.includes(key) ? v : [...v, key]))
+  /*
+   * Section A's two fieldsets, so a blocked Next can put the cursor on the
+   * question it is complaining about rather than at the top of the step.
+   * Separate refs because both can be on screen at once under a Yes.
+   */
+  const a1Ref = useRef<HTMLFieldSetElement | null>(null)
+  const amendmentRef = useRef<HTMLFieldSetElement | null>(null)
 
   /*
    * ── No clearance state here, deliberately ─────────────────────────────
@@ -1832,6 +2227,19 @@ export function ApplyWizard() {
   // Renewal/amendment prefill (v2): reuse an existing business + link prior permit.
   const [prefillBusinessId, setPrefillBusinessId] = useState<number | null>(null)
   const [priorPermitId, setPriorPermitId] = useState<number | null>(null)
+  /*
+   * Every permit the filing covers, primary first. `priorPermitId` above stays
+   * the primary because the renewal chain, analytics and the BPLO form header
+   * all read it; this is the rest of the answer, and the two are written
+   * together so they can never drift.
+   */
+  const [priorPermitIds, setPriorPermitIds] = useState<number[]>([])
+  /*
+   * Paper copies chosen in the identify dialog, waiting for a draft to attach
+   * them to. The dialog runs before the application exists, so these sit here
+   * until `ensureDraft` has an id and `flushPaperCopies` can upload them.
+   */
+  const [pendingPaperCopies, setPendingPaperCopies] = useState<PaperCopy[]>([])
   /*
    * The other half of the prior-permit answer: whether a null `priorPermitId`
    * is the applicant saying "this business has no BizTrack permit" or the
@@ -2147,11 +2555,18 @@ export function ApplyWizard() {
         }
       }
       setPriorPermitId(identity.permitId)
+      setPriorPermitIds(identity.permitIds)
       // Written after `selectBusinessForReuse`, which clears both halves: the
       // dialog's answer is about the business it just settled on, so it has to
       // land last or the clear would eat it.
       setPriorPermitDeclaredNone(identity.declaredNone)
       setAmendment(identity.amendment)
+      /*
+       * Queued, not uploaded. There may be no draft yet — on entry there
+       * certainly is not — and a file uploaded to nothing is a file lost. The
+       * flush happens where an id is guaranteed, in `saveDraft`.
+       */
+      setPendingPaperCopies(identity.paperCopies)
       setIdentify(null)
     } finally {
       setConfirmingIdentity(false)
@@ -2392,7 +2807,60 @@ export function ApplyWizard() {
    * `jumpBlocked`, Part n of N) is written against "the running order" and
    * should not have to care that the running order is currently constant.
    */
-  const sequence: BasePhase[] = BASE_PHASES
+  /*
+   * ── The running order, which a renewal computes rather than inherits ─────
+   *
+   * A new application and an amendment still run the fixed BASE_PHASES. A
+   * renewal does not, because MCG-BPLO-FO-002 does not: its section A1 decides
+   * how much of the rest of the form exists.
+   *
+   *   A1 unanswered → the question, and nothing past it.
+   *   A1 = No       → the question, then Review. Nothing on the paper after
+   *                   section A applies to a business whose registration has
+   *                   not changed; the details carry over from the permit
+   *                   being renewed.
+   *   A1 = Yes      → the sections covering what was TICKED in A2, then the
+   *                   documentary requirements and the tax profile, then
+   *                   Review.
+   *
+   * The A2 ticks choosing the steps is the "friendly" half of the request: a
+   * renewal that only moved premises is asked about its address and nothing
+   * else, rather than being walked through six sections to change one field.
+   *
+   * ── Which tick opens which section ──────────────────────────────────────
+   *
+   *   Location or Address of Business → `address`  (paper item B6)
+   *   Ownership / Nature of Business  → `business` (B1 and the line-of-business
+   *                                     table; the structure itself is A3, and
+   *                                     that is asked on the step below)
+   *   Others (specify)                → `business`, as the catch-all. An
+   *                                     unnamed change has no section of its
+   *                                     own, and the business details are where
+   *                                     the most of it could live. The typed
+   *                                     text rides along to the officer either
+   *                                     way, so nothing is lost if the guess is
+   *                                     wrong.
+   *
+   * `documents` and `fees` are NOT conditional under a Yes. The paper prints
+   * its documentary requirements and its Gross Sales/Receipts column for every
+   * renewal that fills in section B, and the fee engine is fed from `fees` —
+   * gating them on a tick would price the filing off last year's figures
+   * without anybody having said so.
+   */
+  const sequence: BasePhase[] = useMemo(() => {
+    if (applicationType !== 'renewal') return BASE_PHASES
+
+    if (amendment.hasChanges === null) return ['privacy', 'amendments']
+    if (amendment.hasChanges === false) return ['privacy', 'amendments', 'review']
+
+    const changed: BasePhase[] = []
+    if (amendment.location) changed.push('address')
+    if (amendment.ownership || amendment.nature || amendment.other.trim() !== '') {
+      changed.push('business')
+    }
+
+    return ['privacy', 'amendments', ...changed, 'documents', 'fees', 'review']
+  }, [applicationType, amendment])
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
@@ -2654,6 +3122,33 @@ export function ApplyWizard() {
         // rather than the submit button seven steps later.
         case 'privacy':
           return consent ? [] : ['Your agreement to the Data Privacy Consent']
+        /*
+         * Section A, and the two ways it can be incomplete.
+         *
+         * A1 unanswered blocks because the answer decides the length of the
+         * form: letting Next through would have to pick No on the applicant's
+         * behalf, and No is the answer that files "nothing changed" — a
+         * statement about the business, not a blank field.
+         *
+         * A Yes that ticks nothing blocks for the reason the amendment gate
+         * has always blocked: it claims a change and names none, so no office
+         * can act on it and no section opens to describe it.
+         */
+        case 'amendments': {
+          if (amendment.hasChanges === null) {
+            return ['Whether anything has changed since your last permit']
+          }
+          if (
+            amendment.hasChanges &&
+            !amendment.ownership &&
+            !amendment.location &&
+            !amendment.nature &&
+            amendment.other.trim() === ''
+          ) {
+            return ['Which details changed — tick at least one box']
+          }
+          return []
+        }
         case 'documents':
           return requiredDocs
             .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
@@ -2692,6 +3187,15 @@ export function ApplyWizard() {
       priorPermitId,
       renewablePermits,
       amendmentChosen,
+      /*
+       * The whole object, because the `amendments` case reads five of its
+       * fields and the step's gate is only correct if it recomputes when any
+       * of them move. Memoised on `amendmentChosen` alone, answering No after
+       * Yes left the old "tick at least one box" complaint standing over a
+       * step that no longer asked the question.
+       */
+      amendment,
+      priorPermitAnswered,
     ],
   )
 
@@ -2965,6 +3469,7 @@ export function ApplyWizard() {
       title: title.trim() || undefined,
       payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
+      ...(priorPermitIds.length > 0 ? { prior_permit_ids: priorPermitIds } : {}),
       ...(priorPermitId
         ? { prior_permit_id: priorPermitId }
         : /*
@@ -2989,13 +3494,30 @@ export function ApplyWizard() {
    * saying no to a question its form never asked.
    */
   function amendmentPayload(): AmendmentAnswers {
-    if (applicationType !== 'amendment') return {}
+    /*
+     * Renewals send section A too now — MCG-BPLO-FO-002 asks A1/A2/A3 and the
+     * API accepts them for both types. `new` still sends nothing: there is no
+     * section A on MCG-BPLO-FO-001 to answer.
+     *
+     * A renewal that has not answered A1 sends nothing either. The dialog will
+     * not let Confirm through without an answer, so an unanswered A1 here means
+     * a draft reopened from before this question existed — and writing false
+     * for it would turn "never asked" into "answered no" on a filing nobody
+     * asked. That is the exact conversion `prior_permit_declared_none` was
+     * added to stop happening one field over.
+     */
+    if (applicationType === 'new') return {}
+    if (applicationType === 'renewal' && amendment.hasChanges === null) return {}
 
     return {
       amendment_ownership: amendment.ownership,
       amendment_location: amendment.location,
       amendment_nature: amendment.nature,
       amendment_other: amendment.other.trim() || null,
+      // The API nulls both whenever A1 is No, so sending them unconditionally
+      // cannot leave a stale conversion behind.
+      amendment_from_registration_type: amendment.fromRegistrationType || null,
+      amendment_to_registration_type: amendment.toRegistrationType || null,
     }
   }
 
@@ -3029,6 +3551,23 @@ export function ApplyWizard() {
           // even if the autosave debounce has not fired yet.
           await ensureDraftRaw()
         }
+      } else if (phase === 'amendments') {
+        /*
+         * A renewal that answers No at A1 goes straight from here to Review,
+         * so this step is the last chance to create the draft.
+         *
+         * The draft used to be created on leaving `business`, which was safe
+         * while every filing passed through it. A No-path renewal never does —
+         * its sequence is privacy → amendments → review — and without this it
+         * would reach Review with no application id, no autosave having
+         * anything to write to, and a Submit button with nothing to submit.
+         *
+         * Guarded on `canCreateDraft` for the same reason the `business`
+         * branch is: a draft cannot be posted before the business it is for is
+         * known, and on a renewal that is settled by the identify dialog long
+         * before this step.
+         */
+        if (!applicationId && canCreateDraft) await ensureDraftRaw()
       } else if (phase === 'fees') {
         const id = await ensureDraftRaw()
         await applications.update(id, {
@@ -3201,7 +3740,36 @@ export function ApplyWizard() {
         // Which permit is being renewed can change after the draft exists, and
         // it is not part of the general application update (item 50).
         if (isReuse) {
-          await applications.setPriorPermit(id, priorPermitId, priorPermitDeclaredNone)
+          await applications.setPriorPermit(
+            id,
+            priorPermitId,
+            priorPermitDeclaredNone,
+            priorPermitIds,
+          )
+        }
+        /*
+         * The paper copies the identify dialog took, now that there is
+         * somewhere to put them. Uploaded through the held-clearance path
+         * (`permitTypeId`, no document type) so each one arrives named after
+         * the office that has to read it rather than as an untitled file.
+         *
+         * Cleared before the awaits, not after: a second autosave firing
+         * mid-upload would otherwise find the same queue and attach every file
+         * twice. A failure is swallowed on purpose — the applicant can still
+         * attach the copy under Documentary Requirements, and a draft that
+         * refuses to save because an optional attachment did not stick would
+         * lose the answers that DID.
+         */
+        if (pendingPaperCopies.length > 0) {
+          const queued = pendingPaperCopies
+          setPendingPaperCopies([])
+          for (const copy of queued) {
+            try {
+              await documents.upload(id, null, copy.file, copy.permitTypeId)
+            } catch {
+              /* Optional attachment; Documentary Requirements is the retry. */
+            }
+          }
         }
       } else {
         await applications.update(id, { fee_profile: feeProfile, payment_mode: paymentMode })
@@ -3528,10 +4096,24 @@ export function ApplyWizard() {
         setAmendment(
           app.amendments
             ? {
+                /*
+                 * A1 restores from `has_amendments` for an amendment or a
+                 * renewal saved since the question existed — and stays null for
+                 * a renewal draft written before it, so reopening one asks
+                 * rather than assuming. `has_amendments` false on such a draft
+                 * means "the column defaulted", not "the applicant said no",
+                 * and the two must not be confused.
+                 */
+                hasChanges:
+                  app.application_type === 'renewal' && !app.amendments.has_amendments
+                    ? null
+                    : app.amendments.has_amendments,
                 ownership: app.amendments.ownership,
                 location: app.amendments.location,
                 nature: app.amendments.nature,
                 other: app.amendments.other ?? '',
+                fromRegistrationType: app.amendments.from_registration_type ?? '',
+                toRegistrationType: app.amendments.to_registration_type ?? '',
               }
             : EMPTY_AMENDMENT,
         )
@@ -3618,7 +4200,14 @@ export function ApplyWizard() {
          * documents uploaded shows Documentary Requirements unticked, which is
          * the truth about it.
          */
-        setVisited([...BASE_PHASES])
+        /*
+         * A reopened draft has been everywhere, so every step is jumpable.
+         * `amendments` is listed alongside BASE_PHASES rather than added to it:
+         * the constant is the running order for a NEW filing, and a renewal's
+         * order is computed. Naming an extra key here is harmless for the types
+         * that never show it — `visited` is a list of keys, not a sequence.
+         */
+        setVisited([...BASE_PHASES, 'amendments'])
         /*
          * Item 50: which permit this renewal is for, chosen when the draft was
          * started. The list is loaded too (item 85) so Business Information can
@@ -3651,6 +4240,19 @@ export function ApplyWizard() {
           ])
           if (!active) return
           setPriorPermitId(prior?.prior_permit_id ?? null)
+          /*
+           * The whole ticked set, falling back to the primary alone for a
+           * draft saved before the dialog was multi-select. Without the
+           * fallback such a draft would reopen with nothing ticked and the
+           * next autosave would sync an empty pivot over a real answer.
+           */
+          setPriorPermitIds(
+            prior?.prior_permit_ids?.length
+              ? prior.prior_permit_ids
+              : prior?.prior_permit_id
+                ? [prior.prior_permit_id]
+                : [],
+          )
           setPriorPermitDeclaredNone(prior?.declared_none ?? false)
           const amendmentAnswered =
             app.application_type !== 'amendment' ||
@@ -5216,6 +5818,218 @@ export function ApplyWizard() {
         </div>
       )}
 
+      {/*
+        ── Section A · MCG-BPLO-FO-002 v2.0 ────────────────────────────────
+
+        "A. BUSINESS INFORMATION AND REGISTRATION", transcribed. Three
+        questions in the order the paper prints them:
+
+          A1  Do you have any changes or amendments in the previous business
+              registration?                                        Yes / No
+          A2  If yes, please check the appropriate box/es —
+              Ownership · Location or Address of Business ·
+              Nature of Business · Others ______
+          A3  Amendment: From [structure] To [structure]
+
+        A1 is asked HERE, immediately after Data Privacy, and not in the dialog
+        that opened the filing. The dialog's job is to say which permits are
+        being renewed; this is the form's first question, and a No means the
+        form is finished — a decision the wizard can only act on by shortening
+        itself, which it can only do from inside its own sequence.
+
+        A2 does more work here than it does on paper. On the form it is a
+        record of what changed; here it also decides which of the later
+        sections the applicant is shown at all, so a renewal that only moved
+        premises answers one section instead of six. `sequence` above is where
+        that mapping lives.
+      */}
+      {phase === 'amendments' && (
+        <FormSheet meta={typeMeta}>
+          <h2 className="text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
+            A. Business Information and Registration
+          </h2>
+          <div className="mb-6 mt-2 h-px bg-royal/30" />
+
+          {/* ── A1 ─────────────────────────────────────────────────────── */}
+          <fieldset ref={a1Ref} className="border-0 p-0">
+            <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+              1. Do you have any changes or amendments in the previous business registration?
+              <span className="text-s-red"> *</span>
+            </legend>
+            <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+              Answer No and the details on record carry over to this renewal unchanged.
+            </p>
+            <div className="flex gap-2">
+              {/*
+                Two buttons, not one checkbox. The paper prints two boxes, and
+                an unticked checkbox cannot tell "No" from "not answered yet" —
+                the distinction this whole step turns on, because one of those
+                ends the form and the other must not.
+              */}
+              {[
+                { value: true, label: 'Yes' },
+                { value: false, label: 'No' },
+              ].map((opt) => {
+                const chosen = amendment.hasChanges === opt.value
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    aria-pressed={chosen}
+                    onClick={() =>
+                      setAmendment((a) =>
+                        opt.value
+                          ? { ...a, hasChanges: true }
+                          : /*
+                             * No clears section A. Leaving the ticks behind
+                             * would file a renewal claiming nothing changed
+                             * while still naming Location as changed, and the
+                             * API would have to pick one of the two to believe.
+                             */
+                            {
+                              ...a,
+                              hasChanges: false,
+                              ownership: false,
+                              location: false,
+                              nature: false,
+                              other: '',
+                              fromRegistrationType: '',
+                              toRegistrationType: '',
+                            },
+                      )
+                    }
+                    className={
+                      chosen
+                        ? 'min-w-[6rem] rounded-lg border border-royal bg-royal px-5 py-2.5 text-sm font-semibold text-white'
+                        : 'min-w-[6rem] rounded-lg border border-input-border bg-white px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-royal-tint'
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          </fieldset>
+
+          {/* ── A1 = No · the form is finished ─────────────────────────── */}
+          {amendment.hasChanges === false && (
+            <div className="mt-5 max-w-2xl rounded-lg border border-input-border bg-royal-tint px-5 py-4">
+              <p className="text-sm font-semibold text-royal">Your renewal is ready to submit.</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-secondary">
+                Nothing has changed, so there is nothing further to fill in. Every detail carries
+                over from the permit you are renewing. Press Next to check it over and file.
+              </p>
+            </div>
+          )}
+
+          {/* ── A2 ─────────────────────────────────────────────────────── */}
+          {amendment.hasChanges === true && (
+            <fieldset ref={amendmentRef} className="mt-6 border-0 p-0">
+              <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+                2. If yes, please check the appropriate box/es
+                <span className="text-s-red"> *</span>
+              </legend>
+              <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+                Tick only what actually changed. We will ask you to fill in those sections and
+                nothing else — the rest carries over from your last permit.
+              </p>
+              <div className="max-w-2xl space-y-2">
+                {AMENDMENT_KINDS.map((kind) => (
+                  <label
+                    key={kind.key}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-white px-4 py-3"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={amendment[kind.key]}
+                      onChange={(e) =>
+                        setAmendment((a) => ({ ...a, [kind.key]: e.target.checked }))
+                      }
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-ink">{kind.label}</span>
+                      {/*
+                        What ticking it will actually make them fill in. Said on
+                        the box rather than discovered two steps later, because
+                        the tick is now a choice about the length of the form
+                        and not only a record of what changed.
+                      */}
+                      <span className="block text-xs text-ink-secondary">{kind.opens}</span>
+                    </span>
+                  </label>
+                ))}
+                {/*
+                  "Others (specify)" is one control, not a checkbox with a box
+                  beside it: on the paper you cannot tick Others without writing
+                  the other in, so typing IS ticking and a separate tick could
+                  only ever contradict the text.
+                */}
+                <label className="block rounded-lg border border-input-border bg-white px-4 py-3">
+                  <span className="mb-1.5 block text-sm font-medium text-ink">Others (specify)</span>
+                  <input
+                    value={amendment.other}
+                    onChange={(e) => setAmendment((a) => ({ ...a, other: e.target.value }))}
+                    placeholder="what else changed"
+                    maxLength={255}
+                    className={inputCls}
+                  />
+                  <span className="mt-1.5 block text-xs text-ink-secondary">
+                    Opens Business Information so you can edit the details.
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+          )}
+
+          {/* ── A3 ─────────────────────────────────────────────────────── */}
+          {amendment.hasChanges === true && amendment.ownership && (
+            <fieldset className="mt-6 border-0 p-0">
+              <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+                3. Amendment
+              </legend>
+              <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+                Only if the business converted from one legal structure to another. Leave both as
+                they are if ownership changed hands without the structure changing.
+              </p>
+              <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+                {[
+                  { key: 'fromRegistrationType' as const, label: 'From' },
+                  { key: 'toRegistrationType' as const, label: 'To' },
+                ].map((side) => (
+                  <label key={side.key} className="block">
+                    <FieldLabel>{side.label}</FieldLabel>
+                    <select
+                      className={inputCls}
+                      value={amendment[side.key]}
+                      onChange={(e) => setAmendment((a) => ({ ...a, [side.key]: e.target.value }))}
+                    >
+                      <option value="">Not changing</option>
+                      {REGISTRATION_TYPES.map((rt) => (
+                        <option key={rt.value} value={rt.value}>
+                          {rt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {/*
+                A conversion to the structure it already is is not a conversion.
+                Said rather than blocked: it is a slip worth naming, not a
+                filing worth refusing.
+              */}
+              {amendment.fromRegistrationType !== '' &&
+                amendment.fromRegistrationType === amendment.toRegistrationType && (
+                  <p className="mt-2 max-w-2xl text-xs font-medium text-ink">
+                    From and To are the same structure — check which one changed.
+                  </p>
+                )}
+            </fieldset>
+          )}
+        </FormSheet>
+      )}
+
       {/* ── Business & Tax Profile (revenue-code fee inputs) ───────────── */}
       {phase === 'fees' && (
         <FormSheet meta={typeMeta}>
@@ -5517,9 +6331,11 @@ export function ApplyWizard() {
           applicationType={applicationType as 'renewal' | 'amendment'}
           ownedBusinesses={ownedBusinesses.data ?? []}
           businessesLoading={ownedBusinesses.loading}
+          permitTypes={permitTypes}
           initial={{
             businessId: prefillBusinessId,
             permitId: priorPermitId,
+            permitIds: priorPermitIds,
             declaredNone: priorPermitDeclaredNone,
             amendment,
           }}

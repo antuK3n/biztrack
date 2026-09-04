@@ -26,7 +26,12 @@ class PriorPermitController extends Controller
     public function show(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
-        $application->loadMissing('priorPermit.permitType', 'priorPermit.business', 'priorPermit.application');
+        $application->loadMissing(
+            'priorPermit.permitType',
+            'priorPermit.business',
+            'priorPermit.application',
+            'priorPermits.permitType',
+        );
 
         return response()->json([
             'data' => [
@@ -34,6 +39,14 @@ class PriorPermitController extends Controller
                 'prior_permit' => $application->priorPermit
                     ? new PermitResource($application->priorPermit)
                     : null,
+                /*
+                 * The whole set, so a reopened draft restores every tick the
+                 * applicant made rather than just the primary. Ids alone: the
+                 * dialog re-fetches the permits themselves from the prefill it
+                 * already asks for, and sending them twice would give it two
+                 * copies to disagree about.
+                 */
+                'prior_permit_ids' => $application->priorPermits->pluck('id')->all(),
                 // Null and "declared none" are different answers and the wizard
                 // has to be able to tell them apart when it reopens a draft:
                 // one restores a ticked escape, the other an open question.
@@ -56,13 +69,35 @@ class PriorPermitController extends Controller
             // paper permits predate the system. It is only a real answer when
             // it arrives with the flag below — see the comment there.
             'prior_permit_id' => ['present', 'nullable', 'exists:permits,id'],
+            /*
+             * The rest of the set. A renewal covers every permit the shop
+             * holds, not one of them — see the pivot migration. The primary
+             * above still keys the renewal chain; this carries the full answer
+             * the dialog was given, and an absent key leaves the set alone so a
+             * caller that only wants to move the escape flag can still do so.
+             */
+            'prior_permit_ids' => ['sometimes', 'array'],
+            'prior_permit_ids.*' => ['exists:permits,id'],
             'declared_none' => ['sometimes', 'boolean'],
         ]);
 
+        $ids = array_map('intval', (array) ($data['prior_permit_ids'] ?? []));
         if (! empty($data['prior_permit_id'])) {
-            $belongs = $application->business
-                && $application->business->permits()->whereKey($data['prior_permit_id'])->exists();
-            abort_unless($belongs, 422, 'The selected prior permit does not belong to this business.');
+            array_unshift($ids, (int) $data['prior_permit_id']);
+        }
+        $ids = array_values(array_unique(array_filter($ids)));
+
+        /*
+         * Every permit named must belong to this business — the whole set, not
+         * just the primary. Office separability is a boundary: a filing that
+         * names a permit it has no claim to is how a reader ends up looking at
+         * a business it may not see.
+         */
+        if ($ids !== []) {
+            $owned = $application->business
+                ? $application->business->permits()->whereKey($ids)->count()
+                : 0;
+            abort_unless($owned === count($ids), 422, 'A selected prior permit does not belong to this business.');
         }
 
         /*
@@ -73,13 +108,23 @@ class PriorPermitController extends Controller
          * statements — and a row holding both would make the submit gate below
          * pass for the wrong reason.
          */
-        $priorPermitId = $data['prior_permit_id'] ?? null;
+        $priorPermitId = $ids[0] ?? null;
 
         $application->update([
             'prior_permit_id' => $priorPermitId,
             'prior_permit_declared_none' => $priorPermitId === null
                 && (bool) ($data['declared_none'] ?? false),
         ]);
+
+        /*
+         * Only when the caller actually sent a set. `sync([])` on an absent key
+         * would silently empty the pivot for every existing caller that still
+         * sends the primary alone — which is every draft saved before the
+         * dialog became multi-select.
+         */
+        if (array_key_exists('prior_permit_ids', $data) || $priorPermitId !== null) {
+            $application->priorPermits()->sync($ids);
+        }
 
         Audit::log('application.prior_permit_set', $application);
 
