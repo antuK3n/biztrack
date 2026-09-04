@@ -48,6 +48,13 @@ class Application extends Model
         'has_amendments', 'amendment_ownership', 'amendment_location',
         'amendment_nature', 'amendment_other',
         /*
+         * Section A3 of the renewal form — what the business structure changed
+         * FROM and TO. Listed for the same reason the four above are: mass
+         * assignment is how the controller writes them, and an unlisted column
+         * is dropped in silence rather than refused.
+         */
+        'amendment_from_registration_type', 'amendment_to_registration_type',
+        /*
          * The applicant saying, in as many words, that there is no BizTrack
          * permit to point at — their last one was issued on paper by the old
          * counter process. That is the ordinary case in year one, and the
@@ -167,6 +174,25 @@ class Application extends Model
     public function priorPermit(): BelongsTo
     {
         return $this->belongsTo(Permit::class, 'prior_permit_id');
+    }
+
+    /**
+     * Every permit this renewal covers, primary included.
+     *
+     * `priorPermit()` above still answers "which permit does this renew" and
+     * still keys the renewal chain. This answers the different question the
+     * counter actually asks — a shop holding a Mayor's Permit, a Sanitary
+     * Permit and an FSIC renews all three in one visit — and the set contains
+     * the primary as well, so a reader wanting the whole list never has to
+     * union two sources and hope they agree.
+     *
+     * A renewal filed against a paper permit has none of these and
+     * `prior_permit_declared_none` instead; an empty set is an ordinary state,
+     * not a broken one.
+     */
+    public function priorPermits(): BelongsToMany
+    {
+        return $this->belongsToMany(Permit::class, 'application_prior_permits')->withTimestamps();
     }
 
     /**
