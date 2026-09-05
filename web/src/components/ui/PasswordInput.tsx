@@ -20,6 +20,7 @@ export function PasswordInput({
   onBlur,
   invalid,
   describedBy,
+  required,
   iconSize = 20,
   className = '',
 }: {
@@ -32,6 +33,13 @@ export function PasswordInput({
   onBlur?: () => void
   invalid?: boolean
   describedBy?: string
+  /*
+   * Announces the requirement that the label's asterisk shows. Optional so the
+   * auth screens, which mark nothing, are unchanged; aria-required rather than
+   * the `required` attribute because these inputs sit in modals and forms that
+   * save through a button, where native validation would never fire.
+   */
+  required?: boolean
   /** 20 on the auth screens, 18 inside the settings modals. */
   iconSize?: number
   className?: string
@@ -49,6 +57,7 @@ export function PasswordInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         aria-invalid={invalid ? true : undefined}
+        aria-required={required ? true : undefined}
         aria-describedby={describedBy}
         className={`${inputCls} pr-11 [&::-ms-reveal]:hidden ${className}`}
       />
