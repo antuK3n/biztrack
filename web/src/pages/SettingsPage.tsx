@@ -82,6 +82,7 @@ function ProfileField({
   label,
   error,
   hint,
+  required,
   children,
 }: {
   id: string
@@ -89,12 +90,21 @@ function ProfileField({
   error?: string
   /** Shown under the control — used to explain why email is not editable. */
   hint?: string
+  /*
+   * Marks the label with the asterisk FieldLabel already draws for required
+   * answers across the apply wizard and the office forms. It must agree with
+   * two other things or it is a lie: `confirmDisabled` on the modal below, and
+   * the `required` rules in AuthController::updateProfile. Gender is
+   * deliberately NOT one of these — it is nullable on both sides so that
+   * accounts predating the column can still save an unrelated name edit.
+   */
+  required?: boolean
   children: ReactNode
 }) {
   return (
     <div>
       <label htmlFor={id}>
-        <FieldLabel>{label}</FieldLabel>
+        <FieldLabel required={required}>{label}</FieldLabel>
       </label>
       {children}
       {hint && <p className="mt-1.5 text-xs text-ink-muted">{hint}</p>}
@@ -254,13 +264,18 @@ export function SettingsPage() {
             </p>
           )}
           <div className="mt-6 grid gap-5 sm:grid-cols-2">
-            <ProfileField id="profile-first" label="First Name" error={fieldErrors.first_name?.[0]}>
+            <ProfileField id="profile-first" label="First Name" required error={fieldErrors.first_name?.[0]}>
               <div className="relative">
                 <input
                   id="profile-first"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name"
+                  /* aria-required, not the `required` attribute: the modal saves
+                     through a button, not a form submit, so native validation
+                     would never fire — but a screen reader still has to hear
+                     what the asterisk shows. */
+                  aria-required="true"
                   aria-invalid={fieldErrors.first_name ? true : undefined}
                   aria-describedby={fieldErrors.first_name ? 'profile-first-error' : undefined}
                   className={`${inputCls} pr-10`}
@@ -283,13 +298,14 @@ export function SettingsPage() {
                 <InputPencil />
               </div>
             </ProfileField>
-            <ProfileField id="profile-last" label="Last Name" error={fieldErrors.last_name?.[0]}>
+            <ProfileField id="profile-last" label="Last Name" required error={fieldErrors.last_name?.[0]}>
               <div className="relative">
                 <input
                   id="profile-last"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   autoComplete="family-name"
+                  aria-required="true"
                   aria-invalid={fieldErrors.last_name ? true : undefined}
                   aria-describedby={fieldErrors.last_name ? 'profile-last-error' : undefined}
                   className={`${inputCls} pr-10`}
@@ -332,7 +348,7 @@ export function SettingsPage() {
                 <option value="F">Female</option>
               </select>
             </ProfileField>
-            <ProfileField id="profile-phone" label="Mobile Number" error={fieldErrors.mobile_number?.[0]}>
+            <ProfileField id="profile-phone" label="Mobile Number" required error={fieldErrors.mobile_number?.[0]}>
               <div className="relative">
                 <input
                   id="profile-phone"
@@ -341,6 +357,7 @@ export function SettingsPage() {
                   placeholder="09XX XXX XXXX"
                   inputMode="tel"
                   autoComplete="tel"
+                  aria-required="true"
                   aria-invalid={fieldErrors.mobile_number ? true : undefined}
                   aria-describedby={fieldErrors.mobile_number ? 'profile-phone-error' : undefined}
                   className={`${inputCls} pr-10`}
