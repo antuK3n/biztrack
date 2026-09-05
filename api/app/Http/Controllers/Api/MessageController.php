@@ -36,11 +36,23 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *
  * Two different questions are asked in here and they must not be confused:
  *
- *  - may you READ this conversation — ApplicationVisibility::readsThreadOf(),
- *    the same office boundary as clearances, office sheets and inspection
- *    findings, so the offices cannot drift apart again;
- *  - may you ADDRESS this office about this filing — addressableOffices()
- *    below, which is a fact about the filing's ROUTING, not about the reader.
+ *  - may you READ this conversation — readsThread() below, which scopes an
+ *    office seat to its OWN conversations and nothing else;
+ *  - may you ADDRESS this office about this filing — addressableOffices(),
+ *    which is now every configured office, because the owner decides who they
+ *    need to talk to.
+ *
+ * Reading is deliberately NOT ApplicationVisibility::readsThreadOf any more.
+ * That predicate lets `application.view_any_office` through, which is right for
+ * a clearance or an office sheet — BPLO issues the mayor's permit off the other
+ * offices' work and has to read it — and wrong for correspondence. A message to
+ * the health office is not part of the register BPLO coordinates; it is a
+ * conversation between two parties, and the client's rule is that an office
+ * sees a conversation only if it was the one contacted.
+ *
+ * The consequence is stated plainly because it is a real loss: BPLO no longer
+ * reads other offices' mail on a filing, and a seat with no department — the
+ * super admin — reads none at all. Both are fail-closed and both are tested.
  *
  * Thin controller: rows are created here with an audit trail, status is never
  * touched.
@@ -65,46 +77,69 @@ class MessageController extends Controller
     // --- who may be talked to, and about what --------------------------------
 
     /**
-     * The offices an applicant on THIS filing may write to.
+     * May this reader open a conversation with THIS office?
      *
-     * The client's requirement, stated as a set: every department holding an
-     * ApplicationAssignment on the filing, PLUS BPLO. Nothing else — an office
-     * with no assignment is not handling this permit and has no business
-     * receiving mail about it, and asking to write to it is refused with a 403
-     * rather than merely left out of a dropdown. A hidden option is a UI
-     * decision; this is the rule.
+     * An office seat sees its own conversations and no others. There is no
+     * `readsEveryOffice` escape here on purpose: the client's requirement is
+     * that a conversation reaches the office it was addressed to and no other,
+     * and BPLO holding `application.view_any_office` would otherwise read every
+     * office's mail on every filing.
      *
-     * Why the assignment and not the permit type: assignments are what
-     * WorkflowService::routeToDepartments creates when a paid filing is routed,
-     * they are what the officer queue reads, and they survive reassignment.
-     * That is exactly the membership test ApplicationVisibility uses for
-     * "is this office on this filing", and using a second one here would let
-     * an office be messageable while being unable to open the filing.
+     * A reader WITHOUT `application.view_all` is an applicant, and gets true —
+     * they are a party to their own conversations. Which conversations are
+     * theirs is settled elsewhere and must be: authorizeParticipant for a
+     * filing, authorizeGeneralParticipant for an enquiry. This predicate answers
+     * "which office", never "whose".
      *
-     * Why BPLO is always in the set, even on a filing it holds no assignment
-     * for: BPLO coordinates every filing and issues the mayor's permit off the
-     * other offices' clearances, and it is who an applicant writes to when they
-     * do not know who else to ask. Without it, an applicant on a filing that
-     * has not been routed yet — assignments only exist once the fee clears —
-     * would have nobody at all to contact, which is precisely when they most
-     * need to ask.
+     * Fail-closed on a null department: a seat that reviews for no office
+     * matches nothing rather than matching the unaddressed.
+     */
+    private function readsThread(User $user, ?int $threadDepartmentId): bool
+    {
+        if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
+            return true;
+        }
+
+        return $user->department_id !== null
+            && $user->department_id === $threadDepartmentId;
+    }
+
+    /**
+     * The offices an applicant on THIS filing may write to: all of them.
+     *
+     * ── This reverses an earlier rule, deliberately ──────────────────────────
+     *
+     * It used to be "every department holding an ApplicationAssignment on the
+     * filing, PLUS BPLO. Nothing else", refused with a 403 rather than merely
+     * left out of a dropdown, and it read the client's "make sure the business
+     * owner can only contact the correct offices" as "only the offices already
+     * routed to". That reading had a cost nobody wanted: assignments do not
+     * exist until the fee clears, so for the whole of the period an applicant
+     * has the most questions, the only office they could write to was BPLO —
+     * and a question for the health office had to be asked of BPLO and
+     * forwarded by hand.
+     *
+     * The client has since asked for the opposite in as many words: the owner
+     * picks from the offices the system has, starts a conversation with any of
+     * them, and may come back later and start another with a different one.
+     * "The correct office" turns out to mean the office the OWNER judges
+     * correct, which is a different question from which offices are reviewing
+     * the permit.
+     *
+     * What this does NOT relax is who can READ. Widening the addressee list
+     * would be a leak if an office could see mail it was never sent; it cannot.
+     * See readsThread(), which scopes every office seat to its own
+     * conversations and is the half of this that has to stay shut.
      *
      * @return Collection<int, Department> keyed by department id
      */
     private function addressableOffices(Application $application): Collection
     {
-        $application->loadMissing('assignments.department');
-
-        $offices = $application->assignments
-            ->map(fn (ApplicationAssignment $a) => $a->department)
-            ->filter()
-            ->keyBy('id');
-
-        if (($bplo = $this->bplo()) && ! $offices->has($bplo->id)) {
-            $offices->put($bplo->id, $bplo);
-        }
-
-        return $offices;
+        // Every configured office. There is no active/inactive flag on
+        // departments — a row exists because the LGU has that office — so the
+        // table IS the list, and an office added later becomes messageable
+        // without a deploy.
+        return Department::orderBy('name')->get()->keyBy('id');
     }
 
     /**
@@ -117,7 +152,7 @@ class MessageController extends Controller
         $application->loadMissing('messageThreads.department');
 
         return $application->messageThreads
-            ->filter(fn (MessageThread $t) => ApplicationVisibility::readsThreadOf($user, $t->department_id))
+            ->filter(fn (MessageThread $t) => $this->readsThread($user, $t->department_id))
             ->values();
     }
 
@@ -137,7 +172,7 @@ class MessageController extends Controller
     private function visibleOffices(Application $application, User $user): Collection
     {
         $offices = $this->addressableOffices($application)
-            ->filter(fn (Department $d) => ApplicationVisibility::readsThreadOf($user, $d->id));
+            ->filter(fn (Department $d) => $this->readsThread($user, $d->id));
 
         foreach ($this->readableThreads($application, $user) as $thread) {
             if ($thread->department && ! $offices->has($thread->department_id)) {
@@ -162,11 +197,11 @@ class MessageController extends Controller
      *    coordinates every filing and is the office you write to when you do
      *    not know which office to ask.
      *
-     * Both halves of the check are load-bearing. `readsThreadOf` stops the
-     * sanitary officer posting into the fire office's conversation (they may
-     * not even read it), and membership in `addressableOffices` stops anybody —
-     * applicant included — opening a conversation with an office that was never
-     * routed this filing.
+     * The read check is what is load-bearing now: readsThread() stops the
+     * sanitary officer posting into the fire office's conversation, which they
+     * may not even read. Membership in `addressableOffices` no longer narrows
+     * anything for an applicant — every configured office is addressable — but
+     * it stays as the guard that a named department actually exists.
      */
     private function resolveAddressee(User $user, Application $application, ?int $requested): Department
     {
@@ -180,7 +215,7 @@ class MessageController extends Controller
         $office = $targetId !== null ? $offices->get($targetId) : null;
 
         abort_unless(
-            $office !== null && ApplicationVisibility::readsThreadOf($user, $office->id),
+            $office !== null && $this->readsThread($user, $office->id),
             403,
             'That office is not handling this application, so it cannot be messaged about it.'
         );
@@ -211,10 +246,9 @@ class MessageController extends Controller
      */
     private function scopeMessagesToReader($query, User $user): void
     {
-        if (ApplicationVisibility::readsEveryOffice($user)) {
-            return;
-        }
         // The applicant reads their own filing whole; only office seats are scoped.
+        // No readsEveryOffice escape: see readsThread(). BPLO reading every
+        // office's clearances does not extend to reading their mail.
         if (! $user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
             return;
         }
@@ -300,7 +334,26 @@ class MessageController extends Controller
                 'messageThreads.department',
             ]);
 
-        ApplicationVisibility::scope($query, $user);
+        /*
+         * Visible for review, OR written to.
+         *
+         * ApplicationVisibility::scope answers "may you review this permit",
+         * which is about routing. An office may now be written to about a
+         * filing it was never routed, and that filing has to appear in its
+         * inbox or the message is delivered to an inbox that never lists it.
+         * The OR is the whole widening; which conversation on the row may be
+         * opened is still readsThread().
+         */
+        $query->where(function ($scoped) use ($user, $isOfficer) {
+            ApplicationVisibility::scope($scoped, $user);
+
+            if ($isOfficer && $user->department_id !== null) {
+                $scoped->orWhereHas(
+                    'messageThreads',
+                    fn ($t) => $t->where('department_id', $user->department_id)
+                );
+            }
+        });
 
         if ($isOfficer) {
             /*
@@ -315,11 +368,12 @@ class MessageController extends Controller
              * office said, but you can see that it said something and when.
              */
             $query->whereHas('messageThreads', function ($t) use ($user) {
-                if (! ApplicationVisibility::readsEveryOffice($user)) {
-                    // -1 rather than null: an officer with no office matches
-                    // nothing, instead of matching unaddressed threads.
-                    $t->where('message_threads.department_id', $user->department_id ?? -1);
-                }
+                // Always scoped to the reader's own office — a filing appears
+                // in an office's inbox only where that office has a
+                // conversation on it. -1 rather than null: a seat with no
+                // office matches nothing, instead of matching unaddressed
+                // threads.
+                $t->where('message_threads.department_id', $user->department_id ?? -1);
                 $t->whereHas('messages');
             });
         } else {
@@ -426,7 +480,7 @@ class MessageController extends Controller
         // An office sees the enquiries addressed to it, and only once somebody
         // has actually written — the same rule the filing list uses, for the
         // same reason: a row with nothing in it is a silhouette of a message.
-        if (! ApplicationVisibility::readsThreadOf($user, $bplo->id)) {
+        if (! $this->readsThread($user, $bplo->id)) {
             return collect();
         }
 
@@ -956,7 +1010,7 @@ class MessageController extends Controller
         $isOwner = $thread->user_id !== null && $thread->user_id === $reader->id;
 
         $isOffice = $reader->hasPermission('application.view_all')
-            && ApplicationVisibility::readsThreadOf($reader, $thread->department_id);
+            && $this->readsThread($reader, $thread->department_id);
 
         abort_unless($isOwner || $isOffice, 403, 'This conversation is not yours to read.');
     }
@@ -1133,8 +1187,37 @@ class MessageController extends Controller
      */
     private function authorizeParticipant(Request $request, Application $application): void
     {
+        $user = $request->user();
+
+        /*
+         * An office that has been WRITTEN TO may open that filing's messages,
+         * even though the filing was never routed to it.
+         *
+         * ApplicationVisibility::authorize asks "may you review this permit",
+         * which is a question about routing, and it is the right question for
+         * the review screens. It is the wrong one here now that an applicant
+         * may write to any office: a message to the health office on a filing
+         * routed only to BPLO was accepted, stored, and then refused to the
+         * health office with "You are not a participant in this conversation."
+         * — the applicant saw it sent and nobody could ever read it.
+         *
+         * Narrow on purpose. This opens the MESSAGES endpoint for an office
+         * that holds a conversation on the filing, and nothing else: which
+         * conversation it may then read is still readsThread(), so the health
+         * office sees its own and not the fire office's, and the review sheet,
+         * clearances and inspections are untouched.
+         */
+        if ($this->readsThread($user, $user->department_id)
+            && $user->department_id !== null
+            && $application->messageThreads()
+                ->where('department_id', $user->department_id)
+                ->exists()
+        ) {
+            return;
+        }
+
         ApplicationVisibility::authorize(
-            $request->user(),
+            $user,
             $application,
             'You are not a participant in this conversation.'
         );
