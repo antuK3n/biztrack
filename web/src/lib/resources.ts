@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { api } from './api'
+import { formatBytes } from './format'
 import type {
   AdminBusiness,
   AdminUser,
@@ -52,6 +53,7 @@ import type {
   RiskAction,
   RiskBand,
   TimelineEntry,
+  User,
 } from './types'
 
 /*
@@ -927,4 +929,73 @@ export const admin = {
       total: res.data.meta?.total ?? res.data.data.length,
     }
   },
+}
+
+/* ── Profile photo ────────────────────────────────────────────────────── */
+
+/*
+ * The rules for "Edit Profile Picture", in one place — the same reasoning as
+ * pages/applicant/uploads.ts, which does this for application documents. Two
+ * screens draw the avatar (Settings and Profile) and one of them uploads; a
+ * second idea of "5 MB" or "JPG or PNG" living in a component is how a screen
+ * starts accepting a file the API then refuses.
+ *
+ * These must agree with AuthController::updatePhoto — mimes:jpg,jpeg,png and
+ * max:5120. Narrower than a document upload on purpose: an <img> cannot render
+ * a PDF, and this is a face rather than an A4 scan.
+ */
+export const ACCEPTED_PHOTO_EXTENSIONS = ['jpg', 'jpeg', 'png']
+export const PHOTO_ACCEPT_ATTR = '.jpg,.jpeg,.png'
+export const MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+/**
+ * Why this image cannot be sent, checked before it leaves the browser — so the
+ * answer names the actual defect instead of arriving as a bare 422 after the
+ * upload has already cost the user their connection.
+ */
+export function photoRejection(file: File): string | null {
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  if (!ACCEPTED_PHOTO_EXTENSIONS.includes(ext)) {
+    return `“${file.name}” is not an image we can show. Choose a JPG or PNG.`
+  }
+  if (file.size === 0) {
+    return `“${file.name}” is empty. Check the file opens on your device, then choose it again.`
+  }
+  if (file.size > MAX_PHOTO_BYTES) {
+    return `“${file.name}” is ${formatBytes(file.size)}. The limit is 5 MB — try a smaller photo.`
+  }
+  return null
+}
+
+export const profilePhoto = {
+  /**
+   * The signed-in user's photo as a blob: URL, or null when they have none.
+   *
+   * Not an <img src="/api/v1/auth/profile/photo">: the route is behind Sanctum
+   * and an img tag sends no Authorization header, so the browser would render a
+   * broken image. Same fix as DocumentActions — fetch with the interceptor
+   * attached, then hand the tag an object URL.
+   *
+   * The caller owns the URL and must revokeObjectURL it, or every save leaks
+   * the previous image for the life of the tab.
+   */
+  objectUrl: async (): Promise<string | null> => {
+    try {
+      const res = await api.get('/auth/profile/photo', { responseType: 'blob' })
+      return URL.createObjectURL(res.data as Blob)
+    } catch (error) {
+      // 404 is the ordinary "no photo set" answer, not a failure to report.
+      if (axios.isAxiosError(error) && error.response?.status === 404) return null
+      throw error
+    }
+  },
+
+  upload: (file: File): Promise<User> => {
+    const body = new FormData()
+    body.append('photo', file)
+    // POST, not PUT: PHP fills $_FILES from a multipart body only on POST.
+    return unwrap<User>(api.post('/auth/profile/photo', body))
+  },
+
+  remove: (): Promise<User> => unwrap<User>(api.delete('/auth/profile/photo')),
 }

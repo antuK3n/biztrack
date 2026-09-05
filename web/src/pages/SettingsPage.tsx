@@ -1,10 +1,12 @@
-import { useState } from 'react'
-import type { ReactNode, SVGProps } from 'react'
+import { useRef, useState } from 'react'
+import type { ChangeEvent, ReactNode, SVGProps } from 'react'
 import { ChevronRightIcon } from '../components/icons'
 import { PasswordInput } from '../components/ui/PasswordInput'
 import { FieldLabel, PageTitle, ProtoModal, inputCls } from '../components/ui/Proto'
 import { api, toApiError } from '../lib/api'
+import { PHOTO_ACCEPT_ATTR, photoRejection, profilePhoto } from '../lib/resources'
 import type { User } from '../lib/types'
+import { useProfilePhoto } from '../lib/useProfilePhoto'
 import { useAuth } from '../stores/auth'
 
 /* Settings — PDF p11–13: two royal bars opening the Edit Profile / Change Password modals. */
@@ -29,8 +31,25 @@ function PencilIcon({ size = 18, ...props }: SVGProps<SVGSVGElement> & { size?: 
   )
 }
 
-/** Gray avatar circle with the royal ring, per the Edit Profile modal (PDF p12). */
-function ProfileAvatar() {
+/**
+ * Gray avatar circle with the royal ring, per the Edit Profile modal (PDF p12),
+ * showing the uploaded photo once there is one.
+ *
+ * The glyph keeps `aria-hidden`: it is decoration beside the name it sits
+ * under. A real photo gets an empty alt for the same reason — "profile photo"
+ * read aloud next to the fields that spell out whose profile this is would be
+ * the stacked restatement the copy rules warn against.
+ */
+function ProfileAvatar({ src }: { src?: string | null }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="h-24 w-24 rounded-full border-4 border-royal object-cover"
+      />
+    )
+  }
   return (
     <span
       aria-hidden="true"
@@ -151,6 +170,57 @@ export function SettingsPage() {
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
 
+  /*
+   * The photo is its own small transaction, not part of Save Changes. It
+   * uploads the moment a file is chosen and the modal's Cancel does not undo
+   * it — which is why "Remove Photo" exists rather than being left to Cancel.
+   * Bundling it into saveProfile instead would mean a name edit abandoned
+   * halfway also silently discarded the picture.
+   */
+  const fileInput = useRef<HTMLInputElement>(null)
+  const [photoVersion, setPhotoVersion] = useState(0)
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  const photoUrl = useProfilePhoto(user?.has_photo ?? false, photoVersion)
+
+  async function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    // Clear immediately: without this, picking the same file twice after a
+    // failure fires no change event and the retry looks like a dead control.
+    event.target.value = ''
+    if (!file) return
+
+    const rejection = photoRejection(file)
+    if (rejection) {
+      setPhotoError(rejection)
+      return
+    }
+
+    setPhotoBusy(true)
+    setPhotoError(null)
+    try {
+      setUser(await profilePhoto.upload(file))
+      setPhotoVersion((v) => v + 1)
+    } catch (error) {
+      setPhotoError(toApiError(error).message)
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
+  async function removePhoto() {
+    setPhotoBusy(true)
+    setPhotoError(null)
+    try {
+      setUser(await profilePhoto.remove())
+      setPhotoVersion((v) => v + 1)
+    } catch (error) {
+      setPhotoError(toApiError(error).message)
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
   function openProfile() {
     setFirstName(user?.first_name ?? '')
     setMiddleName(user?.middle_name ?? '')
@@ -160,6 +230,7 @@ export function SettingsPage() {
     setPhone(user?.mobile_number ?? '')
     setNote(null)
     setFormError(null)
+    setPhotoError(null)
     setFieldErrors({})
     setOpen('profile')
   }
@@ -253,10 +324,58 @@ export function SettingsPage() {
           confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !phone.trim()}
         >
           <div className="flex flex-col items-center gap-2">
-            <ProfileAvatar />
-            <button type="button" className="inline-flex items-center gap-2 text-base text-ink hover:underline">
-              Edit Profile Picture <PencilIcon className="text-royal" />
+            <ProfileAvatar src={photoUrl} />
+            {/*
+              The real control is this input; the button below is what the
+              mockup draws. It stays in the DOM rather than being rendered on
+              demand so the click handler always has something to open, and it
+              is hidden with `sr-only` rather than `hidden` so a keyboard user
+              tabbing through still meets a labelled file control.
+            */}
+            <input
+              ref={fileInput}
+              type="file"
+              accept={PHOTO_ACCEPT_ATTR}
+              onChange={choosePhoto}
+              className="sr-only"
+              aria-label="Choose a profile picture"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (photoBusy) return
+                setPhotoError(null)
+                fileInput.current?.click()
+              }}
+              // aria-disabled, never `disabled`: a disabled control drops out
+              // of the tab order, taking the only explanation of why it cannot
+              // be used with it.
+              aria-disabled={photoBusy || undefined}
+              className={`inline-flex items-center gap-2 text-base text-ink hover:underline ${
+                photoBusy ? 'opacity-60' : ''
+              }`}
+            >
+              {photoBusy ? 'Uploading…' : 'Edit Profile Picture'}
+              <PencilIcon className="text-royal" />
             </button>
+            {user?.has_photo && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!photoBusy) void removePhoto()
+                }}
+                aria-disabled={photoBusy || undefined}
+                className="text-sm font-medium text-ink-muted hover:text-ink hover:underline"
+              >
+                Remove Photo
+              </button>
+            )}
+            <p className="text-xs text-ink-muted">JPG or PNG, up to 5 MB.</p>
+            {photoError && (
+              <p role="alert" className="text-center text-sm font-medium text-s-red">
+                {photoError}
+              </p>
+            )}
           </div>
           {formError && (
             <p role="alert" className="mt-4 text-center text-sm font-medium text-s-red">

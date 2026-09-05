@@ -14,6 +14,12 @@ export interface User {
   suffix: string | null
   gender: 'M' | 'F'
   department: Department | null
+  /*
+   * Whether to fetch the photo, not where it is. The file is served from
+   * /auth/profile/photo for the signed-in account only, so there is no path or
+   * URL here that a client could edit into someone else's.
+   */
+  has_photo: boolean
   is_active: boolean
   email_verified_at: string | null
   roles: string[]
