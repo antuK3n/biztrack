@@ -35,7 +35,6 @@ class OfficerRequestResource extends JsonResource
              */
             'remarks' => $this->remarks,
             'accepts_response' => (bool) $this->status?->acceptsResponse(),
-            'reviewed_at' => optional($this->reviewed_at)->toISOString(),
             'due_date' => optional($this->due_date)->toISOString(),
             'created_by' => $creator ? [
                 'name' => $creator->name,
