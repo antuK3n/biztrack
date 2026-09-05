@@ -61,7 +61,6 @@ it('refuses a rejection from every office that is not BPLO', function (string $e
     'fire@biztrack.local',
     'obo@biztrack.local',
     'cenro@biztrack.local',
-    'market@biztrack.local',
 ]);
 
 it('still lets a non-BPLO office return its own assignment', function () {

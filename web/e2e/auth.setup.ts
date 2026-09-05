@@ -157,7 +157,7 @@ setup('authenticate as a clearance-office inspector', async ({ page }) => {
  * Sequential, not parallel: they share the sign-in limiter, and setup steps in
  * one file already run in order.
  */
-for (const account of ['sanitary', 'fire', 'obo', 'cenro', 'market'] as const) {
+for (const account of ['sanitary', 'fire', 'obo', 'cenro'] as const) {
   setup(`authenticate as the ${account} office`, async ({ page }) => {
     await saveSession(page, account, 'staff', `${account}.json`)
   })

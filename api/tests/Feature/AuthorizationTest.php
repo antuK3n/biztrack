@@ -101,7 +101,7 @@ it('keeps the four working permissions off the super admin, and the oversight on
  * every one of those offices must be able to close its own visit or the filing
  * strands in `for_inspection` with nobody to move it.
  */
-it('grants inspection.manage to the six clearance offices and no one else', function () {
+it('grants inspection.manage to the five other-permit offices and no one else', function () {
     $holders = Role::whereHas('permissions', fn ($q) => $q->where('name', 'inspection.manage'))
         ->pluck('name')
         ->sort()
@@ -109,9 +109,12 @@ it('grants inspection.manage to the six clearance offices and no one else', func
         ->all();
 
     // BPLO is absent and should be: it issues the Mayor's Permit on the strength
-    // of the six clearances rather than a visit of its own.
+    // of the five other permits rather than a visit of its own.
+    //
+    // `market_admin` was a sixth holder until 6 September 2026, when the Market
+    // Clearance and the City Market Office were removed from the system.
     expect($holders)->toBe([
-        'cenro_officer', 'fire_inspector', 'market_admin',
+        'cenro_officer', 'fire_inspector',
         'obo_staff', 'sanitary_officer', 'zoning_officer',
     ]);
 });

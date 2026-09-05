@@ -1195,25 +1195,12 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       </ul>
 
       {/*
-        ITEM 98 — the way back to a card the derivation did not offer.
-
-        The declaration this stage filters on names market OPERATORS, and the
-        client's "stall holders" are their tenants. So the applicant this
-        control exists for is not an edge case rounded off the end of the
-        derivation — it is, quite possibly, most of the people who need this
-        clearance. It has to be findable.
-
-        It also has to stay quiet. The client's instruction was to derive rather
-        than ask everyone a yes/no, and a prominent question above the cards
-        would be exactly the yes/no they ruled out, asked of every applicant in
-        the city. So it is one line of ordinary text below the grid, phrased as
-        the question a stall holder is already asking when they get here and
-        cannot find their office.
-
-        The reveal is announced through the same live region as Apply and
-        Submit. A card appearing silently at the end of a list is a change a
-        screen reader has no reason to look for, and the applicant pressed a
-        button precisely because they could not find that card.
+        ITEM 98 left a "show me the Market Clearance" reveal control here, for
+        the stall holders a category-based derivation hid the card from. Both
+        the derivation and the control were removed before the permit was, and
+        the Market Clearance itself went on 6 September 2026. Every permit on
+        this stage is now required of every applicant, so there is nothing left
+        to reveal.
       */}
       {/* ── SUBMISSION · a clearance already held ─────────────────────────── */}
       {heldPrompt && (

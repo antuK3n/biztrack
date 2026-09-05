@@ -42,7 +42,6 @@ const OFFICE_INSPECTOR = [
     'CPDO' => 'zoning@biztrack.local',
     'OBO' => 'obo@biztrack.local',
     'CENRO' => 'cenro@biztrack.local',
-    'CMO-MARKET' => 'market@biztrack.local',
 ];
 
 /**
@@ -109,7 +108,7 @@ it('books one visit for each of the six clearance offices, and none for the mayo
      * clearances, so a seventh visit of its own would be a visit nobody
      * performs and would stall approveAndIssue behind it forever.
      */
-    expect($offices)->toBe(['BFP', 'CENRO', 'CHO', 'CMO-MARKET', 'CPDO', 'OBO'])
+    expect($offices)->toBe(['BFP', 'CENRO', 'CHO', 'CPDO', 'OBO'])
         ->and($app->status)->toBe(ApplicationStatus::ForInspection)
         ->and($app->permits()->count())->toBe(0);
 });

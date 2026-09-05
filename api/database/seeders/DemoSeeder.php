@@ -43,7 +43,6 @@ class DemoSeeder extends Seeder
         $bfp = Department::where('code', 'BFP')->first();
         $obo = Department::where('code', 'OBO')->first();
         $cenro = Department::where('code', 'CENRO')->first();
-        $market = Department::where('code', 'CMO-MARKET')->first();
         $cpdo = Department::where('code', 'CPDO')->first();
 
         // --- Demo accounts (one per role) -----------------------------------
@@ -53,7 +52,6 @@ class DemoSeeder extends Seeder
         $this->user('fire@biztrack.local', 'Ferdie', 'Lim', 'M', $password, ['fire_inspector'], $bfp);
         $this->user('obo@biztrack.local', 'Ana', 'Villar', 'F', $password, ['obo_staff'], $obo);
         $this->user('cenro@biztrack.local', 'Ben', 'Cruz', 'M', $password, ['cenro_officer'], $cenro);
-        $this->user('market@biztrack.local', 'Dina', 'Flores', 'F', $password, ['market_admin'], $market);
         // CPDO reviews the zoning / locational clearance queue (tester item 53).
         $this->user('zoning@biztrack.local', 'Elena', 'Bautista', 'F', $password, ['zoning_officer'], $cpdo);
         $this->user('admin@biztrack.local', 'Ramon', 'Santos', 'M', $password, ['admin']);

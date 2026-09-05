@@ -88,7 +88,6 @@ it('lets every reviewing office set the category on its own filing', function (s
     'fire@biztrack.local',
     'obo@biztrack.local',
     'cenro@biztrack.local',
-    'market@biztrack.local',
     'zoning@biztrack.local',
 ]);
 

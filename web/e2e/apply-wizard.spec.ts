@@ -143,7 +143,6 @@ test('the wizard is the business permit alone, with no clearance step', async ({
     'occupancy permit form',
     'locational clearance form',
     'environmental clearance form',
-    'market clearance form',
   ]) {
     expect(joined, `"${sheet}" is a step of the wizard again`).not.toContain(sheet)
   }

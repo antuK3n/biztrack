@@ -122,7 +122,7 @@ it('issues an all-office application to every department queue', function () {
         'lines' => [['psic_code_id' => $psicId]],
     ])->assertCreated()->json('data.id');
 
-    // BPLO, CHO, BFP, OBO, CENRO, CMO-MARKET, CPDO (zoning).
+    // BPLO, CHO, BFP, OBO, CENRO, CPDO (zoning).
     $allTypeIds = PermitType::pluck('id')->all();
     expect($allTypeIds)->toHaveCount(7);
 
