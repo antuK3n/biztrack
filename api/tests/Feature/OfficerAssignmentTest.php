@@ -179,6 +179,121 @@ it('will not mint a business owner from the staff screen', function () {
         ])->assertStatus(422)->assertJsonValidationErrors('roles.0');
 });
 
+it('filters the directory by account status however the browser spells the boolean', function () {
+    $inactive = officerIn('CENRO', 'cenro_officer', 'cenro.gone@biztrack.local');
+    $inactive->update(['is_active' => false]);
+
+    /*
+     * Through the query string, because that is where this broke and no test
+     * that builds a payload in PHP can see it.
+     *
+     * Laravel's `boolean` rule accepts true, false, 1, 0, "1" and "0" — and NOT
+     * "true"/"false", which is exactly what axios puts on the wire for a boolean
+     * query param. The screen's status filter therefore 422'd the whole staff
+     * directory and showed an error naming a field with no visible control.
+     */
+    foreach (['1', 'true', 'TRUE'] as $spelling) {
+        $emails = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson("/api/v1/admin/users?is_active={$spelling}&per_page=200")
+            ->assertOk()->json('data'))->pluck('email');
+
+        expect($emails)->not->toContain('cenro.gone@biztrack.local', "spelling {$spelling} let an inactive account through")
+            ->and($emails)->toContain('admin@biztrack.local');
+    }
+
+    foreach (['0', 'false'] as $spelling) {
+        $emails = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+            ->getJson("/api/v1/admin/users?is_active={$spelling}&per_page=200")
+            ->assertOk()->json('data'))->pluck('email');
+
+        expect($emails)->toContain('cenro.gone@biztrack.local')
+            ->and($emails)->not->toContain('admin@biztrack.local');
+    }
+
+    // Omitting the filter means BOTH, not "inactive" — the tri-state a plain
+    // boolean rule would have collapsed.
+    $all = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/users?per_page=200')->assertOk()->json('data'))->pluck('email');
+    expect($all)->toContain('cenro.gone@biztrack.local', 'admin@biztrack.local');
+
+    // Widened, not abandoned: nonsense is still refused rather than ignored.
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/users?is_active=maybe')
+        ->assertStatus(422)->assertJsonValidationErrors('is_active');
+});
+
+it('keeps citizens off the officer roster', function () {
+    $admin = authAs('admin@biztrack.local');
+
+    /*
+     * The screen used to pull the whole directory and drop business owners in
+     * the browser. Moving the listing server-side lost that, so citizens turned
+     * up on a screen whose every action is about officers — Reassign (they hold
+     * no caseload), Edit (their role cannot be assigned from here), Deactivate
+     * — and the footer counted them as staff.
+     */
+    $staff = collect(test()->withHeaders($admin)
+        ->getJson('/api/v1/admin/users?staff=1&per_page=200')->assertOk()->json('data'));
+
+    expect($staff)->not->toBeEmpty()
+        ->and($staff->pluck('email'))->not->toContain('owner@biztrack.local')
+        ->and($staff->pluck('email'))->toContain('sanitary@biztrack.local', 'admin@biztrack.local');
+
+    foreach ($staff as $row) {
+        expect($row['roles'])->not->toContain('business_owner');
+    }
+
+    // Unasked, the directory is still everybody — the review screen's officer
+    // picker and the audit tooling both read this endpoint unfiltered.
+    $everyone = collect(test()->withHeaders($admin)
+        ->getJson('/api/v1/admin/users?per_page=200')->assertOk()->json('data'));
+    expect($everyone->pluck('email'))->toContain('owner@biztrack.local');
+});
+
+it('does not demand an office from a citizen', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+
+    /*
+     * A business owner is not staff, so there is no office for them to be in.
+     * The office guard listed only the super admin as exempt, so correcting a
+     * citizen's surname through this endpoint answered "Choose an office. An
+     * officer with no office signs in to an empty queue" — wrong, impossible to
+     * act on, and about an account that must never have one.
+     */
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$owner->id}", ['last_name' => 'Corrected'])
+        ->assertOk();
+
+    expect($owner->fresh()->last_name)->toBe('Corrected')
+        ->and($owner->fresh()->department_id)->toBeNull();
+
+    // And they still cannot be given one.
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$owner->id}", [
+            'department_id' => Department::where('code', 'BPLO')->value('id'),
+        ])->assertStatus(422)->assertJsonValidationErrors('department_id');
+});
+
+it('leaves the other roles alone when an edit does not name one', function () {
+    $officer = officerIn('CHO', 'sanitary_officer', 'cho.dual@biztrack.local');
+    // `roles` is a many-to-many and the Edit control is a single select, so an
+    // edit that does not mean to touch roles must not collapse them.
+    $officer->roles()->sync(Role::whereIn('name', ['sanitary_officer', 'fire_inspector'])->pluck('id'));
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$officer->id}", ['last_name' => 'Corrected'])
+        ->assertOk();
+
+    expect($officer->fresh()->roleNames())->toHaveCount(2);
+
+    // A deliberate change still lands.
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$officer->id}", ['roles' => ['sanitary_officer']])
+        ->assertOk();
+
+    expect($officer->fresh()->roleNames())->toBe(['sanitary_officer']);
+});
+
 /* ── Reassign ────────────────────────────────────────────────────────────── */
 
 it('reports what an officer is holding, and who in their office could take it', function () {

@@ -919,6 +919,8 @@ export interface AdminUserFilters extends PageParams {
   department_id?: number
   /** Tri-state: omit for both, true for active only, false for inactive only. */
   is_active?: boolean
+  /** Leave citizens out — the Officer Assignment screen wants staff only. */
+  staff?: boolean
 }
 
 export interface AdminBusinessFilters extends PageParams {
@@ -936,6 +938,26 @@ export interface AuditLogFilters extends PageParams {
   user_id?: number
 }
 
+/**
+ * Put the staff-directory filters on the wire in a shape the API accepts.
+ *
+ * `is_active` is the whole reason this exists. Axios serialises a boolean query
+ * param as the string "true"/"false", and Laravel's `boolean` validation rule
+ * accepts true, false, 1, 0, "1" and "0" — but NOT "true"/"false". So passing a
+ * plain boolean through 422'd the entire directory and put the Officer
+ * Assignment screen into an error state the moment anyone filtered by status.
+ *
+ * The API now folds those two spellings as well, so this is belt and braces —
+ * but 1/0 is the unambiguous form and it is what this sends.
+ */
+function userParams(filters: AdminUserFilters): Record<string, unknown> {
+  const { is_active, staff, ...rest } = filters
+  const params: Record<string, unknown> = { ...rest }
+  if (is_active !== undefined) params.is_active = is_active ? 1 : 0
+  if (staff !== undefined) params.staff = staff ? 1 : 0
+  return params
+}
+
 export const admin = {
   /**
    * The staff directory, alphabetical.
@@ -946,11 +968,11 @@ export const admin = {
    */
   users: (filters: AdminUserFilters = {}) =>
     unwrap<AdminUser[]>(
-      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...filters } }),
+      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...userParams(filters) } }),
     ),
   /** Same directory, keeping the page meta. Prefer this on the Users screen. */
   usersPage: (filters: AdminUserFilters = {}) =>
-    unwrapPaged<AdminUser>(api.get('/admin/users', { params: filters })),
+    unwrapPaged<AdminUser>(api.get('/admin/users', { params: userParams(filters) })),
   /** Real business roster for the Owner Status table (v2). Paged (default 50). */
   businesses: (filters: AdminBusinessFilters = {}) =>
     unwrap<AdminBusiness[]>(api.get('/admin/businesses', { params: filters })),

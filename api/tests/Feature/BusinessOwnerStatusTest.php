@@ -74,7 +74,17 @@ it('tells the owner when their business is suspended, and says why', function ()
         ->and($notification->body)->toContain('Repeated sanitation findings')
         ->and($notification->body)->toContain('Status Test Store')
         // And what it means for them, which is the part they have to act on.
-        ->and($notification->body)->toContain('cannot be filed');
+        ->and($notification->body)->toContain('cannot be filed')
+        /*
+         * A route that exists in web/src/App.tsx. This file's service opens
+         * with the note that `/track/{id}` and `/review/{id}` never did, and
+         * every notification carrying one bounced the reader to the sign-in
+         * redirect. `/businesses` — the obvious guess, and the one this was
+         * written with — is not a route either. `/dashboard` is, and it already
+         * raises AccountRestrictedModal for suspended and blacklisted, so the
+         * link lands on the explanation.
+         */
+        ->and($notification->link)->toBe('/dashboard');
 });
 
 it('says something different when a business is restored', function () {

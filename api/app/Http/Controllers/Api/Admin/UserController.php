@@ -57,6 +57,23 @@ class UserController extends Controller
     private const DEPARTMENTLESS_ROLE = 'admin';
 
     /**
+     * Every role that must NOT hold an office — the super admin and citizens.
+     *
+     * `business_owner` belongs here for a different reason than `admin`: an
+     * owner is not staff at all, so there is no office for them to be in. It is
+     * separate from DEPARTMENTLESS_ROLE because that one also drives the
+     * `wants_department` flag on the roles endpoint, and that endpoint only ever
+     * lists roles an admin may assign — which owners are not.
+     *
+     * Getting this wrong is not theoretical: with only `admin` listed, editing a
+     * citizen's surname through this endpoint answered "Choose an office. An
+     * officer with no office signs in to an empty queue" — a sentence that is
+     * both wrong and impossible to act on, about an account that must never have
+     * one.
+     */
+    private const OFFICELESS_ROLES = ['admin', 'business_owner'];
+
+    /**
      * The staff directory. Paginated, alphabetical.
      *
      * Alphabetical rather than newest-first on purpose: this is a directory you
@@ -65,6 +82,27 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        /*
+         * "true"/"false" are folded to booleans before the rules run, for every
+         * boolean this endpoint accepts.
+         *
+         * Laravel's `boolean` rule accepts true, false, 1, 0, "1" and "0" — and
+         * NOT the strings "true" and "false", which is exactly what any JS
+         * client produces when it puts a boolean in a query string. So the
+         * status filter on the Officer Assignment screen 422'd the entire staff
+         * directory the moment anyone chose "Active only": the screen went to an
+         * error state, and the message named a field with no visible control.
+         *
+         * Only those two spellings are folded. "yes", "on" and nonsense still
+         * fail the rule, so this widens the contract rather than abandoning it.
+         */
+        foreach (['is_active', 'staff'] as $flag) {
+            $raw = $request->query($flag);
+            if (is_string($raw) && in_array(strtolower($raw), ['true', 'false'], true)) {
+                $request->merge([$flag => strtolower($raw) === 'true']);
+            }
+        }
+
         $request->validate([
             'q' => ['sometimes', 'nullable', 'string', 'max:120'],
             'role' => ['sometimes', 'nullable', 'string', 'max:60'],
@@ -75,6 +113,19 @@ class UserController extends Controller
              * missing filter as "inactive only" the moment a caller omitted it.
              */
             'is_active' => ['sometimes', 'nullable', 'boolean'],
+            /*
+             * Staff only — leave the citizens out.
+             *
+             * The Officer Assignment screen used to pull the directory and drop
+             * business owners in the browser. Moving the listing server-side
+             * lost that filter, so three citizens appeared on a screen whose
+             * every action is about officers: Reassign (they hold no caseload),
+             * Edit (their role cannot be assigned from here) and Deactivate.
+             * Not a leak — the reader already holds `user.manage` — but the
+             * wrong roster, and one that made "Showing 11 of 11 accounts" a
+             * misleading count of a seven-office staff.
+             */
+            'staff' => ['sometimes', 'boolean'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -98,6 +149,9 @@ class UserController extends Controller
         }
         if ($request->has('is_active') && $request->query('is_active') !== null) {
             $query->where('is_active', $request->boolean('is_active'));
+        }
+        if ($request->boolean('staff')) {
+            $query->whereDoesntHave('roles', fn ($r) => $r->whereIn('name', self::EXCLUDED_ROLES));
         }
 
         $users = $query->paginate($this->perPage($request));
@@ -515,15 +569,19 @@ class UserController extends Controller
             ? $data['department_id']
             : $user?->department_id;
 
-        $isSuperAdmin = in_array(self::DEPARTMENTLESS_ROLE, $roles, true);
+        $officeless = array_intersect($roles, self::OFFICELESS_ROLES) !== [];
 
-        if ($isSuperAdmin && $departmentId !== null) {
+        if ($officeless && $departmentId !== null) {
             throw ValidationException::withMessages([
-                'department_id' => ['The super admin works across every office, so this account cannot belong to one.'],
+                'department_id' => [
+                    in_array(self::DEPARTMENTLESS_ROLE, $roles, true)
+                        ? 'The super admin works across every office, so this account cannot belong to one.'
+                        : 'A business owner is not LGU staff, so this account cannot belong to an office.',
+                ],
             ]);
         }
 
-        if (! $isSuperAdmin && $departmentId === null) {
+        if (! $officeless && $departmentId === null) {
             throw ValidationException::withMessages([
                 'department_id' => ['Choose an office. An officer with no office signs in to an empty queue.'],
             ]);
