@@ -197,7 +197,7 @@ it('filters the directory by account status however the browser spells the boole
             ->getJson("/api/v1/admin/users?is_active={$spelling}&per_page=200")
             ->assertOk()->json('data'))->pluck('email');
 
-        expect($emails)->not->toContain('cenro.gone@biztrack.local', "spelling {$spelling} let an inactive account through")
+        expect($emails)->not->toContain('cenro.gone@biztrack.local')
             ->and($emails)->toContain('admin@biztrack.local');
     }
 
@@ -292,6 +292,135 @@ it('leaves the other roles alone when an edit does not name one', function () {
         ->assertOk();
 
     expect($officer->fresh()->roleNames())->toBe(['sanitary_officer']);
+});
+
+/* ── Who may hold an account, and how many ───────────────────────────────── */
+
+it('lets one office hold as many accounts as it needs', function () {
+    $cho = Department::where('code', 'CHO')->value('id');
+
+    // The register shipped one account per office. Offices are staffed by more
+    // than one person, and nothing about the schema ever said otherwise — this
+    // pins that the endpoint does not quietly grow a one-per-office rule.
+    foreach ([['Almira', 'Delgado', 'cho.two@biztrack.local'], ['Bonifacio', 'Yumul', 'cho.three@biztrack.local']] as [$first, $last, $email]) {
+        test()->withHeaders(authAs('admin@biztrack.local'))
+            ->postJson('/api/v1/admin/users', [
+                'first_name' => $first, 'last_name' => $last, 'gender' => 'M',
+                'email' => $email, 'mobile_number' => '09171234567',
+                'password' => 'biztrack1', 'role' => 'sanitary_officer', 'department_id' => $cho,
+            ])->assertCreated();
+    }
+
+    $inOffice = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users?staff=1&department_id={$cho}&per_page=200")
+        ->assertOk()->json('data'));
+
+    expect($inOffice)->toHaveCount(3);
+
+    // And each of them can actually sign in to the staff portal.
+    foreach (['cho.two@biztrack.local', 'cho.three@biztrack.local'] as $email) {
+        test()->postJson('/api/v1/auth/login', [
+            'email' => $email, 'password' => 'biztrack1', 'portal' => 'staff',
+        ])->assertOk();
+    }
+});
+
+it('keeps the super admin a single seat', function () {
+    $admin = authAs('admin@biztrack.local');
+
+    /*
+     * The super admin is the only account holding `user.manage`, so it is the
+     * root of how every other staff account exists. A second one is two people
+     * who can mint officers for any office with no way to tell which is the
+     * real one. This answered 201.
+     */
+    test()->withHeaders($admin)->postJson('/api/v1/admin/users', [
+        'first_name' => 'Second', 'last_name' => 'Admin', 'gender' => 'F',
+        'email' => 'second.admin@biztrack.local', 'mobile_number' => '09171234567',
+        'password' => 'biztrack1', 'role' => 'admin',
+    ])->assertStatus(422)->assertJsonValidationErrors('roles');
+
+    // Promotion is the same act by another route, and was equally open.
+    $officer = User::where('email', 'sanitary@biztrack.local')->firstOrFail();
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$officer->id}", ['roles' => ['admin'], 'department_id' => null])
+        ->assertStatus(422)->assertJsonValidationErrors('roles');
+
+    expect(Role::where('name', 'admin')->firstOrFail()->users()->count())->toBe(1);
+});
+
+it('will not let the last super admin be demoted or switched off', function () {
+    $superAdmin = User::where('email', 'admin@biztrack.local')->firstOrFail();
+
+    /*
+     * The mirror case, and the one reachable by accident. Empty this seat and
+     * `user.manage` is held by nobody: no account can be created or corrected,
+     * no caseload moved, no business status changed — permanently, with no way
+     * back from inside the app. Both doors are one click on an ordinary-looking
+     * row, so both are shut.
+     */
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$superAdmin->id}", [
+            'roles' => ['bplo_staff'],
+            'department_id' => Department::where('code', 'BPLO')->value('id'),
+        ])->assertStatus(422)->assertJsonValidationErrors('roles');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$superAdmin->id}/toggle-active")
+        ->assertStatus(422)->assertJsonValidationErrors('is_active');
+
+    $superAdmin->refresh();
+    expect($superAdmin->is_active)->toBeTrue()
+        ->and($superAdmin->roleNames())->toBe(['admin']);
+
+    // Editing everything else about the account is untouched.
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->putJson("/api/v1/admin/users/{$superAdmin->id}", ['last_name' => 'Corrected'])
+        ->assertOk();
+});
+
+it('tells the form the super-admin seat is taken so it can grey it out', function () {
+    $roles = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/roles')->assertOk()->json('data'));
+
+    // Reported, not merely enforced: an admin should not fill in a whole
+    // account and meet the refusal on submit.
+    expect($roles->firstWhere('name', 'admin')['available'])->toBeFalse();
+
+    // Every office role stays available however many hold it. This is the half
+    // that must NOT be confused with the singleton rule.
+    foreach (['sanitary_officer', 'fire_inspector', 'zoning_officer', 'obo_staff', 'cenro_officer', 'market_admin', 'bplo_staff'] as $office) {
+        expect($roles->firstWhere('name', $office)['available'])->toBeTrue("{$office} should stay assignable");
+    }
+});
+
+it('lets nobody but the super admin create an office account', function () {
+    /*
+     * Office accounts are not self-registered the way a business owner's is, so
+     * the endpoint that mints them must be reachable from exactly one seat.
+     * `user.manage` is held by the admin role alone; this asserts the route
+     * agrees, from an office account and from a citizen.
+     */
+    $payload = [
+        'first_name' => 'Sneaky', 'last_name' => 'Officer', 'gender' => 'M',
+        'email' => 'sneaky@biztrack.local', 'mobile_number' => '09171234567',
+        'password' => 'biztrack1', 'role' => 'bplo_staff',
+        'department_id' => Department::where('code', 'BPLO')->value('id'),
+    ];
+
+    foreach (['bplo@biztrack.local', 'sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
+        test()->withHeaders(authAs($email))
+            ->postJson('/api/v1/admin/users', $payload)
+            ->assertForbidden();
+    }
+
+    // Not even to read the directory or the role list.
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/admin/users')->assertForbidden();
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->getJson('/api/v1/admin/roles')->assertForbidden();
+
+    expect(User::where('email', 'sneaky@biztrack.local')->exists())->toBeFalse();
 });
 
 /* ── Reassign ────────────────────────────────────────────────────────────── */

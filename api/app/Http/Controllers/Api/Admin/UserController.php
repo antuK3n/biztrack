@@ -179,6 +179,8 @@ class UserController extends Controller
             ->orderBy('display_name')
             ->get(['name', 'display_name', 'description']);
 
+        $superAdminTaken = $this->superAdminExists();
+
         return response()->json([
             'data' => $roles->map(fn (Role $role) => [
                 'name' => $role->name,
@@ -187,8 +189,26 @@ class UserController extends Controller
                 // The form has to know which choice hides the Office field, and
                 // it must not learn that by hard-coding the string 'admin'.
                 'wants_department' => $role->name !== self::DEPARTMENTLESS_ROLE,
+                /*
+                 * There is one super admin seat and it is either free or taken.
+                 *
+                 * Reported rather than merely enforced so the form can grey the
+                 * option out with a reason, instead of letting an admin fill in
+                 * a whole account and meet the refusal on submit. Every office
+                 * role stays available however many people already hold it —
+                 * offices are explicitly allowed more than one account each.
+                 */
+                'available' => $role->name !== self::DEPARTMENTLESS_ROLE || ! $superAdminTaken,
             ])->all(),
         ]);
+    }
+
+    /** Is the single super-admin seat occupied — by anyone other than $excluding? */
+    private function superAdminExists(?User $excluding = null): bool
+    {
+        return User::whereHas('roles', fn ($r) => $r->where('name', self::DEPARTMENTLESS_ROLE))
+            ->when($excluding, fn ($q) => $q->whereKeyNot($excluding->id))
+            ->exists();
     }
 
     public function store(Request $request): JsonResponse
@@ -459,6 +479,18 @@ class UserController extends Controller
     public function toggleActive(Request $request, User $user): JsonResponse
     {
         // Route-gated by permission:owner.manage_status.
+        /*
+         * The sole super admin cannot be switched off. `user.manage` lives on no
+         * other role, so deactivating this one account locks every remaining
+         * administrative action out of the app for good — and it is one button
+         * on a row that looks like any other. See assertSuperAdminSeat().
+         */
+        if ($user->is_active && in_array(self::DEPARTMENTLESS_ROLE, $user->roleNames(), true)) {
+            throw ValidationException::withMessages([
+                'is_active' => ['This is the only super admin. Deactivating it would leave nobody able to manage accounts.'],
+            ]);
+        }
+
         $released = null;
         if ($user->is_active) {
             $released = $this->releaseCaseload($user, 'user.deactivated');
@@ -547,8 +579,56 @@ class UserController extends Controller
         ]);
 
         $this->assertOfficeMatchesRole($data, $user);
+        $this->assertSuperAdminSeat($data, $user);
 
         return $data;
+    }
+
+    /**
+     * There is exactly one super admin: the seat cannot be doubled, and it
+     * cannot be vacated.
+     *
+     * ── Why one ──────────────────────────────────────────────────────────────
+     *
+     * The super admin is the only account that can create office accounts —
+     * `user.manage` is held by no other role — so it is the root of how everyone
+     * else gets in. Two of them is two people who can mint officers for any
+     * office and reassign any office's caseload, with no record of which of them
+     * is the real one; the register's own account of who authorised a staff
+     * account stops meaning anything. Nothing enforced this: a second one could
+     * be created, or an existing officer promoted, and the endpoint answered 201.
+     *
+     * ── Why it also cannot be emptied ────────────────────────────────────────
+     *
+     * The mirror case is worse and reachable by accident. Demote the sole super
+     * admin, or deactivate them, and `user.manage` is held by nobody: no account
+     * can be created or corrected, no caseload reassigned, no business status
+     * changed — permanently, from inside the app, with no way back except a
+     * hand-written database edit. A one-click, irreversible lockout is not a
+     * thing an admin screen should offer, so both doors are shut here.
+     */
+    private function assertSuperAdminSeat(array $data, ?User $user): void
+    {
+        // Nothing to check unless this write actually names the roles.
+        if (! isset($data['roles'])) {
+            return;
+        }
+
+        $becomingSuperAdmin = in_array(self::DEPARTMENTLESS_ROLE, $data['roles'], true);
+
+        if ($becomingSuperAdmin && $this->superAdminExists($user)) {
+            throw ValidationException::withMessages([
+                'roles' => ['There is already a super admin, and there can only be one. Every office role may be held by as many accounts as you need.'],
+            ]);
+        }
+
+        $wasSuperAdmin = $user !== null && in_array(self::DEPARTMENTLESS_ROLE, $user->roleNames(), true);
+
+        if ($wasSuperAdmin && ! $becomingSuperAdmin) {
+            throw ValidationException::withMessages([
+                'roles' => ['This is the only super admin. Changing its role would leave nobody able to create office accounts.'],
+            ]);
+        }
     }
 
     /**

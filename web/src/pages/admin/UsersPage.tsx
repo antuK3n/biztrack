@@ -425,6 +425,17 @@ function ReassignModal({
 
 /* ── Editing (p97) ────────────────────────────────────────────────────── */
 
+/**
+ * Is this the super admin?
+ *
+ * Asked of the roles list rather than by comparing against the string 'admin',
+ * so the one role that belongs to no office stays a fact the API states and not
+ * a name hard-coded on three screens.
+ */
+function isSuperAdmin(user: AdminUser, roles: AdminRole[]): boolean {
+  return user.roles.some((name) => roles.find((r) => r.name === name)?.wants_department === false)
+}
+
 /** Whether this set of roles is the departmentless super admin. */
 function wantsOffice(roleNames: string[], roles: AdminRole[]): boolean {
   if (roleNames.length === 0) return true
@@ -475,6 +486,15 @@ function EditModal({
    */
   const initialRole = user.roles[0] ?? ''
   const roleChanged = Boolean(form.role) && form.role !== initialRole
+  /*
+   * The super-admin row. Its role is fixed both ways — the seat is a singleton
+   * and it cannot be vacated, because `user.manage` lives on no other role and
+   * emptying it would lock every administrative action out of the app.
+   */
+  const currentRole = roles.find((r) => r.name === initialRole)
+  // `roles` is empty while it loads, and an unknown role must not be mistaken
+  // for the super admin — hence the explicit "found it, and it wants no office".
+  const isOnlySuperAdmin = currentRole ? !currentRole.wants_department : false
 
   async function save() {
     setBusy(true)
@@ -580,14 +600,28 @@ function EditModal({
             <select
               className={inputCls}
               value={form.role}
+              disabled={isOnlySuperAdmin}
               onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
             >
               {roles.map((r) => (
-                <option key={r.name} value={r.name}>
+                /*
+                 * The role this account already holds is never disabled, even
+                 * when it is the taken super-admin seat — it is taken BY this
+                 * account, and greying out its own current value would read as
+                 * a fault on the row you are editing.
+                 */
+                <option key={r.name} value={r.name} disabled={!r.available && r.name !== initialRole}>
                   {r.label}
+                  {!r.available && r.name !== initialRole && ' — already assigned'}
                 </option>
               ))}
             </select>
+            {isOnlySuperAdmin && (
+              <p className="mt-1 text-xs text-ink-muted">
+                The super admin is a single account and the only one that can create office
+                accounts, so its role cannot be changed away.
+              </p>
+            )}
             {user.roles.length > 1 && (
               <p className="mt-1 text-xs text-amber-800">
                 This account holds {user.roles.length} roles ({user.roles.join(', ')}). Changing this
@@ -798,8 +832,15 @@ function CreateOfficerModal({
             <select className={inputCls} value={form.role} onChange={(e) => set('role', e.target.value)}>
               <option value="">Select a role</option>
               {roles.map((r) => (
-                <option key={r.name} value={r.name}>
+                /*
+                 * The super admin seat is disabled once it is taken, rather
+                 * than offered and refused on submit. Office roles are never
+                 * disabled — an office is meant to have as many accounts as it
+                 * needs, and only this one role is a singleton.
+                 */
+                <option key={r.name} value={r.name} disabled={!r.available}>
                   {r.label}
+                  {!r.available && ' — already assigned'}
                 </option>
               ))}
             </select>
@@ -1179,10 +1220,23 @@ export function UsersPage() {
                         >
                           Edit
                         </button>
+                        {/*
+                          The sole super admin cannot be switched off — it holds
+                          the only `user.manage` in the system, so deactivating
+                          it locks every administrative action out of the app
+                          permanently. The API refuses it; offering a button
+                          that always fails is worse than not offering one, so
+                          the reason is stated where the control would be.
+                        */}
                         <button
                           type="button"
                           onClick={() => setModal({ kind: 'deactivate', user })}
-                          disabled={busyId === user.id}
+                          disabled={busyId === user.id || isSuperAdmin(user, roleList)}
+                          title={
+                            isSuperAdmin(user, roleList)
+                              ? 'The only super admin cannot be deactivated — no other account can manage accounts.'
+                              : undefined
+                          }
                           className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
                         >
                           {user.is_active ? 'Deactivate' : 'Activate'}
