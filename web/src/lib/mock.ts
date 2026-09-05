@@ -26,6 +26,8 @@ function makeUser(partial: Partial<MockUser> & Pick<MockUser, 'email' | 'first_n
     middle_name: null,
     suffix: null,
     department: null,
+    // The mock has no file storage, so every mock account draws the glyph.
+    has_photo: false,
     is_active: true,
     email_verified_at: '2026-07-01T08:00:00Z',
     roles: ['business_owner'],
