@@ -241,7 +241,24 @@ class AuthController extends Controller
             // seeded or created before the column existed hold null, and forcing
             // a value on them would make an unrelated name edit fail validation.
             'gender' => ['nullable', 'in:M,F'],
-            'mobile_number' => ['required', 'string', 'max:20'],
+            /*
+             * Eleven digits in local 09 form, and nothing else.
+             *
+             * `string|max:20` accepted anything short enough, and the Edit
+             * Profile field passed on whatever was typed — which is how the
+             * demo owner's number came to be the three characters "09d". A
+             * client-side restriction alone would not have stopped it: the rule
+             * has to hold at the endpoint, because the field is not the only
+             * thing that can call it.
+             *
+             * Deliberately narrower than validateMobile on the web side, which
+             * also accepts +639…; the field now permits digits only, so the
+             * international form cannot be typed and storing two spellings of
+             * one number would only make them harder to compare later.
+             */
+            'mobile_number' => ['required', 'string', 'regex:/^09\d{9}$/'],
+        ], [
+            'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
         ]);
 
         $user = $request->user();

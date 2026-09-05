@@ -7,6 +7,7 @@ import { api, toApiError } from '../lib/api'
 import { PHOTO_ACCEPT_ATTR, photoRejection, profilePhoto } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useProfilePhoto } from '../lib/useProfilePhoto'
+import { MOBILE_DIGITS, validateMobile } from '../lib/validation'
 import { useAuth } from '../stores/auth'
 
 /* Settings — PDF p11–13: two royal bars opening the Edit Profile / Change Password modals. */
@@ -166,6 +167,19 @@ export function SettingsPage() {
   const [suffix, setSuffix] = useState(user?.suffix ?? '')
   const [gender, setGender] = useState<string>(user?.gender ?? '')
   const [phone, setPhone] = useState(user?.mobile_number ?? '')
+  /*
+   * The mobile number complains on blur, not on every keystroke. Typing the
+   * third digit of a number that will be eleven is not a mistake, and an error
+   * that appears while someone is still answering trains them to ignore it.
+   */
+  const [phoneTouched, setPhoneTouched] = useState(false)
+  /*
+   * validateMobile is the same check registration runs, so one number is not
+   * acceptable at sign-up and refused here. It also names the actual defect —
+   * "that number is 9 digits long, but a mobile number needs 11" — rather than
+   * restating the format and leaving the reader to spot the difference.
+   */
+  const phoneError = phoneTouched ? validateMobile(phone) : undefined
   const [currentPassword, setCurrentPassword] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -228,6 +242,7 @@ export function SettingsPage() {
     setSuffix(user?.suffix ?? '')
     setGender(user?.gender ?? '')
     setPhone(user?.mobile_number ?? '')
+    setPhoneTouched(false)
     setNote(null)
     setFormError(null)
     setPhotoError(null)
@@ -321,7 +336,7 @@ export function SettingsPage() {
           confirmLabel={saving ? 'Saving…' : 'Save Changes'}
           onCancel={() => setOpen(null)}
           onConfirm={saveProfile}
-          confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !phone.trim()}
+          confirmDisabled={saving || !firstName.trim() || !lastName.trim() || !!validateMobile(phone)}
         >
           <div className="flex flex-col items-center gap-2">
             <ProfileAvatar src={photoUrl} />
@@ -467,18 +482,42 @@ export function SettingsPage() {
                 <option value="F">Female</option>
               </select>
             </ProfileField>
-            <ProfileField id="profile-phone" label="Mobile Number" required error={fieldErrors.mobile_number?.[0]}>
+            <ProfileField
+              id="profile-phone"
+              label="Mobile Number"
+              required
+              error={fieldErrors.mobile_number?.[0] ?? phoneError}
+            >
               <div className="relative">
                 <input
                   id="profile-phone"
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="09XX XXX XXXX"
-                  inputMode="tel"
+                  /*
+                   * Digits only, eleven at most, enforced as the character is
+                   * typed rather than reported afterwards: a field that accepts
+                   * a letter and then explains it should not have is a field
+                   * that wasted the keystroke. This is what let "09d" reach the
+                   * database through this very form.
+                   *
+                   * Paste is covered too — onChange sees the pasted value — so
+                   * "0917 123 4567" off a contact card arrives as 09171234567
+                   * instead of being rejected for its spaces.
+                   */
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, MOBILE_DIGITS))}
+                  onBlur={() => setPhoneTouched(true)}
+                  // The shape of an answer, never an answer: a specimen number
+                  // reads as real and gets submitted as one.
+                  placeholder="11 digits, starting 09"
+                  maxLength={MOBILE_DIGITS}
+                  // numeric, not tel: tel offers + * # on a phone keypad, and
+                  // none of them can be entered here.
+                  inputMode="numeric"
                   autoComplete="tel"
                   aria-required="true"
-                  aria-invalid={fieldErrors.mobile_number ? true : undefined}
-                  aria-describedby={fieldErrors.mobile_number ? 'profile-phone-error' : undefined}
+                  aria-invalid={fieldErrors.mobile_number || phoneError ? true : undefined}
+                  aria-describedby={
+                    fieldErrors.mobile_number || phoneError ? 'profile-phone-error' : undefined
+                  }
                   className={`${inputCls} pr-10`}
                 />
                 <InputPencil />
