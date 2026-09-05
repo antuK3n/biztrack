@@ -444,9 +444,22 @@ class ApplicationController extends Controller
     {
         $this->authorizeOwner($request, $application);
 
+        /*
+         * Cancellable up to and including Pending Payment — before money has
+         * changed hands and before any other office has been given work.
+         * `ApplicationStatus::allowedNext()` mirrors this list and the two must
+         * move together; the enum's docblock says so from the other side.
+         *
+         * `Returned` joins the list, which is new and is not a widening: a
+         * returned filing is one BPLO has handed back, so it is sitting with the
+         * applicant unpaid, which is exactly the position `draft` is in. Under
+         * the old machine it was excluded only because `returned` then meant
+         * "mid-review", which it no longer does.
+         */
         $allowed = [
             ApplicationStatus::Draft,
-            ApplicationStatus::Submitted,
+            ApplicationStatus::ForApproval,
+            ApplicationStatus::Returned,
             ApplicationStatus::PendingPayment,
         ];
         if (! in_array($application->status, $allowed, true)) {

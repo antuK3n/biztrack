@@ -58,6 +58,33 @@ class PermitType extends Model
      */
     public const CLEARANCE_ORDER = ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY', 'MARKET'];
 
+    /**
+     * The other permits every application must obtain before BPLO can approve
+     * it (docs/application-flow-2026-09.md rule 1, verified with the client
+     * against the counter procedure on 6 September 2026).
+     *
+     * MARKET is deliberately absent. It is for stall owners in the public
+     * market, which most businesses are not, so requiring it would block every
+     * ordinary filing on a clearance the office would never issue. It stays
+     * available to opt into, and BPLO asks for it through Other Requirements
+     * when an owner needed one and did not know — a mechanism that does not
+     * exist yet and is out of scope.
+     *
+     * This is the list `for_final_approval` is computed from. Adding a code
+     * here makes it mandatory on every NEW filing; filings already in flight
+     * keep the permit set they were submitted with, because `attachRequired()`
+     * runs once at submission and nothing re-derives it afterwards. That is on
+     * purpose — an LGU adding a requirement must not retroactively block
+     * applications people have already paid for.
+     */
+    public const REQUIRED_CLEARANCE_CODES = ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'];
+
+    /** Is this one of the five every application must obtain? */
+    public function isRequiredClearance(): bool
+    {
+        return in_array($this->code, self::REQUIRED_CLEARANCE_CODES, true);
+    }
+
     protected $fillable = [
         'code', 'name', 'permit_number_prefix', 'issuing_department_id',
         'validity_days', 'description',

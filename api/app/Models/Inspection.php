@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use Illuminate\Database\Eloquent\Builder;
@@ -119,9 +119,10 @@ class Inspection extends Model
      *
      * - the visit FAILED. A passed visit has nothing to re-inspect; offering it
      *   would be an invitation to re-open a filing that has already cleared.
-     * - the filing is still FOR INSPECTION. Once it is approved, rejected or
-     *   cancelled the decision is made, and scheduling a visit against it would
-     *   produce a booking no transition can ever consume.
+     * - the PERMIT is still for inspection. Once that permit is approved or
+     *   rejected the decision is made, and scheduling a visit against it would
+     *   produce a booking no transition can ever consume. This used to ask the
+     *   APPLICATION's status and had to stop — see permitIsAwaitingInspection().
      * - this row is still the CURRENT visit. Otherwise an officer reading the
      *   history of a filing that already failed twice could schedule a third
      *   visit from the older of the two failures, and the office would end up
@@ -130,7 +131,32 @@ class Inspection extends Model
     public function canBeReinspected(): bool
     {
         return $this->failed()
-            && $this->application?->status === ApplicationStatus::ForInspection
+            && $this->permitIsAwaitingInspection()
             && $this->isCurrent();
+    }
+
+    /**
+     * Is the PERMIT this visit belongs to still waiting on an inspection?
+     *
+     * This asked the APPLICATION's status and could not any more: since
+     * 6 September 2026 `for_inspection` is a state of one permit, not of the
+     * filing. An application whose CHO permit is being re-inspected reads
+     * `awaiting_other_permits`, so the old test would have refused every
+     * legitimate re-inspection in the system.
+     *
+     * Matched through the issuing department, which is how inspections have
+     * always been keyed. Every seeded permit type has its own office, so the
+     * mapping is exact; if an LGU ever gives one office two permit types this
+     * becomes ambiguous, and the fix then is `permit_type_id` on `inspections`
+     * rather than a cleverer join here.
+     */
+    private function permitIsAwaitingInspection(): bool
+    {
+        $typeIds = PermitType::where('issuing_department_id', $this->department_id)->pluck('id');
+
+        return ApplicationPermitType::where('application_id', $this->application_id)
+            ->whereIn('permit_type_id', $typeIds)
+            ->where('status', ClearanceStatus::ForInspection->value)
+            ->exists();
     }
 }

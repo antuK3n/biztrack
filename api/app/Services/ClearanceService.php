@@ -4,15 +4,18 @@ namespace App\Services;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\AssignmentStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
+use App\Models\ApplicationPermitType;
 use App\Models\PermitType;
 use App\Support\Audit;
 use App\Support\HeldPermits;
 use App\Support\PermitFees;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The LGU clearance stage (docs/clearances-after-payment.md).
@@ -202,20 +205,47 @@ class ClearanceService
      */
     private function state(Application $application, PermitType $type, bool $hasHeld): string
     {
-        $issued = $application->permits->contains(fn ($p) => $p->permit_type_id === $type->id);
-        if ($issued) {
-            return 'issued';
-        }
-        if ($this->isAppliedFor($application, $type)) {
-            return 'applied';
+        /*
+         * The permit's own status, straight through, because it now HAS one.
+         *
+         * This used to infer a state: a permit row exists → issued, the pivot
+         * is attached → applied, a held copy is on file → submitted, otherwise
+         * available. Every one of those was a proxy for a fact the schema did
+         * not record, and the proxies disagreed with each other — a clearance
+         * whose office had returned it read as `applied`, identical to one
+         * nobody had opened.
+         *
+         * `application_permit_types.status` is that fact. The inference is gone
+         * rather than kept as a fallback, because a fallback here is how a
+         * genuine null quietly renders as a plausible wrong badge.
+         */
+        $row = $application->permitTypes->firstWhere('id', $type->id);
+        $status = $row?->pivot?->status;
+
+        if ($status !== null) {
+            return $status->value;
         }
 
-        return $hasHeld ? 'submitted' : 'available';
+        /*
+         * Not attached at all. For an optional permit that is the truth — it
+         * has not been asked for. `hasHeld` still matters: a copy uploaded
+         * before the permit was started is a half-finished action the applicant
+         * should see reflected rather than lose.
+         */
+        return $hasHeld ? ClearanceStatus::NotStarted->value : 'available';
     }
 
     public function isAppliedFor(Application $application, PermitType $type): bool
     {
         return $application->permitTypes->contains(fn ($pt) => $pt->id === $type->id);
+    }
+
+    /** This permit's pivot row on this filing — the row that carries its status. */
+    public function pivotRow(Application $application, PermitType $type): ?ApplicationPermitType
+    {
+        return ApplicationPermitType::where('application_id', $application->id)
+            ->where('permit_type_id', $type->id)
+            ->first();
     }
 
     /**
@@ -316,13 +346,28 @@ class ClearanceService
      * question to put to BPLO then is whether an unpaid filing may hold
      * clearances at all, not whether this line should quietly go back.
      */
+    /*
+     * ── The gate is PAYMENT again [client, verified procedure, 2026-09-06] ────
+     *
+     * This has now been all three things, so the history matters. It began as
+     * payment, moved to submission on 2 September because payment was a dummy
+     * that never cleared — "a gate that no one can pass is indistinguishable
+     * from a deleted feature" — and comes back to payment now that the counter
+     * procedure has been checked against the real office.
+     *
+     * What makes it safe this time is that the thing it waits for actually
+     * happens. Payment is the applicant's own action and completes
+     * synchronously in the same press; nothing external has to clear. The 2
+     * September failure was not that payment was the wrong gate, it was that
+     * the gate was wired to an event the system never emitted.
+     *
+     * `isPaid()` is deliberately a list of paid statuses rather than "not one
+     * of the unpaid ones", so a status added later is unpaid until somebody
+     * says otherwise. Safe default for a gate that guards money.
+     */
     public function isUnlocked(Application $application): bool
     {
-        return ! in_array($application->status, [
-            ApplicationStatus::Draft,
-            ApplicationStatus::Rejected,
-            ApplicationStatus::Cancelled,
-        ], true);
+        return $application->status?->isPaid() ?? false;
     }
 
     /**
@@ -413,13 +458,41 @@ class ClearanceService
     public function apply(Application $application, PermitType $type): void
     {
         DB::transaction(function () use ($application, $type) {
-            $application->permitTypes()->syncWithoutDetaching([$type->id]);
-            $application->load('permitTypes');
-
-            app(WorkflowService::class)->routeClearance($application, $type);
-            $this->reassess($application);
+            app(WorkflowService::class)->startClearance(
+                $application,
+                $type,
+                ApplicationPermitType::MODE_APPLY,
+            );
 
             Audit::log('clearance.applied', $application, ['permit_type' => $type->code]);
+        });
+    }
+
+    /**
+     * The applicant hands in a permit they already hold.
+     *
+     * The other half of `apply`, and it goes through the same door on purpose.
+     * Both put the permit into `for_approval` and both route it to its office;
+     * the only difference is `mode`, which tells the office whether there is a
+     * form to read or only an image.
+     *
+     * It does NOT skip the inspection, and that is the client's decision rather
+     * than an oversight (6 September 2026): the LGU inspects the premises, not
+     * the paperwork, so a business handing in last year's Fire Safety
+     * certificate is still visited. Nor does it reduce the fee — the bill was
+     * settled at submission and charges for a permit either way, because the
+     * fee covers that inspection.
+     */
+    public function submitHeld(Application $application, PermitType $type): void
+    {
+        DB::transaction(function () use ($application, $type) {
+            app(WorkflowService::class)->startClearance(
+                $application,
+                $type,
+                ApplicationPermitType::MODE_UPLOAD,
+            );
+
+            Audit::log('clearance.held_submitted', $application, ['permit_type' => $type->code]);
         });
     }
 
@@ -453,12 +526,41 @@ class ClearanceService
      */
     public function unapply(Application $application, PermitType $type): void
     {
+        /*
+         * A REQUIRED permit cannot be withdrawn, and this is the rule that
+         * changed. Five of the six are mandatory now
+         * (PermitType::REQUIRED_CLEARANCE_CODES), so "changing your mind" is not
+         * a move that exists for them — the application cannot be approved
+         * without them, and detaching one would leave a filing that has been
+         * paid for and can never complete.
+         *
+         * Market Clearance is the one that can still come off, because it is
+         * the one that was optional to begin with.
+         */
+        if ($type->isRequiredClearance()) {
+            throw ValidationException::withMessages([
+                'permit_type' => [$type->name.' is required on every application and cannot be withdrawn.'],
+            ]);
+        }
+
         DB::transaction(function () use ($application, $type) {
             $application->permitTypes()->detach($type->id);
             $application->load('permitTypes');
 
-            app(WorkflowService::class)->withdrawClearanceRouting($application, $type);
-            $this->reassess($application);
+            /*
+             * The fee is NOT re-assessed. One bill, raised at submission,
+             * covering everything (docs/application-flow-2026-09.md rule 4) —
+             * and by the time this stage is open the applicant has already paid
+             * it. Re-pricing here would lower `total_assessed` below
+             * `total_paid` on a filing whose money is already in, which is a
+             * refund and not an assessment. Refundability is an open question
+             * with BPLO; until it is answered, withdrawing an optional permit
+             * costs what it cost.
+             */
+            ApplicationAssignment::where('application_id', $application->id)
+                ->where('department_id', $type->issuing_department_id)
+                ->where('status', AssignmentStatus::Pending->value)
+                ->delete();
 
             Audit::log('clearance.unapplied', $application, ['permit_type' => $type->code]);
         });
@@ -478,15 +580,22 @@ class ClearanceService
      * is for a direct caller, so that reaching this on an unsubmitted filing
      * cannot invent a Tax Order of Payment for it.
      */
-    private function reassess(Application $application): void
-    {
-        if ($application->feeAssessment()->doesntExist()) {
-            return;
-        }
-
-        app(WorkflowService::class)->assessFees($application);
-        $application->load('feeAssessment');
-    }
+    /*
+     * `reassess()` is gone.
+     *
+     * It re-priced the filing every time a clearance was applied for or
+     * withdrawn, which was the whole point while clearances were chosen after
+     * payment and accrued a running balance. There is no balance now: the bill
+     * is raised once at submission over every permit the filing will need, and
+     * the applicant pays it before the other permits even open
+     * (docs/application-flow-2026-09.md rule 4).
+     *
+     * Nothing replaces it. If a second payment ever comes back — a clearance
+     * choosable after the bill, an LGU adding a requirement mid-flight — this
+     * method and the `PermitFees::hasOutstandingBalance` release gate come back
+     * together, and the argument for both is in the superseded
+     * `clearances-after-payment.md`.
+     */
 
     /**
      * Has this clearance's office already acted? Then it cannot be withdrawn.

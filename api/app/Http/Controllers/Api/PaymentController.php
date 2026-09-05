@@ -206,55 +206,6 @@ class PaymentController extends Controller
         return trim(preg_replace('/\s{2,}/u', ' ', $stripped) ?? $stripped);
     }
 
-    /**
-     * Officer adjusts the fee (permission fee.adjust on the route).
-     *
-     * The office boundary is checked here too. `fee.adjust` currently only ever
-     * sits alongside `application.view_any_office` (BPLO, admin), so this closes
-     * nothing today — but rewriting somebody's Tax Order of Payment is a
-     * stronger act than reading their filing, and it should not be the one
-     * officer action that skips the check the reads all make.
-     *
-     * The money rules match the fee-profile ceilings: line items land in
-     * decimal(14,2) columns, so an unbounded `numeric` is a 500 waiting for
-     * someone to paste a long number.
-     */
-    public function adjustFee(Request $request, Application $application): JsonResponse
-    {
-        ApplicationVisibility::authorize(
-            $request->user(),
-            $application,
-            'This application belongs to another office.'
-        );
-
-        $data = $request->validate([
-            'line_items' => ['required', 'array', 'min:1', 'max:200'],
-            'line_items.*.label' => ['required', 'string', 'max:255'],
-            'line_items.*.amount' => ['required', 'numeric', 'min:0', 'max:10000000000'],
-            'total_amount' => ['required', 'numeric', 'min:0', 'max:10000000000'],
-        ]);
-
-        $sum = array_sum(array_column($data['line_items'], 'amount'));
-        if (abs($sum - (float) $data['total_amount']) > 0.01) {
-            throw ValidationException::withMessages([
-                'total_amount' => ['The total must equal the sum of the line items.'],
-            ]);
-        }
-
-        $fee = $this->workflow->adjustFee(
-            $application,
-            $data['line_items'],
-            (float) $data['total_amount'],
-            $request->user(),
-        );
-
-        return response()->json([
-            'data' => [
-                'line_items' => $fee->line_items,
-                'total_amount' => $fee->total_amount,
-            ],
-        ]);
-    }
 
     private function authorizeOwner(Request $request, Application $application): void
     {

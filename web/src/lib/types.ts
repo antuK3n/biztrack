@@ -277,15 +277,36 @@ export type ApplicationType = 'new' | 'renewal' | 'amendment'
 
 export type ApplicationStatus =
   | 'draft'
-  | 'submitted'
-  | 'under_review'
+  | 'for_approval'
   | 'returned'
   | 'pending_payment'
-  | 'for_inspection'
+  | 'awaiting_other_permits'
+  | 'for_final_approval'
   | 'approved'
   | 'issued'
   | 'rejected'
   | 'cancelled'
+
+/**
+ * One other permit's own status — `App\Enums\ClearanceStatus`.
+ *
+ * The second machine. The application has a status and each of the five
+ * required permits has its own, running at the same time
+ * (docs/application-flow-2026-09.md). `available` is not a server value: it is
+ * what the clearance stage shows for an OPTIONAL permit that is not on the
+ * filing at all, which has no pivot row and therefore no status.
+ */
+export type ClearanceStatus =
+  | 'not_started'
+  | 'for_approval'
+  | 'for_inspection'
+  | 'approved'
+  | 'rejected'
+  | 'returned'
+  | 'available'
+
+/** How the applicant satisfied one permit: filled the form, or handed in a copy. */
+export type ClearanceMode = 'apply' | 'upload'
 
 export interface ApplicationListItem {
   id: number
