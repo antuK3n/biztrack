@@ -935,7 +935,6 @@ const PERMIT_TYPE_HEADINGS: Record<string, string> = {
   ZONING: 'Zoning',
   OCCUPANCY: 'Occupancy',
   CEC: 'Environmental',
-  MARKET: 'Market',
 }
 
 /**

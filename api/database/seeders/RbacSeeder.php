@@ -128,11 +128,18 @@ class RbacSeeder extends Seeder
                 'description' => 'Reviews environmental-certificate requirements for CENRO.',
                 'permissions' => $review,
             ],
-            'market_admin' => [
-                'display_name' => 'Market Administrator',
-                'description' => 'Reviews market-clearance requirements for the CMO Market Office.',
-                'permissions' => $review,
-            ],
+            /*
+             * `market_admin` was here and is gone [client, 2026-09-06], with the
+             * Market Clearance and the CMO Market Office it belonged to. The
+             * client confirmed with the LGU that neither is needed; a business
+             * that genuinely needs one is asked by hand through Other
+             * Requirements.
+             *
+             * The ROLE ROW is not deleted from the live register by re-seeding —
+             * this seeder only creates and updates. The 2026_09_06 migration
+             * removes the role, its one seeded account and the department,
+             * having first checked that nothing points at them.
+             */
             /*
              * The super admin OVERSEES the process; it does not work inside it.
              *

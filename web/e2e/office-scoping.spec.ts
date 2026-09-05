@@ -488,7 +488,7 @@ test('an office’s permit list holds only the clearance that office issues', as
    *
    * Measured on this register: sanitary@biztrack.local's `GET /permits` reports
    * 5,327 rows, and the first page of 200 contains 39 FSIC, 22 CEC, 22
-   * OCCUPANCY, 21 ZONING, 19 MARKET and 38 BUSINESS certificates alongside its
+   * OCCUPANCY, 21 ZONING and 38 BUSINESS certificates alongside its
    * own 39 SANITARY. That is the exact thing the client asked to be checked,
    * and the answer is that the account can see them.
    *

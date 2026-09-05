@@ -253,7 +253,7 @@ it('actually slows the one office it says it slows', function () {
      * year, and the next highest office never clears x1.17.
      */
     $ratios = [];
-    foreach (['BPLO', 'BFP', 'CPDO', 'OBO', 'CENRO', 'CMO-MARKET'] as $code) {
+    foreach (['BPLO', 'BFP', 'CPDO', 'OBO', 'CENRO'] as $code) {
         // A lower floor than CHO's: these offices are seeded as the quiet ones
         // on purpose, and requiring BPLO's volume of them would be requiring the
         // fixture to flatten exactly the difference it exists to show.
@@ -311,7 +311,7 @@ it('spreads history across the barangays and offices the register actually has',
         ->distinct()->pluck('department_id')
         ->map(fn ($id) => Department::find($id)->code)
         ->sort()->values()->all();
-    expect($offices)->toBe(['BFP', 'BPLO', 'CENRO', 'CHO', 'CMO-MARKET', 'CPDO', 'OBO']);
+    expect($offices)->toBe(['BFP', 'BPLO', 'CENRO', 'CHO', 'CPDO', 'OBO']);
 
     AnalyticsHistorySeeder::purge();
 });
@@ -358,7 +358,7 @@ it('gives every office enough completed reviews per week to be charted', functio
     };
 
     $busy = ['BPLO', 'CHO', 'BFP'];
-    $minor = ['CPDO', 'OBO', 'CENRO', 'CMO-MARKET'];
+    $minor = ['CPDO', 'OBO', 'CENRO'];
 
     $stats = [];
     foreach ([...$busy, ...$minor] as $code) {

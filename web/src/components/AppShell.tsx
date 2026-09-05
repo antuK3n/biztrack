@@ -20,7 +20,6 @@ const ROLE_LABELS: Record<string, string> = {
   zoning_officer: 'Zoning officer',
   obo_staff: 'Building official staff',
   cenro_officer: 'Environment officer',
-  market_admin: 'Market administrator',
   admin: 'Administrator',
 }
 

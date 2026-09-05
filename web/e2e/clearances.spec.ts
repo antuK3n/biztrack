@@ -315,19 +315,19 @@ test('before the first payment the stage is visible but locked, in the API’s o
   })
 
   /*
-   * All six are on screen, Market included.
+   * All five are on screen, and every one of them is required.
    *
-   * It was five for a while: item 98 derived the Market card from the filing's
-   * own declaration and hid it otherwise. That was reversed on the client's
-   * instruction, and the reason is worth keeping — the revenue-code categories
-   * it keyed on describe the operator who RUNS a market, not the trader renting
-   * one stall inside it. So the card was hidden from precisely the people it
-   * exists for, who then had no way to discover it.
+   * It was six until 6 September 2026, the sixth being the Market Clearance.
+   * That card had already been through two reversals — hidden behind a
+   * derivation from the filing's declared revenue-code category, then shown to
+   * everyone again because those categories describe the operator who RUNS a
+   * market rather than the trader renting one stall inside it, so the card was
+   * hidden from exactly the people it existed for. The permit and its office
+   * have now been removed from the system entirely.
    */
   const cards = clearanceCards(page)
-  await expect(cards).toHaveCount(6)
-  const market = cards.filter({ hasText: /market clearance/i })
-  await expect(market).toHaveCount(1)
+  await expect(cards).toHaveCount(5)
+  await expect(cards.filter({ hasText: /market/i })).toHaveCount(0)
   await expect(market).toContainText(/optional/i)
   await expect(market).toContainText(/stall in a public or private market/i)
 
@@ -415,9 +415,11 @@ test('once the stage is open, the grid says which button spends money and how mu
    * the defect this guards against.
    *
    * Asserted across the grid rather than on one card, because `fee_preview` is
-   * legitimately null for the Market Clearance (its stall rental is set by the
-   * office case by case) and legitimately zero where no revenue-code rule
-   * prices it. All three cases have to say something; none may say nothing.
+   * legitimately null where an office sets the amount case by case, and
+   * legitimately zero where no revenue-code rule prices the permit. All three
+   * cases have to say something; none may say nothing. (The Market Clearance
+   * was the standing example of the null case until it was removed on
+   * 6 September 2026.)
    */
   for (const card of await cards.all()) {
     await expect(card, 'a clearance card quotes no price at all').toContainText(
@@ -793,12 +795,13 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * changes elsewhere on the page is not an announcement, so the live region
    * still has to say what the press did and what it cost.
    *
-   * This used to press MARKET, because MARKET was the last clearance with no
-   * office sheet and so the last on which Apply stayed put. Checklist item 109
-   * gave it one, so now every one of the six navigates away — first ZONING
-   * (item 101), now the rest. The press and the return are therefore both part
-   * of the test: Apply opens the sheet, and the announcement of what it just
-   * cost is still standing when the applicant comes back to the cards.
+   * Every one of the five navigates away — first ZONING (item 101), then the
+   * rest. This used to press MARKET, which was the last permit with no office
+   * sheet and so the last on which Apply stayed put; item 109 gave it one, and
+   * the permit itself went on 6 September 2026. The press and the return are
+   * therefore both part of the test: Apply opens the sheet, and the
+   * announcement of what it just cost is still standing when the applicant
+   * comes back to the cards.
    */
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await card.getByRole('button', { name: /^apply for the/i }).click()
@@ -817,127 +820,22 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
   await expect(status).toContainText(/balance due/i)
 })
 
-test('the Market Clearance is offered to everyone, and says who it is for', async ({ page }) => {
-  /*
-   * ITEM 98 — *"Market clearance should not be required. It is only required
-   * for stall holders."*
-   *
-   * First built as a derivation: the card was hidden unless the filing's
-   * declared revenue-code category or stall count implied market trade. The
-   * client reversed it after seeing it, and was right to. The categories the
-   * derivation read — public_market_100_plus_stalls,
-   * public_market_under_100_stalls, private_market — describe the operator who
-   * RUNS a market. The stall holder the client named is that operator's tenant
-   * and carries none of them. So the card was hidden from exactly the people it
-   * exists for, who had no way to find out it existed.
-   *
-   * The rule now is show-and-label, not hide-and-derive. What this guards is
-   * that the label survives: a sixth card with nothing saying who it is for is
-   * a sixth thing every applicant has to work out is not addressed to them.
-   */
-  await page.goto('/dashboard')
-  const appId = await makePaidApplication(page)
-
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
-
-  const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
-  await expect(marketCard).toHaveCount(1)
-
-  // Optional, and who it is for — both on the card's face, not in a tooltip.
-  await expect(marketCard).toContainText(/optional/i)
-  await expect(marketCard).toContainText(/stall in a public or private market/i)
-
-  /*
-   * And it is tied to the buttons, so the two words that decide whether this
-   * card is yours are heard BEFORE Apply or Submit, not after. A note only a
-   * sighted reader gets is not a note that stops anyone applying for a market
-   * stall they do not have.
-   */
-  const apply = marketCard.getByRole('button', { name: /^apply for the/i })
-  const describedBy = await apply.getAttribute('aria-describedby')
-  expect(describedBy, 'the Apply button names nothing that says who the card is for').toBeTruthy()
-  await expect(page.locator(`#${describedBy!.split(' ').at(-1)}`)).toContainText(/stall/i)
-})
-
-test('the Market Clearance opens a sheet, and asks which stall it is clearing', async ({ page }) => {
-  /*
-   * ITEM 109 — *"Application form for Market Clearance is missing. Create
-   * something for this since we currently don't have the paper version."*
-   * Applying for it used to collect nothing whatsoever, so the Office of the
-   * City Market Administrator received a request naming neither a market nor a
-   * stall.
-   *
-   * The sheet is written rather than transcribed — the only one of the six that
-   * is — so this test pins the two answers it refuses to do without. See the
-   * header of web/src/pages/applicant/OfficeFormStep.tsx for why those two and
-   * not more.
-   */
-  await page.goto('/dashboard')
-  const appId = await makePaidApplication(page)
-
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
-  // No reveal step any more — the card is on the grid with the other five.
-  const marketCard = page.locator('ul > li').filter({ hasText: /market clearance/i })
-  await marketCard.getByRole('button', { name: /^apply for the/i }).click()
-
-  // Apply opens the sheet, as it does for the other five.
-  await expect(page.getByRole('heading', { name: /market clearance \(stall holders\)/i })).toBeVisible()
-  // It says on its face that it is interim — no invented form code.
-  await expect(page.getByText(/the office has no printed version/i)).toBeVisible()
-
-  // It opens with what it already knows rather than by asking again.
-  await expect(page.getByLabel(/business name/i)).toHaveAttribute('readonly', '')
-  await expect(page.getByLabel(/type of application/i)).toHaveAttribute('readonly', '')
-
-  const save = page.getByRole('button', { name: /save & back to clearances/i })
-  await expect(save).toBeDisabled()
-  await expect(page.getByText(/still needed on this form/i)).toContainText(/name of market/i)
-  await expect(page.getByText(/still needed on this form/i)).toContainText(/stall no/i)
-
-  await page.getByLabel(/name of market/i).fill('Malabon Central Market')
-  await page.getByLabel(/stall no/i).fill('B-14')
-
-  // The stall count is optional, but a typed answer has to be countable: the
-  // revenue-code market lines multiply it by a peso rate.
-  await page.getByLabel(/number of stalls held/i).fill('two')
-  await expect(page.getByRole('alert')).toContainText(/whole number/i)
-  await expect(save).toBeDisabled()
-  await page.getByLabel(/number of stalls held/i).fill('2')
-  await expect(page.getByRole('alert')).toHaveCount(0)
-
-  await expect(save).toBeEnabled()
-  await save.click()
-  await expect(marketCard.first()).toBeVisible()
-
-  // Saved as the office will read it, derived answer and all.
-  const stored = await page.evaluate(async (id) => {
-    const token = localStorage.getItem('biztrack.token.public')
-    const res = await fetch(`/api/v1/applications/${id}/office-forms`, {
-      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-    })
-    const forms = (await res.json()).data as {
-      permit_type_code: string
-      form_data: Record<string, unknown>
-    }[]
-    return forms.find((f) => f.permit_type_code === 'MARKET')?.form_data ?? null
-  }, appId)
-
-  expect(stored, 'the Market sheet was not stored').not.toBeNull()
-  expect(stored).toMatchObject({
-    market_name: 'Malabon Central Market',
-    stall_no: 'B-14',
-    stall_count: '2',
-  })
-  // Derived by the API, never typed.
-  expect(String(stored?.application_type)).toMatch(/market clearance/i)
-})
-
+/*
+ * Two Market Clearance tests lived here and went with the permit on
+ * 6 September 2026.
+ *
+ *  - ITEM 98, "the Market Clearance is offered to everyone, and says who it is
+ *    for": it asserted the card carried an applicability note naming stall
+ *    holders, tied to Apply via aria-describedby so a screen reader heard who
+ *    the card was for BEFORE the button.
+ *  - ITEM 109, "the Market Clearance opens a sheet, and asks which stall it is
+ *    clearing": it asserted the invented sheet stored a market name, a stall
+ *    number and a stall count.
+ *
+ * Both rules survive their subject. If a conditional permit is ever added, the
+ * aria-describedby assertion is the one to copy — APPLICABILITY in
+ * ClearanceStagePage is still wired to it and still empty.
+ */
 test('applying is reported on the button, and never by a second meaning of it', async ({
   page,
 }) => {
@@ -1200,100 +1098,49 @@ test('the wizard bills the business permit alone, and each clearance accrues aft
   ).toBeGreaterThan(atSubmit.total)
 })
 
+
 /*
- * CLR-2 — an Apply pressed by mistake must not strand the applicant, and must
- * not leave them paying for it.
+ * ── The withdraw test was here, and its subject no longer exists ───────────
  *
- * ── How the trap has changed shape, and why the test survives ─────────────
+ * "a clearance applied for by mistake can be withdrawn, and its fee comes back
+ * off" pressed Apply on the Market Clearance, asserted the sheet named its own
+ * way out, withdrew it, and checked the fee left the balance. Two separate
+ * changes retired it on 6 September 2026:
  *
- * It used to be a WIZARD trap. Applying inserted that clearance's sheet as a
- * step behind the cards, and the Market sheet would not be walked past without
- * a market name and a stall number — so a shopfront greengrocer who pressed
- * Apply on the Market card had two options: invent a market they do not trade
- * from, or cancel the filing and retype it. The audit of 2026-08-06 found five
- * real drafts in exactly that state, none able to reach Review & Submit.
+ *  - the Market Clearance and its office were removed from the system, and it
+ *    was chosen for this test precisely because it was the likeliest accidental
+ *    Apply — the one with two required answers that the client had objected to
+ *    being offered universally.
+ *  - the remaining five permits are REQUIRED on every application, so there is
+ *    no such thing as applying for one by mistake and nothing to withdraw.
+ *    `ClearanceService::unapply` now refuses a required permit outright.
  *
- * The sheets are not wizard steps any more, so nothing stands between the
- * applicant and submission — they have already submitted and paid to get here.
- * That removes the STRANDING, and it is why this test no longer walks a section
- * map. It does not remove the mistake, and it makes the other half worse: an
- * accidental Apply now spends money immediately, against a balance that holds
- * the permit until it is settled. So the way out matters more than it did, not
- * less, and what this asserts is that the fee goes back off when it is taken.
- *
- * MARKET rather than SANITARY or OCCUPANCY because it is the one with two
- * required answers and the one the client already objected to being offered
- * universally — the likeliest accidental Apply in the product.
+ * What replaces it asserts the new rule rather than deleting the coverage: a
+ * required permit cannot be taken back off. If an optional permit is ever added
+ * again, the withdrawal path and its fee assertion come back with it — the
+ * original is in git history at 5f7a0b1~1.
  */
-test('a clearance applied for by mistake can be withdrawn, and its fee comes back off', async ({
-  page,
-}) => {
+test('a required permit cannot be withdrawn from the application', async ({ page }) => {
   await page.goto('/dashboard')
   const appId = await makePaidApplication(page)
 
+  const refusal = await page.evaluate(async (id) => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const res = await fetch(`/api/v1/applications/${id}/clearances/SANITARY/apply`, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+    })
+    return { status: res.status, body: await res.text() }
+  }, appId)
+
+  expect(refusal.status, 'a required permit was allowed to be withdrawn').toBe(422)
+  expect(refusal.body).toMatch(/required on every application/i)
+
+  // And the card still stands, with no control offering the withdrawal.
   await page.goto(`/applications/${appId}/clearances`)
   const cards = clearanceCards(page)
-  await expect(cards).toHaveCount(6, { timeout: 30_000 })
-  const marketCard = cards.filter({ hasText: /market clearance/i })
-
-  const assessed = async () =>
-    page.evaluate(async (id) => {
-      const token = localStorage.getItem('biztrack.token.public')
-      const res = await fetch(`/api/v1/applications/${id}/clearances`, {
-        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-      })
-      const meta = (await res.json()).meta
-      /*
-       * Compared as STRINGS, not parsed to numbers. These arrive already
-       * formatted ("₱10,801.00") and the assertion is "unchanged", for which
-       * the server's own rendering is the strictest possible comparison — a
-       * parse would quietly accept a figure that had changed shape.
-       */
-      return {
-        assessed: String(meta.total_assessed),
-        balance: String(meta.balance_due),
-      }
-    }, appId)
-
-  const before = await assessed()
-
-  await marketCard.getByRole('button', { name: /^apply for the/i }).click()
-
-  /*
-   * The sheet opens over the cards, and it still refuses to save without the
-   * two answers it exists to collect. Nothing about that gating was wrong — the
-   * Office of the City Market Administrator cannot act on a request naming
-   * neither a market nor a stall (item 109).
-   */
-  await expect(page.getByRole('heading', { name: /market clearance \(stall holders\)/i })).toBeVisible()
-  await expect(page.getByText(/still needed on this form/i)).toContainText(/name of market/i)
-  await expect(page.getByRole('button', { name: /save & back to clearances/i })).toBeDisabled()
-
-  /*
-   * The way out, named on the screen the mistake put the applicant on. They are
-   * not looking at the cards — this sheet is where Apply left them, and it was
-   * once the one screen that never mentioned the way back.
-   */
-  await expect(page.getByText(/applied for this by mistake/i)).toContainText(/withdraw/i)
-
-  await page.getByRole('button', { name: /back without saving/i }).click()
-  await expect(marketCard.first()).toBeVisible()
-
-  await marketCard.getByRole('button', { name: /^withdraw your application for the/i }).click()
-  await expect(marketCard.getByRole('button', { name: /^apply for the/i })).toBeVisible()
-
-  /*
-   * And the money is genuinely back off, which is the assertion that matters
-   * now that applying spends immediately. A withdrawal that left the fee on the
-   * balance would hold the applicant's permit against a clearance they no
-   * longer have — the same defect as the old stranding, one screen further on.
-   */
-  const after = await assessed()
-  expect(after.assessed, 'withdrawing left the clearance on the assessment').toBe(before.assessed)
-  expect(after.balance, 'withdrawing left its fee on the balance due').toBe(before.balance)
-
-  // Said out loud, and it names the balance rather than a settled bill.
-  await expect(
-    page.getByRole('status').filter({ hasText: /withdrew your application/i }),
-  ).toContainText(/balance due/i)
+  await expect(cards).toHaveCount(5, { timeout: 30_000 })
+  await expect(page.getByRole('button', { name: /^withdraw your application for the/i })).toHaveCount(
+    0,
+  )
 })

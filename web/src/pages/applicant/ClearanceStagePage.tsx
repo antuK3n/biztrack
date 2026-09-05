@@ -113,135 +113,30 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  */
 
 /**
- * Who a clearance is for, where the answer is not "every business".
+ * Who a permit is for, where the answer is not "every business".
  *
- * Checklist item 98: *"Market clearance should not be required. It is only
- * required for stall holders."*
+ * EMPTY, and kept as the extension point rather than deleted. Its one entry was
+ * MARKET — "only if you trade from a stall in a public or private market" — and
+ * the Market Clearance was removed from the system on 6 September 2026, so
+ * every permit on this stage is now required of every applicant and none of
+ * them needs a note saying who it is addressed to.
  *
- * Taken literally, nothing required it, and that was checked before writing
- * anything. The step passes on `anyClearanceDecided` — ANY ONE of the six, and
- * never a named one — and no other path singles the Market Clearance out:
- * `ClearanceService::clearanceTypes` returns every non-BUSINESS permit type
- * with no per-code rule, submission validates none of them individually, and
- * the one MARKET-conditional question in the wizard (the stall count on the
- * Business & Tax Profile step) is gated on a permit-code list every call site
- * fills with BUSINESS alone, so it never fires. An applicant can reach Review &
- * Submit having never touched this card.
- *
- * So the complaint is about the screen, not the rule. Six cards laid out
- * identically, each with the same two buttons and the same fee sentence, read
- * as six obligations — and the Market Clearance is the one of the six that most
- * businesses genuinely have no business applying for. The card said nothing
- * about that, and its fee sentence ("Applying adds nothing to your assessment")
- * made it look like the cheap, harmless one to tick.
- *
- * The fix is to say who it is for, not to hide it. Hiding it would decide
- * `docs/questions-for-malabon.md` A1 — whether the applicant chooses the six or
- * BPLO determines them from the line of business and the location — by guessing
- * that the system determines them, and we would be guessing it from data we do
- * not collect: nothing in the wizard asks whether the premises is a market
- * stall. An LGU that seeds this permit type wants its office on the screen; a
- * greengrocer with a shopfront wants to know the card is not addressed to them.
- * One sentence on the card does both.
- *
- * Keyed by code and deliberately sparse. A clearance with no entry is one that
- * any business may need, which is the honest default and the same way an LGU's
- * seventh seeded clearance behaves — it renders, with no note, rather than
+ * Deliberately sparse when it does have entries: a permit with no entry is one
+ * any business may need, which is the honest default and the way an LGU's
+ * newly seeded permit behaves — it renders, with no note, rather than
  * inheriting a claim nobody made about it.
+ *
+ * Deleted along with it: `MARKET_CATEGORIES` and `marketClearanceApplies()`,
+ * which derived from the applicant's declared revenue-code category whether the
+ * card belonged on their screen. That derivation was tried and reversed before
+ * the permit itself went, and the reason is worth keeping even though the code
+ * is not: those categories name the operator who RUNS a market, not the trader
+ * who rents a stall inside it, so it showed the card to the landlord and hid it
+ * from the tenant — exactly inverted from the population it was meant for. If a
+ * conditional permit is ever added here, do not derive its audience from fee
+ * categories.
  */
-const APPLICABILITY: Record<string, string> = {
-  /*
-   * One line, down from three sentences. The second and third ("If your
-   * premises is not a market stall, leave this one — nothing in this
-   * application asks for it") were telling the applicant how to read the
-   * screen, which the screen now does for itself: the card is not on the grid
-   * unless the filing says it belongs there, so anyone reading this went
-   * looking for it and does not need talking out of it.
-   */
-  MARKET:
-    'Optional — only if you trade from a stall in a public or private market. Skip it if you do not.',
-}
-
-/**
- * The revenue-code categories that say, in the applicant's own declaration,
- * that this filing is about a market.
- *
- * Not a list invented for this screen: every one of them is a `conditions.
- * business_category` value on a seeded FeeRule whose `basis` is `stall_count`
- * — garbage Schedule J's public-market rows, the privately-owned market
- * bracket, and the fish broker market bracket. So the same declaration that
- * decides whether the applicant is charged per stall decides whether they are
- * shown the stall clearance. Two screens disagreeing about who is a market
- * business would be worse than either answer.
- *
- * `fish_broker_market` is here and was not in the original three. It belongs
- * for the same reason the other three do — `permit.fish_broker_market_by_stalls`
- * is priced per stall off the same basis — and leaving it out would hide the
- * card from an operator the fee engine is already billing by the stall.
- */
-export const MARKET_CATEGORIES = [
-  'public_market_100_plus_stalls',
-  'public_market_under_100_stalls',
-  'private_market',
-  'fish_broker_market',
-]
-
-/**
- * Whether the filing's own answers say the Market Clearance card belongs on
- * this applicant's screen — checklist item 98.
- *
- * *"Market clearance should not be required. It is only required for stall
- * holders."* An earlier pass answered that with a sentence on the card saying
- * who it was for, which was true and was not enough: the card was still one of
- * six laid out identically for every applicant in the city, and the great
- * majority of them have nothing to do with a public market. The client has
- * since asked for it to be derived rather than shown to everyone, and rather
- * than asked of everyone as a yes/no.
- *
- * NOT CURRENTLY CALLED, and that is pre-existing rather than part of the
- * payment-first reordering. The derivation was tried and reversed — every card
- * is on the grid again (see the note above `visibleRows`) — because these
- * categories name the operator who RUNS a market, not the trader who rents a
- * stall inside it, so it hid the card from exactly the people it exists for.
- * Kept, unused, because the reasoning below is the record of why a derived
- * checklist is the wrong instrument here, and it is the first thing anyone will
- * reach for again.
- *
- * The signal is at least available in time: the category and the stall count
- * are both declared on the wizard's Business & Tax Profile step, which now runs
- * a whole submission and a payment before this stage opens.
- *
- * ── The reason this reveals and never restricts ────────────────────────────
- *
- * These categories describe a market OPERATOR, not a market STALL HOLDER. A
- * fishmonger renting one stall inside the Malabon Central Market is not a
- * "privately-owned public market" and will not have declared themselves one;
- * the operator of that market is. So a pure derivation shows the card to the
- * landlord and hides it from the tenant — which is precisely inverted from the
- * population the client named.
- *
- * That is why this function only ever ADDS the card, and why the stage keeps a
- * plain control for revealing it by hand. A derivation that is wrong about a
- * minority and can be overridden in one click costs that minority one click. A
- * derivation that is wrong and cannot be overridden costs them the clearance.
- *
- * Whether "stall holder" is even the right population — whether the operator
- * needs it too, or instead — is a question for BPLO and the City Market
- * Administrator, not one to settle by choosing a filter. See
- * docs/questions-for-malabon.md A13.
- */
-export function marketClearanceApplies(
-  categories: readonly string[],
-  stallCount: number | string | null | undefined,
-): boolean {
-  if (categories.some((c) => MARKET_CATEGORIES.includes(c.trim()))) return true
-  // A stall count typed at all is a claim about stalls. Number('') is 0, not
-  // NaN, so the empty string falls through to false rather than to a truthy
-  // "they answered something".
-  const stalls = typeof stallCount === 'string' ? Number(stallCount.trim()) : stallCount
-  return typeof stalls === 'number' && Number.isFinite(stalls) && stalls > 0
-}
-
+const APPLICABILITY: Record<string, string> = {}
 /**
  * What this clearance costs. The number, and as little around it as possible.
  *
@@ -737,46 +632,22 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   const formMissing = formCode ? officeFormMissing(formCode, officeData[formCode] ?? {}) : []
 
   /*
-   * ITEM 98 — which cards this applicant actually sees.
+   * Every permit is on the grid, and every one of them is required.
    *
-   * Five of the six are for any business and are always here. The Market
-   * Clearance is not: it is for a stall in a public or private market, and
-   * showing it to the greengrocer with a shopfront is what made six cards read
-   * as six obligations in the first place.
+   * This has been answered three different ways and the history is the reason
+   * the binding is named rather than `rows` being inlined into the map. It was
+   * six cards for everyone; then five, with the Market Clearance derived from
+   * the applicant's declared revenue-code category; then six again, because
+   * that derivation showed the card to the market OPERATOR and hid it from the
+   * stall TENANT it was written for. It is five now, permanently: Market
+   * Clearance was removed from the system on 6 September 2026 and the remaining
+   * five are mandatory on every application
+   * (docs/application-flow-2026-09.md rule 1).
    *
-   * Three things put it back on screen, and the third is the one that must not
-   * be forgotten. A clearance ALREADY DECIDED stays visible whatever the
-   * derivation says — a reopened draft whose category was since edited, or
-   * whose reveal was clicked in a previous session, would otherwise lose a
-   * choice the applicant had already made, silently, with the fee still on the
-   * assessment. Hiding a decision is not the same as not offering it.
-   *
-   * `.filter` and not a separate render branch: the card, its buttons and its
-   * whole state machine are one definition, and a second copy for the one
-   * clearance that is conditional is how the two would drift apart.
-   */
-  /*
-   * Every clearance is on the grid, Market included.
-   *
-   * It was hidden unless the declared revenue-code category or a stall count
-   * implied market trade. Wrong instrument: the three categories it keyed on —
-   * public_market_100_plus_stalls, public_market_under_100_stalls,
-   * private_market — describe the operator who RUNS a market, not the trader
-   * who rents one stall inside it. So the people the card exists for were
-   * exactly the people it was hidden from, and they had no way to learn it
-   * existed. A clearance nobody can find is worse than one they can see and
-   * skip.
-   *
-   * Shown, labelled with who it is for (APPLICABILITY, tied to the buttons via
-   * aria-describedby so it is heard before either is pressed), and optional —
-   * which every card is: no single clearance is required by this stage.
-   *
-   * There is no `marketShown` and no reveal control. Both were removed with the
-   * derivation; `marketClearanceApplies` survives above, uncalled, as the
-   * record of why. Nothing filters this list, which is what `visibleRows = rows`
-   * says — kept as a named binding rather than inlining `rows` into the map,
-   * because "which rows the applicant sees" is a question this screen has
-   * answered three different ways and will be asked again.
+   * So nothing filters this list, which is what `visibleRows = rows` says. If a
+   * conditional permit is ever added, filter here rather than adding a second
+   * render branch — the card, its buttons and its whole state machine are one
+   * definition, and a second copy for the conditional one is how the two drift.
    */
   const visibleRows = rows
 

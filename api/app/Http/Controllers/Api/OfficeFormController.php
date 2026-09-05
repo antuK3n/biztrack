@@ -366,19 +366,10 @@ class OfficeFormController extends Controller
                 default => 'FSIC for Business Permit (New Business)',
             };
         }
-        if ($permitTypeCode === 'MARKET') {
-            /*
-             * The one derived answer on a sheet that is otherwise invented
-             * (checklist item 109 — the office has no paper form). Worth
-             * deriving precisely because it is invented: whether the stall
-             * holder is new to the market or renewing is the single question
-             * the office would certainly ask, and it is the single question the
-             * filing can already answer for itself.
-             */
-            $derived['application_type'] = $existingBusiness
-                ? 'Renewal of Market Clearance'
-                : 'New Market Clearance';
-        }
+        // The MARKET branch was here. Market Clearance and the CMO Market Office
+        // were removed from the system on 6 September 2026 — see the note in
+        // ReferenceSeeder where the department used to be seeded.
+        //
         // OCCUPANCY's own "application_type" is Full vs Partial occupancy — a
         // real applicant decision, not the new/renewal the system already knows.
 

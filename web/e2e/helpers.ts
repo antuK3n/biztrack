@@ -24,7 +24,6 @@ export const ACCOUNTS = {
   fire: 'fire@biztrack.local',
   obo: 'obo@biztrack.local',
   cenro: 'cenro@biztrack.local',
-  market: 'market@biztrack.local',
 } as const
 
 /**
@@ -46,7 +45,6 @@ export const OFFICES = [
   { account: 'zoning', code: 'CPDO', permit: 'ZONING', inspects: true },
   { account: 'obo', code: 'OBO', permit: 'OCCUPANCY', inspects: true },
   { account: 'cenro', code: 'CENRO', permit: 'CEC', inspects: true },
-  { account: 'market', code: 'CMO-MARKET', permit: 'MARKET', inspects: true },
 ] as const satisfies ReadonlyArray<{
   account: keyof typeof ACCOUNTS
   code: string
