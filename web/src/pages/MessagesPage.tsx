@@ -250,6 +250,42 @@ export function MessagesPage() {
     return sort === 'recent' ? ordered.reverse() : ordered
   }, [threads, query, sort])
 
+  /*
+   * One group per conversation subject, in the order the rows already have —
+   * newest activity first — so grouping never reorders the list, it only draws
+   * a line between the businesses in it. Keyed on the row key of the first
+   * member rather than on the name, because two businesses can share a name and
+   * a React key has to be unique.
+   */
+  const groups = useMemo(() => {
+    const out: {
+      key: string
+      heading: string
+      trackingId: string | null
+      rows: MessageThreadSummary[]
+    }[] = []
+
+    for (const row of visible) {
+      const key = row.kind === 'general' ? 'general' : `app-${row.application_id}`
+      const existing = out.find((g) => g.key === key)
+      if (existing) {
+        existing.rows.push(row)
+        continue
+      }
+      out.push({
+        key,
+        heading:
+          row.kind === 'general'
+            ? 'General enquiry'
+            : (row.business_name ?? row.tracking_id ?? 'Application'),
+        trackingId: row.kind === 'general' ? null : row.tracking_id,
+        rows: [row],
+      })
+    }
+
+    return out
+  }, [visible])
+
   function open(key: string) {
     setParams({ application: key })
   }
@@ -303,16 +339,39 @@ export function MessagesPage() {
           }
         />
       ) : (
-        <ul className="flex flex-col gap-4">
-          {visible.map((t) => (
-            <ThreadCard
-              key={rowKey(t)}
-              thread={t}
-              active={rowKey(t) === selectedKey}
-              onOpen={() => open(rowKey(t))}
-            />
+        /*
+         * Grouped by what the conversation is about, because an owner with two
+         * businesses reads down this list looking for a business first and an
+         * office second. The heading carries the business name AND the tracking
+         * number: two filings for one business are otherwise two identical
+         * headings, and the number is the only thing that separates them.
+         *
+         * An officer's list is grouped the same way — they are looking for a
+         * business too — and the general enquiry gets its own heading because
+         * it belongs to no business at all.
+         */
+        <div className="flex flex-col gap-6">
+          {groups.map((group) => (
+            <section key={group.key} aria-label={group.heading}>
+              <h2 className="mb-2 px-1 text-[13px] font-bold text-ink">
+                {group.heading}
+                {group.trackingId && (
+                  <span className="ml-2 font-semibold text-ink-muted">{group.trackingId}</span>
+                )}
+              </h2>
+              <ul className="flex flex-col gap-3">
+                {group.rows.map((t) => (
+                  <ThreadCard
+                    key={rowKey(t)}
+                    thread={t}
+                    active={rowKey(t) === selectedKey}
+                    onOpen={() => open(rowKey(t))}
+                  />
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   )

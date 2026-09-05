@@ -2,6 +2,7 @@
 
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
+use App\Models\Department;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 
@@ -162,15 +163,25 @@ it('names the offices an applicant may talk to on each inbox row', function () {
         ->firstWhere('application_id', $appId);
 
     /*
-     * Submitted but not paid, so WorkflowService has routed it to nobody and
-     * there are no assignments at all. BPLO is still there — that is the point
-     * of it always being addressable. An applicant whose filing has not been
-     * routed is exactly the applicant with a question and nobody to ask.
+     * This test used to assert exactly ['BPLO'], because an office had to hold
+     * an assignment before it could be written to and a submitted-but-unpaid
+     * filing is routed to nobody. The rule it encoded is no longer true: the
+     * client asked for the owner to choose from the offices the system has, so
+     * every configured office is offered and BPLO is one of them rather than
+     * the only one. See addressableOffices().
+     *
+     * The reasoning that made BPLO special still holds — an applicant whose
+     * filing has not been routed is exactly the applicant with a question — it
+     * simply no longer has to carry every other office's mail to get there.
      */
-    expect(collect($row['offices'])->pluck('code')->all())->toBe(['BPLO'])
-        ->and($row['offices'][0]['can_message'])->toBeTrue()
-        ->and($row['offices'][0]['thread_id'])->toBeNull()
-        ->and($row['offices'][0]['messages_count'])->toBe(0);
+    $codes = collect($row['offices'])->pluck('code');
+
+    expect($codes)->toContain('BPLO')->toContain('CHO')->toContain('BFP')
+        ->and($codes)->toHaveCount(Department::count())
+        ->and(collect($row['offices'])->every(fn ($o) => $o['can_message']))->toBeTrue()
+        // Offered, but nothing said yet: no thread exists until somebody writes.
+        ->and(collect($row['offices'])->every(fn ($o) => $o['thread_id'] === null))->toBeTrue()
+        ->and(collect($row['offices'])->sum('messages_count'))->toBe(0);
 });
 
 it('counts each office’s conversation separately on the inbox row', function () {
