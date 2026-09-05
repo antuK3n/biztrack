@@ -140,6 +140,48 @@ const CATEGORY_LABEL_BY_SLUG = new Map(CATEGORIES.map((c) => [c.slug, c.label]))
  * the reference list is non-ASCII, so this only ever affects free text, where
  * preserving what was typed matters more than looking like the seeded slugs.
  */
+/**
+ * The declared categories whose fees are priced PER STALL.
+ *
+ * Every one of them is a `conditions.business_category` value on a seeded
+ * FeeRule whose `basis` is `stall_count`: the mayor's-permit market and
+ * fish-broker-market brackets, and garbage Schedule J's two public-market rows
+ * and its private-market row. Five rules, all of them gated on the BUSINESS
+ * permit.
+ *
+ * ── Why this moved here on 6 September 2026 ────────────────────────────────
+ *
+ * The stall count used to be asked whenever the applicant had selected the
+ * MARKET permit type. That was always the wrong question and the removal of the
+ * Market Clearance made it an impossible one: these five rules price a business
+ * permit for someone who OPERATES a market, and operating a market is not the
+ * same as holding a Market Clearance for a stall — the clearance was for the
+ * tenant, these fees are for the landlord. Gating on the clearance meant a
+ * market operator who never touched that card was billed a flat business permit
+ * fee instead of one per stall, and a stall holder who did touch it was asked
+ * how many stalls they ran.
+ *
+ * Asking off the declared category fixes both, and ties the question to the
+ * only thing that actually consumes the answer. If no rule with
+ * `basis: stall_count` survives a future revenue-code revision, this list and
+ * the field it gates should go with them.
+ */
+export const STALL_PRICED_CATEGORIES = [
+  'public_market_100_plus_stalls',
+  'public_market_under_100_stalls',
+  'private_market',
+  'fish_broker_market',
+]
+
+/** Does any line of business declare a category that is priced per stall? */
+export function needsStallCount(
+  categories: Record<number, { category: string }>,
+): boolean {
+  return Object.values(categories).some((c) =>
+    STALL_PRICED_CATEGORIES.includes(normalizeCategory(c.category ?? '')),
+  )
+}
+
 export function normalizeCategory(text: string): string {
   return text
     .toLowerCase()
@@ -571,14 +613,20 @@ export function feeProfileIssues(
     }
   }
 
-  if (has('MARKET')) {
+  /*
+   * Asked off the declared category, not off a permit type — see
+   * STALL_PRICED_CATEGORIES. Required when it is asked at all, because a
+   * category that is priced per stall cannot be priced without the count: a
+   * blank would silently bill a market operator one flat business-permit fee.
+   */
+  if (needsStallCount(draft.categories)) {
     push(
       numericIssue({
         key: 'stall_count',
         label: 'Number of Stalls',
         value: draft.stall_count,
         required: true,
-        blankMessage: 'Enter how many stalls you are applying for.',
+        blankMessage: 'Enter how many stalls are in the market.',
         integer: true,
         positive: true,
         max: MAX_COUNT,
@@ -595,7 +643,7 @@ export function buildFeeProfile(
   draft: FeeProfileDraft,
   opts: {
     applicationType: ApplicationType
-    /** Selected permit-type codes (BUSINESS, OCCUPANCY, MARKET, …). */
+    /** Selected permit-type codes (BUSINESS, OCCUPANCY, ZONING, …). */
     permitCodes: string[]
     /** psic_code_id of each declared line of business, in order. */
     lineIds: number[]
@@ -655,7 +703,9 @@ export function buildFeeProfile(
             : { construction_cost: toNumber(draft.construction_cost) }),
         }
       : {}),
-    ...(has('MARKET') ? { stall_count: toInt(draft.stall_count) } : {}),
+    // Sent whenever the declared category is priced per stall, whatever permits
+    // the filing carries. See STALL_PRICED_CATEGORIES.
+    ...(needsStallCount(draft.categories) ? { stall_count: toInt(draft.stall_count) } : {}),
     flags,
   }
 }
@@ -862,7 +912,7 @@ export function FeeProfileStep({
   const isNew = applicationType === 'new'
   const hasBusiness = permitCodes.includes('BUSINESS')
   const hasOccupancy = permitCodes.includes('OCCUPANCY')
-  const hasMarket = permitCodes.includes('MARKET')
+  const showStallCount = needsStallCount(value.categories)
   /*
    * The structure carried over from Business Information, matched to its
    * label. Unrecognised values fall through to null and the question is asked
@@ -1397,8 +1447,16 @@ export function FeeProfileStep({
         </section>
       )}
 
-      {/* ── MARKET clearance ─────────────────────────────────────────────── */}
-      {hasMarket && (
+      {/*
+        ── Stalls, for a business that OPERATES a market ──────────────────────
+
+        Drawn off the declared Revenue Code category, not off a permit type.
+        This was gated on the MARKET permit until 6 September 2026, which asked
+        the stall TENANT how many stalls they ran and never asked the market
+        LANDLORD at all — and it is the landlord whose business permit and
+        garbage fee are priced per stall. See STALL_PRICED_CATEGORIES.
+      */}
+      {showStallCount && (
         <section>
           <SectionMarker letter={nextLetter()} label="Market Stall Details" />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">

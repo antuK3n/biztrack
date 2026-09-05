@@ -5348,11 +5348,12 @@ export function ApplyWizard() {
             */}
           <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
             <p className="text-xs text-ink-secondary">
-              <span className="font-semibold text-ink">Applying for the other clearances?</span> Fire,
-              Sanitary, Building/Occupancy, Environmental, Market and this Zoning clearance are not
-              part of this form. Submit this application and all six open together under{' '}
-              <span className="font-semibold text-ink">LGU Clearances</span>, where you apply only
-              for the ones you need and fill in each office’s sheet.
+              <span className="font-semibold text-ink">The other permits come later.</span> Fire,
+              Sanitary, Building/Occupancy, Environmental and this Zoning clearance are not part of
+              this form. Once BPLO approves your application and you have paid, all five open under{' '}
+              <span className="font-semibold text-ink">Other Permits</span> — you need every one of
+              them, and for each you either fill in that office’s sheet or hand in the permit you
+              already hold.
             </p>
           </div>
 

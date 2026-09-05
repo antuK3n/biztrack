@@ -40,35 +40,35 @@ class PermitType extends Model
      * arrived shortly after and the sheet was rebuilt against it (see the
      * header of OfficeFormStep.tsx and questions-for-malabon E4/C9).
      *
-     * MARKET joined last (checklist item 109) and joined differently: the
-     * client said outright that no paper version of it exists and asked for one
-     * to be created, so it is the one code on this list whose sheet nobody at
-     * the city has seen. Applying for the Market Clearance used to collect
-     * nothing at all, which is the worse end of that trade — the office got a
-     * request naming neither a market nor a stall. All six open a form now.
+     * MARKET was on this list and is gone [client, 2026-09-06]. It was the one
+     * sheet nobody at the city had ever seen — the client said outright that no
+     * paper version existed and asked for one to be invented — and it has now
+     * been confirmed with the LGU that neither the Market Clearance nor its
+     * office is needed. A business that genuinely needs one is asked by hand,
+     * through Other Requirements. Five open a form.
      */
-    public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY', 'MARKET'];
+    public const OFFICE_FORM_CODES = ['ZONING', 'SANITARY', 'CEC', 'FSIC', 'OCCUPANCY'];
 
     /**
-     * Display order for the six clearances, as the client's flow lays them out
-     * (docs/clearances-after-payment.md §"The shape"). Codes outside this list
-     * — an LGU that adds a permit type later — sort after it by id, so a new
-     * clearance appears at the end rather than silently vanishing from the
-     * step.
+     * Display order for the five other permits, as the client's flow lays them
+     * out (docs/application-flow-2026-09.md). Codes outside this list — an LGU
+     * that adds a permit type later — sort after it by id, so a new permit
+     * appears at the end rather than silently vanishing from the stage.
      */
-    public const CLEARANCE_ORDER = ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY', 'MARKET'];
+    public const CLEARANCE_ORDER = ['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY'];
 
     /**
      * The other permits every application must obtain before BPLO can approve
      * it (docs/application-flow-2026-09.md rule 1, verified with the client
      * against the counter procedure on 6 September 2026).
      *
-     * MARKET is deliberately absent. It is for stall owners in the public
-     * market, which most businesses are not, so requiring it would block every
-     * ordinary filing on a clearance the office would never issue. It stays
-     * available to opt into, and BPLO asks for it through Other Requirements
-     * when an owner needed one and did not know — a mechanism that does not
-     * exist yet and is out of scope.
+     * These are now ALL of the other permits — there is no optional one. Market
+     * Clearance was the exception and was removed from the system entirely on
+     * 6 September 2026, so "required" and "exists" describe the same set. Two
+     * consequences worth knowing before adding a permit type: an optional permit
+     * has nowhere to be expressed any more, and the one bill raised at
+     * submission can cover every permit precisely because none of them is a
+     * choice.
      *
      * This is the list `for_final_approval` is computed from. Adding a code
      * here makes it mandatory on every NEW filing; filings already in flight
@@ -98,7 +98,7 @@ class PermitType extends Model
         'per_line_surcharge' => 'decimal:2',
     ];
 
-    /** One of the six supporting clearances, rather than the permit applied for. */
+    /** One of the five other permits, rather than the permit applied for. */
     public function isClearance(): bool
     {
         return $this->code !== self::OUTCOME_CODE;

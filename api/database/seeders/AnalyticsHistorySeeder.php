@@ -195,16 +195,17 @@ class AnalyticsHistorySeeder extends Seeder
      */
     private const OFFICE_TURNAROUND_DAYS = [
         'BPLO' => 2.0, 'CHO' => 2.5, 'BFP' => 3.0, 'CPDO' => 2.2,
-        // The three offices that had almost no seeded history at all — see
+        // The offices that had almost no seeded history at all — see
         // CLEARANCE_ATTACH_RATES below. Targets are their own rather than
         // copies: OBO signs off a certificate of occupancy against a building
-        // record, which is the slowest desk read of the seven; CENRO checks an
-        // environmental questionnaire against the declared line; and a market
-        // clearance is a stall lookup, which is the quickest thing any of these
-        // offices does. Nothing here is measured from the live register —
-        // there was no history to measure — so they are ordered by how much
-        // paper each decision actually involves.
-        'OBO' => 2.8, 'CENRO' => 2.4, 'CMO-MARKET' => 1.8,
+        // record, which is the slowest desk read of the six; CENRO checks an
+        // environmental questionnaire against the declared line. Nothing here is
+        // measured from the live register — there was no history to measure — so
+        // they are ordered by how much paper each decision actually involves.
+        //
+        // CMO-MARKET was a third entry at 1.8 and went with the Market Clearance
+        // on 6 September 2026.
+        'OBO' => 2.8, 'CENRO' => 2.4,
     ];
 
     /** Shape of the lognormal review duration (generate.R's sdlog). */
@@ -226,7 +227,7 @@ class AnalyticsHistorySeeder extends Seeder
         // active officers per department, so these are not decoration: an office
         // carrying a hundred-odd reviews a year with nobody on its roll would
         // make that screen incoherent in the other direction.
-        'OBO' => 1, 'CENRO' => 1, 'CMO-MARKET' => 1,
+        'OBO' => 1, 'CENRO' => 1,
     ];
 
     /**
@@ -263,11 +264,10 @@ class AnalyticsHistorySeeder extends Seeder
      *    mostly does not, so the renewal rate is a fraction of the new one.
      *  - CEC (CENRO) is an annual environmental compliance certificate, so it
      *    recurs on renewal nearly as often as it appears on a new filing.
-     *  - MARKET is a stall clearance and applies to market-based businesses
-     *    only, which is why it is the lowest of the three on both counts. It is
-     *    still seeded high enough to chart, which is a deliberate trade: a
-     *    truthful market-stall share of a general business register would leave
-     *    the office un-chartable again and back in the footnote.
+     *  - MARKET had a row here at [0.44, 0.34], seeded higher than a truthful
+     *    market-stall share of a general business register would justify, so
+     *    that its office stayed chartable. It went with the Market Clearance on
+     *    6 September 2026.
      *
      * Amendments carry none of these. An amendment changes a detail on a permit
      * already issued and is routed to BPLO alone, which is the behaviour the
@@ -291,7 +291,6 @@ class AnalyticsHistorySeeder extends Seeder
     private const CLEARANCE_ATTACH_RATES = [
         'OCCUPANCY' => [0.62, 0.30],
         'CEC' => [0.52, 0.40],
-        'MARKET' => [0.44, 0.34],
         'ZONING' => [0.0, 0.34],
     ];
 
@@ -423,7 +422,6 @@ class AnalyticsHistorySeeder extends Seeder
         // The market visit had no entry because no seeded filing had ever been
         // routed to the Market Office. It has one now, and without this its
         // inspections would be the only ones on the register with a null type.
-        'CMO-MARKET' => 'market',
     ];
 
     /* ── officer activity ─────────────────────────────────────────────────── */
@@ -626,8 +624,8 @@ class AnalyticsHistorySeeder extends Seeder
          * `$app->applicant` — an APPLICANT approving an office's own assignment,
          * which is a plausible-looking history that is quietly wrong.
          */
-        $officeCodes = ['BPLO', 'CHO', 'BFP', 'CPDO', 'OBO', 'CENRO', 'CMO-MARKET'];
-        $permitCodes = ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET'];
+        $officeCodes = ['BPLO', 'CHO', 'BFP', 'CPDO', 'OBO', 'CENRO'];
+        $permitCodes = ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'];
 
         $this->departments = Department::whereIn('code', $officeCodes)
             ->get()->keyBy('code')->all();
@@ -764,7 +762,6 @@ class AnalyticsHistorySeeder extends Seeder
             'CPDO' => 'zoning_officer',
             'OBO' => 'obo_staff',
             'CENRO' => 'cenro_officer',
-            'CMO-MARKET' => 'market_admin',
         ];
         $names = [
             'BPLO' => [['Perlita', 'Sandoval'], ['Ignacio', 'Bermudez'], ['Sonia', 'Talusan']],
@@ -773,7 +770,6 @@ class AnalyticsHistorySeeder extends Seeder
             'CPDO' => [['Herminia', 'Alcantara']],
             'OBO' => [['Teodoro', 'Mangahas']],
             'CENRO' => [['Rosalinda', 'Buenaventura']],
-            'CMO-MARKET' => [['Efren', 'Salvacion']],
         ];
 
         foreach (self::REVIEWERS as $code => $headcount) {

@@ -359,7 +359,7 @@ export interface FeeLineItem {
   label: string
   amount: string | number
   code?: string
-  /** Collecting office: BPLO, CTO, CHO, CENRO, OBO, BFP, CMO-MARKET. */
+  /** Collecting office: BPLO, CTO, CPDO, CHO, CENRO, OBO, BFP. */
   office?: string
   group?: string
   /** Revenue-code citation, e.g. "Sec. 2A.01". */
