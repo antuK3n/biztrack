@@ -1772,7 +1772,21 @@ export interface MessageOffice {
 
 /** One conversation row in the Messages inbox (GET /message-threads). */
 export interface MessageThreadSummary {
-  application_id: number
+  /*
+   * Which of the two shapes this row is.
+   *
+   * 'general' is an enquiry with no filing behind it — the conversation a
+   * business owner can have with BPLO before they have applied for anything.
+   * Stated rather than inferred from a null application_id, so a reader
+   * branches on a fact instead of on a missing value that reads like a bug.
+   */
+  kind: 'application' | 'general'
+  /** Set on a general row only; null on a filing, whose threads are per office. */
+  thread_id: number | null
+  /** Whose enquiry it is — what an officer opens a general conversation by. */
+  user_id: number | null
+  /** Null on a general enquiry: there is no filing to point at. */
+  application_id: number | null
   tracking_id: string | null
   business_name: string | null
   status: string | null

@@ -521,6 +521,34 @@ export const messages = {
       }),
     )
   },
+  /*
+   * The enquiry that has no filing behind it — always BPLO.
+   *
+   * No id in the path means "mine", which is what an applicant sends: someone
+   * who has registered no business has no tracking id to put in a URL. An
+   * officer passes the person's id; the office check is on the server, so the
+   * two-argument form is not a way in for anybody else.
+   */
+  generalWithMeta: async (
+    userId?: number | null,
+  ): Promise<{ data: Message[]; meta: MessageTranscriptMeta }> => {
+    const res = await api.get<{ data: Message[]; meta: MessageTranscriptMeta }>(
+      userId ? `/general-messages/${userId}` : '/general-messages',
+    )
+    return { data: res.data.data, meta: res.data.meta }
+  },
+  sendGeneral: (body: string, attachment?: File | null, userId?: number | null) => {
+    const url = userId ? `/general-messages/${userId}` : '/general-messages'
+    if (attachment) {
+      const form = new FormData()
+      form.append('body', body)
+      form.append('attachment', attachment)
+      return unwrap<Message>(
+        api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+      )
+    }
+    return unwrap<Message>(api.post(url, { body }))
+  },
   /** Attachment save-to-disk (the resource's download_url carries no bearer). */
   attachmentDownload: (id: number, filename: string) =>
     downloadBlob(`/message-attachments/${id}/download`, filename),

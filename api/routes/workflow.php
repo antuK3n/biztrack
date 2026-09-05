@@ -113,6 +113,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('message-threads', [MessageController::class, 'threads']);
         Route::get('applications/{application}/messages', [MessageController::class, 'index']);
         Route::post('applications/{application}/messages', [MessageController::class, 'store']);
+        /*
+         * A question with no filing behind it, addressed to BPLO.
+         *
+         * No `{user}` means "mine", which is what an applicant always sends —
+         * someone who has registered no business has no application id to put
+         * in a path, and telling them to "contact the City BPLO" while giving
+         * them no way to do it is what this fixes. BPLO names the person whose
+         * enquiry it is opening; the office check is in the controller, so the
+         * two-segment form is not a way in for anybody else.
+         */
+        Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
+        Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
         Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
     });
 
