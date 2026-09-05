@@ -39,10 +39,10 @@ function filingOutsideOffice(string $officerEmail): Application
 }
 
 it('will not let an office adjust the fee on another office’s filing', function () {
-    grantPermission('market_admin', 'fee.adjust');
-    $application = filingOutsideOffice('market@biztrack.local');
+    grantPermission('cenro_officer', 'fee.adjust');
+    $application = filingOutsideOffice('cenro@biztrack.local');
 
-    test()->withHeaders(authAs('market@biztrack.local'))
+    test()->withHeaders(authAs('cenro@biztrack.local'))
         ->postJson("/api/v1/applications/{$application->id}/fee/adjust", [
             'line_items' => [['label' => 'Revised assessment', 'amount' => 1]],
             'total_amount' => 1,
@@ -51,10 +51,10 @@ it('will not let an office adjust the fee on another office’s filing', functio
 });
 
 it('will not let an office end another office’s filing', function () {
-    grantPermission('market_admin', 'application.reject');
-    $application = filingOutsideOffice('market@biztrack.local');
+    grantPermission('cenro_officer', 'application.reject');
+    $application = filingOutsideOffice('cenro@biztrack.local');
 
-    test()->withHeaders(authAs('market@biztrack.local'))
+    test()->withHeaders(authAs('cenro@biztrack.local'))
         ->postJson("/api/v1/applications/{$application->id}/reject", ['reason' => 'Not my filing.'])
         ->assertForbidden();
 
@@ -62,13 +62,13 @@ it('will not let an office end another office’s filing', function () {
 });
 
 it('will not let an OIC reshuffle another office’s queue', function () {
-    grantPermission('market_admin', 'oic.assign');
+    grantPermission('cenro_officer', 'oic.assign');
 
-    $market = User::where('email', 'market@biztrack.local')->firstOrFail();
-    $otherAssignment = ApplicationAssignment::where('department_id', '!=', $market->department_id)->firstOrFail();
+    $cenro = User::where('email', 'cenro@biztrack.local')->firstOrFail();
+    $otherAssignment = ApplicationAssignment::where('department_id', '!=', $cenro->department_id)->firstOrFail();
     $someOfficer = User::where('department_id', $otherAssignment->department_id)->firstOrFail();
 
-    test()->withHeaders(authAs('market@biztrack.local'))
+    test()->withHeaders(authAs('cenro@biztrack.local'))
         ->postJson("/api/v1/assignments/{$otherAssignment->id}/assign", [
             'officer_user_id' => $someOfficer->id,
         ])

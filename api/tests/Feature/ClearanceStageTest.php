@@ -161,7 +161,7 @@ it('lists the six clearances and never the permit the application is for', funct
     $codes = collect($rows)->pluck('permit_type.code');
 
     expect($codes)->toHaveCount(6)
-        ->and($codes->all())->toBe(['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY', 'MARKET'])
+        ->and($codes->all())->toBe(['ZONING', 'SANITARY', 'FSIC', 'CEC', 'OCCUPANCY'])
         // The mayor's permit is the outcome of the application, not a clearance
         // to pick, so it is not on the chooser at all.
         ->and($codes)->not->toContain(PermitType::OUTCOME_CODE);
@@ -976,7 +976,6 @@ function passEveryScheduledInspection(Application $app): void
         'CPDO' => 'zoning@biztrack.local',
         'OBO' => 'obo@biztrack.local',
         'CENRO' => 'cenro@biztrack.local',
-        'CMO-MARKET' => 'market@biztrack.local',
     ];
 
     $inspections = $app->inspections()->with('department')->get();

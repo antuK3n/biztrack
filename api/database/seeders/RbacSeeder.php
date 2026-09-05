@@ -17,7 +17,7 @@ class RbacSeeder extends Seeder
         // Actor mapping (paper: Business Owner / Office Admins / Super Admin):
         //   Business Owner -> business_owner
         //   Office Admins  -> bplo_staff, sanitary_officer, fire_inspector,
-        //                     zoning_officer, obo_staff, cenro_officer, market_admin
+        //                     zoning_officer, obo_staff, cenro_officer
         //   Super Admin    -> admin
         // The granular roles refine the paper's "Office Admin" per office queue.
         /*

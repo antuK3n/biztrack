@@ -87,7 +87,6 @@ it('keeps a filing out of the list of every office it was not routed to', functi
     'fire@biztrack.local',
     'obo@biztrack.local',
     'cenro@biztrack.local',
-    'market@biztrack.local',
     'zoning@biztrack.local',
 ]);
 
@@ -238,7 +237,7 @@ it('refuses an outside office closing another office’s request', function () {
             'request_type' => 'document', 'title' => 'Water potability result',
         ])->assertCreated()->json('data.id');
 
-    test()->withHeaders(authAs('market@biztrack.local'))
+    test()->withHeaders(authAs('cenro@biztrack.local'))
         ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'fulfilled'])
         ->assertForbidden();
 
@@ -326,7 +325,7 @@ it('does not turn a business the officer may not see into a 500', function () {
         );
     }
 
-    test()->withHeaders(authAs('market@biztrack.local'))
+    test()->withHeaders(authAs('cenro@biztrack.local'))
         ->getJson("/api/v1/businesses/{$orphanBusiness->id}")
         ->assertForbidden();
 });

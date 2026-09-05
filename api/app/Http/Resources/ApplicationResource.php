@@ -87,22 +87,83 @@ class ApplicationResource extends JsonResource
              * — or a shop owner think they were not.
              */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(fn ($pt) => [
-                    'id' => $pt->id,
-                    'code' => $pt->code,
-                    'name' => $pt->name,
-                    'requires_inspection' => (bool) $pt->requires_inspection,
-                    'is_required' => $pt->isRequiredClearance(),
-                    'status' => $pt->pivot?->status?->value,
-                    'status_label' => $pt->pivot?->status?->label(),
-                    'mode' => $pt->pivot?->mode,
-                    'remarks' => $pt->pivot?->remarks,
-                    'rejection_reason' => $pt->pivot?->rejection_reason,
-                    'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
-                ])->values()
+                ? $this->permitTypes->map(function ($pt) use ($request) {
+                    /*
+                     * SEP-5. Progress is shared across the filing; the words an
+                     * office wrote are not.
+                     *
+                     * The same split `readsInspectionDetail` settled for site
+                     * visits (INS-8), and it is drawn here for the same reason.
+                     * Every office on the filing has a genuine need to know
+                     * that the fire permit exists, that it reached inspection
+                     * and that it passed — BPLO's final approval is gated on
+                     * all five being approved, so an office cannot tell whether
+                     * the filing is moving without seeing the others' state.
+                     * Withholding status would replace a privacy defect with a
+                     * coordination one.
+                     *
+                     * `remarks` and `rejection_reason` are the other thing
+                     * entirely: free prose one office wrote about someone
+                     * else's premises. The client's instruction is exact — "the
+                     * City Health Office admin must NOT see any application
+                     * fields regarding Fire Safety Inspection Certificate
+                     * application" — and this is where that lands on a payload
+                     * every office reads.
+                     *
+                     * `mode` stays shared: apply-or-upload is the shape of the
+                     * evidence, not its content, and BPLO's coordination view
+                     * would be incoherent without it.
+                     */
+                    $readsWords = ApplicationVisibility::readsOfficeSheet(
+                        $request->user(),
+                        $pt->issuing_department_id,
+                    );
+
+                    return [
+                        'id' => $pt->id,
+                        'code' => $pt->code,
+                        'name' => $pt->name,
+                        'requires_inspection' => (bool) $pt->requires_inspection,
+                        'is_required' => $pt->isRequiredClearance(),
+                        'status' => $pt->pivot?->status?->value,
+                        'status_label' => $pt->pivot?->status?->label(),
+                        'mode' => $pt->pivot?->mode,
+                        'remarks' => $readsWords ? $pt->pivot?->remarks : null,
+                        'rejection_reason' => $readsWords ? $pt->pivot?->rejection_reason : null,
+                        'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
+                    ];
+                })->values()
                 : [],
+            /*
+             * SEP-8. A shared requirement is everyone's; a permit copy is one
+             * office's.
+             *
+             * Most attachments carry no `permit_type_id` and are exactly what
+             * `readsOfficeSheet` calls the applicant's own particulars — the
+             * barangay clearance, the lease, the valid ID. Every office on the
+             * filing needs those, and this filter must never touch them.
+             *
+             * The ones that DO carry a permit type are the copies an applicant
+             * hands in instead of applying (HeldPermits). Under this flow that
+             * is half the process — for each of the five permits the applicant
+             * either fills the office's form or uploads the permit they already
+             * hold — so a held Fire Safety Inspection Certificate is BFP's
+             * evidence as squarely as the FSIC questionnaire is, and the
+             * sanitary officer has no more business reading one than the other.
+             *
+             * Documents were scoped at the FILING level and no finer, which was
+             * right while every attachment really was shared. It stopped being
+             * enough the moment half the evidence on a filing became
+             * office-specific.
+             */
             'documents' => $this->relationLoaded('documents')
-                ? DocumentResource::collection($this->documents)
+                ? DocumentResource::collection(
+                    $this->documents->filter(fn ($doc) => $doc->permit_type_id === null
+                        || ApplicationVisibility::readsOfficeSheet(
+                            $request->user(),
+                            $doc->permitType?->issuing_department_id,
+                        ))->values()
+                )
                 : [],
             'fee_profile' => $this->fee_profile,
             /*
@@ -160,8 +221,31 @@ class ApplicationResource extends JsonResource
             'inspections' => $this->relationLoaded('inspections')
                 ? InspectionResource::collection($this->inspections)
                 : [],
+            /*
+             * SEP-6, and the fourth time this exact door has been left open.
+             *
+             * `ApplicationVisibility::readsPermitOf` exists precisely so that a
+             * sanitary account cannot read a BFP-issued certificate, and it was
+             * wired into `PermitController` alone. The officer's review sheet
+             * does not call that controller — it reads permits out of
+             * `GET /assignments/{id}` and `GET /applications/{id}`, both of
+             * which resolve this resource, which had no filter. Same user, same
+             * certificate, two endpoints, two answers: 403 on
+             * `/permits/{id}`, and the whole certificate here.
+             *
+             * That is the identical shape as the office-form leak (SEP-1), the
+             * permit-list leak the predicate was written for, and the
+             * inspection leak (INS-8). Filtering, rather than 403-ing the whole
+             * filing, because every office on it is legitimately reading the
+             * filing — it is one embedded collection that is not theirs.
+             */
             'permits' => $this->relationLoaded('permits')
-                ? PermitResource::collection($this->permits)
+                ? PermitResource::collection(
+                    $this->permits->filter(fn ($permit) => ApplicationVisibility::readsPermitOf(
+                        $request->user(),
+                        $permit->permitType?->issuing_department_id,
+                    ))->values()
+                )
                 : [],
             /*
              * What actually happened to this filing, oldest first (the relation

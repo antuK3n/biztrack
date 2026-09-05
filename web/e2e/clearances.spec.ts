@@ -328,8 +328,6 @@ test('before the first payment the stage is visible but locked, in the API’s o
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(5)
   await expect(cards.filter({ hasText: /market/i })).toHaveCount(0)
-  await expect(market).toContainText(/optional/i)
-  await expect(market).toContainText(/stall in a public or private market/i)
 
   /*
    * The reason is the server's sentence, shown verbatim. There is no heading

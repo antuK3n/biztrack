@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\DocumentType;
+use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -65,15 +66,15 @@ it('lets an office that holds an assignment on the filing download it', function
 it('refuses an office the filing never reached', function () {
     ['application' => $app, 'document' => $doc] = scopedDocument();
 
-    $market = Department::where('code', 'CMO-MARKET')->firstOrFail();
+    $cenro = Department::where('code', 'CENRO')->firstOrFail();
     expect(
         ApplicationAssignment::where('application_id', $app->id)
-            ->where('department_id', $market->id)
+            ->where('department_id', $cenro->id)
             ->exists()
     )->toBeFalse();
 
     // A real reviewer with a real session, guessing at a document id.
-    authAs('market@biztrack.local');
+    authAs('cenro@biztrack.local');
     $this->get("/api/v1/documents/{$doc['id']}/download")
         // 403, not a 500 and not a stream: the reader exists, the answer is no.
         ->assertStatus(403);
@@ -100,7 +101,7 @@ it('refuses a reviewer with no department at all', function () {
     ['document' => $doc] = scopedDocument();
 
     // Strip the office off a scoped reviewer: the boundary has to fail closed.
-    \App\Models\User::where('email', 'sanitary@biztrack.local')->update(['department_id' => null]);
+    User::where('email', 'sanitary@biztrack.local')->update(['department_id' => null]);
 
     authAs('sanitary@biztrack.local');
     $this->get("/api/v1/documents/{$doc['id']}/download")->assertStatus(403);
