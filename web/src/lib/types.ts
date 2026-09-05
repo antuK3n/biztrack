@@ -1711,6 +1711,12 @@ export interface AdminRole {
   description: string | null
   /** False for the super admin, who works across every office and belongs to none. */
   wants_department: boolean
+  /*
+   * Whether this role can still be handed out. False only for the super admin
+   * once the single seat is taken — every office role stays available however
+   * many accounts already hold it, because offices are meant to have several.
+   */
+  available: boolean
 }
 
 export interface AdminUserPayload {
