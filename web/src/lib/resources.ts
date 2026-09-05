@@ -959,6 +959,25 @@ export const admin = {
   },
 }
 
+/* ── Unread badges ────────────────────────────────────────────────────── */
+
+export interface UnreadSummary {
+  messages: number
+  notifications: number
+}
+
+/**
+ * What is waiting for the signed-in user, for the two nav badges.
+ *
+ * One call for both numbers: the nav draws them together on every screen, and
+ * two polls would be two round trips on each one. Counts are scoped on the
+ * server exactly like the conversations themselves — a badge that counted mail
+ * the reader may not open would leak its existence as a number.
+ */
+export const unread = {
+  summary: () => unwrap<UnreadSummary>(api.get('/unread-summary')),
+}
+
 /* ── Profile photo ────────────────────────────────────────────────────── */
 
 /*

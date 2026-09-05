@@ -845,6 +845,8 @@ class MessageController extends Controller
         }
 
         $threadIds = $threads->pluck('id')->all();
+        // Opening a conversation is reading it — there is no separate gesture.
+        $this->markThreadsRead($threadIds, $user);
         $total = Message::whereIn('thread_id', $threadIds)->count();
         $messages = Message::query()
             ->whereIn('thread_id', $threadIds)
@@ -971,6 +973,95 @@ class MessageController extends Controller
         ], 201);
     }
 
+    // --- unread counts for the nav badge -------------------------------------
+
+    /**
+     * Restrict a `messages` query to the conversations this reader may open.
+     *
+     * scopeMessagesToReader answers the office half and deliberately returns
+     * early for an applicant, because everywhere else it is called the filing
+     * has already been established as theirs. Here nothing has: this counts
+     * across the whole table, so the applicant's own half has to be spelled out
+     * or the badge would count the city's mail.
+     */
+    private function scopeUnreadToReader($query, User $user): void
+    {
+        if ($user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
+            // -1 for a seat with no office: matches nothing, rather than
+            // matching threads with a null department.
+            $deptId = $user->department_id ?? -1;
+
+            $query->whereExists(fn ($sub) => $sub->selectRaw('1')
+                ->from('message_threads as ut')
+                ->whereColumn('ut.id', 'messages.thread_id')
+                ->where('ut.department_id', $deptId));
+
+            return;
+        }
+
+        $query->whereExists(fn ($sub) => $sub->selectRaw('1')
+            ->from('message_threads as ut')
+            ->whereColumn('ut.id', 'messages.thread_id')
+            ->where(function ($w) use ($user) {
+                // Their own enquiry, or a conversation on a filing of theirs.
+                $w->where('ut.user_id', $user->id)
+                    ->orWhereExists(fn ($app) => $app->selectRaw('1')
+                        ->from('applications')
+                        ->whereColumn('applications.id', 'ut.application_id')
+                        ->where('applications.applicant_user_id', $user->id));
+            }));
+    }
+
+    /**
+     * How many messages are waiting, and how many notifications.
+     *
+     * One call, because the nav draws both badges at once and two polls for two
+     * numbers is two round trips on every screen.
+     *
+     * "Unread" is a message somebody ELSE sent that this reader has not opened.
+     * Your own turn is never unread to you, which is why the sender is excluded
+     * rather than the count being taken from the thread.
+     */
+    public function unreadSummary(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $messages = Message::query()
+            ->whereNull('messages.read_at')
+            ->where('messages.sender_user_id', '!=', $user->id)
+            ->tap(fn ($q) => $this->scopeUnreadToReader($q, $user))
+            ->count();
+
+        return response()->json([
+            'data' => [
+                'messages' => $messages,
+                'notifications' => $user->notifications()->whereNull('read_at')->count(),
+            ],
+        ]);
+    }
+
+    /**
+     * Mark everything the reader just saw as read.
+     *
+     * Called from the two transcript endpoints, because opening a conversation
+     * IS reading it — there is no separate "mark read" gesture in the UI and a
+     * badge that only ever counts up is worse than no badge.
+     *
+     * Only the other side's turns: marking your own read is meaningless, and
+     * doing it would hide the fact that the office has not opened yours.
+     */
+    private function markThreadsRead(array $threadIds, User $user): void
+    {
+        if ($threadIds === []) {
+            return;
+        }
+
+        Message::whereIn('thread_id', $threadIds)
+            ->whereNull('read_at')
+            ->where('sender_user_id', '!=', $user->id)
+            ->update(['read_at' => now()]);
+    }
+
     // --- general enquiries: a question with no filing behind it --------------
 
     /**
@@ -1034,6 +1125,7 @@ class MessageController extends Controller
         $thread = $this->generalThreadFor($this->generalOwner($request, $user));
         $this->authorizeGeneralParticipant($reader, $thread);
 
+        $this->markThreadsRead([$thread->id], $reader);
         $total = Message::where('thread_id', $thread->id)->count();
         $messages = Message::query()
             ->where('thread_id', $thread->id)

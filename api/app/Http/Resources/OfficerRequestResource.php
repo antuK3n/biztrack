@@ -23,6 +23,19 @@ class OfficerRequestResource extends JsonResource
             'body' => $this->description,
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
+            /*
+             * The office's reason, and whether the applicant can still act.
+             *
+             * `remarks` was stored on the model and never returned, so a
+             * requirement sent back said only that it had been — the applicant
+             * saw "Rejected" and no explanation anywhere in the app. Without
+             * `accepts_response` the client has to re-derive the lifecycle from
+             * the status string, which is how a Resubmit button ends up offered
+             * on a requirement the API will refuse.
+             */
+            'remarks' => $this->remarks,
+            'accepts_response' => (bool) $this->status?->acceptsResponse(),
+            'reviewed_at' => optional($this->reviewed_at)->toISOString(),
             'due_date' => optional($this->due_date)->toISOString(),
             'created_by' => $creator ? [
                 'name' => $creator->name,

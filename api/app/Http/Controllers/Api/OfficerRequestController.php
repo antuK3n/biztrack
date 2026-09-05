@@ -185,8 +185,18 @@ class OfficerRequestController extends Controller
             403,
             'This request is not yours to respond to.'
         );
-        // Only a closed request stops accepting replies; pending and submitted both do.
-        if (in_array($officerRequest->status, [OfficerRequestStatus::Fulfilled, OfficerRequestStatus::Rejected], true)) {
+        /*
+         * Only a CLOSED requirement stops accepting replies.
+         *
+         * Pending and Submitted always did. NeedsResubmission now does too, and
+         * that is the point of the state: an office that asked for a clearer
+         * copy has to be able to receive one. Before this, rejecting made the
+         * requirement permanently unanswerable, so the resubmission the office
+         * had just asked for was refused by the same endpoint.
+         *
+         * The rule lives on the enum so this check and the UI cannot drift.
+         */
+        if (! $officerRequest->status?->acceptsResponse()) {
             throw ValidationException::withMessages(['status' => ['This request is closed, so you can no longer respond to it.']]);
         }
 
@@ -304,17 +314,40 @@ class OfficerRequestController extends Controller
         }
 
         $data = $request->validate([
-            'outcome' => ['required', 'in:fulfilled,rejected'],
+            'outcome' => ['required', 'in:fulfilled,needs_resubmission,rejected'],
+            /*
+             * A remark is required for anything but acceptance.
+             *
+             * The column existed and nothing ever wrote to it, so an applicant
+             * whose document was turned down saw the status change and no
+             * reason anywhere — the one thing they need in order to act. Saying
+             * "Needs Resubmission" without saying what was wrong just moves the
+             * question to a phone call.
+             *
+             * Accepting needs no words: the outcome is the whole message.
+             */
+            'remarks' => ['required_unless:outcome,fulfilled', 'nullable', 'string', 'max:2000'],
+        ], [
+            'remarks.required_unless' => 'Say what was wrong, so the applicant knows what to fix.',
         ]);
 
         $officerRequest->update([
             'status' => OfficerRequestStatus::from($data['outcome']),
             'reviewed_by_user_id' => $request->user()->id,
             'reviewed_at' => now(),
+            // Kept on acceptance too when one was given, and cleared when it
+            // was not: a stale remark from an earlier rejection sitting under
+            // an approved requirement reads as a fresh complaint.
+            'remarks' => $data['remarks'] ?? null,
         ]);
-        Audit::log('request.closed', $officerRequest, ['outcome' => $data['outcome']]);
+        Audit::log('request.closed', $officerRequest, [
+            'outcome' => $data['outcome'],
+        ]);
 
         if ($officerRequest->application->applicant) {
+            // Same ping either way — the applicant needs to know the office has
+            // ruled, and "needs resubmission" is the outcome they most need to
+            // hear because it is the one that asks something of them.
             $this->notify->requestClosed($officerRequest->fresh()->load('application'), $officerRequest->application->applicant);
         }
 
