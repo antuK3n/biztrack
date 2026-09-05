@@ -133,9 +133,19 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
-    // Fee adjustment (officer: fee.adjust)
-    Route::middleware('permission:fee.adjust')
-        ->post('applications/{application}/fee/adjust', [PaymentController::class, 'adjustFee']);
+    /*
+     * Fee adjustment is GONE [client, 2026-09-06]: the fee is system-computed
+     * and BPLO cannot change it.
+     *
+     * It comes from the revenue-code rules in FeeCalculator, is assessed once at
+     * submission, and is the figure the applicant has been looking at ever since
+     * — so there is no moment at which moving it would not move a number
+     * somebody had already decided to pay. The `fee.adjust` permission is left
+     * in RbacSeeder rather than dropped, because revoking a permission is a
+     * migration on live role rows and nothing now grants a route with it; if
+     * BPLO turns out to need this, the route comes back rather than the
+     * permission being reinvented.
+     */
 
     // Officer queues + review (application.review)
     Route::middleware('permission:application.review')->group(function () {
@@ -182,6 +192,20 @@ Route::middleware('auth:sanctum')->group(function () {
          * inspection until somebody conducts the new visit.
          */
         Route::post('inspections/{inspection}/reinspect', [InspectionController::class, 'reinspect']);
+
+        /*
+         * The office books its FIRST visit on one permit and picks the date.
+         *
+         * Addressed by permit code rather than inspection id because no
+         * inspection exists yet — this is what creates one. Same permission as
+         * the rest of the group: it is the same act by the same people, and the
+         * office boundary is enforced in the controller against the permit's
+         * issuing department.
+         */
+        Route::post(
+            'applications/{application}/permits/{code}/inspection',
+            [InspectionController::class, 'schedule'],
+        );
     });
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)

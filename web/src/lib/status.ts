@@ -11,7 +11,7 @@ import {
   UploadIcon,
   XCircleIcon,
 } from '../components/icons'
-import type { ApplicationStatus } from './types'
+import type { ApplicationStatus, ClearanceStatus } from './types'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 
@@ -68,15 +68,47 @@ interface StatusMeta {
  */
 const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
   draft: { label: 'Draft', tone: 'neutral', icon: DraftsIcon },
-  submitted: { label: 'Submitted', tone: 'progress', icon: UploadIcon },
-  under_review: { label: 'For Approval', tone: 'attention', icon: ClockIcon },
+  for_approval: { label: 'For Approval', tone: 'attention', icon: ClockIcon },
   returned: { label: 'Returned', tone: 'attention', icon: InfoCircleIcon },
   pending_payment: { label: 'Pending Payment', tone: 'attention', icon: PaymentsIcon },
-  for_inspection: { label: 'For Inspection', tone: 'scheduled', icon: SearchIcon },
+  awaiting_other_permits: { label: 'Awaiting Other Permits', tone: 'progress', icon: UploadIcon },
+  for_final_approval: { label: 'For Final Approval', tone: 'attention', icon: ClockIcon },
   approved: { label: 'Approved', tone: 'success', icon: CheckCircleIcon },
   issued: { label: 'Permit Issued', tone: 'success', icon: ShieldCheckIcon },
   rejected: { label: 'Rejected', tone: 'danger', icon: XCircleIcon },
   cancelled: { label: 'Cancelled', tone: 'neutral', icon: XCircleIcon },
+}
+
+/**
+ * MIRROR OF `App\Enums\ClearanceStatus::label()`, under the same rule as above.
+ *
+ * `for_inspection` keeps the yellow `scheduled` band it had when it was an
+ * application status — it is the same fact about the same premises, just now
+ * attached to one permit rather than to the whole filing, and an officer who
+ * learned that colour should not have to relearn it.
+ *
+ * `available` has no PHP counterpart and is not in the parity test's scope: the
+ * API emits it for an optional permit with no pivot row, where there is no
+ * status to label.
+ */
+const CLEARANCE_STATUS: Record<ClearanceStatus, StatusMeta> = {
+  not_started: { label: 'Not Started', tone: 'neutral', icon: DotIcon },
+  for_approval: { label: 'For Approval', tone: 'attention', icon: ClockIcon },
+  for_inspection: { label: 'For Inspection', tone: 'scheduled', icon: SearchIcon },
+  approved: { label: 'Approved', tone: 'success', icon: CheckCircleIcon },
+  rejected: { label: 'Rejected', tone: 'danger', icon: XCircleIcon },
+  returned: { label: 'Returned', tone: 'attention', icon: InfoCircleIcon },
+  available: { label: 'Available', tone: 'neutral', icon: DotIcon },
+}
+
+export function clearanceStatusMeta(status: string): StatusMeta {
+  return (
+    CLEARANCE_STATUS[status as ClearanceStatus] ?? {
+      label: status,
+      tone: 'neutral',
+      icon: DotIcon,
+    }
+  )
 }
 
 export function applicationStatusMeta(status: string, fallbackLabel?: string): StatusMeta {
@@ -92,11 +124,12 @@ export function applicationStatusMeta(status: string, fallbackLabel?: string): S
 /** The applicant-facing "what happens next" line for a status. */
 export const NEXT_ACTION: Partial<Record<ApplicationStatus, string>> = {
   draft: 'Finish and submit your application when you are ready.',
-  submitted: 'The office has received it and will begin review shortly.',
-  under_review: 'Officers are reviewing your documents. No action needed yet.',
-  returned: 'An office asked for changes. Review the remarks, then resubmit.',
+  for_approval: 'BPLO is reading your form. No action needed yet.',
+  returned: 'BPLO asked for changes. Review the remarks, then resubmit.',
   pending_payment: 'Your fees are assessed. Pay to continue processing.',
-  for_inspection: 'An inspection is scheduled. Please prepare the premises.',
+  awaiting_other_permits:
+    'Apply for your other permits, or hand in copies of the ones you already hold. Each is approved and released on its own.',
+  for_final_approval: 'Every other permit is in. BPLO is approving the application.',
   approved: 'Everything checks out. Your permit is being issued.',
   issued: 'Your permit is ready. Download it from your permit vault.',
   rejected: 'This application was rejected. See the reason below.',

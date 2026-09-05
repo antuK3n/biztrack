@@ -732,7 +732,19 @@ class AnalyticsController extends Controller
     /** Mean days from `submitted` to `approved` per application, from status history. */
     private function avgProcessingDays(): ?float
     {
-        $submitted = ApplicationStatusHistory::where('to_status', ApplicationStatus::Submitted->value)
+        /*
+         * `for_approval` is where a submitted filing lands now, and `submitted`
+         * is what it landed in before 6 September 2026. Both are matched
+         * because this reads HISTORY: the older rows keep the name the system
+         * gave them at the time, so looking only for the current name would
+         * silently drop every filing made before the change out of the
+         * processing-time average — and an average over a shrinking window
+         * looks like an improvement.
+         */
+        $submitted = ApplicationStatusHistory::whereIn('to_status', [
+            ApplicationStatus::ForApproval->value,
+            'submitted',
+        ])
             ->select('application_id', DB::raw('min(created_at) as t'))
             ->groupBy('application_id')->pluck('t', 'application_id');
 

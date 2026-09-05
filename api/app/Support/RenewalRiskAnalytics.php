@@ -881,10 +881,21 @@ final class RenewalRiskAnalytics
             ApplicationStatus::Rejected->value => 'rejected',
             ApplicationStatus::Returned->value => 'returned',
             ApplicationStatus::Draft->value => 'draft',
-            ApplicationStatus::Submitted->value,
+            ApplicationStatus::ForApproval->value,
             ApplicationStatus::PendingPayment->value,
-            ApplicationStatus::UnderReview->value,
-            ApplicationStatus::ForInspection->value => 'in_progress',
+            ApplicationStatus::AwaitingOtherPermits->value,
+            ApplicationStatus::ForFinalApproval->value => 'in_progress',
+            /*
+             * The retired names are matched as raw strings, not enum cases,
+             * because they no longer have cases. This method reads
+             * `applications.status` for live rows and
+             * `application_status_history.to_status` for historical ones, and
+             * the history deliberately keeps what the system said at the time
+             * (see the 2026_09_06 migration). Dropping these arms would score
+             * every pre-September filing as `null` — ignored — and silently
+             * empty the renewal-risk history.
+             */
+            'submitted', 'under_review', 'for_inspection' => 'in_progress',
             // Cancelled leaves no filing standing, which is the same position as
             // never having filed — handled by the caller's 'none' default.
             default => null,

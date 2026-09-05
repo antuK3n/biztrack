@@ -1273,11 +1273,25 @@ class AnalyticsHistorySeeder extends Seeder
         // workflow will not issue on its own. The re-inspection that cleared it
         // is the decision, so issuance is asked for explicitly, at that instant,
         // through the same public method the workflow uses itself.
+        /*
+         * A failed visit stays on the file forever, so nothing downstream will
+         * issue on its own; the re-inspection that cleared it is the decision,
+         * and issuance is asked for explicitly at that instant.
+         *
+         * `approveAndIssue()` is gone with the single-machine workflow. The
+         * equivalent now is BPLO's second act, and it is reached the same way a
+         * real filing reaches it: every required permit approved puts the filing
+         * in `for_final_approval`, and BPLO approves the whole thing.
+         */
         $app->refresh();
-        if ($failed !== [] && $app->status === ApplicationStatus::ForInspection) {
+        if ($failed !== [] && ! $app->status?->isTerminal()) {
             $this->travelTo($lastVisitAt ?? $paidAt);
             Auth::setUser($this->reviewers['BPLO'][0]);
-            $this->workflow->approveAndIssue($app->fresh());
+            $this->workflow->refreshReadiness($app->fresh());
+            $app->refresh();
+            if ($app->status === ApplicationStatus::ForFinalApproval) {
+                $this->workflow->approveOverall($app->fresh());
+            }
             $app->refresh();
         }
 

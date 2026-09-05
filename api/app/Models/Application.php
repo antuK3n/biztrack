@@ -131,9 +131,42 @@ class Application extends Model
         return $this->belongsTo(User::class, 'complexity_set_by_user_id')->withTrashed();
     }
 
+    /**
+     * The permits this filing asks for, each carrying its OWN progress.
+     *
+     * The pivot is no longer just a link — it holds the per-permit state machine
+     * (`ClearanceStatus`), so every read of this relation needs `withPivot` or
+     * the status silently comes back missing rather than wrong. That is the one
+     * failure mode worth knowing about here: `$app->permitTypes` without the
+     * pivot columns yields models whose `pivot->status` is null, which reads as
+     * "not started" to anything that casts it and is how a filing would appear
+     * to have lost six approvals.
+     *
+     * `withTimestamps` so `updated_at` on the pivot moves when a permit
+     * progresses; ProcessingTimeAnalytics measures per-office service time off
+     * assignments, but the pivot is the only row that knows when the APPLICANT
+     * did their half.
+     */
     public function permitTypes(): BelongsToMany
     {
-        return $this->belongsToMany(PermitType::class, 'application_permit_types');
+        return $this->belongsToMany(PermitType::class, 'application_permit_types')
+            ->withPivot(['status', 'mode', 'submitted_at', 'decided_at', 'remarks', 'rejection_reason'])
+            ->withTimestamps()
+            ->using(ApplicationPermitType::class);
+    }
+
+    /**
+     * The other permits — everything except the Mayor's / Business Permit.
+     *
+     * BPLO's row is on the same pivot and must be excluded from every "are they
+     * all approved?" question, because it is the one waiting on the answer:
+     * including it makes `for_final_approval` unreachable, since the business
+     * permit is only approved once BPLO has given the final sign-off that this
+     * predicate gates. A circular wait that presents as filings stuck forever.
+     */
+    public function otherPermitTypes(): BelongsToMany
+    {
+        return $this->permitTypes()->where('permit_types.code', '!=', PermitType::OUTCOME_CODE);
     }
 
     public function documents(): HasMany

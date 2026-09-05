@@ -138,10 +138,10 @@ class DemoSeeder extends Seeder
             'gender' => 'M', 'is_primary' => true,
         ]);
 
-        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::UnderReview, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
+        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
         $this->history($app2, [
-            [null, 'draft', $owner2], ['draft', 'submitted', $owner2], ['submitted', 'pending_payment', null],
-            ['pending_payment', 'under_review', null],
+            [null, 'draft', $owner2], ['draft', 'for_approval', $owner2], ['for_approval', 'pending_payment', null],
+            ['pending_payment', 'awaiting_other_permits', null],
         ], now()->subDays(3));
         $this->paidFee($app2, 2610);
         foreach ([[$bplo, AssignmentStatus::Completed], [$cho, AssignmentStatus::InProgress], [$bfp, AssignmentStatus::Pending]] as [$dept, $st]) {

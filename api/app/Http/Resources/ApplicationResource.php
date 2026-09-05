@@ -65,17 +65,26 @@ class ApplicationResource extends JsonResource
             'ra11032' => $this->ra11032(),
             'rejection_reason' => $this->rejection_reason,
             /*
-             * `requires_inspection` is here because the progression rail on the
-             * review sheet must not draw a stage this filing will never enter.
+             * Each requested permit, carrying ITS OWN status.
              *
-             * WorkflowService::afterReviewProgress() checks exactly this flag
-             * across exactly these rows: if no chosen permit type requires an
-             * inspection, the last office approval goes straight to
-             * approveAndIssue(). Without the flag the browser had no way to know
-             * that, so the honest options were to always show an inspection step
-             * (a lie on roughly half the filings) or never show one (a lie on
-             * the rest). The client's own wording is "for those permits that
-             * actually has inspection" — this is what makes that answerable.
+             * This is the second state machine reaching the browser
+             * (docs/application-flow-2026-09.md). The application's `status`
+             * above says where the filing is; these say where each permit is,
+             * and the two move independently — a filing reading
+             * `awaiting_other_permits` can have one permit issued, one being
+             * inspected and three not started.
+             *
+             * `requires_inspection` stays because the progression rail must not
+             * draw a stage a permit will never enter: an office whose permit
+             * type is desk-only goes straight from For Approval to Approved, and
+             * without the flag the browser's honest options were to always show
+             * an inspection step or never show one.
+             *
+             * `is_required` is what the applicant's stage needs to tell a permit
+             * they must obtain from one they merely may. Market Clearance is the
+             * only false one today, and rendering it identically to the five
+             * mandatory ones is how a stall owner would think they were finished
+             * — or a shop owner think they were not.
              */
             'permit_types' => $this->relationLoaded('permitTypes')
                 ? $this->permitTypes->map(fn ($pt) => [
@@ -83,6 +92,13 @@ class ApplicationResource extends JsonResource
                     'code' => $pt->code,
                     'name' => $pt->name,
                     'requires_inspection' => (bool) $pt->requires_inspection,
+                    'is_required' => $pt->isRequiredClearance(),
+                    'status' => $pt->pivot?->status?->value,
+                    'status_label' => $pt->pivot?->status?->label(),
+                    'mode' => $pt->pivot?->mode,
+                    'remarks' => $pt->pivot?->remarks,
+                    'rejection_reason' => $pt->pivot?->rejection_reason,
+                    'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
                 ])->values()
                 : [],
             'documents' => $this->relationLoaded('documents')
