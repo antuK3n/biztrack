@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use App\Models\AppNotification;
+use App\Models\Business;
 use App\Models\OfficerRequest;
 use App\Models\Permit;
 use App\Models\User;
@@ -301,6 +302,58 @@ class NotificationService
             '/permits',
         );
         $this->fanOut($owner, "BizTrack: renewal due for permit {$permit->permit_number}.");
+    }
+
+    /**
+     * The LGU has changed a business's standing. Tell the person it belongs to.
+     *
+     * ── Why this exists ──────────────────────────────────────────────────────
+     *
+     * Suspending or blacklisting a business is the heaviest thing the super
+     * admin can do to a citizen on this system, and it used to happen entirely
+     * behind their back: a status column moved, an audit row was written, and
+     * the owner found out the next time they tried to file and were refused by
+     * a sentence that did not say when, why, or by whom. The reason is already
+     * required at the point of the change; this is what carries it to the one
+     * person who has to act on it.
+     *
+     * ── Why the reason is repeated verbatim ──────────────────────────────────
+     *
+     * Guardrail §9.5 keeps PII out of notification payloads, and this obeys it:
+     * the business name and the admin's own words are not third-party data, and
+     * the owner is the subject of both. Paraphrasing would be worse than silent
+     * — an appeal has to be against what was actually recorded.
+     */
+    public function businessStatusChanged(
+        Business $business,
+        string $from,
+        string $to,
+        string $reason,
+        string $label,
+    ): void {
+        $business->loadMissing('owner');
+        if (! $business->owner) {
+            return;
+        }
+
+        /*
+         * Restored reads as good news and everything else as a warning, because
+         * a single flat "your status changed" makes the one message an owner
+         * must act on look like the one they can ignore.
+         */
+        $restored = $to === 'active';
+        $title = $restored ? 'Business account restored' : "Business account {$label}";
+
+        $body = $restored
+            ? "{$business->name} is active again and can file applications. Reason: {$reason}"
+            : "{$business->name} is now {$label}. "
+                .($to === Business::STATUS_BLACKLISTED || $to === 'suspended'
+                    ? 'New applications cannot be filed for it while this stands. '
+                    : '')
+                ."Reason: {$reason} If you believe this is a mistake, message the City BPLO.";
+
+        $this->push($business->owner, 'account_status', $title, $body, '/businesses');
+        $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
     }
 
     // --- Channel fan-out (mail log + sms log) --------------------------------

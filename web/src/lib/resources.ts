@@ -3,8 +3,12 @@ import { api } from './api'
 import { formatBytes } from './format'
 import type {
   AdminBusiness,
+  AdminCaseload,
+  AdminRole,
   AdminUser,
   AdminUserPayload,
+  CaseloadMove,
+  CaseloadMovePayload,
   AnalyticsSummary,
   Application,
   ApplicationListItem,
@@ -54,6 +58,7 @@ import type {
   RiskBand,
   TimelineEntry,
   User,
+  ReleasedCaseload,
 } from './types'
 
 /*
@@ -912,11 +917,23 @@ export interface AdminUserFilters extends PageParams {
   role?: string
   /** Narrow to one office — what the review screen's officer picker wants. */
   department_id?: number
+  /** Tri-state: omit for both, true for active only, false for inactive only. */
+  is_active?: boolean
 }
 
 export interface AdminBusinessFilters extends PageParams {
   q?: string
   status?: BusinessStatus
+}
+
+/** Which audit rows to read. All optional; omitting every one reads the trail. */
+export interface AuditLogFilters extends PageParams {
+  action?: string
+  /** Short model name — 'Business', 'User'. The API prepends the namespace. */
+  auditable_type?: string
+  auditable_id?: number
+  /** The actor, by user id. */
+  user_id?: number
 }
 
 export const admin = {
@@ -943,13 +960,43 @@ export const admin = {
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
+  /**
+   * The roles an officer account may be given, with the labels the API holds.
+   *
+   * The screen used to carry its own list of four role names and its own map of
+   * labels, so four of the city's seven offices could not be staffed at all and
+   * three roles rendered as raw `obo_staff`. `roles.display_name` has held the
+   * right words since the first migration.
+   */
+  roles: () => unwrap<AdminRole[]>(api.get('/admin/roles')),
   createUser: (body: AdminUserPayload) => unwrap<AdminUser>(api.post('/admin/users', body)),
   updateUser: (id: number, body: Partial<AdminUserPayload>) =>
     unwrap<AdminUser>(api.put(`/admin/users/${id}`, body)),
-  toggleActive: (id: number) => unwrap<AdminUser>(api.post(`/admin/users/${id}/toggle-active`)),
-  auditLogs: async (page = 1): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
+  /**
+   * Toggle activation, and report what the change released.
+   *
+   * Deactivation hands the officer's open work back to their office, so the
+   * caller needs the counts to say what happened rather than just that it did.
+   */
+  toggleActive: async (id: number): Promise<{ user: AdminUser; released: ReleasedCaseload | null }> => {
+    const res = await api.post<{ data: AdminUser; meta?: { released?: ReleasedCaseload } }>(
+      `/admin/users/${id}/toggle-active`,
+    )
+    return { user: res.data.data, released: res.data.meta?.released ?? null }
+  },
+  /** What this officer is holding, and which colleagues could take it. */
+  caseload: (id: number) => unwrap<AdminCaseload>(api.get(`/admin/users/${id}/caseload`)),
+  /** Move it. `to_user_id: null` releases it to the office queue. */
+  reassignCaseload: (id: number, body: CaseloadMovePayload) =>
+    unwrap<CaseloadMove>(api.post(`/admin/users/${id}/reassign-caseload`, body)),
+  auditLogs: async (
+    pageOrFilters: number | AuditLogFilters = 1,
+  ): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
+    // Historically this took a bare page number and several callers still pass
+    // one; a filter object is the shape that can also ask about one record.
+    const params = typeof pageOrFilters === 'number' ? { page: pageOrFilters } : pageOrFilters
     const res = await api.get<{ data: AuditLog[]; meta?: Partial<PageMeta> }>('/admin/audit-logs', {
-      params: { page },
+      params,
     })
     return {
       data: res.data.data,
