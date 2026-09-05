@@ -458,6 +458,23 @@ function EditModal({
 
   const needsOffice = wantsOffice(form.role ? [form.role] : [], roles)
   const officeChanged = form.department_id !== (user.department ? String(user.department.id) : '')
+  /*
+   * Only send `roles` when the admin actually moved this select.
+   *
+   * The control is a single select and `roles` is a many-to-many, so posting it
+   * unconditionally would sync a multi-role account down to the one role that
+   * happened to be showing — silent, irreversible, and triggered by an edit to
+   * something else entirely. Every account holds exactly one role today, which
+   * is precisely why such a bug would go unnoticed until it didn't. The old
+   * modal never sent roles at all; this keeps that safety while still letting a
+   * deliberate change through.
+   *
+   * Compared against what the select was INITIALISED with, not against the
+   * account's role count: `user.roles[0]` is what is on screen either way, so
+   * "unchanged" is the only thing that can be read off it honestly.
+   */
+  const initialRole = user.roles[0] ?? ''
+  const roleChanged = Boolean(form.role) && form.role !== initialRole
 
   async function save() {
     setBusy(true)
@@ -469,7 +486,7 @@ function EditModal({
         last_name: form.last_name.trim(),
         email: form.email.trim(),
         mobile_number: form.mobile_number.trim(),
-        roles: form.role ? [form.role] : undefined,
+        roles: roleChanged ? [form.role] : undefined,
         // Null clears it, which is what the super admin needs and what "No
         // office" silently failed to do before: the payload simply omitted the
         // key, so the modal closed reporting success with the office unchanged.
@@ -571,6 +588,12 @@ function EditModal({
                 </option>
               ))}
             </select>
+            {user.roles.length > 1 && (
+              <p className="mt-1 text-xs text-amber-800">
+                This account holds {user.roles.length} roles ({user.roles.join(', ')}). Changing this
+                select replaces all of them with the one chosen.
+              </p>
+            )}
             <FieldError message={firstError(errors, 'roles', 'roles.0', 'role')} />
           </label>
           <label className="block">
@@ -908,6 +931,9 @@ export function UsersPage() {
   const { data, loading, error, reload, setData } = useAsync(
     () =>
       admin.usersPage({
+        // Officers, not citizens. The old screen dropped business owners in the
+        // browser; moving the listing server-side has to carry that with it.
+        staff: true,
         q: query || undefined,
         role: role || undefined,
         department_id: office ? Number(office) : undefined,

@@ -115,6 +115,27 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
     }
   }
 
+  /*
+   * The LGU has changed this business's standing.
+   *
+   * Not left to the default: a suspension is the heaviest thing this system
+   * does to a citizen, and rendering it in the same neutral grey bell as a
+   * routine update is how the one notice an owner must act on gets scrolled
+   * past. A restoration is the same event with the opposite sign, so it is
+   * told apart by the title rather than flattened into the same warning.
+   */
+  if (n.type === 'account_status') {
+    return /restored/i.test(n.title)
+      ? { tone: 'success', Glyph: CheckCircleIcon }
+      : { tone: 'warning', Glyph: AlertTriangleIcon }
+  }
+
+  // Cases moved onto an officer by the super admin — their queue changed
+  // without them doing anything, which is worth a distinct icon.
+  if (n.type === 'assignment') {
+    return { tone: 'info', Glyph: ClipboardIcon }
+  }
+
   // An officer is asking the applicant for something: their move.
   if (n.type === 'request') {
     return { tone: 'pending', Glyph: ClipboardIcon }

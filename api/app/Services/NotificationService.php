@@ -352,7 +352,16 @@ class NotificationService
                     : '')
                 ."Reason: {$reason} If you believe this is a mistake, message the City BPLO.";
 
-        $this->push($business->owner, 'account_status', $title, $body, '/businesses');
+        /*
+         * `/dashboard`, not `/businesses` — there is no such route, and this
+         * file's own opening note records what happens then: the reader is
+         * bounced to the sign-in redirect and the notification is worse than
+         * useless. The owner dashboard is also the right destination on its
+         * merits, because it already raises AccountRestrictedModal for exactly
+         * these two statuses, so following the link lands on an explanation
+         * rather than somewhere the reader has to go looking.
+         */
+        $this->push($business->owner, 'account_status', $title, $body, '/dashboard');
         $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
     }
 
