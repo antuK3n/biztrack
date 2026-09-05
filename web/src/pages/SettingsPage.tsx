@@ -402,7 +402,7 @@ export function SettingsPage() {
           <div className="grid gap-5 py-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label htmlFor="settings-current">
-                <FieldLabel>Current Password</FieldLabel>
+                <FieldLabel required>Current Password</FieldLabel>
               </label>
               <PasswordInput
                 id="settings-current"
@@ -410,6 +410,7 @@ export function SettingsPage() {
                 value={currentPassword}
                 onChange={setCurrentPassword}
                 autoComplete="current-password"
+                required
                 invalid={!!fieldErrors.current_password}
                 describedBy={fieldErrors.current_password ? 'settings-current-error' : undefined}
                 iconSize={18}
@@ -418,12 +419,13 @@ export function SettingsPage() {
             </div>
             <div>
               <label htmlFor="settings-password">
-                <FieldLabel>Enter New Password</FieldLabel>
+                <FieldLabel required>Enter New Password</FieldLabel>
               </label>
               <PasswordInput
                 id="settings-password"
                 value={password}
                 onChange={setPassword}
+                required
                 invalid={!!fieldErrors.password}
                 describedBy={fieldErrors.password ? 'settings-password-error' : undefined}
                 iconSize={18}
@@ -432,12 +434,13 @@ export function SettingsPage() {
             </div>
             <div>
               <label htmlFor="settings-confirm">
-                <FieldLabel>Confirm New Password</FieldLabel>
+                <FieldLabel required>Confirm New Password</FieldLabel>
               </label>
               <PasswordInput
                 id="settings-confirm"
                 value={confirm}
                 onChange={setConfirm}
+                required
                 iconSize={18}
               />
             </div>
