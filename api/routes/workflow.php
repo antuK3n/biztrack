@@ -216,6 +216,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('chatbot/messages', [ChatbotController::class, 'store']);
 
     // Notifications (self-scoped)
+    /*
+     * Both nav badges in one call. Deliberately NOT inside the
+     * `message.participate` group: the badge is drawn on every screen for every
+     * seat, and an officer without that permission still has notifications.
+     * The counts are scoped to the reader inside the controller.
+     */
+    Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
     Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
