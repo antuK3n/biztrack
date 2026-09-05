@@ -9,8 +9,8 @@ import {
   FieldLabel,
   PageTitle,
   ProtoCard,
+  FilterPills,
   ProtoModal,
-  SortFilter,
   StatusChip,
   inputCls,
   useDialogKeyboard,
@@ -134,20 +134,27 @@ const STATUS_DOT: Record<BusinessStatus, string> = {
   blacklisted: 'bg-s-red',
 }
 
-/**
- * How far back the history reads.
- *
- * The audit trail has no per-target filter, so this modal can only scan the
- * pages it pulls: 8 × 25 = the 200 most recent entries. It used to read page 1
- * alone, and the newest page is almost always sign-ins, so the timeline was
- * empty for every business while still calling itself complete.
- */
-const HISTORY_PAGES = 8
-
 function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }) {
+  /*
+   * This business's status changes, asked for by subject.
+   *
+   * It used to pull the eight newest pages of the WHOLE audit trail — 200 rows
+   * out of tens of thousands — and keep the handful that happened to be about
+   * this business. The newest rows are overwhelmingly sign-ins, so a business
+   * blacklisted a month ago showed a timeline containing only "Registered",
+   * under a caption explaining that the screen could not see very far. That is
+   * a fair description of a window and no way to run a register. The audit
+   * endpoint now filters on the subject, so this is the actual history.
+   */
   const { data, loading } = useAsync(
-    () => Promise.all(Array.from({ length: HISTORY_PAGES }, (_, i) => admin.auditLogs(i + 1))),
-    [],
+    () =>
+      admin.auditLogs({
+        auditable_type: 'Business',
+        auditable_id: row.id,
+        action: 'status',
+        per_page: 100,
+      }),
+    [row.id],
   )
   const panelRef = useRef<HTMLDivElement | null>(null)
   const closeRef = useRef<HTMLButtonElement | null>(null)
@@ -155,18 +162,9 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
   // handling: no focus move on open, no Escape, and Tab walked out of it.
   useDialogKeyboard(panelRef, onClose, closeRef)
 
-  const scanned = (data ?? []).reduce((n, p) => n + p.data.length, 0)
-
   const entries = useMemo<HistoryEntry[]>(() => {
-    const fromLogs: HistoryEntry[] = (data ?? [])
-      .flatMap((p) => p.data)
-      .filter(
-        (log: AuditLog) =>
-          log.auditable_type.endsWith('Business') &&
-          log.auditable_id === row.id &&
-          /status/.test(log.action),
-      )
-      .map((log) => {
+    const fromLogs: HistoryEntry[] = (data?.data ?? [])
+      .map((log: AuditLog) => {
         /*
          * BusinessStatusController writes { from, to, reason }. This read
          * `changes.status`, which is never there, and fell back to 'active' — so
@@ -210,7 +208,10 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
         <div className="bg-royal px-5 py-3 text-base font-bold tracking-wide text-white">Status History</div>
         <p className="border-b border-line px-5 py-3 text-sm text-ink-secondary">
           {row.name}
-          {!loading && ` · status changes found in the ${scanned.toLocaleString()} most recent audit entries`}
+          {!loading &&
+            ` · ${(data?.total ?? 0).toLocaleString()} status ${
+              (data?.total ?? 0) === 1 ? 'change' : 'changes'
+            } on record`}
         </p>
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading ? (
@@ -253,9 +254,21 @@ type ModalState = { kind: 'change' | 'history'; row: AdminBusiness } | null
 /** Rows per request. The roster is 705 businesses and grows with the city. */
 const PAGE_SIZE = 25
 
+/** The roster filter: every status, or exactly one. */
+type StatusFilter = 'all' | BusinessStatus
+
+const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' },
+  { value: 'flagged', label: 'Flagged' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'blacklisted', label: 'Blacklisted' },
+]
+
 export function OwnersPage() {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<StatusFilter>('all')
   const [page, setPage] = useState(1)
   const [modal, setModal] = useState<ModalState>(null)
 
@@ -267,8 +280,16 @@ export function OwnersPage() {
    * footer called that the whole roster.
    */
   const { data, loading, error, reload, setData } = useAsync(
-    () => admin.businessesPage({ q: query || undefined, page, per_page: PAGE_SIZE }),
-    [query, page],
+    () =>
+      admin.businessesPage({
+        q: query || undefined,
+        // The endpoint has always accepted this and nothing ever sent it, so
+        // "show me the suspended ones" meant paging the whole register by eye.
+        status: status === 'all' ? undefined : status,
+        page,
+        per_page: PAGE_SIZE,
+      }),
+    [query, status, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -312,16 +333,32 @@ export function OwnersPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
+              placeholder="Search business or owner…"
               aria-label="Search businesses or owners"
               className="w-56 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
-            <SortFilter />
           </span>
         }
       >
         Business Owner Status
       </PageTitle>
+
+      {/*
+        A real status filter, replacing the decorative Sort/Filter pair. The
+        whole point of this screen is finding the businesses under sanction, and
+        they were indistinguishable from the 700 that are not without paging the
+        register and reading chips.
+      */}
+      <div className="mb-5">
+        <FilterPills
+          options={STATUS_FILTERS}
+          value={status}
+          onChange={(next) => {
+            setStatus(next)
+            setPage(1)
+          }}
+        />
+      </div>
 
       {loading ? (
         <SkeletonList rows={7} />

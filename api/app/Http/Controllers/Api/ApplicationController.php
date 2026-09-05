@@ -277,6 +277,28 @@ class ApplicationController extends Controller
         }
 
         /*
+         * A suspended or blacklisted business cannot file — checked HERE as well
+         * as at create.
+         *
+         * store() has always had this gate, and on its own it only asks whether
+         * the business was in good standing on the day the draft was started.
+         * Drafts autosave and sit for weeks, so a business suspended in the
+         * meantime carried every draft it already had straight past the block:
+         * the filing landed in an office queue, was worked, and the suspension
+         * that was supposed to stop it never came up. The state that matters is
+         * the one at the moment the filing is actually made.
+         *
+         * `loadMissing` rather than a fresh query — submit() already touches the
+         * business through syncLineCapitalization below.
+         */
+        $application->loadMissing('business');
+        if ($application->business?->isBlockedFromApplying()) {
+            throw ValidationException::withMessages([
+                'business_id' => ['This business currently can’t file applications. Please contact the LGU to resolve its account status.'],
+            ]);
+        }
+
+        /*
          * Checklist items 82/84 — an amendment amending nothing is not a filing.
          *
          * The wizard blocks Next on the same rule, but the gate belongs here as

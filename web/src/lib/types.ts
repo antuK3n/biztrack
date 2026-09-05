@@ -1703,6 +1703,16 @@ export interface RenewalModelReport {
 
 export interface AdminUser extends User {}
 
+/** A role an officer account can be given, as the API describes it. */
+export interface AdminRole {
+  name: string
+  /** roles.display_name — "Building Official Staff", not `obo_staff`. */
+  label: string
+  description: string | null
+  /** False for the super admin, who works across every office and belongs to none. */
+  wants_department: boolean
+}
+
 export interface AdminUserPayload {
   first_name: string
   middle_name?: string
@@ -1710,10 +1720,50 @@ export interface AdminUserPayload {
   suffix?: string
   gender: 'M' | 'F'
   email: string
+  /* Required by the API on create; optional here because an edit may omit it. */
   mobile_number?: string
   password?: string
-  role: string
-  department_id?: number
+  /*
+   * `roles`, plural, because that is what the endpoint validates.
+   *
+   * This said `role: string` and the form sent it, so "Add Officer" 422'd on a
+   * missing `roles` every time — and the error came back keyed `roles`, which
+   * the modal was not rendering, so the failure was completely silent. The API
+   * now accepts either spelling; this is the one it has always documented.
+   */
+  roles: string[]
+  /** Null clears the office. Omit to leave it alone. */
+  department_id?: number | null
+}
+
+/** Open work handed back to an office because its officer left or moved. */
+export interface ReleasedCaseload {
+  reviews: number
+  inspections: number
+}
+
+/** What an officer is holding, and who could take it. */
+export interface AdminCaseload {
+  user: { id: number; name: string }
+  department: { id: number; code: string; name: string } | null
+  open_reviews: number
+  open_inspections: number
+  total: number
+  candidates: { id: number; name: string; email: string; open_total: number }[]
+}
+
+export interface CaseloadMovePayload {
+  /** Null releases the caseload to the office queue rather than naming a successor. */
+  to_user_id: number | null
+  scope: 'all' | 'reviews' | 'inspections'
+  reason: string
+}
+
+export interface CaseloadMove {
+  moved_reviews: number
+  moved_inspections: number
+  total: number
+  to: { id: number; name: string } | null
 }
 
 export interface AuditLog {

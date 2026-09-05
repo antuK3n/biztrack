@@ -333,6 +333,27 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('users', [UserController::class, 'index']);
             Route::post('users', [UserController::class, 'store']);
             Route::put('users/{user}', [UserController::class, 'update']);
+            /*
+             * The roles the officer form may offer, with the labels the register
+             * already holds. On `user.manage` because it exists to fill in that
+             * form; whoever may create an officer may see what an officer can be.
+             */
+            Route::get('roles', [UserController::class, 'roles']);
+        });
+        /*
+         * Caseload read and move sit on `oic.assign`, not `user.manage`.
+         *
+         * Naming who handles a case is the OIC's power, and it is already the
+         * permission guarding the per-application version of exactly this act
+         * (assignments/{assignment}/assign above). Putting the bulk move on
+         * `user.manage` instead would mean an account that may correct a
+         * surname could also empty an office's queue — a different decision
+         * wearing the same permission. The Officer Assignment screen hides the
+         * control when the reader lacks this.
+         */
+        Route::middleware('permission:oic.assign')->group(function () {
+            Route::get('users/{user}/caseload', [UserController::class, 'caseload']);
+            Route::post('users/{user}/reassign-caseload', [UserController::class, 'reassignCaseload']);
         });
         Route::middleware('permission:owner.manage_status')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
