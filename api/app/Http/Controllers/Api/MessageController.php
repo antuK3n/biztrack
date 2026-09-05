@@ -369,10 +369,151 @@ class MessageController extends Controller
             ->filter()
             ->values();
 
+        /*
+         * Enquiries carrying no filing, merged into the first page only.
+         *
+         * The list pages by FILING — that is what the query above orders and
+         * counts — and an enquiry has none, so it cannot be paged by the same
+         * key. Page 1 is where it belongs anyway: for an applicant there is at
+         * most one, and it is the way in they would otherwise not have.
+         *
+         * The honest limit: a BPLO officer with more enquiries than fit a page
+         * sees the most recent, and the rest are reachable only by opening the
+         * person. That needs the list to page over conversations rather than
+         * filings, which is a larger change than this one and is not pretended
+         * at here.
+         */
+        if ($applications->currentPage() === 1) {
+            $rows = $this->generalRows($user, $isOfficer, $this->perPage($request))
+                ->merge($rows)
+                ->sortByDesc(fn (array $row) => $row['updated_at'] ?? '')
+                ->values();
+        }
+
         return response()->json([
             'data' => $rows,
             'meta' => $this->pageMeta($applications),
         ]);
+    }
+
+    /**
+     * Inbox rows for general enquiries — the applicant's own, or the ones
+     * addressed to this officer's office.
+     *
+     * An applicant's row is SYNTHESISED when they have never written: it
+     * carries a null `thread_id` and no messages. Creating the thread here
+     * instead would mean a GET that writes, and would leave a row in the table
+     * for every account that ever opened the Messages page.
+     *
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function generalRows(User $user, bool $isOfficer, int $limit): Collection
+    {
+        $bplo = $this->bplo();
+        if ($bplo === null) {
+            return collect();
+        }
+
+        if (! $isOfficer) {
+            $thread = MessageThread::with('department')
+                ->whereNull('application_id')
+                ->where('user_id', $user->id)
+                ->first();
+
+            return collect([$this->generalRow($thread, $user, $bplo, false)]);
+        }
+
+        // An office sees the enquiries addressed to it, and only once somebody
+        // has actually written — the same rule the filing list uses, for the
+        // same reason: a row with nothing in it is a silhouette of a message.
+        if (! ApplicationVisibility::readsThreadOf($user, $bplo->id)) {
+            return collect();
+        }
+
+        $threads = MessageThread::with(['department', 'user:id,name'])
+            ->whereNull('application_id')
+            ->whereNotNull('user_id')
+            ->where('department_id', $bplo->id)
+            ->whereHas('messages')
+            ->get();
+
+        /*
+         * `toBase()` and not just `map()`. An Eloquent collection that maps to
+         * arrays downgrades itself to a base collection only if it has
+         * something in it to inspect — an EMPTY one stays Eloquent, and the
+         * merge below then tries to read a model key off an array and 500s.
+         * The empty case is the common one: most offices have no enquiries.
+         */
+        return $threads->toBase()
+            ->map(fn (MessageThread $t) => $this->generalRow($t, $user, $bplo, true))
+            ->sortByDesc(fn (array $row) => $row['updated_at'] ?? '')
+            ->take($limit)
+            ->values();
+    }
+
+    /**
+     * One inbox row for an enquiry, in the same shape a filing's row has.
+     *
+     * `application_id` is null and `kind` says so, because every reader of this
+     * payload has to branch somewhere and a null id alone would be read as a
+     * bug. Everything else — counterparty, offices, preview — keeps its meaning
+     * so the inbox does not need a second renderer.
+     *
+     * @return array<string, mixed>
+     */
+    private function generalRow(?MessageThread $thread, User $user, Department $bplo, bool $isOfficer): array
+    {
+        $count = $thread ? Message::where('thread_id', $thread->id)->count() : 0;
+        $last = $thread
+            ? Message::with('sender:id,name')->where('thread_id', $thread->id)->latest('id')->first()
+            : null;
+
+        $office = $thread?->department ?? $bplo;
+
+        return [
+            'kind' => 'general',
+            'application_id' => null,
+            'thread_id' => $thread?->id,
+            // The person, when an officer is reading; nobody, when it is your
+            // own enquiry and the counterparty is the office.
+            'user_id' => $thread?->user_id,
+            'tracking_id' => null,
+            'business_name' => null,
+            'status' => null,
+            'counterparty' => $isOfficer
+                ? [
+                    'name' => $thread?->user?->name ?? 'Applicant',
+                    'subtitle' => 'General enquiry',
+                    'is_officer' => false,
+                ]
+                : [
+                    'name' => $office->name,
+                    'subtitle' => 'General enquiry',
+                    'is_officer' => true,
+                ],
+            'responsible_office' => [
+                'code' => $office->code,
+                'name' => $office->name,
+                'officer' => null,
+            ],
+            'offices' => [[
+                'department_id' => $office->id,
+                'code' => $office->code,
+                'name' => $office->name,
+                'thread_id' => $thread?->id,
+                'messages_count' => $count,
+                'last_message_at' => optional($last?->created_at)->toISOString(),
+                'can_message' => true,
+            ]],
+            'messages_count' => $count,
+            'last_message' => $last ? [
+                'body' => $last->body,
+                'sender_name' => $last->sender?->name,
+                'mine' => $last->sender_user_id === $user->id,
+                'created_at' => optional($last->created_at)->toISOString(),
+            ] : null,
+            'updated_at' => optional($last?->created_at ?? $thread?->updated_at)->toISOString(),
+        ];
     }
 
     /** One inbox row, named from the reader's side of the conversation. */
@@ -403,6 +544,11 @@ class MessageController extends Controller
         $count = (int) collect($offices)->sum('messages_count');
 
         return [
+            // Says which of the two shapes this row is, so a reader branches on
+            // a stated kind rather than inferring one from a null id.
+            'kind' => 'application',
+            'thread_id' => null,
+            'user_id' => null,
             'application_id' => $app->id,
             'tracking_id' => $app->tracking_id,
             'business_name' => $app->business?->name,
@@ -771,10 +917,188 @@ class MessageController extends Controller
         ], 201);
     }
 
+    // --- general enquiries: a question with no filing behind it --------------
+
+    /**
+     * The BPLO conversation belonging to one person, created on first sight.
+     *
+     * BPLO and nothing else. Without a filing there are no assignments, so
+     * `addressableOffices` has nothing to reason about and no other office has
+     * any business receiving the mail — the same reasoning that already makes
+     * BPLO the default addressee on a filing nobody has routed yet.
+     *
+     * `firstOrCreate` on the unique `(user_id, department_id)` pair, so two
+     * requests racing to open the same conversation still produce one row.
+     */
+    private function generalThreadFor(User $owner): MessageThread
+    {
+        $bplo = $this->bplo();
+        abort_unless($bplo !== null, 503, 'The BPLO office is not set up on this system.');
+
+        return MessageThread::firstOrCreate([
+            'user_id' => $owner->id,
+            'department_id' => $bplo->id,
+        ]);
+    }
+
+    /**
+     * Who may read and write a general thread: its owner, or BPLO.
+     *
+     * The ownership test is explicit and cannot be replaced by
+     * `readsThreadOf` alone. That predicate answers "true" for ANY reader
+     * without `application.view_all`, because on a filing the applicant is the
+     * author of every sheet and ownership has already been established by
+     * authorizeParticipant. There is no filing here to establish it, so
+     * leaning on it would let one business owner read another's enquiry.
+     */
+    private function authorizeGeneralParticipant(User $reader, MessageThread $thread): void
+    {
+        $isOwner = $thread->user_id !== null && $thread->user_id === $reader->id;
+
+        $isOffice = $reader->hasPermission('application.view_all')
+            && ApplicationVisibility::readsThreadOf($reader, $thread->department_id);
+
+        abort_unless($isOwner || $isOffice, 403, 'This conversation is not yours to read.');
+    }
+
+    /**
+     * Resolve whose general thread is being asked for.
+     *
+     * No `{user}` in the path means "mine", which is what an applicant always
+     * sends. Naming somebody else is an office action and is refused unless the
+     * reader actually holds the office — checked in
+     * authorizeGeneralParticipant, not here.
+     */
+    private function generalOwner(Request $request, ?User $owner): User
+    {
+        return $owner ?? $request->user();
+    }
+
+    public function generalIndex(Request $request, ?User $user = null): JsonResponse
+    {
+        $reader = $request->user();
+        $thread = $this->generalThreadFor($this->generalOwner($request, $user));
+        $this->authorizeGeneralParticipant($reader, $thread);
+
+        $total = Message::where('thread_id', $thread->id)->count();
+        $messages = Message::query()
+            ->where('thread_id', $thread->id)
+            ->with(['sender:id,name,department_id', 'attachments', 'thread:id,department_id', 'thread.department:id,code,name'])
+            ->orderByDesc('created_at')
+            ->orderByDesc('id')
+            ->limit(self::MESSAGE_WINDOW)
+            ->get()
+            ->sortBy([['created_at', 'asc'], ['id', 'asc']])
+            ->values();
+
+        return response()->json([
+            'data' => MessageResource::collection($messages),
+            'meta' => [
+                'total' => $total,
+                'returned' => $messages->count(),
+                'window' => self::MESSAGE_WINDOW,
+                'department_id' => $thread->department_id,
+                // One office, always, so the transcript screen's picker has the
+                // same shape it has on a filing and needs no second branch.
+                'offices' => [$this->generalOfficeRow($thread, $total)],
+            ],
+        ]);
+    }
+
+    public function generalStore(Request $request, ?User $user = null): JsonResponse
+    {
+        $reader = $request->user();
+        $owner = $this->generalOwner($request, $user);
+        $thread = $this->generalThreadFor($owner);
+        $this->authorizeGeneralParticipant($reader, $thread);
+
+        $data = $request->validate([
+            'body' => ['required', 'string', 'max:5000'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+        ], [
+            'attachment.max' => 'The attachment may not be larger than 10MB.',
+            'attachment.mimes' => 'Attach a PDF, JPG, or PNG file.',
+        ]);
+
+        $message = DB::transaction(function () use ($request, $reader, $thread, $data, $owner) {
+            $message = Message::create([
+                'thread_id' => $thread->id,
+                'sender_user_id' => $reader->id,
+                'body' => $data['body'],
+            ]);
+
+            if ($file = $request->file('attachment')) {
+                $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+                $filename = Str::uuid()->toString().'.'.$ext;
+                // Keyed by the person, not by a filing that does not exist.
+                $dir = "private/messages/general/{$owner->id}";
+                Storage::disk('local')->putFileAs($dir, $file, $filename);
+
+                MessageAttachment::create([
+                    'message_id' => $message->id,
+                    'original_filename' => $file->getClientOriginalName(),
+                    'stored_path' => "{$dir}/{$filename}",
+                    'mime' => $file->getClientMimeType(),
+                    'size' => $file->getSize(),
+                ]);
+            }
+
+            return $message;
+        });
+
+        Audit::log('message.sent', $message);
+
+        return response()->json([
+            'data' => new MessageResource($message->load([
+                'sender:id,name,department_id',
+                'attachments',
+                'thread:id,department_id',
+                'thread.department:id,code,name',
+            ])),
+        ], 201);
+    }
+
+    /**
+     * The single office row a general conversation carries.
+     *
+     * @return array<string, mixed>
+     */
+    private function generalOfficeRow(MessageThread $thread, int $count): array
+    {
+        $office = $thread->department ?? $this->bplo();
+
+        return [
+            'department_id' => $thread->department_id,
+            'code' => $office?->code,
+            'name' => $office?->name ?? 'Business Permits and Licensing Office',
+            'thread_id' => $thread->id,
+            'messages_count' => $count,
+            'last_message_at' => null,
+            'can_message' => true,
+        ];
+    }
+
     public function downloadAttachment(Request $request, MessageAttachment $attachment): StreamedResponse
     {
-        $attachment->loadMissing('message.thread.application');
-        $app = $attachment->message?->thread?->application;
+        $attachment->loadMissing('message.thread.application', 'message.thread.user');
+        $thread = $attachment->message?->thread;
+        abort_unless($thread !== null, 404, 'Attachment not found.');
+
+        /*
+         * A general thread has no filing to authorise against, so it is checked
+         * on its own terms. Without this branch the `abort_unless($app)` below
+         * answered 404 for every attachment on an enquiry — the file was
+         * unreachable rather than protected, which reads as a broken feature.
+         */
+        if ($thread->isGeneral()) {
+            $this->authorizeGeneralParticipant($request->user(), $thread);
+
+            abort_unless(Storage::disk('local')->exists($attachment->stored_path), 404, 'File not found.');
+
+            return Storage::disk('local')->download($attachment->stored_path, $attachment->original_filename);
+        }
+
+        $app = $thread->application;
         abort_unless($app, 404, 'Attachment not found.');
         $this->authorizeParticipant($request, $app);
 

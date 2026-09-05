@@ -251,13 +251,27 @@ function OfficePicker({
  * The in-page panel wraps it in its card; the dedicated Messages page drops it
  * straight into the right-hand pane.
  */
+/**
+ * Which conversation a transcript is showing.
+ *
+ * A filing's conversation is picked out by its application and then by office;
+ * a general enquiry has no filing at all, only the person whose it is, and is
+ * always with BPLO. Stating the two as separate shapes keeps the impossible
+ * combination — an application id AND a general enquiry — unrepresentable,
+ * rather than passing a nullable id and hoping every branch checks it.
+ */
+export type MessageTarget =
+  | { kind: 'application'; applicationId: number }
+  /** `userId` omitted means "mine"; an officer names the person. */
+  | { kind: 'general'; userId?: number | null }
+
 export function MessageThreadView({
-  applicationId,
+  target,
   className = '',
   scrollClassName = 'max-h-96',
   onSent,
 }: {
-  applicationId: number
+  target: MessageTarget
   className?: string
   scrollClassName?: string
   onSent?: () => void
@@ -286,7 +300,15 @@ export function MessageThreadView({
   const { data, loading, error, reload, setData } = useAsync<{
     data: Message[]
     meta: MessageTranscriptMeta
-  }>(() => messagesApi.listWithMeta(applicationId, officeId), [applicationId, officeId])
+  }>(
+    () =>
+      target.kind === 'general'
+        ? messagesApi.generalWithMeta(target.userId)
+        : messagesApi.listWithMeta(target.applicationId, officeId),
+    // The key parts of the target, not the object: a fresh literal on every
+    // render would re-fetch the transcript forever.
+    [target.kind, target.kind === 'general' ? target.userId : target.applicationId, officeId],
+  )
 
   const [body, setBody] = useState('')
   const [attachment, setAttachment] = useState<File | null>(null)
@@ -333,7 +355,10 @@ export function MessageThreadView({
     setSending(true)
     setSendError(null)
     try {
-      const sent = await messagesApi.send(applicationId, text, attachment, officeId)
+      const sent =
+        target.kind === 'general'
+          ? await messagesApi.sendGeneral(text, attachment, target.userId)
+          : await messagesApi.send(target.applicationId, text, attachment, officeId)
       /*
        * Append rather than refetch, so the message appears instantly — but only
        * onto a transcript that has loaded. With nothing to append to (the first
@@ -466,7 +491,7 @@ export function MessagesPanel({ applicationId }: { applicationId: number }) {
       </div>
 
       <div className="rounded-2xl bg-canvas/60 p-4 shadow-card sm:p-5">
-        <MessageThreadView applicationId={applicationId} />
+        <MessageThreadView target={{ kind: 'application', applicationId }} />
       </div>
     </section>
   )

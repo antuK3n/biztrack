@@ -125,6 +125,27 @@ function ThreadCard({
     : []
   const conversationOffices = withOffices.length > 0 ? withOffices.join(' · ') : null
 
+  /*
+   * Which business, and which filing of it, this conversation is about.
+   *
+   * The counterparty subtitle carries the business name OR the tracking id —
+   * whichever it has — so an owner with two filings for the same business saw
+   * two identical cards and no way to tell which was which. The tracking id is
+   * the thing that differs, so it is always printed; the business name joins it
+   * only when it is not already said above.
+   *
+   * A general enquiry has neither and prints nothing here: there is no filing.
+   */
+  const identity =
+    thread.kind === 'application' && thread.tracking_id
+      ? [
+          thread.business_name && thread.business_name !== subtitle ? thread.business_name : null,
+          thread.tracking_id,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : null
+
   return (
     <li>
       <button
@@ -148,6 +169,11 @@ function ThreadCard({
               {formatDate(thread.updated_at)}
             </span>
           </span>
+          {identity && (
+            <span className="mt-0.5 block truncate text-xs font-medium text-ink-muted">
+              {identity}
+            </span>
+          )}
           {handledBy && (
             <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
               Handled by {handledBy}
@@ -175,16 +201,26 @@ export function MessagesPage() {
   const [sort, setSort] = useState<Sort>('recent')
 
   const threads = data ?? []
-  const selectedId = Number(params.get('application')) || null
-  const selected = threads.find((t) => t.application_id === selectedId) ?? null
+  /*
+   * A row is identified by a KEY, not by an application id — an enquiry with
+   * no filing has no id to be identified by. Filings keep their numeric id as
+   * their key, so a link someone already has (?application=12) still opens the
+   * same conversation; the enquiry uses the literal 'general', which
+   * Number() reads as NaN and no filing can collide with.
+   */
+  const rowKey = (t: MessageThreadSummary) =>
+    t.kind === 'general' ? 'general' : String(t.application_id)
+
+  const selectedKey = params.get('application')
+  const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
 
   // On a wide screen an empty pane is wasted space: open the newest thread.
   useEffect(() => {
-    if (selectedId || threads.length === 0) return
+    if (selectedKey || threads.length === 0) return
     if (window.matchMedia('(min-width: 1024px)').matches) {
-      setParams({ application: String(threads[0].application_id) }, { replace: true })
+      setParams({ application: rowKey(threads[0]) }, { replace: true })
     }
-  }, [selectedId, threads, setParams])
+  }, [selectedKey, threads, setParams])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -214,8 +250,8 @@ export function MessagesPage() {
     return sort === 'recent' ? ordered.reverse() : ordered
   }, [threads, query, sort])
 
-  function open(applicationId: number) {
-    setParams({ application: String(applicationId) })
+  function open(key: string) {
+    setParams({ application: key })
   }
 
   const list = (
@@ -270,10 +306,10 @@ export function MessagesPage() {
         <ul className="flex flex-col gap-4">
           {visible.map((t) => (
             <ThreadCard
-              key={t.application_id}
+              key={rowKey(t)}
               thread={t}
-              active={t.application_id === selectedId}
-              onOpen={() => open(t.application_id)}
+              active={rowKey(t) === selectedKey}
+              onOpen={() => open(rowKey(t))}
             />
           ))}
         </ul>
@@ -390,8 +426,12 @@ export function MessagesPage() {
       </header>
 
       <MessageThreadView
-        key={selected.application_id}
-        applicationId={selected.application_id}
+        key={rowKey(selected)}
+        target={
+          selected.kind === 'general'
+            ? { kind: 'general', userId: selected.user_id }
+            : { kind: 'application', applicationId: selected.application_id! }
+        }
         className="flex-1 px-5 pb-5 pt-4"
         scrollClassName="min-h-0"
         onSent={reload}
