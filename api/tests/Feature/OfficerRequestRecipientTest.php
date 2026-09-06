@@ -5,9 +5,23 @@ use App\Models\Department;
 use App\Models\OfficerRequest;
 
 /*
- * The applicant needs to know which office is asking. The requester's own
- * department is the sensible default, but the super admin has none, so an
- * explicit choice has to be possible or their requests arrive from nobody.
+ * The applicant needs to know which office is asking, and the answer is always
+ * the office of whoever asked.
+ *
+ * Three tests in this file used to assert the opposite — that a requester could
+ * NAME a different office on the payload. That was a real feature, added so the
+ * super admin (who has no department) could attribute a request to somebody.
+ * The client has since reversed both halves of it: `request.create` came off
+ * `admin`, and the office is now taken from the authenticated account and
+ * nothing else — "Do not allow an Admin to manually change the office assigned
+ * to the request ... enforced by the backend, not only by hiding the field in
+ * the frontend."
+ *
+ * So those three are inverted here rather than deleted. The behaviour they
+ * guarded is gone on purpose, and an inverted test says that out loud where a
+ * missing one would just look like coverage that got dropped. What they were
+ * really protecting — that `from_office` is emitted at all, rather than the
+ * screen falling back to `created_by.department` — is kept and still asserted.
  */
 
 function openApplicationForRequest(): Application
@@ -30,19 +44,27 @@ it('defaults the office to the requesting officer own department', function () {
     expect(OfficerRequest::find($id)->department_id)->toBe($bplo);
 });
 
-it('lets the requester name the office the applicant sees', function () {
+it('ignores an office named by the requester', function () {
     $app = openApplicationForRequest();
     $cho = Department::where('code', 'CHO')->value('id');
+    $bplo = Department::where('code', 'BPLO')->value('id');
 
+    /*
+     * Inverted deliberately — this used to assert that CHO came back.
+     *
+     * A BPLO officer posting City Health's id still raises a BPLO requirement.
+     * The old behaviour let one office file work into another office's queue,
+     * which is the same boundary the rest of this system spends its time
+     * defending; the client closed it.
+     */
     $id = $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/requests", [
-            'request_type' => 'document',
             'subject' => 'Health certificates',
             'body' => 'For the food handlers.',
             'department_id' => $cho,
         ])->assertCreated()->json('data.id');
 
-    expect(OfficerRequest::find($id)->department_id)->toBe($cho);
+    expect(OfficerRequest::find($id)->department_id)->toBe($bplo);
 });
 
 /*
@@ -83,16 +105,25 @@ it('refuses the super admin a request: asking the applicant is an office’s wor
         ->toBeFalse();
 });
 
-it('rejects an office that does not exist', function () {
+it('is unmoved by a nonsense office on the payload', function () {
     $app = openApplicationForRequest();
+    $bplo = Department::where('code', 'BPLO')->value('id');
 
-    $this->withHeaders(authAs('bplo@biztrack.local'))
+    /*
+     * This used to 422 on `exists:departments,id`. The field is no longer
+     * validated because it is no longer READ — an ignored input needs no rule,
+     * and keeping one would imply the value still decides something. A caller
+     * sending rubbish gets a perfectly ordinary requirement from their own
+     * office, which is the correct outcome and the safe one.
+     */
+    $id = $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/requests", [
-            'request_type' => 'document',
             'subject' => 'x',
             'body' => 'y',
             'department_id' => 999999,
-        ])->assertStatus(422)->assertJsonValidationErrors(['department_id']);
+        ])->assertCreated()->json('data.id');
+
+    expect(OfficerRequest::find($id)->department_id)->toBe($bplo);
 });
 
 /*
@@ -120,28 +151,32 @@ it('names the applicant as the recipient of the request', function () {
         ->and($recipient['name'])->not->toBe('');
 });
 
-it('reads the chosen office back, not the requester’s own', function () {
+it('reads the requesting office back on the payload', function () {
     /*
-     * Regression guard for the half of item 57 that was never finished. The
-     * composer has stored `department_id` since that round, but the payload only
-     * ever emitted `created_by.department` — the requester's own office — so
-     * picking a different one moved a column no screen displayed.
+     * The surviving half of item 57, and the reason this test is kept rather
+     * than dropped with the override it used to exercise: `from_office` has to
+     * be EMITTED. The composer stored `department_id` for a whole round while
+     * the payload emitted only `created_by.department`, so the office an
+     * applicant saw was a different fact from the office the row belonged to,
+     * and no screen could tell them apart.
+     *
+     * Now that the two are always the same office, this asserts they agree —
+     * which is the shape the client asked for and the shape that makes "from
+     * the City Health Office" and "visible to the City Health Office" one
+     * statement.
      */
     $app = openApplicationForRequest();
-    $cho = Department::where('code', 'CHO')->firstOrFail();
+    $bplo = Department::where('code', 'BPLO')->firstOrFail();
 
     $data = $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/applications/{$app->id}/requests", [
-            'request_type' => 'document',
             'subject' => 'Health certificates',
             'body' => 'For the food handlers.',
-            'department_id' => $cho->id,
         ])->assertCreated()->json('data');
 
-    expect($data['from_office']['id'])->toBe($cho->id)
-        ->and($data['from_office']['name'])->toBe($cho->name)
-        // BPLO raised it on CHO's behalf; both facts stay true and separate.
-        ->and($data['created_by']['department'])->not->toBe($cho->name);
+    expect($data['from_office']['id'])->toBe($bplo->id)
+        ->and($data['from_office']['name'])->toBe($bplo->name)
+        ->and($data['created_by']['department'])->toBe($bplo->name);
 });
 
 it('names the recipient on the request list too', function () {

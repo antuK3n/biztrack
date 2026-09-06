@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { SVGProps } from 'react'
-import { ArrowLeftIcon, ChevronRightIcon, DownloadIcon } from '../components/icons'
+import { ArrowLeftIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import {
   FieldLabel,
   PageTitle,
   PillButton,
+  ProtoCard,
   ProtoModal,
   SortFilter,
   StatusChip,
@@ -14,15 +15,13 @@ import {
 import type { ChipTone } from '../components/ui/Proto'
 import { toApiError } from '../lib/api'
 import { businessName, formatDate, formatDateTime } from '../lib/format'
-import { applications, documents, reference, requests } from '../lib/resources'
+import { applications, documents, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type {
   ApplicationListItem,
-  Department,
   OfficerRequest,
   RequestStatus,
-  RequestType,
 } from '../lib/types'
 
 /*
@@ -71,34 +70,39 @@ function senderName(request: OfficerRequest): string {
   return request.created_by?.name ?? 'Officer removed from register'
 }
 
-/** "<business> (<tracking id>)" for the filing a request was raised on. */
-function filingLine(request: OfficerRequest): string {
-  const filing = request.application
-  if (!filing) return 'a filing removed from the register'
-  const name = businessName(filing.business_name ? { name: filing.business_name } : null)
-  return filing.tracking_id ? `${name} (${filing.tracking_id})` : `${name} (draft, not yet filed)`
+/*
+ * Tone only — the WORDS come from the API's `status_label`.
+ *
+ * This map used to carry both, so the screen had its own private vocabulary:
+ * it said "Submitted" and "Fulfilled" while the client's spec says "For Review"
+ * and "Approved", and `needs_resubmission` was missing altogether, which in a
+ * `Record<RequestStatus, …>` meant an undefined lookup and a chip rendering as
+ * blank. One source of truth for the label; the colour is presentation and
+ * stays here.
+ *
+ * Needs Resubmission is orange, the same as Pending, because to a business
+ * owner they are the same situation: you owe us a document.
+ */
+const STATUS_TONE: Record<RequestStatus, ChipTone> = {
+  pending: 'orange',
+  needs_resubmission: 'orange',
+  submitted: 'tint-purple',
+  fulfilled: 'green',
+  rejected: 'red',
 }
 
-/* Status chip tone (pending=orange, submitted=royal-ish, fulfilled=green, rejected=red). */
-const STATUS_CHIP: Record<RequestStatus, { tone: ChipTone; label: string }> = {
-  pending: { tone: 'orange', label: 'Pending' },
-  submitted: { tone: 'tint-purple', label: 'Submitted' },
-  fulfilled: { tone: 'green', label: 'Fulfilled' },
-  rejected: { tone: 'red', label: 'Rejected' },
+const STATUS_DOT: Record<RequestStatus, string> = {
+  pending: 'bg-s-orange',
+  needs_resubmission: 'bg-s-orange',
+  submitted: 'bg-royal',
+  fulfilled: 'bg-s-green',
+  rejected: 'bg-s-red',
 }
 
 function StatusDot({ status, label }: { status: RequestStatus; label: string }) {
-  const dot =
-    status === 'pending'
-      ? 'bg-s-orange'
-      : status === 'fulfilled'
-        ? 'bg-s-green'
-        : status === 'rejected'
-          ? 'bg-s-red'
-          : 'bg-royal'
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-ink-secondary">
-      <span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
+      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[status] ?? 'bg-line'}`} aria-hidden="true" />
       {label}
     </span>
   )
@@ -158,11 +162,22 @@ function LetterView({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const chip = STATUS_CHIP[request.status]
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+
+  const tone = STATUS_TONE[request.status] ?? 'tint-gray'
   const thread = request.responses ?? []
-  // An applicant may keep replying until the officer closes the request.
-  const canRespond = !isOfficer && (request.status === 'pending' || request.status === 'submitted')
-  const canClose = isOfficer && request.status === 'submitted'
+  /*
+   * Taken from the API's own answer, not re-derived from the status string.
+   *
+   * This read `status === 'pending' || status === 'submitted'`, which silently
+   * excluded `needs_resubmission` — so after an office sent a document back
+   * asking for a clearer copy, the owner had no button to send one. The API
+   * accepted the resubmission the whole time; the screen just never offered it,
+   * which is the worst shape for this bug to take because nothing errors.
+   */
+  const canRespond = !isOfficer && request.accepts_response
+  const canClose = isOfficer && request.awaits_office
 
   async function submitResponse() {
     setBusy(true)
@@ -180,11 +195,23 @@ function LetterView({
     }
   }
 
-  async function close(outcome: 'fulfilled' | 'rejected') {
+  /*
+   * Approve, or send it back.
+   *
+   * "Reject" here means `needs_resubmission`, not the terminal `rejected`:
+   * "Do NOT mark the requirement as completed after rejection ... the
+   * requirement should remain active until the Admin approves a valid
+   * submission." Turning down a DOCUMENT is not the same act as withdrawing a
+   * REQUIREMENT, and only the second one ends the matter — so only the first is
+   * offered on this screen.
+   */
+  async function close(outcome: 'fulfilled' | 'needs_resubmission', remarks?: string) {
     setBusy(true)
     setError(null)
     try {
-      onUpdated(await requests.close(request.id, outcome))
+      onUpdated(await requests.close(request.id, outcome, remarks))
+      setRejectOpen(false)
+      setRejectReason('')
     } catch (err) {
       setError(toApiError(err).message)
     } finally {
@@ -205,7 +232,7 @@ function LetterView({
       <div className="rounded-2xl bg-white px-6 py-8 shadow-card sm:px-10">
         <div className="flex flex-wrap items-start justify-between gap-3 border-b-2 border-ink/40 pb-3">
           <h1 className="text-3xl font-bold text-ink">{request.subject}</h1>
-          <StatusChip tone={chip.tone}>{chip.label}</StatusChip>
+          <StatusChip tone={tone}>{request.status_label}</StatusChip>
         </div>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -241,13 +268,85 @@ function LetterView({
           <span className="text-ink-muted"> · applicant</span>
         </p>
 
+        {/*
+          What this requirement IS, before what it says.
+
+          The letter used to open straight into the body text, with the business
+          only mentioned in a grey "re ..." line. An owner with two shops could
+          not tell at a glance which one a Health Certificate was for, and the
+          deadline and the office's reference file had nowhere to appear at all.
+        */}
+        <dl className="mt-6 grid gap-x-6 gap-y-3 rounded-xl bg-canvas px-5 py-4 sm:ml-16 sm:grid-cols-2">
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Business</dt>
+            <dd className="text-sm font-bold text-ink">
+              {businessName(
+                request.application?.business_name ? { name: request.application.business_name } : null,
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Business No.</dt>
+            <dd className="tnum text-sm font-bold text-ink">
+              {request.application?.tracking_id || 'Draft — not yet filed'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Requesting office</dt>
+            <dd className="text-sm font-bold text-ink">
+              {request.from_office?.name ?? request.created_by?.department ?? '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Deadline</dt>
+            <dd className="text-sm font-bold text-ink">
+              {request.due_date ? formatDate(request.due_date) : 'No deadline set'}
+            </dd>
+          </div>
+        </dl>
+
         <div className="mt-6 space-y-3 pl-0 text-[15px] leading-relaxed text-ink sm:pl-16">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-            {request.request_type === 'document' ? 'Document request' : 'Message'} · re{' '}
-            {filingLine(request)}
-          </p>
-          <p className="whitespace-pre-wrap">{request.body}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Instructions</p>
+          <p className="whitespace-pre-wrap">{request.body || 'No instructions were given.'}</p>
+
+          {request.additional_remarks && (
+            <div className="rounded-xl bg-input px-5 py-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                Additional remarks
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{request.additional_remarks}</p>
+            </div>
+          )}
+
+          {request.reference && (
+            <button
+              type="button"
+              onClick={() => requests.viewReference(request.id, window.open('', '_blank'))}
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-royal underline hover:text-royal-hover"
+            >
+              <DownloadIcon size={16} />
+              {request.reference.name ?? 'Reference file'}
+            </button>
+          )}
         </div>
+
+        {/*
+          The office's verdict on the latest submission, said where the owner is
+          already reading. Without it a status of "Needs Resubmission" is an
+          instruction with no content - it moves the question to a phone call.
+        */}
+        {request.remarks && !request.awaits_office && (
+          <div
+            className={`mt-6 rounded-xl px-5 py-4 sm:ml-16 ${
+              request.status === 'fulfilled' ? 'bg-s-green-tint' : 'bg-s-red-tint'
+            }`}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              {request.status === 'fulfilled' ? 'Approved with a note' : `${request.status_label} — why`}
+            </p>
+            <p className="mt-1 whitespace-pre-wrap text-sm font-medium text-ink">{request.remarks}</p>
+          </div>
+        )}
 
         {thread.length > 0 && (
           <div className="mt-6 sm:ml-16">
@@ -255,17 +354,35 @@ function LetterView({
               {thread.length === 1 ? 'Applicant response' : `Applicant responses (${thread.length})`}
             </h2>
             <ol className="mt-2 flex flex-col gap-3">
-              {thread.map((r, i) => (
+              {thread.map((r) => (
                 <li key={r.id} className="rounded-xl bg-input px-5 py-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <span className="text-sm font-bold text-ink">
                       {thread.length > 1 && (
-                        <span className="mr-1.5 font-semibold text-ink-muted">{i + 1}.</span>
+                        <span className="mr-1.5 font-semibold text-ink-muted">
+                          Submission #{r.number}
+                        </span>
                       )}
                       {r.author.name ?? 'Applicant'}
                     </span>
                     <span className="text-xs italic text-ink-muted">{formatDateTime(r.created_at)}</span>
                   </div>
+                  {/*
+                    The verdict on THIS submission, not the requirement's current
+                    one. The parent carries a single remark that is always the
+                    latest, so a history rendered from it told the owner that
+                    every earlier attempt was refused for today's reason.
+                  */}
+                  {r.review_outcome && (
+                    <p className="mt-1.5 text-xs font-semibold text-ink-secondary">
+                      <span
+                        className={r.review_outcome === 'fulfilled' ? 'text-s-green' : 'text-s-red'}
+                      >
+                        {r.review_status_label}
+                      </span>
+                      {r.review_remarks && <span className="font-normal"> — {r.review_remarks}</span>}
+                    </p>
+                  )}
                   {r.body && <p className="mt-1.5 whitespace-pre-wrap text-sm text-ink">{r.body}</p>}
                   {r.document && (
                     <button
@@ -306,23 +423,55 @@ function LetterView({
                 disabled={busy}
                 className="rounded-md bg-s-green px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60"
               >
-                {busy ? 'Working…' : 'Mark fulfilled'}
+                {busy ? 'Working…' : 'Approve'}
               </button>
               <button
                 type="button"
-                onClick={() => close('rejected')}
+                onClick={() => setRejectOpen(true)}
                 disabled={busy}
                 className="rounded-md bg-s-red px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60"
               >
-                Reject
+                Reject — ask again
               </button>
             </>
           )}
           {!canRespond && !canClose && (
-            <StatusDot status={request.status} label={`Status: ${chip.label}`} />
+            <StatusDot status={request.status} label={`Status: ${request.status_label}`} />
           )}
         </div>
       </div>
+
+      {rejectOpen && (
+        <ProtoModal
+          title="Send this back"
+          tone="red"
+          cancelLabel="Cancel"
+          confirmLabel="Send back for resubmission"
+          onCancel={() => setRejectOpen(false)}
+          onConfirm={() => close('needs_resubmission', rejectReason.trim())}
+          confirmDisabled={busy || !rejectReason.trim()}
+        >
+          <p className="mb-4 border-b border-line pb-3 text-sm text-ink-secondary">
+            {request.subject} ·{' '}
+            {businessName(
+              request.application?.business_name ? { name: request.application.business_name } : null,
+            )}
+          </p>
+          <label className="block">
+            <FieldLabel required>Why is this being sent back?</FieldLabel>
+            <textarea
+              className={`${inputCls} min-h-24`}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="e.g. Please submit a clearer copy of the certificate."
+            />
+            <p className="mt-1.5 text-xs text-ink-secondary">
+              The owner sees this word for word, and the requirement stays open so they
+              can submit a replacement.
+            </p>
+          </label>
+        </ProtoModal>
+      )}
 
       {replying && (
         <div className="mt-6 flex items-start gap-4">
@@ -403,18 +552,24 @@ function ComposeModal({
 }) {
   const [appId, setAppId] = useState('')
   /*
-   * Which office the applicant sees this from. Defaults to the requester's own,
-   * but the super admin has no department, so without an explicit choice their
-   * requests reach the applicant attributed to nobody.
+   * No office picker and no type picker.
+   *
+   * The office is taken from the signed-in account by the API — sending one is
+   * ignored — so offering a dropdown here would be a control that looks like it
+   * decides something and does not. It used to genuinely decide: a City Health
+   * officer could raise a requirement the applicant saw as coming from the Fire
+   * Office, which then appeared in the fire office's list and not in City
+   * Health's own. The office is shown, not chosen.
+   *
+   * Type is gone for a simpler reason: an Other Requirement is a document
+   * request. There was nothing else it could be.
    */
   const user = useAuth((s) => s.user)
-  const departments = useAsync(() => reference.departments(), [])
-  const [departmentId, setDepartmentId] = useState(
-    user?.department ? String(user.department.id) : '',
-  )
-  const [type, setType] = useState<RequestType>('document')
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
+  const [dueDate, setDueDate] = useState('')
+  const [additionalRemarks, setAdditionalRemarks] = useState('')
+  const [reference, setReference] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -433,15 +588,16 @@ function ComposeModal({
     : ''
 
   async function submit() {
-    if (!appId || !departmentId || !subject.trim() || !body.trim()) return
+    if (!appId || !subject.trim()) return
     setBusy(true)
     setError(null)
     try {
       const created = await requests.create(Number(appId), {
-        request_type: type,
         subject: subject.trim(),
-        body: body.trim(),
-        ...(departmentId ? { department_id: Number(departmentId) } : {}),
+        ...(body.trim() ? { body: body.trim() } : {}),
+        ...(dueDate ? { due_date: dueDate } : {}),
+        ...(additionalRemarks.trim() ? { additional_remarks: additionalRemarks.trim() } : {}),
+        ...(reference ? { reference } : {}),
       })
       onCreated(created)
     } catch (err) {
@@ -452,98 +608,122 @@ function ComposeModal({
 
   return (
     <ProtoModal
-      title="Request"
+      title="Create Other Requirement"
       wide
       cancelLabel="Cancel"
-      confirmLabel="Send request"
+      confirmLabel="Create requirement request"
       onCancel={onClose}
       onConfirm={submit}
-      confirmDisabled={busy || !appId || !departmentId || !subject.trim() || !body.trim()}
+      confirmDisabled={busy || !appId || !subject.trim()}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
-        Ask an applicant for a document or send them a message.
+        Ask a business owner for a document your office needs.
       </p>
       {error && <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{error}</p>}
       <div className="space-y-4">
         <label className="block">
-          <FieldLabel required>Application</FieldLabel>
+          <FieldLabel required>Requirement / Document name</FieldLabel>
+          <input
+            className={inputCls}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
+            placeholder="e.g. Health Certificate"
+          />
+        </label>
+
+        <label className="block">
+          <FieldLabel required>Business</FieldLabel>
           <select className={inputCls} value={appId} onChange={(e) => setAppId(e.target.value)}>
-            <option value="">Select an application…</option>
+            <option value="">Select a business…</option>
             {apps.map((a) => (
               <option key={a.id} value={a.id}>
                 {/*
-                 * A tracking ID is minted on submit, so a draft has none and
-                 * this read "Nena Sari-Sari Store · " — a separator pointing at
-                 * nothing, which looks like data that failed to load. Say the
-                 * filing is a draft instead; that is why it has no number.
+                 * Business name AND number. A tracking ID is minted on submit,
+                 * so a draft has none and this read "Nena Sari-Sari Store · " —
+                 * a separator pointing at nothing. The number is what tells one
+                 * owner's two businesses apart, so it is never dropped silently.
                  */}
                 {businessName(a.business)} · {a.tracking_id || 'Draft (not yet filed)'}
               </option>
             ))}
           </select>
         </label>
+
         {/*
          * readOnly, not disabled: a disabled input is skipped by the keyboard
          * and often unread by screen readers, and this is information the
          * officer needs before they send — WCAG 2.1 AA, and the same rule the
          * review sheet follows for its record fields.
          */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <FieldLabel>To (recipient)</FieldLabel>
+            <input
+              className={inputCls}
+              value={recipientLine}
+              readOnly
+              placeholder="Choose a business above"
+              aria-describedby="request-recipient-note"
+            />
+            <p id="request-recipient-note" className="mt-1.5 text-xs text-ink-secondary">
+              Requirements go to the business owner who filed the application.
+            </p>
+          </label>
+          <label className="block">
+            <FieldLabel>From office</FieldLabel>
+            <input
+              className={inputCls}
+              value={user?.department?.name ?? 'Your office'}
+              readOnly
+              aria-describedby="request-office-note"
+            />
+            <p id="request-office-note" className="mt-1.5 text-xs text-ink-secondary">
+              Set automatically from your account, and recorded as a document request.
+            </p>
+          </label>
+        </div>
+
         <label className="block">
-          <FieldLabel>To (recipient)</FieldLabel>
-          <input
-            className={inputCls}
-            value={recipientLine}
-            readOnly
-            placeholder="Choose an application above"
-            aria-describedby="request-recipient-note"
-          />
-          <p id="request-recipient-note" className="mt-1.5 text-xs text-ink-secondary">
-            Requests go to the business owner who filed the application. Pick a
-            different application to write to a different owner.
-          </p>
-        </label>
-        <label className="block">
-          <FieldLabel required>From office</FieldLabel>
-          <select
-            className={inputCls}
-            value={departmentId}
-            onChange={(e) => setDepartmentId(e.target.value)}
-            aria-describedby="request-from-office-note"
-          >
-            <option value="">Select an office…</option>
-            {(departments.data ?? []).map((d: Department) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <p id="request-from-office-note" className="mt-1.5 text-xs text-ink-secondary">
-            The office the owner sees this request coming from.
-          </p>
-        </label>
-        <label className="block">
-          <FieldLabel required>Type</FieldLabel>
-          <select className={inputCls} value={type} onChange={(e) => setType(e.target.value as RequestType)}>
-            <option value="document">Document request</option>
-            <option value="message">Message</option>
-          </select>
-        </label>
-        <label className="block">
-          <FieldLabel required>Subject</FieldLabel>
-          <input
-            className={inputCls}
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            placeholder="e.g. Additional Documents Required"
-          />
-        </label>
-        <label className="block">
-          <FieldLabel required>Body</FieldLabel>
+          <FieldLabel>Description / instructions</FieldLabel>
           <textarea
-            className={`${inputCls} min-h-32`}
+            className={`${inputCls} min-h-28`}
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder="Describe what the applicant needs to do."
+            placeholder="Describe exactly what the owner needs to submit."
+          />
+        </label>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <FieldLabel>Deadline</FieldLabel>
+            <input
+              type="date"
+              className={inputCls}
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <FieldLabel>Attachment / reference file</FieldLabel>
+            <input
+              type="file"
+              accept=".pdf,.jpg,.jpeg,.png"
+              className={inputCls}
+              onChange={(e) => setReference(e.target.files?.[0] ?? null)}
+            />
+            <p className="mt-1.5 text-xs text-ink-secondary">
+              Optional — a blank form or a sample, for the owner to work from.
+            </p>
+          </label>
+        </div>
+
+        <label className="block">
+          <FieldLabel>Additional remarks</FieldLabel>
+          <textarea
+            className={`${inputCls} min-h-20`}
+            value={additionalRemarks}
+            onChange={(e) => setAdditionalRemarks(e.target.value)}
+            placeholder="Anything else the owner should know."
           />
         </label>
       </div>
@@ -658,56 +838,84 @@ export function RequestsPage() {
           <p className="mb-3 text-sm text-ink-muted">
             Showing {list.length.toLocaleString()} of {total.toLocaleString()}, newest first.
           </p>
-          <ul className="flex flex-col gap-4">
-            {list.map((r) => {
-              const chip = STATUS_CHIP[r.status]
-              return (
-                <li key={r.id}>
-                  <button
-                    type="button"
-                    onClick={() => setOpenId(r.id)}
-                    className="flex w-full items-center gap-3 rounded-xl bg-white px-5 py-4 text-left shadow-card transition-shadow hover:shadow-raised sm:gap-5"
-                  >
-                    <AvatarCircle />
-                    {/* Fixed at 11rem the sender column plus the avatar, gaps and
-                        trailing chevron came to more than a 390px screen, so the
-                        row's own chevron hung past the card edge. */}
-                    <span className="w-28 shrink-0 sm:w-44">
-                      <span className="block truncate text-[15px] font-bold text-ink">
-                        {senderName(r)}
-                      </span>
-                      {/*
-                       * An officer's list is everything their office has sent, so
-                       * the useful second line is who each one went to. The owner
-                       * is reading their own inbox and already knows.
-                       */}
-                      {isOfficer && (
-                        <span className="block truncate text-xs text-ink-secondary">
-                          To {r.recipient?.name ?? 'the business owner on file'}
-                        </span>
-                      )}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[15px] text-ink">
-                      <span className="font-bold">{r.subject} - </span>
-                      {r.body}
-                    </span>
-                    <StatusDot
-                      status={r.status}
-                      label={
-                        r.responses?.length
-                          ? `${chip.label} · ${r.responses.length} ${r.responses.length === 1 ? 'response' : 'responses'}`
-                          : chip.label
-                      }
-                    />
-                    <span className="hidden shrink-0 text-sm italic text-ink-muted sm:inline">
-                      {formatDate(r.created_at)}
-                    </span>
-                    <ChevronRightIcon size={18} className="shrink-0 text-ink-secondary" />
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+          {/*
+            A table, because the columns ARE the information.
+            
+            This was a card list showing sender, subject and status — and never
+            the business. One owner with two businesses got two identical rows,
+            and an office looking at its queue could not tell which shop a
+            "Health Certificate" belonged to without opening it. Business name
+            and business number are what keep them apart, so they are columns.
+          */}
+          <ProtoCard className="overflow-hidden rounded-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[46rem] text-left text-sm">
+                <thead>
+                  <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                    <th className="px-5 py-3">Business</th>
+                    <th className="px-5 py-3">Business No.</th>
+                    <th className="px-5 py-3">Requirement</th>
+                    <th className="px-5 py-3">{isOfficer ? 'Submitted' : 'Office'}</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((r) => {
+                    const rowTone = STATUS_TONE[r.status] ?? 'tint-gray'
+                    const latest = r.responses?.[r.responses.length - 1]
+                    return (
+                      <tr key={r.id} className="border-t border-line align-top">
+                        <td className="px-5 py-3.5 font-bold text-ink">
+                          {businessName(
+                            r.application?.business_name ? { name: r.application.business_name } : null,
+                          )}
+                        </td>
+                        <td className="tnum px-5 py-3.5 text-ink-secondary">
+                          {r.application?.tracking_id || 'Draft'}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <span className="block font-semibold text-ink">{r.subject}</span>
+                          {r.body && (
+                            <span className="mt-0.5 block max-w-md truncate text-xs text-ink-secondary">
+                              {r.body}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3.5 text-ink-secondary">
+                          {/*
+                            The office is the useful column for an owner — "who
+                            is asking me for this" — and for an office reading
+                            its own queue it is always itself, so that side gets
+                            the submission date instead.
+                          */}
+                          {isOfficer
+                            ? latest
+                              ? formatDate(latest.created_at)
+                              : '—'
+                            : (r.from_office?.name ?? r.created_by?.department ?? '—')}
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <StatusChip tone={rowTone}>{r.status_label}</StatusChip>
+                        </td>
+                        <td className="px-5 py-3.5">
+                          <button
+                            type="button"
+                            onClick={() => setOpenId(r.id)}
+                            className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                          >
+                            {/* An office with something waiting is being asked to
+                                review; everyone else is being offered a read. */}
+                            {isOfficer && r.awaits_office ? 'Review' : 'View'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </ProtoCard>
           {hasMore && (
             <button
               type="button"

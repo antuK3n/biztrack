@@ -1885,14 +1885,36 @@ export interface MessageThreadSummary {
 
 export type RequestType = 'document' | 'message'
 
-export type RequestStatus = 'pending' | 'submitted' | 'fulfilled' | 'rejected'
+/**
+ * `needs_resubmission` was missing here while the API has emitted it since the
+ * resubmission round, so every screen narrowed it away and the one status that
+ * asks something of the applicant was the one TypeScript said could not happen.
+ */
+export type RequestStatus =
+  | 'pending'
+  | 'submitted'
+  | 'fulfilled'
+  | 'needs_resubmission'
+  | 'rejected'
 
-/** One applicant reply; a request can collect several. */
+/** One applicant submission; a requirement can collect several. */
 export interface OfficerRequestResponse {
   id: number
+  /** 1-based, so the reader sees "Submission #2" without counting rows. */
+  number: number
   body: string | null
   author: { name: string | null }
   document: { id: number; filename: string | null } | null
+  /**
+   * What became of THIS submission. Null while it is still with the office —
+   * and on rows that predate per-submission verdicts being recorded at all.
+   * The parent's `remarks` is always the LATEST verdict, so a history rendered
+   * from it alone attributes today's reason to every earlier attempt.
+   */
+  review_outcome: RequestStatus | null
+  review_status_label: string | null
+  review_remarks: string | null
+  reviewed_at: string | null
   created_at: string
 }
 
@@ -1914,12 +1936,30 @@ export interface OfficerRequest {
    */
   created_by: { name: string; department: string | null } | null
   /**
-   * The office the applicant sees this coming FROM, as picked in the composer.
-   * Distinct from `created_by.department`, which is the requester's own office:
-   * the super admin belongs to none and has to choose, and an officer may raise
-   * a requirement on another office's behalf.
+   * The office that raised this — taken from the signed-in account server-side,
+   * never chosen. It is what makes "from the City Health Office" and "visible
+   * to the City Health Office" the same statement.
    */
   from_office: Department | null
+  /** The office's verdict on the latest submission. */
+  remarks: string | null
+  /** Whether the applicant may still answer. Do not re-derive from `status`. */
+  accepts_response: boolean
+  /**
+   * Whose move it is, decided by the API so two screens cannot disagree.
+   * Pending and Needs Resubmission are one situation to an owner — you owe us a
+   * document — and anything counting outstanding requirements counts both.
+   */
+  awaits_applicant: boolean
+  awaits_office: boolean
+  is_closed: boolean
+  /** The note written when the requirement was raised, not the review verdict. */
+  additional_remarks: string | null
+  /** An optional file the OFFICE attached: a blank form, a template. */
+  reference: { name: string | null; url: string } | null
+  /** Deadline, when the office set one. */
+  due_date: string | null
+  reviewed_at: string | null
   /**
    * The recipient (checklist item 89). Always the applicant on the filing — a
    * request is answered through `request.respond`, which only business owners
@@ -1933,12 +1973,38 @@ export interface OfficerRequest {
    * point at a removed business, so the inner null is the common one. Use
    * `businessName()` from lib/format rather than rendering it raw.
    */
-  application: { id: number; tracking_id: string; business_name: string | null } | null
+  application: {
+    id: number
+    /** The number shown beside the business name — the client's "Business Number". */
+    tracking_id: string
+    business_id: number | null
+    business_name: string | null
+  } | null
   /** Latest reply, mirrored for older clients; `responses` is the full thread. */
   response_body: string | null
   responses: OfficerRequestResponse[]
   created_at: string
   responded_at: string | null
+}
+
+/**
+ * What the Create Other Requirement form sends.
+ *
+ * No `department_id` and no `request_type`: the office comes from the signed-in
+ * account (the API ignores one sent anyway) and an Other Requirement is a
+ * document request by definition. Both were fields the officer used to have to
+ * fill in, and one of them let an office file work into another office's queue.
+ */
+export interface CreateRequirementPayload {
+  /** Requirement / Document Name. */
+  subject: string
+  /** Description / Instructions. */
+  body?: string
+  /** Deadline, ISO date. */
+  due_date?: string
+  additional_remarks?: string
+  /** Attachment / Reference File — a blank form or template for the applicant. */
+  reference?: File | null
 }
 
 /* ── Renewal/amendment prefill (v2 CONTRACT) ──────────────────────────── */
