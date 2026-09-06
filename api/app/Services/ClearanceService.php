@@ -237,7 +237,37 @@ class ClearanceService
 
     public function isAppliedFor(Application $application, PermitType $type): bool
     {
-        return $application->permitTypes->contains(fn ($pt) => $pt->id === $type->id);
+        /*
+         * Has the applicant STARTED this permit — not "is it attached".
+         *
+         * ── This was a live blocker, not a nicety ─────────────────────────
+         *
+         * It read `permitTypes->contains(...)`, and attachment used to be the
+         * whole of the question: a clearance was on the filing because the
+         * applicant had opted into it, so present meant applied-for.
+         *
+         * `attachRequiredPermitTypes()` broke that on 6 September 2026. All five
+         * required permits are attached at SUBMISSION now — they have to be, or
+         * the one Tax Order of Payment could not price them — so this returned
+         * true for every one of them from the moment the form was filed.
+         * `ClearanceController::apply` aborts when it is true, which meant every
+         * clearance answered "You have already applied for the ..." and NO
+         * APPLICANT COULD APPLY FOR ANYTHING. The stage rendered, the buttons
+         * were there, and all five 422'd.
+         *
+         * The pivot's status is the honest test. `not_started` is precisely "on
+         * the filing so it can be billed, and not yet begun", which is the state
+         * this predicate has to be able to see.
+         *
+         * A REJECTED or RETURNED permit stays "applied for", deliberately. The
+         * applicant's way back in is `refileClearance()`, which resets the row to
+         * `not_started` first; letting them post to `apply` instead would create
+         * a second start on a permit an office has already ruled on and lose the
+         * remarks explaining why.
+         */
+        $row = $this->pivotRow($application, $type);
+
+        return $row !== null && $row->status !== ClearanceStatus::NotStarted;
     }
 
     /** This permit's pivot row on this filing — the row that carries its status. */

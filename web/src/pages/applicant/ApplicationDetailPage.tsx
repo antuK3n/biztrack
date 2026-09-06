@@ -670,10 +670,19 @@ export function ApplicationDetailPage() {
         {status !== 'draft' && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
+            {/*
+              Two corrections. They open on PAYMENT, not on submission —
+              `ClearanceService::isUnlocked` is `status->isPaid()`, and payment
+              is now itself two steps away from submitting, so "once this
+              application is submitted" would send an applicant to a locked
+              screen with no idea what they were missing. And nothing here adds
+              to a balance any more: the Tax Order of Payment prices all five up
+              front.
+            */}
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once this application is submitted. Each goes to its own office, and
-              each one you apply for adds its fee to your balance — your permit is released when
-              that balance reaches zero.
+              These open once BPLO approves this application and you have paid. Each goes to its
+              own office, and your payment covers all five — your Business Permit is released once
+              every one of them is approved.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}

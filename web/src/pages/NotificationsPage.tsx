@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { ComponentType, ReactNode, SVGProps } from 'react'
 import {
@@ -23,6 +23,7 @@ import { notifications } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import type { Notification, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
+import { useNotifications } from '../stores/notifications'
 
 /*
  * Every row used to carry the same person-avatar glyph, which told the reader
@@ -165,7 +166,27 @@ export function NotificationsPage() {
   const emptyDescription = emptyStateFor(user)
   const items: Notification[] = data?.data ?? []
   const unread = data?.unread ?? 0
+  const setUnread = useNotifications((s) => s.setUnread)
 
+  /*
+   * This page's own count is the freshest one in the app — it was just fetched
+   * with the list — so it seeds the badge rather than waiting for the poller's
+   * next tick. It also corrects the badge after somebody reads a notification in
+   * another tab: this fetch sees the true figure, the store may not have yet.
+   */
+  useEffect(() => {
+    if (data) setUnread(data.unread)
+  }, [data, setUnread])
+
+  /*
+   * Both handlers below tell the shared store as well as their own state.
+   *
+   * The bell's badge reads that store, and it is refreshed by a 30-second
+   * poller. Without these two lines, marking everything read here would leave a
+   * count sitting over the bell for up to half a minute — on the one screen that
+   * has just finished proving it wrong. Setting it directly is not a duplicate
+   * of the poll; it is the answer arriving before the question is next asked.
+   */
   async function markAll() {
     setMarkingAll(true)
     try {
@@ -175,6 +196,7 @@ export function NotificationsPage() {
           ? { data: prev.data.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })), unread: 0 }
           : prev!,
       )
+      setUnread(0)
     } finally {
       setMarkingAll(false)
     }
@@ -192,6 +214,7 @@ export function NotificationsPage() {
             }
           : prev!,
       )
+      setUnread(unread - 1)
     } catch {
       // Non-fatal: reading is best-effort.
     }
@@ -225,28 +248,80 @@ export function NotificationsPage() {
       ) : (
         <ul className="flex flex-col gap-4">
           {items.map((n) => {
+            const unreadRow = !n.read_at
+
+            /*
+             * ── Telling read from unread, which the list could not do ───────
+             *
+             * Every row was `bg-white shadow-card` with a bold title, read or
+             * not. The ONLY difference was an `sr-only` "(unread)" — so a screen
+             * reader was told and a sighted reader was not, which is the
+             * accessibility trade backwards: the accessible name was carrying a
+             * distinction the design never made.
+             *
+             * Gmail's convention, adapted to this palette. The page is canvas
+             * (#d1dbeb) and cards are white, so "forward" is white and
+             * "recessed" is the tint: unread rows keep the white card and its
+             * shadow, read rows drop to `royal-tint` and lose the lift. On a
+             * blue-grey page that reads as settled rather than as disabled.
+             *
+             * ── Three carriers, so it is never colour alone ─────────────────
+             *
+             * DESIGN.md's rule, and a list where one third of the rows differ
+             * only by background is exactly what it is for:
+             *
+             *   1. WEIGHT — bold title unread, medium and muted read. Survives
+             *      greyscale, survives every kind of colour blindness.
+             *   2. THE DOT — a filled royal disc before the title, present only
+             *      when unread. A shape, not a shade.
+             *   3. THE ACCENT BAR — a royal left border, transparent when read
+             *      so the text still lines up and rows do not jump 4px as they
+             *      are opened.
+             *
+             * The `sr-only` "(unread)" stays. It is now saying the same thing as
+             * the visuals rather than standing in for them.
+             */
             const row: ReactNode = (
               <div className="flex items-center gap-4 px-5 py-4">
                 <NotificationIcon notification={n} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[15px] font-bold text-ink">
-                    {n.title}
-                    {!n.read_at && <span className="sr-only"> (unread)</span>}
+                  <p
+                    className={`flex items-center gap-2 truncate text-[15px] ${
+                      unreadRow ? 'font-bold text-ink' : 'font-medium text-ink-secondary'
+                    }`}
+                  >
+                    {unreadRow && (
+                      <span
+                        aria-hidden="true"
+                        className="h-2 w-2 shrink-0 rounded-full bg-royal"
+                      />
+                    )}
+                    <span className="truncate">{n.title}</span>
+                    {unreadRow && <span className="sr-only"> (unread)</span>}
                   </p>
-                  <p className="mt-0.5 truncate text-sm text-ink-secondary">{n.body}</p>
+                  <p
+                    className={`mt-0.5 truncate text-sm ${
+                      unreadRow ? 'text-ink-secondary' : 'text-ink-muted'
+                    }`}
+                  >
+                    {n.body}
+                  </p>
                 </div>
                 <span className="shrink-0 text-sm italic text-ink-muted">{formatDateTime(n.created_at)}</span>
                 <ChevronRightIcon size={18} className="shrink-0 text-ink-secondary" />
               </div>
             )
+            const shell = `overflow-hidden rounded-xl border-l-4 ${
+              unreadRow ? 'border-royal bg-white shadow-card' : 'border-transparent bg-royal-tint'
+            }`
             return (
-              <li key={n.id} onClick={() => markOne(n)} className="rounded-xl bg-white shadow-card">
+              <li key={n.id} onClick={() => markOne(n)} className={shell}>
                 {n.link ? (
-                  <Link to={n.link} className="block rounded-xl transition-shadow hover:shadow-raised">
+                  <Link to={n.link} className="block transition-shadow hover:shadow-raised">
                     {row}
                   </Link>
                 ) : (
-                  <div className="rounded-xl transition-shadow hover:shadow-raised">{row}</div>
+                  <div className="transition-shadow hover:shadow-raised">{row}</div>
                 )}
               </li>
             )

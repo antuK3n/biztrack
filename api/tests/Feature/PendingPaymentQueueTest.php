@@ -57,6 +57,7 @@ function unpaidFiling(): Application
     $draft = test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [$businessPermit->id],
         ])

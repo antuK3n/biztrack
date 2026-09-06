@@ -52,11 +52,14 @@ function progressFiling(array $permitCodes): int
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', $permitCodes)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     return $appId;
@@ -227,6 +230,7 @@ it('reports an empty history rather than failing when nothing has moved yet', fu
 
     $draftId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ])->assertCreated()->json('data.id');

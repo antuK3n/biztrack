@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\BusinessResource;
 use App\Http\Resources\PermitResource;
 use App\Models\Business;
+use App\Models\BusinessOwner;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\Numbering;
@@ -40,7 +41,7 @@ class BusinessController extends Controller
      */
     private const MALABON_POSTAL_CODE = '1470';
 
-    private array $eager = ['address.barangay', 'lines.psicCode'];
+    private array $eager = ['address.barangay', 'lines.psicCode', 'owners'];
 
     /**
      * The caller's own businesses, newest first.
@@ -313,6 +314,7 @@ class BusinessController extends Controller
             'president_officer_name' => $data['president_officer_name'] ?? null,
             'citizenship' => $data['citizenship'] ?? null,
             'capital_participation_filipino' => $data['capital_participation_filipino'] ?? null,
+            'capital_investment' => $data['capital_investment'] ?? null,
             'has_tax_incentives' => (bool) ($data['has_tax_incentives'] ?? false),
         ];
     }
@@ -465,7 +467,29 @@ class BusinessController extends Controller
             'president_officer_name' => ['nullable', 'string', 'max:255'],
             'citizenship' => ['nullable', 'string', 'max:100'],
             // A percentage, not an amount: decimal(5,2) holds 0.00 to 100.00.
+            'address.mobile_number' => ['nullable', 'string', 'max:40'],
+            'address.email' => ['nullable', 'email', 'max:255'],
             'capital_participation_filipino' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            // BPLO item B7 — one figure for the whole business. The per-line
+            // capitalization the fee engine reads lives on the fee profile and
+            // is a different question; see the note in ApplyWizard.
+            'capital_investment' => ['nullable', 'numeric', 'min:0', 'max:10000000000'],
+            /*
+             * BPLO items 11 and 12 — the named person on the form.
+             *
+             * Every field is nullable. None of the three paper forms marks any
+             * field required, and the wizard prefills these from the signed-in
+             * account, so a blank here means the applicant cleared a prefill on
+             * purpose. Refusing that would be our rule, not the city's.
+             *
+             * `gender` is bounded to the two the paper prints (M / F boxes).
+             */
+            'owner' => ['sometimes', 'array'],
+            'owner.surname' => ['nullable', 'string', 'max:100'],
+            'owner.given_name' => ['nullable', 'string', 'max:100'],
+            'owner.middle_name' => ['nullable', 'string', 'max:100'],
+            'owner.suffix' => ['nullable', 'string', 'max:20'],
+            'owner.gender' => ['nullable', 'in:M,F'],
             // BPLO item B8 (new form) / B7 (renewal). Not derivable from the
             // `is_bmbe` / `is_cooperative` fee-profile flags — see the Business
             // model — so it is asked and stored on its own.
@@ -575,6 +599,40 @@ class BusinessController extends Controller
         return $length > 9 ? $tin.'-'.substr($digits, 9) : $tin;
     }
 
+    /**
+     * The named person on the paper — BPLO item 11 / item 12.
+     *
+     * Writes the PRIMARY owner row and only when the caller sent an `owner`
+     * key. An absent key means "this request is not about the owner" (a
+     * fee-profile autosave, say) and must leave the row alone; an explicit
+     * blank inside a present key means the applicant cleared a prefilled field,
+     * and that is stored as the null it is.
+     *
+     * `updateOrCreate` on `is_primary` rather than a plain create: the wizard
+     * saves the same business repeatedly as the applicant types, and a create
+     * would leave one owner row per keystroke.
+     */
+    private function syncOwner(Business $business, array $data): void
+    {
+        if (! array_key_exists('owner', $data) || ! is_array($data['owner'])) {
+            return;
+        }
+
+        $owner = $data['owner'];
+        $clean = fn (string $key) => filled($owner[$key] ?? null) ? trim((string) $owner[$key]) : null;
+
+        BusinessOwner::updateOrCreate(
+            ['business_id' => $business->id, 'is_primary' => true],
+            [
+                'surname' => $clean('surname'),
+                'given_name' => $clean('given_name'),
+                'middle_name' => $clean('middle_name'),
+                'suffix' => $clean('suffix'),
+                'gender' => $clean('gender'),
+            ],
+        );
+    }
+
     private function syncAddressAndLines(Business $business, array $data): void
     {
         $address = $business->address()->updateOrCreate([], [
@@ -614,7 +672,27 @@ class BusinessController extends Controller
         $address->website = filled($data['address']['website'] ?? null)
             ? trim($data['address']['website'])
             : null;
+        /*
+         * Items A7 and A8 — the BUSINESS's mobile number and e-mail.
+         *
+         * Both columns have been on `business_addresses` and empty on every row,
+         * because nothing collected them: the officer's sheet showed the account
+         * holder's details instead, which is a different fact. A corporation's
+         * contact number is not whoever happens to hold the login.
+         *
+         * The wizard prefills them from the signed-in account, so most filings
+         * will carry the same values — but they are stored HERE, on the business,
+         * so editing one never edits the other.
+         */
+        $address->mobile_number = filled($data['address']['mobile_number'] ?? null)
+            ? trim($data['address']['mobile_number'])
+            : null;
+        $address->email = filled($data['address']['email'] ?? null)
+            ? trim($data['address']['email'])
+            : null;
         $address->save();
+
+        $this->syncOwner($business, $data);
 
         /*
          * The declared capital per line, as it stands before this write.

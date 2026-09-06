@@ -9,6 +9,7 @@ import { loginPathFor, portalPath } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
+import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
 import { BellIcon } from './icons'
 
@@ -201,16 +202,90 @@ function LogoutModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
   )
 }
 
-/* Notification bell, fixed top-right on the canvas (p5). */
+/**
+ * How often to ask whether anything new has arrived.
+ *
+ * The same 30 seconds MessagesPanel polls on, and for the same reason: it is
+ * short enough that an applicant refreshing a page has usually already been
+ * told, and long enough that a session left open all afternoon is not two
+ * requests a minute for nothing. One row of payload each time — see the note in
+ * `stores/notifications.ts`.
+ */
+const NOTIFICATION_POLL_MS = 30_000
+
+/**
+ * Notification bell, fixed top-right on the canvas (p5) — now with the count.
+ *
+ * ── There was no indication at all, and notifications are silent ──────────
+ *
+ * `NotificationService` writes a row, sends to the log mailer and the SMS log,
+ * and tells no browser anything: the plan is polling, not websockets. Nothing
+ * polled. So this bell was a plain link, unchanged whether the reader had
+ * nothing waiting or eleven things, and the only way to find out was to click
+ * it on the off-chance. Every notification the system sent — a form returned,
+ * fees adjusted, a permit issued, a permit about to expire — arrived where
+ * nobody was looking.
+ *
+ * The count comes from a shared store rather than local state because the
+ * notifications page lowers it too, and it is a route rather than a child of
+ * this component.
+ *
+ * ── Accessibility, and why the badge is not only a dot ────────────────────
+ *
+ * DESIGN.md's Never Color Alone: a red dot alone encodes "you have something"
+ * in colour and position and nothing else. The badge carries the NUMBER, so it
+ * is legible without colour vision, and the link's accessible name says the
+ * same thing in words — a screen reader announces "Notifications, 3 unread"
+ * rather than reading a decorative circle. `aria-hidden` on the badge itself
+ * stops it being read twice.
+ *
+ * Nine is the cap. Past that the exact figure is not what anybody is deciding
+ * on, and a three-digit badge would burst a 40px control.
+ */
 function Bell() {
   const portal = useAuth((s) => s.portal)
+  const unread = useNotifications((s) => s.unread)
+  const refresh = useNotifications((s) => s.refresh)
+
+  useEffect(() => {
+    void refresh()
+    const timer = setInterval(() => void refresh(), NOTIFICATION_POLL_MS)
+
+    /*
+     * A tab left in the background is not polled by most browsers on the
+     * timer's schedule, and one brought back to the front is exactly when
+     * somebody wants to know. Asking on focus costs one request and closes the
+     * gap between "I came back" and the next tick.
+     */
+    const onFocus = () => void refresh()
+    window.addEventListener('focus', onFocus)
+
+    return () => {
+      clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [refresh])
+
+  const label = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
+
   return (
     <NavLink
       to={portalPath(portal, '/notifications')}
-      title="Notifications"
+      title={label}
+      aria-label={label}
       className="fixed right-5 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full text-royal hover:bg-white/60"
     >
-      <BellIcon size={24} />
+      <span className="relative flex items-center justify-center">
+        <BellIcon size={24} />
+        {unread > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-2 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-canvas bg-s-red px-1 text-[10px] font-bold leading-none text-white tnum"
+          >
+            {unread > 9 ? '9+' : unread}
+          </span>
+        )}
+      </span>
     </NavLink>
   )
 }

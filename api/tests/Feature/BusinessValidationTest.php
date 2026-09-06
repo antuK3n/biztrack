@@ -4,8 +4,10 @@ use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
+use App\Models\FeeAssessment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Models\User;
 use Database\Seeders\ReferenceSeeder;
 
 /*
@@ -131,6 +133,7 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
     $appId = $this->withHeaders($owner)
         ->postJson('/api/v1/applications', [
             'business_id' => $businessId,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
         ])
@@ -142,7 +145,7 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
         ->assertOk()
         ->assertJsonPath('data.status', 'pending_payment');
 
-    $fee = \App\Models\FeeAssessment::where('application_id', $appId)->first();
+    $fee = FeeAssessment::where('application_id', $appId)->first();
     expect((float) $fee->total_amount)->toBeGreaterThan(0.0);
 });
 
@@ -157,6 +160,7 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
     $appId = $this->withHeaders($owner)
         ->postJson('/api/v1/applications', [
             'business_id' => $businessId,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => $typeIds,
         ])
@@ -164,6 +168,8 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
         ->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     $deptCodes = ApplicationAssignment::where('application_id', $appId)
@@ -227,11 +233,11 @@ it('stores and returns the lessor and emergency contact block', function () {
 it('accepts annual and quarterly payment modes and nothing else', function () {
     // Ordinance Sec. 2N offers exactly these two; a semi-annual option would be
     // the system inventing a payment schedule the ordinance does not grant.
-    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+    $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
     $base = [
         'business_id' => $business->id,
         'application_type' => 'new',
-        'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+        'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ];
 
     $this->withHeaders(authAs('owner@biztrack.local'))
@@ -246,13 +252,14 @@ it('accepts annual and quarterly payment modes and nothing else', function () {
 });
 
 it('defaults the payment mode to annual', function () {
-    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+    $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
-            'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+            'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
         ])
         ->assertCreated()
         ->assertJsonPath('data.payment_mode', 'annual');

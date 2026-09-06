@@ -29,9 +29,17 @@ class AuthController extends Controller
      * means a leaked staff credential is useless at the public sign-in, and an
      * applicant can never land on an officer dashboard by accident.
      */
+    /*
+     * `market_admin` was on this list and is gone [client, 2026-09-06], with the
+     * Market Clearance and the CMO Market Office it belonged to. Nothing could
+     * hold the role — the 2026_09_06 migration deleted the row — so the entry
+     * admitted nobody. Removed anyway: a name left in a door list outlives the
+     * reason it was harmless, and the next role created under it would have been
+     * waved through the staff sign-in without anyone deciding that it should be.
+     */
     private const STAFF_ROLES = [
         'bplo_staff', 'sanitary_officer', 'fire_inspector', 'zoning_officer',
-        'obo_staff', 'cenro_officer', 'market_admin', 'admin',
+        'obo_staff', 'cenro_officer', 'admin',
     ];
 
     private function withRelations(User $user): User

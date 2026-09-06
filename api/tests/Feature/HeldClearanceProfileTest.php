@@ -59,6 +59,7 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
 
     $appId = test()->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
         'fee_profile' => [
@@ -74,6 +75,8 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
     ])->assertCreated()->json('data.id');
 
     test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     test()->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     return Application::findOrFail($appId);

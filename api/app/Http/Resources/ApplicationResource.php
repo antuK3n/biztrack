@@ -23,6 +23,12 @@ class ApplicationResource extends JsonResource
             'title' => $this->title,
             'payment_mode' => $this->payment_mode,
             /*
+             * So a reopened draft can put the tick back. Without it the wizard
+             * had no way to know the applicant had already agreed, and asked
+             * again every single time — see the note in ApplicationController.
+             */
+            'data_privacy_consent' => (bool) $this->data_privacy_consent,
+            /*
              * The paper form's "Amendment from:" block (checklist items 82/84).
              *
              * Null on a new or renewal filing rather than an object of falses,

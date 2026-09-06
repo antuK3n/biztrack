@@ -11,6 +11,7 @@ use App\Models\Payment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Services\WorkflowService;
 use Illuminate\Http\UploadedFile;
 
 /*
@@ -46,11 +47,31 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', $permitCodes)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    /*
+     * BPLO reads the main form before the bill exists.
+     *
+     * These two lines used to be submit-then-pay, and that is not a shortcut any
+     * more, it is a state the API refuses: `ApplicationStatus::isBillable()`
+     * rejects a payment at `for_approval`, so the fixture 422'd and took every
+     * case in this file with it. The verified procedure is submit → For Approval
+     * → BPLO approves → Pending Payment → pay.
+     *
+     * Driven at the service, not through POST /assignments/{id}/approve, so the
+     * fixture stays short and does not disturb the acting user — the convention
+     * `classifyAsOfficer` documents, and classification is a precondition of
+     * approving rather than anything this file is testing.
+     */
+    $app = Application::findOrFail($appId);
+    classifyAsOfficer($app);
+    app(WorkflowService::class)->approveMainForm($app->fresh());
+
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     return ['id' => $appId, 'business_id' => $businessId];

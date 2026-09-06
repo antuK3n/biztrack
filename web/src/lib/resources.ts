@@ -318,6 +318,8 @@ export const applications = {
     fee_profile?: FeeProfile
     /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
     payment_mode?: 'annual' | 'quarterly'
+    /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
+    data_privacy_consent?: boolean
   } & AmendmentAnswers) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
@@ -327,6 +329,7 @@ export const applications = {
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'quarterly'
+      data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
@@ -628,11 +631,23 @@ export interface AssignmentFilters extends PageParams {
    */
   status?: string
   /**
-   * The *application's* status, which is what the queue tabs split on.
-   * Comma-separated, e.g. 'submitted,pending_payment,under_review,returned'.
+   * The *application's* status, which is what most of the queue tabs split on.
+   * Comma-separated, e.g. 'for_approval,returned,awaiting_other_permits'.
    * Filter here rather than in the browser — see AssignmentPageMeta.
    */
   application_status?: string
+  /**
+   * The state of THIS OFFICE'S own permit on the filing — the second machine.
+   * Comma-separated, e.g. 'for_inspection'.
+   *
+   * Needed because neither status above can answer "what is waiting on me" once
+   * a permit reaches its site visit: `approveClearance()` completes the
+   * assignment when the paperwork is accepted, and the filing stays
+   * `awaiting_other_permits` throughout. The server matches this against the
+   * permit whose issuing office IS the assignment's department, so an office is
+   * never selected on a clearance beside its own.
+   */
+  clearance_status?: string
 }
 
 export const assignments = {

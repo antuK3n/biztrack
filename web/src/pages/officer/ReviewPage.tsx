@@ -66,6 +66,23 @@ interface ReviewBusiness {
   citizenship?: string | null
   capital_participation_filipino?: string | null
   has_tax_incentives?: boolean | null
+  /*
+   * The premises and the emergency contact — Section B on the paper.
+   *
+   * `BusinessResource` has sent all seven of these since it was written; this
+   * type simply never declared them, so nothing on the sheet could print them
+   * and the type checker agreed there was nothing to print. Every field is
+   * optional for the same reason as the block above: a business filed before
+   * the wizard asked carries null, and an owned premises carries null for the
+   * whole lessor group by design.
+   */
+  is_rented?: boolean | null
+  lessor_name?: string | null
+  lessor_address?: string | null
+  lessor_contact?: string | null
+  monthly_rental?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_number?: string | null
   lines?: {
     id: number
     psic_code: { code: string; title: string } | null
@@ -2060,49 +2077,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   }
                 />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* Item B6. */}
-                <Field
-                  label="Economic Organization"
-                  value={
-                    business.economic_organization
-                      ? business.economic_organization === 'others'
-                        ? `Others — ${business.economic_organization_others || 'unspecified'}`
-                        : humanizeKey(business.economic_organization)
-                      : ''
-                  }
-                />
-                {/*
-                  * Item B8 (new form) / B7 (renewal).
-                  *
-                  * KNOWN LIMIT, and it is worth stating rather than papering
-                  * over: `businesses.has_tax_incentives` is `boolean default
-                  * false` and NOT NULL, so a business registered before the
-                  * wizard asked this question reads "No" here — not because the
-                  * applicant declared no incentives, but because nobody put the
-                  * question. Making the column nullable would not fix it either:
-                  * the rows already on disk are `false`, and every row written
-                  * from now on is a real answer. So there is nothing to migrate,
-                  * only something to know. If an officer is about to act on a
-                  * "No" from an older filing, ask through Messages — the same
-                  * remedy the Amendment From block above prescribes for the same
-                  * class of gap.
-                  *
-                  * The null branch is kept for the case the resource omits the
-                  * field entirely (a business that has been removed from the
-                  * register renders an empty ReviewBusiness).
-                  */}
-                <Field
-                  label="Tax Incentives from a Government Entity"
-                  value={
-                    business.has_tax_incentives == null
-                      ? ''
-                      : business.has_tax_incentives
-                        ? 'Yes — certificate required'
-                        : 'No'
-                  }
-                />
-              </div>
+              {/*
+                * Items B6 and B8 were printed here and have moved to Section B.
+                * They are Business OPERATION questions — what kind of
+                * establishment this is, and whether it holds tax incentives —
+                * and printing them under "Business Information & Registration"
+                * put two of the paper's B items under its A heading on a sheet
+                * whose whole purpose is to be a faithful rendering of it.
+                */}
             </div>
 
             <SubHeading>Main Office Address</SubHeading>
@@ -2116,9 +2098,68 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             </div>
           </section>
 
-          {/* B — Lines of business */}
+          {/*
+            B — Business Operation.
+            ─────────────────────────────────────────────────────────────────
+            It was headed "Line of Business" and held only that table, while
+            items B6 and B8 were printed up in Section A and the premises and
+            emergency-contact answers were printed NOWHERE. So the sheet had an
+            A that carried B's questions, a B that carried one of them, and a
+            handful the applicant typed that no officer could read.
+
+            The paper's B is "Business Operation": what the business does, out
+            of what premises, on what terms, and who to ring. That is the
+            grouping now, and the letter finally means the same thing on both
+            sides of the desk.
+          */}
           <section className="mt-9">
-            <SectionHeading letter="B">Line of Business</SectionHeading>
+            <SectionHeading letter="B">Business Operation</SectionHeading>
+
+            <div className="mb-6 grid gap-4 sm:grid-cols-2">
+              {/* Item B6. */}
+              <Field
+                label="Economic Organization"
+                value={
+                  business.economic_organization
+                    ? business.economic_organization === 'others'
+                      ? `Others — ${business.economic_organization_others || 'unspecified'}`
+                      : humanizeKey(business.economic_organization)
+                    : ''
+                }
+              />
+              {/*
+                * Item B8 (new form) / B7 (renewal).
+                *
+                * KNOWN LIMIT, and it is worth stating rather than papering
+                * over: `businesses.has_tax_incentives` is `boolean default
+                * false` and NOT NULL, so a business registered before the
+                * wizard asked this question reads "No" here — not because the
+                * applicant declared no incentives, but because nobody put the
+                * question. Making the column nullable would not fix it either:
+                * the rows already on disk are `false`, and every row written
+                * from now on is a real answer. So there is nothing to migrate,
+                * only something to know. If an officer is about to act on a
+                * "No" from an older filing, ask through Messages — the same
+                * remedy the Amendment From block prescribes for the same class
+                * of gap.
+                *
+                * The null branch is kept for the case the resource omits the
+                * field entirely (a business that has been removed from the
+                * register renders an empty ReviewBusiness).
+                */}
+              <Field
+                label="Tax Incentives from a Government Entity"
+                value={
+                  business.has_tax_incentives == null
+                    ? ''
+                    : business.has_tax_incentives
+                      ? 'Yes — certificate required'
+                      : 'No'
+                }
+              />
+            </div>
+
+            <SubHeading>Line of Business</SubHeading>
             {business.lines && business.lines.length > 0 ? (
               <div className="space-y-4">
                 {business.lines.map((line, i) => (
@@ -2148,6 +2189,48 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               </div>
             ) : (
               <Field label="Line of Business" value={app.permit_types.map((p) => p.name).join(', ')} />
+            )}
+
+            {/*
+              * The premises, and who to ring — asked of every applicant and
+              * shown to no officer until now.
+              *
+              * `BusinessResource` has emitted all seven of these fields the
+              * whole time; no section printed them. The lessor block is the
+              * costlier omission: whether a business rents, from whom, and for
+              * how much is exactly what an officer checks a lease against, and
+              * the lease is sitting in Section C two headings below. The
+              * emergency contact is the number an inspector rings when nobody
+              * answers at the premises.
+              *
+              * The lessor block is drawn only when the premises are rented,
+              * because four empty fields under "Lessor" read as missing answers
+              * rather than as an owned building. The one-line statement is
+              * printed either way, so the sheet always says which it is.
+              */}
+            <SubHeading>Premises &amp; Contact</SubHeading>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field
+                label="Premises"
+                value={business.is_rented == null ? '' : business.is_rented ? 'Rented' : 'Owned'}
+              />
+              <Field label="Emergency Contact Person" value={business.emergency_contact_name ?? ''} />
+              <Field label="Emergency Contact Number" value={business.emergency_contact_number ?? ''} />
+            </div>
+            {business.is_rented && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                <Field label="Lessor's Name" value={business.lessor_name ?? ''} />
+                <Field
+                  label="Lessor's Address"
+                  value={business.lessor_address ?? ''}
+                  className="sm:col-span-2"
+                />
+                <Field label="Lessor's Contact Number" value={business.lessor_contact ?? ''} />
+                <Field
+                  label="Monthly Rental"
+                  value={business.monthly_rental == null ? '' : formatMoney(business.monthly_rental)}
+                />
+              </div>
             )}
           </section>
 

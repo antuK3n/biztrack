@@ -84,6 +84,39 @@ function authAs(string $email, string $password = 'biztrack1'): array
  * so it stays one line and does not disturb the acting user; the endpoint and
  * its authorization are the subject of Ra11032ClassificationTest.
  */
+/**
+ * BPLO accepts the main form, which is what raises the bill.
+ *
+ * A PRECONDITION of paying, and since 6 September 2026 it is not an optional
+ * one. The verified counter procedure is submit → For Approval → BPLO approves →
+ * Pending Payment → pay, and `ApplicationStatus::isBillable()` enforces it: a
+ * POST to `/pay` at `for_approval` is refused with "BPLO has not approved this
+ * application yet".
+ *
+ * Thirteen fixtures across this suite went submit-then-pay on two consecutive
+ * lines, because until that date nothing sat between them. They share this
+ * rather than each growing its own copy — the sequence is one fact about the
+ * process, and the last time it was spread by hand it had to be corrected in
+ * every file at once.
+ *
+ * Driven at the service rather than through POST /assignments/{id}/approve so it
+ * stays one line and does not disturb the acting user, which is the convention
+ * `classifyAsOfficer` below documents and this depends on: the workflow refuses
+ * to approve a filing nobody has categorised.
+ */
+function bploApprovesForm(Application|int $app): Application
+{
+    // An id is accepted because most fixtures hold one, not a model, and making
+    // twelve files import Application to call one helper is a worse trade than
+    // one lookup here.
+    $app = $app instanceof Application ? $app : Application::findOrFail($app);
+
+    classifyAsOfficer($app);
+    app(WorkflowService::class)->approveMainForm($app->fresh());
+
+    return $app->fresh();
+}
+
 function classifyAsOfficer(Application $app, string $email = 'bplo@biztrack.local', ?string $tier = null): Application
 {
     $app = $app->fresh();

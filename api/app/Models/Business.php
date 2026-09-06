@@ -42,6 +42,10 @@ class Business extends Model
          */
         'economic_organization', 'economic_organization_others',
         'president_officer_name', 'citizenship', 'capital_participation_filipino',
+        // BPLO item B7. Absent from this list the column is dropped by mass
+        // assignment in silence, which is how it stayed empty on every row while
+        // a column for it sat on the table.
+        'capital_investment',
         'has_tax_incentives',
     ];
 
@@ -198,6 +202,29 @@ class Business extends Model
     public function address(): HasOne
     {
         return $this->hasOne(BusinessAddress::class);
+    }
+
+    /**
+     * The named person on the paper — BPLO item 11 (Sole Proprietorship) and
+     * item 12 (Corporation / Partnership / Cooperative).
+     *
+     * `business_owners` has held surname, given name, middle name, SUFFIX and
+     * GENDER since the schema was aligned with the manuscript, and until now its
+     * only writers were two seeders: no controller touched it, so a form that
+     * asks for a suffix and a gender had nowhere to put either. This is that
+     * relation, finally used.
+     *
+     * Distinct from `owner()` directly above, which is the USER ACCOUNT that
+     * filed. The account holder is usually the proprietor and on the paper they
+     * are two different questions — a corporation's filer is not its president.
+     *
+     * `hasMany` because item 12 prints two rows. The wizard writes one today
+     * (the primary), and the relation is plural so the second does not need a
+     * migration when it is asked for.
+     */
+    public function owners(): HasMany
+    {
+        return $this->hasMany(BusinessOwner::class);
     }
 
     public function lines(): HasMany

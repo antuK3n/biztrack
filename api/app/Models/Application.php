@@ -33,6 +33,13 @@ class Application extends Model
         'complexity_set_by_user_id', 'complexity_set_at',
         'rejection_reason', 'fee_profile', 'payment_mode',
         /*
+         * RA 10173 consent for THIS filing. Absent from this list the column is
+         * dropped by mass assignment in silence, which is how it stayed empty on
+         * every row while a column for it sat on the table — the wizard held the
+         * tick in browser state and nothing ever carried it here.
+         */
+        'data_privacy_consent',
+        /*
          * The paper BPLO form's "Amendment from:" block (checklist items 82/84).
          * The manuscript-alignment migration created these columns and nothing
          * ever wrote them, so /apply?type=amendment was the new-application
@@ -86,6 +93,9 @@ class Application extends Model
         'amendment_location' => 'boolean',
         'amendment_nature' => 'boolean',
         'prior_permit_declared_none' => 'boolean',
+        // Same reason as the four above: SQLite hands back 0/1, and the submit
+        // gate reads this as a boolean.
+        'data_privacy_consent' => 'boolean',
     ];
 
     /**

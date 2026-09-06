@@ -92,6 +92,7 @@ it('lets an officer adjust the fee before payment', function () {
     $typeId = PermitType::where('code', 'BUSINESS')->value('id');
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
+        'data_privacy_consent' => true,
     ])->json('data.id');
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
@@ -116,6 +117,7 @@ it('blocks a suspended business from filing a new application', function () {
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
+            'data_privacy_consent' => true,
         ])
         ->assertStatus(422);
 });
@@ -142,6 +144,7 @@ it('upserts and reads a per-office application form', function () {
     $typeId = PermitType::where('code', 'OCCUPANCY')->value('id');
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
+        'data_privacy_consent' => true,
     ])->json('data.id');
 
     $this->withHeaders($owner)

@@ -70,26 +70,60 @@ function filingWithEveryClearance(): Application
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     $app = Application::findOrFail($appId);
 
+    /*
+     * The applicant starts each other permit, and THAT is what routes its
+     * office.
+     *
+     * This step did not exist and did not need to: payment used to route all
+     * six offices at once, so the fixture could go straight from paying to
+     * approving. `startClearance()` routes one office at a time now, when the
+     * applicant actually files that permit — which is what keeps `assigned_at`
+     * an honest start for the office's measured service time instead of
+     * charging it for the days somebody spent filling in the other five.
+     *
+     * Without this the filing has exactly one assignment (BPLO's, completed at
+     * the form approval) and the loop below has nothing to iterate.
+     */
+    authAs('owner@biztrack.local');
+    foreach (PermitType::where('code', '!=', PermitType::OUTCOME_CODE)->get() as $type) {
+        test()->postJson("/api/v1/applications/{$appId}/clearances/{$type->code}/apply")->assertOk();
+    }
+
     // Confirmed on receipt. Without a person's name on the processing category
     // no office may approve at all, and what this file is about is which of the
-    // seven offices gets sent out to the premises.
+    // offices gets sent out to the premises.
     classifyAsOfficer($app);
 
-    // Each office signs off its own assignment; ApplicationVisibility keeps a
-    // reviewer to the filings routed to their department, so no one account can
-    // stand in for the rest.
-    foreach ($app->assignments()->with('department')->get() as $assignment) {
+    /*
+     * Each office signs off its own assignment; ApplicationVisibility keeps a
+     * reviewer to the filings routed to their department, so no one account can
+     * stand in for the rest.
+     *
+     * BPLO is skipped, and that is the flow rather than a convenience. Its
+     * assignment is already `completed` — approving the main form is what closed
+     * it — and its second act is the FINAL approval, which the workflow refuses
+     * until every other permit is approved ("There is nothing for BPLO to
+     * approve while this application is Awaiting Other Permits"). Pressing it
+     * here 422s and took this whole file down with it.
+     */
+    foreach ($app->fresh()->assignments()->with('department')->get() as $assignment) {
         $code = $assignment->department->code;
-        authAs($code === 'BPLO' ? 'bplo@biztrack.local' : OFFICE_INSPECTOR[$code]);
+        if ($code === 'BPLO') {
+            continue;
+        }
+        authAs(OFFICE_INSPECTOR[$code]);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     }
 

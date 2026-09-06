@@ -3,6 +3,7 @@
 use App\Models\Business;
 use App\Models\DocumentType;
 use App\Models\PermitType;
+use App\Models\PsicCode;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -44,6 +45,7 @@ it('returns every rented-premises field when a draft is reopened', function () {
     $draft = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [$businessPt->id],
         ])
@@ -90,6 +92,7 @@ it('keeps the permit selection on a reopened draft so its office form still appe
     $draft = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [$businessPt->id, $sanitaryPt->id],
         ])
@@ -111,7 +114,7 @@ it('keeps the permit selection on a reopened draft so its office form still appe
 
 it('restores the free-text line of business typed against "Other (not listed)"', function () {
     $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
-    $otherPsic = \App\Models\PsicCode::where('code', '00000')->firstOrFail();
+    $otherPsic = PsicCode::where('code', '00000')->firstOrFail();
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->putJson("/api/v1/businesses/{$business->id}", [
@@ -158,6 +161,7 @@ it('rejects an attachment over the documented 10MB limit', function () {
     $draft = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [$businessPt->id],
         ])
@@ -184,6 +188,7 @@ it('accepts a PDF at the documented limit and refuses a type it cannot read', fu
     $draft = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [$businessPt->id],
         ])

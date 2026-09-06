@@ -41,6 +41,9 @@ class BusinessResource extends JsonResource
             'president_officer_name' => $this->president_officer_name,
             'citizenship' => $this->citizenship,
             'capital_participation_filipino' => $this->capital_participation_filipino,
+            // BPLO item B7. A column that existed and was written by nothing
+            // until the wizard started asking for it.
+            'capital_investment' => $this->capital_investment,
             'has_tax_incentives' => (bool) $this->has_tax_incentives,
             // Owner-visible standing (p006 blacklist modal reads this).
             'status' => $this->status ?? 'active',
@@ -55,6 +58,11 @@ class BusinessResource extends JsonResource
                 // back into the form it will save over.
                 'telephone' => $this->address->telephone,
                 'website' => $this->address->website,
+                // BPLO items A7 and A8 — the BUSINESS's own mobile and e-mail,
+                // not the account holder's. Two columns that existed and were
+                // empty on every row until the wizard started asking.
+                'mobile_number' => $this->address->mobile_number,
+                'email' => $this->address->email,
                 'latitude' => $this->address->latitude,
                 'longitude' => $this->address->longitude,
                 'barangay' => $this->address->relationLoaded('barangay') && $this->address->barangay ? [
@@ -62,6 +70,26 @@ class BusinessResource extends JsonResource
                     'name' => $this->address->barangay->name,
                 ] : null,
             ] : null),
+            /*
+             * BPLO items 11 / 12 — the named person, as its own object rather
+             * than flattened onto the business.
+             *
+             * The PRIMARY row only. Item 12 prints two, the wizard writes one,
+             * and the relation is plural so the second needs no migration; this
+             * shape holds either way because a caller reading `owner` wants the
+             * person the filing is in the name of.
+             */
+            'owner' => $this->whenLoaded('owners', function () {
+                $primary = $this->owners->firstWhere('is_primary', true) ?? $this->owners->first();
+
+                return $primary ? [
+                    'surname' => $primary->surname,
+                    'given_name' => $primary->given_name,
+                    'middle_name' => $primary->middle_name,
+                    'suffix' => $primary->suffix,
+                    'gender' => $primary->gender,
+                ] : null;
+            }),
             'lines' => $this->whenLoaded('lines', fn () => $this->lines->map(fn ($line) => [
                 'id' => $line->id,
                 'psic_code' => $line->relationLoaded('psicCode') && $line->psicCode ? [

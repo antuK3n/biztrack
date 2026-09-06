@@ -29,6 +29,16 @@ class ApplicationController extends Controller
 
     private array $fullEager = [
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
+        /*
+         * BPLO items 11 / 12 — the named person.
+         *
+         * `BusinessResource` serialises `owner` behind `whenLoaded('owners')`,
+         * so without this the KEY IS ABSENT from the payload rather than null,
+         * and the wizard reopening a draft reads `undefined` and blanks the
+         * name, suffix and gender the applicant had already given. Silent, and
+         * only visible on a reopen — which is exactly how it was found.
+         */
+        'business.owners',
         'documents.documentType', 'feeAssessment', 'payments',
         'assignments.department', 'assignments.officer',
         'inspections.department', 'inspections.inspector',
@@ -151,6 +161,28 @@ class ApplicationController extends Controller
             // Ordinance Sec. 2N: annual (first 20 days of January) or quarterly
             // (first 20 days of Jan/Apr/Jul/Oct). No semi-annual option exists.
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            /*
+             * RA 10173 consent, kept with the FILING it was given for.
+             *
+             * `applications.data_privacy_consent` has been on this table the
+             * whole time and nothing wrote it: the wizard held the tick in React
+             * state, sent it nowhere, and lost it on every reload. So the
+             * applicant was re-asked each time they reopened a draft — which
+             * teaches people to tick without reading — and the register kept no
+             * evidence of a consent it refuses to proceed without.
+             *
+             * `boolean` and not `accepted` here, deliberately. A draft is saved
+             * half-answered by design and an untidied `false` is a real state
+             * (they have not ticked it yet); `accepted` would reject the
+             * autosave of a draft that is simply unfinished. The requirement is
+             * enforced at submit(), which is the moment it actually matters.
+             *
+             * No separate timestamp: the filing already carries `created_at` and
+             * `submitted_at`, and consent is required to submit, so "before
+             * submitted_at" is already in the record. A second date column would
+             * restate what two existing ones say.
+             */
+            'data_privacy_consent' => ['sometimes', 'boolean'],
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
@@ -218,6 +250,7 @@ class ApplicationController extends Controller
             'prior_permit_declared_none' => $priorIds === []
                 && (bool) ($data['prior_permit_declared_none'] ?? false),
             'payment_mode' => $data['payment_mode'] ?? 'annual',
+            'data_privacy_consent' => (bool) ($data['data_privacy_consent'] ?? false),
             'fee_profile' => $data['fee_profile'] ?? null,
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
@@ -256,6 +289,10 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            // See the note on the same key in store(): `boolean`, not
+            // `accepted`, because a draft may legitimately be saved before the
+            // applicant has ticked it. submit() is the gate.
+            'data_privacy_consent' => ['sometimes', 'boolean'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
@@ -290,6 +327,16 @@ class ApplicationController extends Controller
         if (isset($data['payment_mode'])) {
             $application->update(['payment_mode' => $data['payment_mode']]);
         }
+        /*
+         * `array_key_exists`, not `isset`: the value is a boolean and `false` is
+         * a real answer. `isset` would have made UNTICKING the box impossible —
+         * the write would be skipped and the stored `true` would stand, so an
+         * applicant who changed their mind would find the box ticked again next
+         * time and the record still saying they had agreed.
+         */
+        if (array_key_exists('data_privacy_consent', $data)) {
+            $application->update(['data_privacy_consent' => (bool) $data['data_privacy_consent']]);
+        }
 
         Audit::log('application.updated', $application);
 
@@ -303,6 +350,25 @@ class ApplicationController extends Controller
         $this->authorizeOwner($request, $application);
         if ($application->status !== ApplicationStatus::Draft) {
             throw ValidationException::withMessages(['status' => ['Only draft applications can be submitted.']]);
+        }
+
+        /*
+         * No consent, no filing.
+         *
+         * The wizard already disables Submit without the tick, and that is not
+         * enough for this one: consent under RA 10173 is the lawful basis for
+         * processing everything else on the form, so "the browser would not have
+         * let you" is a poor answer to give afterwards. Checked here for the
+         * same reason the amendment gate below is — the browser is not the only
+         * way into this endpoint.
+         *
+         * At submit rather than at create, because drafts autosave
+         * half-answered by design and the tick is on step 1 of seven.
+         */
+        if (! $application->data_privacy_consent) {
+            throw ValidationException::withMessages([
+                'data_privacy_consent' => ['Agree to the Data Privacy Consent before submitting this application.'],
+            ]);
         }
 
         /*
