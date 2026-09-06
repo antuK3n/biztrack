@@ -54,6 +54,8 @@ import type {
   RenewalModelReport,
   RenewalRiskReport,
   CreateRequirementPayload,
+  OfficeStatusOption,
+  RequestStatus,
   RiskAction,
   RiskBand,
   TimelineEntry,
@@ -572,9 +574,14 @@ export const requests = {
   /** Requests visible to the caller, newest first. Paged (default 50). */
   list: (filters: RequestFilters = {}) =>
     unwrap<OfficerRequest[]>(api.get('/requests', { params: filters })),
-  /** Same list, keeping the page meta. */
+  /**
+   * Same list, keeping the page meta — which also carries `office_statuses`,
+   * the statuses an office may set and the words to show for them.
+   */
   page: (filters: RequestFilters = {}) =>
-    unwrapPaged<OfficerRequest>(api.get('/requests', { params: filters })),
+    unwrapPaged<OfficerRequest, PageMeta & { office_statuses: OfficeStatusOption[] }>(
+      api.get('/requests', { params: filters }),
+    ),
   /**
    * An office raises a requirement against an application.
    *
@@ -629,7 +636,7 @@ export const requests = {
    */
   close: (
     id: number,
-    outcome: 'fulfilled' | 'needs_resubmission' | 'rejected',
+    outcome: RequestStatus,
     remarks?: string,
   ) =>
     unwrap<OfficerRequest>(

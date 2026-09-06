@@ -170,7 +170,19 @@ it('lets the applicant resubmit, and the answer returns to the same office', fun
         ->and($inbox('fire@biztrack.local'))->not->toContain($requestId);
 });
 
-it('closes a requirement for good when it is rejected outright', function () {
+it('lets the applicant answer again after a rejection', function () {
+    /*
+     * Inverted deliberately — this asserted that rejection was FINAL.
+     *
+     * The client has ruled the other way twice: "Do NOT mark the requirement as
+     * completed after rejection", and then plainly, that if a document is
+     * rejected the owner can send another one. So rejection is now the same
+     * situation as needs_resubmission — refused, explained, still open — and
+     * approval is the only thing that ends a requirement.
+     *
+     * Kept as an inverted test rather than deleted: the behaviour changed on
+     * purpose, and a missing test would read as coverage someone dropped.
+     */
     $appId = requirementApplication('ABC Store', 'DTI-80004');
 
     $requestId = test()->withHeaders(authAs('sanitary@biztrack.local'))
@@ -180,21 +192,91 @@ it('closes a requirement for good when it is rejected outright', function () {
 
     test()->withHeaders(authAs('sanitary@biztrack.local'))
         ->postJson("/api/v1/requests/{$requestId}/close", [
-            'outcome' => 'rejected', 'remarks' => 'Not applicable to this business.',
+            'outcome' => 'rejected', 'remarks' => 'The scan is unreadable.',
         ])->assertOk();
 
-    // Rejected is final — the difference from needs_resubmission.
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/requests/{$requestId}/respond", ['body' => 'Trying anyway.'])
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('status');
-
-    $seen = collect(test()->withHeaders(authAs('owner@biztrack.local'))
+    $seen = fn () => collect(test()->withHeaders(authAs('owner@biztrack.local'))
         ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))
         ->firstWhere('id', $requestId);
 
-    expect($seen['accepts_response'])->toBeFalse()
-        ->and($seen['remarks'])->toBe('Not applicable to this business.');
+    // Refused, and back with the applicant rather than shut.
+    expect($seen()['status_label'])->toBe('Rejected')
+        ->and($seen()['accepts_response'])->toBeTrue()
+        ->and($seen()['awaits_applicant'])->toBeTrue()
+        ->and($seen()['is_closed'])->toBeFalse()
+        ->and($seen()['remarks'])->toBe('The scan is unreadable.');
+
+    // And the replacement actually lands.
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/respond", ['body' => 'A clean scan this time.'])
+        ->assertOk();
+
+    expect($seen()['status_label'])->toBe('For Review');
+
+    // Approval is the one thing that closes it.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+
+    expect($seen()['is_closed'])->toBeTrue()
+        ->and($seen()['accepts_response'])->toBeFalse();
+});
+
+it('lets the office set the status directly, and correct itself', function () {
+    $appId = requirementApplication('ABC Store', 'DTI-80010');
+
+    $requestId = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", [
+            'title' => 'Health Certificate',
+        ])->assertCreated()->json('data.id');
+
+    $status = fn () => OfficerRequest::find($requestId)->status->value;
+
+    /*
+     * The three the client named, set directly rather than only as the outcome
+     * of reviewing a submission. An office has to be able to fix a mistake —
+     * an approval clicked on the wrong row is otherwise permanent — so this is
+     * not gated on a document being in the queue.
+     */
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+    expect($status())->toBe('fulfilled');
+
+    // Approved by mistake — put it back.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", [
+            'outcome' => 'pending', 'remarks' => 'Approved in error; still waiting on the certificate.',
+        ])->assertOk();
+    expect($status())->toBe('pending');
+
+    // Reopened, so the applicant can act again.
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/respond", ['body' => 'Here it is.'])
+        ->assertOk();
+    expect($status())->toBe('submitted');
+
+    // Anything but an approval has to say why.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'rejected'])
+        ->assertStatus(422)->assertJsonValidationErrors('remarks');
+
+    // And "submitted" is not the office's to claim — it is what the applicant did.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requestId}/close", ['outcome' => 'submitted', 'remarks' => 'x'])
+        ->assertStatus(422)->assertJsonValidationErrors('outcome');
+});
+
+it('tells the client which statuses an office may set', function () {
+    $meta = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/requests?per_page=5')->assertOk()->json('meta');
+
+    // Served with the list so the control's words come from one place — the
+    // enum's own label() — rather than a second copy in TypeScript.
+    expect(collect($meta['office_statuses'])->pluck('value')->all())
+        ->toBe(['pending', 'fulfilled', 'rejected']);
+    expect(collect($meta['office_statuses'])->pluck('label')->all())
+        ->toBe(['Pending', 'Approved', 'Rejected']);
 });
 
 it('shows the applicant an approved requirement as fulfilled', function () {

@@ -263,7 +263,22 @@ class OfficerRequestController extends Controller
 
         return response()->json([
             'data' => OfficerRequestResource::collection($requests->items()),
-            'meta' => $this->pageMeta($requests),
+            /*
+             * The statuses an office may set, with their labels, sent alongside
+             * the list.
+             *
+             * Here rather than hard-coded in the client because the words are
+             * already decided in PHP — OfficerRequestStatus::label() — and a
+             * second copy in TypeScript is how a screen ends up offering
+             * "Fulfilled" months after the register started calling it
+             * "Approved". One list, one set of words.
+             */
+            'meta' => $this->pageMeta($requests) + [
+                'office_statuses' => array_map(
+                    fn (OfficerRequestStatus $s) => ['value' => $s->value, 'label' => $s->label()],
+                    OfficerRequestStatus::officeSettable(),
+                ),
+            ],
         ]);
     }
 
@@ -371,7 +386,21 @@ class OfficerRequestController extends Controller
         ]);
     }
 
-    /** Officer closes the request (request.create gate) with an outcome. */
+    /**
+     * The office sets the requirement's status (request.create gate).
+     *
+     * Named `close` because that is what it used to be and what the route is
+     * still called; it is now the office's status control, and it can reopen as
+     * well as finish. The client asked for exactly that: an office may set a
+     * requirement to pending, approved or rejected, and correct itself if it
+     * rules the wrong way.
+     *
+     * Not gated on there being a submission waiting. An office needs to be able
+     * to fix a mistake — an approval clicked on the wrong row, a rejection that
+     * should have been an approval — and a control that only appears while a
+     * document happens to be in the queue cannot do that. Every change is
+     * audited and the applicant is told.
+     */
     public function close(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant');
@@ -413,7 +442,17 @@ class OfficerRequestController extends Controller
         }
 
         $data = $request->validate([
-            'outcome' => ['required', 'in:fulfilled,needs_resubmission,rejected'],
+            /*
+             * `pending` is here so an office can hand a requirement back
+             * without refusing it — "we asked for the wrong thing, send the
+             * other one" — which previously had no expression at all: the only
+             * ways out of For Review were approve and reject.
+             *
+             * `submitted` is deliberately NOT settable. It means "the applicant
+             * has uploaded something", which is a fact about what the applicant
+             * did; letting an officer assert it would make the status a claim.
+             */
+            'outcome' => ['required', 'in:pending,fulfilled,needs_resubmission,rejected'],
             /*
              * A remark is required for anything but acceptance.
              *
@@ -427,7 +466,7 @@ class OfficerRequestController extends Controller
              */
             'remarks' => ['required_unless:outcome,fulfilled', 'nullable', 'string', 'max:2000'],
         ], [
-            'remarks.required_unless' => 'Say what was wrong, so the applicant knows what to fix.',
+            'remarks.required_unless' => 'Say why, so the applicant knows what to do next.',
         ]);
 
         $outcome = OfficerRequestStatus::from($data['outcome']);
