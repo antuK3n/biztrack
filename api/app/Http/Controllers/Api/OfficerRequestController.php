@@ -47,17 +47,25 @@ class OfficerRequestController extends Controller
         ]);
 
         $data = $request->validate([
-            'request_type' => ['required', 'in:document,message,meeting'],
+            /*
+             * Optional, and "document" when unsaid.
+             *
+             * An Other Requirement IS a document request — the client is
+             * explicit that there is no Type to choose — so the composer no
+             * longer asks and no longer sends one. The rule stays permissive
+             * rather than being deleted because `message` and `meeting` are
+             * real rows in this table with their own callers; removing the
+             * field outright would break them to tidy up a form.
+             */
+            'request_type' => ['sometimes', 'in:document,message,meeting'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'due_date' => ['nullable', 'date'],
-            /*
-             * Which office the applicant should see this coming from. Defaults
-             * to the requester's own, but the super admin has no department, so
-             * without this their requests reach the applicant attributed to
-             * nobody. Officers may also raise one on another office's behalf.
-             */
-            'department_id' => ['nullable', 'exists:departments,id'],
+            // The note written when the requirement is raised — NOT the review
+            // verdict, which is `remarks` and is written by close().
+            'additional_remarks' => ['nullable', 'string', 'max:2000'],
+            // A blank form, a template, a sample of a valid certificate.
+            'reference' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
             // Meeting fields (officer-provided; no live calendar call — future work).
             'meeting_scheduled_at' => ['nullable', 'date', 'required_if:request_type,meeting'],
             'meeting_duration_minutes' => ['nullable', 'integer', 'min:5', 'max:480'],
@@ -65,22 +73,54 @@ class OfficerRequestController extends Controller
             'meeting_platform' => ['nullable', 'string', 'max:50'],
         ]);
 
+        /*
+         * ── The office is taken from the account, never from the request ─────
+         *
+         * "Do not allow an Admin to manually change the office assigned to the
+         * request. The office must be retrieved from the authenticated account
+         * ... enforced by the backend, not only by hiding the field in the
+         * frontend." So `department_id` is not in the rules above and is not
+         * read here: a caller may post one and it is ignored, which is the only
+         * version of this that a hidden form field cannot be talked out of.
+         *
+         * An account with no office cannot raise a requirement at all. That is
+         * the super admin, by construction — it belongs to no office, oversees
+         * the register rather than working inside it, and holds no
+         * `request.create` in the RBAC matrix, so this is a second lock on a
+         * door already shut rather than a new restriction. Said out loud
+         * because the alternative — writing NULL — produced requirements the
+         * applicant saw as coming from nobody, and which no office's list
+         * could ever match.
+         */
+        $office = $request->user()->department_id;
+        if ($office === null) {
+            throw ValidationException::withMessages([
+                'department_id' => ['This account belongs to no office, so it cannot raise a requirement. Requirements are always raised by an office.'],
+            ]);
+        }
+
+        $reference = $this->storeReferenceFile($request, $application);
+
         $officerRequest = OfficerRequest::create([
             'application_id' => $application->id,
             'requested_by_user_id' => $request->user()->id,
-            'department_id' => $data['department_id'] ?? $request->user()->department_id,
-            'request_type' => $data['request_type'],
+            'department_id' => $office,
+            'request_type' => $data['request_type'] ?? 'document',
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
+            'additional_remarks' => $data['additional_remarks'] ?? null,
+            'reference_path' => $reference['path'],
+            'reference_name' => $reference['name'],
             'due_date' => $data['due_date'] ?? null,
             'meeting_scheduled_at' => $data['meeting_scheduled_at'] ?? null,
             'meeting_duration_minutes' => $data['meeting_duration_minutes'] ?? 30,
             'meeting_link' => $data['meeting_link'] ?? null,
             'meeting_platform' => $data['meeting_platform'] ?? 'google_meet',
+            // Nothing has been submitted, so the applicant owes a document.
             'status' => OfficerRequestStatus::Pending,
         ]);
 
-        Audit::log('request.created', $officerRequest);
+        Audit::log('request.created', $officerRequest, ['department_id' => $office]);
 
         $application->loadMissing('applicant');
         if ($application->applicant) {
@@ -90,6 +130,65 @@ class OfficerRequestController extends Controller
         return response()->json([
             'data' => new OfficerRequestResource($officerRequest->load($this->eager())),
         ], 201);
+    }
+
+    /**
+     * Put the office's optional reference file on the private disk.
+     *
+     * Private, like every other upload here: it is attached to one filing and
+     * readable by that filing's applicant and the office that raised the
+     * requirement, which is a decision the download route makes per request —
+     * not one a public URL can make at all.
+     *
+     * @return array{path: ?string, name: ?string}
+     */
+    private function storeReferenceFile(Request $request, Application $application): array
+    {
+        $file = $request->file('reference');
+        if (! $file) {
+            return ['path' => null, 'name' => null];
+        }
+
+        $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+        $filename = Str::uuid()->toString().'.'.$ext;
+        $dir = "private/requirement-references/{$application->id}";
+        Storage::disk('local')->putFileAs($dir, $file, $filename);
+
+        return ['path' => "{$dir}/{$filename}", 'name' => $file->getClientOriginalName()];
+    }
+
+    /**
+     * Download the office's reference file.
+     *
+     * Two readers, and no third: the applicant the requirement was addressed
+     * to, and the office that raised it. `ApplicationVisibility::authorize`
+     * covers the office side and lets the filing's own applicant through, so
+     * the check is the same one that guards reading the requirement itself —
+     * a file that could be fetched by anyone holding the id would make the
+     * office boundary decorative.
+     */
+    public function reference(Request $request, OfficerRequest $officerRequest)
+    {
+        $officerRequest->loadMissing('application');
+        abort_unless($officerRequest->application, 404, 'The application behind this request no longer exists.');
+        abort_unless($officerRequest->reference_path, 404, 'This requirement has no reference file.');
+
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $officerRequest->application,
+            'This requirement belongs to another office’s application.'
+        );
+
+        abort_unless(
+            Storage::disk('local')->exists($officerRequest->reference_path),
+            404,
+            'The reference file is no longer on file.'
+        );
+
+        return Storage::disk('local')->download(
+            $officerRequest->reference_path,
+            $officerRequest->reference_name ?? 'reference'
+        );
     }
 
     /**
@@ -331,15 +430,42 @@ class OfficerRequestController extends Controller
             'remarks.required_unless' => 'Say what was wrong, so the applicant knows what to fix.',
         ]);
 
-        $officerRequest->update([
-            'status' => OfficerRequestStatus::from($data['outcome']),
-            'reviewed_by_user_id' => $request->user()->id,
-            'reviewed_at' => now(),
-            // Kept on acceptance too when one was given, and cleared when it
-            // was not: a stale remark from an earlier rejection sitting under
-            // an approved requirement reads as a fresh complaint.
-            'remarks' => $data['remarks'] ?? null,
-        ]);
+        $outcome = OfficerRequestStatus::from($data['outcome']);
+
+        DB::transaction(function () use ($officerRequest, $request, $data, $outcome) {
+            $officerRequest->update([
+                'status' => $outcome,
+                'reviewed_by_user_id' => $request->user()->id,
+                'reviewed_at' => now(),
+                // Kept on acceptance too when one was given, and cleared when it
+                // was not: a stale remark from an earlier rejection sitting under
+                // an approved requirement reads as a fresh complaint.
+                'remarks' => $data['remarks'] ?? null,
+            ]);
+
+            /*
+             * Stamp the verdict on the submission it actually judged.
+             *
+             * The parent carries one status and one remark, which are always
+             * the LATEST verdict — so once a requirement goes round twice the
+             * history read "Submission #1, Submission #2" with a single remark
+             * floating above both, belonging to neither, and changing under the
+             * applicant each time an officer ruled. An office reviews the
+             * newest submission, so that is the row this belongs on.
+             *
+             * A requirement can also be closed with nothing submitted at all —
+             * withdrawn as raised in error — and then there is no submission to
+             * stamp and none is invented.
+             */
+            $latest = $officerRequest->responses()->latest('id')->first();
+            $latest?->update([
+                'review_outcome' => $outcome->value,
+                'review_remarks' => $data['remarks'] ?? null,
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $request->user()->id,
+            ]);
+        });
+
         Audit::log('request.closed', $officerRequest, [
             'outcome' => $data['outcome'],
         ]);

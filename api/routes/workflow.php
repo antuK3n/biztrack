@@ -130,6 +130,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Officer requests ("Other Requirements")
     Route::get('requests', [OfficerRequestController::class, 'index']);
+    /*
+     * The office's reference file — a blank form or template attached when the
+     * requirement was raised.
+     *
+     * Outside both permission groups below on purpose: the two people who need
+     * it are the APPLICANT, who holds neither `request.create` nor any office
+     * permission, and the office that raised it. Which of them is asking is
+     * decided inside the controller by ApplicationVisibility, the same check
+     * that guards reading the requirement itself.
+     */
+    Route::get('requests/{officerRequest}/reference', [OfficerRequestController::class, 'reference']);
     Route::middleware('permission:request.create')->group(function () {
         Route::post('applications/{application}/requests', [OfficerRequestController::class, 'store']);
         Route::post('requests/{officerRequest}/close', [OfficerRequestController::class, 'close']);

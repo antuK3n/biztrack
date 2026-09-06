@@ -53,7 +53,7 @@ import type {
   RenewalReminderResult,
   RenewalModelReport,
   RenewalRiskReport,
-  RequestType,
+  CreateRequirementPayload,
   RiskAction,
   RiskBand,
   TimelineEntry,
@@ -575,17 +575,32 @@ export const requests = {
   /** Same list, keeping the page meta. */
   page: (filters: RequestFilters = {}) =>
     unwrapPaged<OfficerRequest>(api.get('/requests', { params: filters })),
-  /** Officer creates a request against an application. */
-  create: (
-    applicationId: number,
-    body: {
-      request_type: RequestType
-      subject: string
-      body: string
-      /** Office the applicant sees this from; defaults to the requester's own. */
-      department_id?: number
-    },
-  ) => unwrap<OfficerRequest>(api.post(`/applications/${applicationId}/requests`, body)),
+  /**
+   * An office raises a requirement against an application.
+   *
+   * No `department_id` and no `request_type`. The office is taken from the
+   * signed-in account server-side — sending one is ignored — and an Other
+   * Requirement is a document request by definition, so neither is the
+   * officer's to choose. Multipart whenever a reference file is attached,
+   * because a blank form or template travels with the request.
+   */
+  create: (applicationId: number, body: CreateRequirementPayload) => {
+    const { reference, ...fields } = body
+    const url = `/applications/${applicationId}/requests`
+    if (!reference) return unwrap<OfficerRequest>(api.post(url, fields))
+
+    const form = new FormData()
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && value !== null && value !== '') form.append(key, String(value))
+    }
+    form.append('reference', reference)
+    return unwrap<OfficerRequest>(
+      api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    )
+  },
+  /** The office's reference file (a blank form, a template), opened in a tab. */
+  viewReference: (id: number, target?: Window | null) =>
+    viewBlob(`/requests/${id}/reference`, target),
   /** Owner responds; optional document is posted as multipart. */
   respond: (id: number, body: string, document?: File | null, documentTypeId?: number) => {
     if (document) {
@@ -602,8 +617,24 @@ export const requests = {
     return unwrap<OfficerRequest>(api.post(`/requests/${id}/respond`, { body }))
   },
   /** Officer closes a submitted request. */
-  close: (id: number, outcome: 'fulfilled' | 'rejected') =>
-    unwrap<OfficerRequest>(api.post(`/requests/${id}/close`, { outcome })),
+  /**
+   * The office rules on a submission.
+   *
+   * `needs_resubmission` sends it back with a reason and keeps the requirement
+   * alive — the client's "do not mark it completed after rejection". `rejected`
+   * remains in the API for withdrawing a requirement raised in error, which is
+   * a different act and is not offered on the review screen.
+   *
+   * `remarks` is required by the API for anything but an approval.
+   */
+  close: (
+    id: number,
+    outcome: 'fulfilled' | 'needs_resubmission' | 'rejected',
+    remarks?: string,
+  ) =>
+    unwrap<OfficerRequest>(
+      api.post(`/requests/${id}/close`, { outcome, ...(remarks ? { remarks } : {}) }),
+    ),
 }
 
 /* ── Payments ─────────────────────────────────────────────────────────── */
