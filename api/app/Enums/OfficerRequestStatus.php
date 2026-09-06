@@ -5,9 +5,9 @@ namespace App\Enums;
 /**
  * officer_requests.status lifecycle:
  *
- *   pending → submitted → fulfilled
- *                      ↘ needs_resubmission → submitted → …
- *                      ↘ rejected
+ *   pending ⇄ submitted → fulfilled
+ *      ↑           ↓
+ *      └── rejected / needs_resubmission ──┘
  *
  * ── The words on screen ──────────────────────────────────────────────────────
  *
@@ -19,19 +19,27 @@ namespace App\Enums;
  *   submitted  → "For Review"   (it is with the office, not with the applicant)
  *   fulfilled  → "Approved"     ("Fulfilled" is not a word an applicant uses)
  *
- * ── Why NeedsResubmission is not a closed state ──────────────────────────────
+ * ── Approval is the only end ────────────────────────────────────────────────
  *
- * It is the difference between "you got it wrong" and "you got it wrong and
- * there is nothing you can do about it". The client is explicit: "Do NOT mark
- * the requirement as completed after rejection. The requirement should remain
- * active until the Admin approves a valid submission." So the office's Reject
- * lands here — sent back, with a reason, still answerable — and the requirement
- * is once again waiting on the applicant, exactly as Pending is.
+ * `rejected` used to be terminal: once an office refused a document the
+ * applicant could never answer again, so an office that wanted a clearer copy
+ * had to either accept the bad one or raise a second requirement from scratch.
+ * The client has ruled the other way twice — "Do NOT mark the requirement as
+ * completed after rejection", and then plainly: if it is rejected, the owner
+ * can send another one. So rejection now returns the requirement to the
+ * applicant with a reason attached, and a REQUIREMENT ends only when the office
+ * approves a submission.
  *
- * `rejected` stays as the one genuinely terminal refusal: a requirement raised
- * in error, or one that no longer applies. Nothing in the review screen offers
- * it, because rejecting a DOCUMENT is not the same act as withdrawing a
- * REQUIREMENT, and only the second one ends the matter.
+ * `rejected` and `needs_resubmission` are therefore the same situation wearing
+ * two names: refused, explained, still open. Both are kept because both are
+ * already stored and both read naturally in different mouths — an office
+ * "rejects" a document, and an applicant is asked to "resubmit" — and
+ * collapsing them would rewrite history rows for a caption.
+ *
+ * CONSEQUENCE, recorded because it is a real hole and not an oversight: there
+ * is now no way to withdraw a requirement raised in error. Approving one to
+ * make it go away records an approval that never happened. If the LGU needs
+ * that, it wants its own state (`cancelled`) rather than borrowing one of these.
  */
 enum OfficerRequestStatus: string
 {
@@ -44,14 +52,15 @@ enum OfficerRequestStatus: string
     /**
      * Is this requirement still the applicant's to answer?
      *
-     * Pending and Submitted have always accepted a reply; NeedsResubmission is
-     * the whole point of the state. Fulfilled and Rejected are closed.
+     * Everything except an approval. Rejected is in this list deliberately —
+     * see the note above: refusing a document does not close the requirement,
+     * it hands it back, and the applicant must be able to send another one.
      */
     public function acceptsResponse(): bool
     {
         return match ($this) {
-            self::Pending, self::Submitted, self::NeedsResubmission => true,
-            self::Fulfilled, self::Rejected => false,
+            self::Pending, self::Submitted, self::NeedsResubmission, self::Rejected => true,
+            self::Fulfilled => false,
         };
     }
 
@@ -67,8 +76,8 @@ enum OfficerRequestStatus: string
     public function awaitsApplicant(): bool
     {
         return match ($this) {
-            self::Pending, self::NeedsResubmission => true,
-            self::Submitted, self::Fulfilled, self::Rejected => false,
+            self::Pending, self::NeedsResubmission, self::Rejected => true,
+            self::Submitted, self::Fulfilled => false,
         };
     }
 
@@ -82,6 +91,26 @@ enum OfficerRequestStatus: string
     public function isClosed(): bool
     {
         return ! $this->acceptsResponse();
+    }
+
+    /**
+     * The statuses an OFFICE may set directly.
+     *
+     * Three, because those are the three the client named: pending, approved,
+     * rejected. `submitted` is absent because it is not the office's to set —
+     * it is what the applicant's own upload means — and inviting an officer to
+     * mark a requirement "For Review" when nothing has been submitted would
+     * make the status a claim rather than a fact.
+     *
+     * `needs_resubmission` is absent for the opposite reason: it is a synonym
+     * for rejected here, still accepted by the endpoint so existing rows and
+     * callers keep working, just not offered twice on one control.
+     *
+     * @return list<self>
+     */
+    public static function officeSettable(): array
+    {
+        return [self::Pending, self::Fulfilled, self::Rejected];
     }
 
     public function label(): string

@@ -1988,6 +1988,19 @@ export interface OfficerRequest {
 }
 
 /**
+ * A status an office may set on a requirement, with the word to show for it.
+ *
+ * Served with the requirements list rather than hard-coded here: the labels are
+ * already decided in PHP (OfficerRequestStatus::label), and a second copy in
+ * TypeScript is how a screen ends up offering "Fulfilled" months after the
+ * register started calling it "Approved".
+ */
+export interface OfficeStatusOption {
+  value: RequestStatus
+  label: string
+}
+
+/**
  * What the Create Other Requirement form sends.
  *
  * No `department_id` and no `request_type`: the office comes from the signed-in

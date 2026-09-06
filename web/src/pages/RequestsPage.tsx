@@ -20,6 +20,7 @@ import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type {
   ApplicationListItem,
+  OfficeStatusOption,
   OfficerRequest,
   RequestStatus,
 } from '../lib/types'
@@ -148,11 +149,14 @@ function ShareIcon({ size = 22, ...props }: SVGProps<SVGSVGElement> & { size?: n
 function LetterView({
   request,
   isOfficer,
+  officeStatuses,
   onBack,
   onUpdated,
 }: {
   request: OfficerRequest
   isOfficer: boolean
+  /** What this office may set the status to, and the words for it. From the API. */
+  officeStatuses: OfficeStatusOption[]
   onBack: () => void
   onUpdated: (updated: OfficerRequest) => void
 }) {
@@ -162,8 +166,9 @@ function LetterView({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const [rejectOpen, setRejectOpen] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
+  // The status the office is proposing, and why. '' means the editor is shut.
+  const [nextStatus, setNextStatus] = useState<RequestStatus | ''>('')
+  const [reason, setReason] = useState('')
 
   const tone = STATUS_TONE[request.status] ?? 'tint-gray'
   const thread = request.responses ?? []
@@ -177,7 +182,13 @@ function LetterView({
    * which is the worst shape for this bug to take because nothing errors.
    */
   const canRespond = !isOfficer && request.accepts_response
-  const canClose = isOfficer && request.awaits_office
+  /*
+   * The office may set the status whenever, not only while a submission is in
+   * the queue. It used to be gated on `awaits_office`, so an approval clicked
+   * on the wrong row was permanent and a requirement raised by mistake could
+   * never be put back — there was no control on screen that could undo either.
+   */
+  const canSetStatus = isOfficer
 
   async function submitResponse() {
     setBusy(true)
@@ -205,13 +216,13 @@ function LetterView({
    * REQUIREMENT, and only the second one ends the matter — so only the first is
    * offered on this screen.
    */
-  async function close(outcome: 'fulfilled' | 'needs_resubmission', remarks?: string) {
+  async function setStatus(outcome: RequestStatus, remarks?: string) {
     setBusy(true)
     setError(null)
     try {
       onUpdated(await requests.close(request.id, outcome, remarks))
-      setRejectOpen(false)
-      setRejectReason('')
+      setNextStatus('')
+      setReason('')
     } catch (err) {
       setError(toApiError(err).message)
     } finally {
@@ -415,41 +426,51 @@ function LetterView({
               )}
             </>
           )}
-          {canClose && (
+          {canSetStatus && (
             <>
-              <button
-                type="button"
-                onClick={() => close('fulfilled')}
-                disabled={busy}
-                className="rounded-md bg-s-green px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60"
-              >
-                {busy ? 'Working…' : 'Approve'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setRejectOpen(true)}
-                disabled={busy}
-                className="rounded-md bg-s-red px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60"
-              >
-                Reject — ask again
-              </button>
+              {/*
+                One button per status the office may set, from the API's own
+                list. Approving needs no words; anything else has to say why,
+                and the applicant reads it verbatim.
+              */}
+              {officeStatuses
+                .filter((o) => o.value !== request.status)
+                .map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() =>
+                      o.value === 'fulfilled' ? setStatus('fulfilled') : setNextStatus(o.value)
+                    }
+                    disabled={busy}
+                    className={`rounded-md px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:brightness-110 disabled:opacity-60 ${
+                      o.value === 'fulfilled'
+                        ? 'bg-s-green'
+                        : o.value === 'rejected'
+                          ? 'bg-s-red'
+                          : 'bg-s-orange'
+                    }`}
+                  >
+                    {busy && o.value === 'fulfilled' ? 'Working…' : `Mark ${o.label}`}
+                  </button>
+                ))}
             </>
           )}
-          {!canRespond && !canClose && (
+          {!canRespond && !canSetStatus && (
             <StatusDot status={request.status} label={`Status: ${request.status_label}`} />
           )}
         </div>
       </div>
 
-      {rejectOpen && (
+      {nextStatus && (
         <ProtoModal
-          title="Send this back"
+          title={`Mark ${officeStatuses.find((o) => o.value === nextStatus)?.label ?? nextStatus}`}
           tone="red"
           cancelLabel="Cancel"
-          confirmLabel="Send back for resubmission"
-          onCancel={() => setRejectOpen(false)}
-          onConfirm={() => close('needs_resubmission', rejectReason.trim())}
-          confirmDisabled={busy || !rejectReason.trim()}
+          confirmLabel="Save status"
+          onCancel={() => setNextStatus('')}
+          onConfirm={() => setStatus(nextStatus, reason.trim())}
+          confirmDisabled={busy || !reason.trim()}
         >
           <p className="mb-4 border-b border-line pb-3 text-sm text-ink-secondary">
             {request.subject} ·{' '}
@@ -458,16 +479,20 @@ function LetterView({
             )}
           </p>
           <label className="block">
-            <FieldLabel required>Why is this being sent back?</FieldLabel>
+            <FieldLabel required>Why?</FieldLabel>
             <textarea
               className={`${inputCls} min-h-24`}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="e.g. Please submit a clearer copy of the certificate."
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={
+                nextStatus === 'rejected'
+                  ? 'e.g. Please submit a clearer copy of the certificate.'
+                  : 'e.g. Approved in error — still waiting on the certificate.'
+              }
             />
             <p className="mt-1.5 text-xs text-ink-secondary">
-              The owner sees this word for word, and the requirement stays open so they
-              can submit a replacement.
+              The owner reads this word for word. The requirement stays open, so they can
+              send another document.
             </p>
           </label>
         </ProtoModal>
@@ -763,6 +788,12 @@ export function RequestsPage() {
     })
   }, [data])
 
+  /*
+   * The statuses this office may set, and their words, straight from the API.
+   * Empty until the first page lands, which is also when the letter view can
+   * first be opened, so the control is never drawn from a guess.
+   */
+  const officeStatuses = data?.meta.office_statuses ?? []
   const total = data?.meta.total ?? 0
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
   const firstLoad = loading && list.length === 0
@@ -787,6 +818,7 @@ export function RequestsPage() {
       <LetterView
         request={open}
         isOfficer={isOfficer}
+        officeStatuses={officeStatuses}
         onBack={() => setOpenId(null)}
         onUpdated={patch}
       />
