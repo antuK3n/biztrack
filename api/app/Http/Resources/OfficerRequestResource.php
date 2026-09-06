@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Enums\OfficerRequestStatus;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -35,6 +36,29 @@ class OfficerRequestResource extends JsonResource
              */
             'remarks' => $this->remarks,
             'accepts_response' => (bool) $this->status?->acceptsResponse(),
+            /*
+             * Whose move it is, said once by the API rather than re-derived
+             * from the status string on every screen.
+             *
+             * The client's rule is "no document submitted = Pending, document
+             * submitted = For Review, rejected = Pending again". Pending and
+             * Needs Resubmission are one situation to a business owner — you
+             * owe us a document — and any screen that counts outstanding
+             * requirements has to count them together. A client re-deriving
+             * that from `status` is how one screen ends up disagreeing with
+             * another about how many things are outstanding.
+             */
+            'awaits_applicant' => (bool) $this->status?->awaitsApplicant(),
+            'awaits_office' => (bool) $this->status?->awaitsOffice(),
+            'is_closed' => (bool) $this->status?->isClosed(),
+            // The note written when the requirement was RAISED. Distinct from
+            // `remarks`, which is the office's verdict on a submission.
+            'additional_remarks' => $this->additional_remarks,
+            // An optional file the OFFICE attached — a blank form, a template.
+            'reference' => $this->reference_path ? [
+                'name' => $this->reference_name,
+                'url' => "/requests/{$this->id}/reference",
+            ] : null,
             'due_date' => optional($this->due_date)->toISOString(),
             'created_by' => $creator ? [
                 'name' => $creator->name,
@@ -78,9 +102,16 @@ class OfficerRequestResource extends JsonResource
                     'kind' => 'applicant',
                 ]
                 : null,
+            /*
+             * The filing, and through it the business. `tracking_id` is the
+             * number the client calls the "Business Number" (BIZ-2026-00001) and
+             * quotes on screen next to the business name; together they are what
+             * keeps one owner's two businesses apart on a list that shows both.
+             */
             'application' => $this->relationLoaded('application') && $this->application ? [
                 'id' => $this->application->id,
                 'tracking_id' => $this->application->tracking_id,
+                'business_id' => $this->application->business_id,
                 'business_name' => $this->application->relationLoaded('business') && $this->application->business
                     ? $this->application->business->name
                     : null,
@@ -91,8 +122,11 @@ class OfficerRequestResource extends JsonResource
             'response_body' => $this->applicant_response,
             // Every applicant reply, oldest first.
             'responses' => $this->relationLoaded('responses')
-                ? $this->responses->map(fn ($r) => [
+                ? $this->responses->values()->map(fn ($r, $i) => [
                     'id' => $r->id,
+                    // 1-based, so the applicant reads "Submission #2" rather
+                    // than having to count rows to know which one was refused.
+                    'number' => $i + 1,
                     'body' => $r->body,
                     'author' => [
                         'name' => $r->relationLoaded('author') && $r->author ? $r->author->name : null,
@@ -101,6 +135,18 @@ class OfficerRequestResource extends JsonResource
                         'id' => $r->application_document_id,
                         'filename' => $r->file_name,
                     ] : null,
+                    /*
+                     * What became of THIS submission. Null means it has not
+                     * been ruled on — which for the newest row is the ordinary
+                     * "with the office" state, and for an older row means it
+                     * predates per-submission verdicts being recorded at all.
+                     */
+                    'review_outcome' => $r->review_outcome,
+                    'review_status_label' => $r->review_outcome
+                        ? OfficerRequestStatus::from($r->review_outcome)->label()
+                        : null,
+                    'review_remarks' => $r->review_remarks,
+                    'reviewed_at' => optional($r->reviewed_at)->toISOString(),
                     'created_at' => optional($r->created_at)->toISOString(),
                 ])->all()
                 : [],
