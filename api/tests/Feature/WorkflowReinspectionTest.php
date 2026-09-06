@@ -55,11 +55,14 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
     $typeIds = PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC'])->pluck('id')->all();
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $typeIds,
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     // Confirmed on receipt, before any office can sign off: the approval gate

@@ -58,15 +58,22 @@ class PaymentController extends Controller
         ]);
 
         /*
-         * TWO payments are the flow, and this endpoint serves both
-         * (docs/clearances-after-payment.md, "one ledger, two moments").
+         * ONE payment is the flow, and this endpoint may still be called twice.
          *
-         * The first settles the business permit's Tax Order of Payment and
-         * moves the filing into review — and, the part not visible from here,
-         * opens the LGU clearance stage. Every clearance applied for after that
-         * re-assesses onto the same FeeAssessment, so a balance appears behind
-         * a filing that is already under review, and settling it is the second
-         * payment.
+         * It used to say the opposite, citing docs/clearances-after-payment.md
+         * and "one ledger, two moments": the first payment settled the business
+         * permit and opened the clearance stage, and each clearance applied for
+         * afterwards re-assessed onto the same FeeAssessment, so a balance
+         * accrued behind a filing already under review and settling it was the
+         * second payment. That document is superseded
+         * (docs/application-flow-2026-09.md) and the accrual is gone with it —
+         * `WorkflowService::submit()` attaches every required permit and THEN
+         * assesses, so the single Tax Order of Payment prices all five up
+         * front, and `ClearanceService::reassess()` no longer exists.
+         *
+         * A second call is still possible and must stay possible: an officer
+         * can raise an assessment after payment. It is the exception now rather
+         * than the design.
          *
          * This is why the endpoint is NOT restricted to `pending_payment`, and
          * the restriction must not come back. The last build of this design had
@@ -92,15 +99,46 @@ class PaymentController extends Controller
          * precisely the unpayable-balance bug named above wearing a different
          * status. There is genuinely nothing to buy on a rejection.
          */
-        $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
-        $balanceDue = PermitFees::balance($application->fresh())['balance_due'];
-        $awaitingFirstPayment = $application->status === ApplicationStatus::PendingPayment;
-
         $closed = in_array(
             $application->status,
             [ApplicationStatus::Rejected, ApplicationStatus::Cancelled],
             true
         );
+
+        /*
+         * The LOWER bound, and it is checked before anything is assessed.
+         *
+         * Everything above concerns payments that arrive LATE — after review,
+         * after an officer raises the assessment — and none of it says a word
+         * about one arriving EARLY, because until 6 September 2026 none could:
+         * submission moved a filing straight to PendingPayment, so there was no
+         * status between the draft and the bill for a payment to land in.
+         *
+         * ForApproval is now exactly that status, and the wizard drove straight
+         * into it — `submit()` then `pay()` in one press. Neither refusal below
+         * fires there: the filing is not closed, and its balance is the whole
+         * unpaid assessment. So the charge succeeded, and
+         * `WorkflowService::onPaymentCompleted` then returned early because the
+         * status was not PendingPayment. Money taken, filing unmoved, and BPLO's
+         * approval afterwards asking the applicant for a bill already settled.
+         *
+         * Ordered ahead of `assessFees` deliberately: that call CREATES a fee
+         * assessment when none exists, so leaving it above this guard would
+         * raise a Tax Order of Payment on a draft merely because someone posted
+         * to this endpoint.
+         *
+         * The client's rule, twice stated: BPLO approves the form, and only then
+         * does the applicant pay.
+         */
+        if (! $closed && ! $application->status->isBillable()) {
+            throw ValidationException::withMessages([
+                'status' => ['BPLO has not approved this application yet, so there is nothing to pay.'],
+            ]);
+        }
+
+        $fee = $application->feeAssessment ?: $this->workflow->assessFees($application);
+        $balanceDue = PermitFees::balance($application->fresh())['balance_due'];
+        $awaitingFirstPayment = $application->status === ApplicationStatus::PendingPayment;
 
         if (! $awaitingFirstPayment && $closed) {
             throw ValidationException::withMessages([
@@ -205,7 +243,6 @@ class PaymentController extends Controller
 
         return trim(preg_replace('/\s{2,}/u', ' ', $stripped) ?? $stripped);
     }
-
 
     private function authorizeOwner(Request $request, Application $application): void
     {

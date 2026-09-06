@@ -42,11 +42,14 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     $cpdoId = Department::where('code', 'CPDO')->value('id');
@@ -80,11 +83,14 @@ it('lets the zoning officer clear its own assignment but not end the application
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     // Confirmed on receipt, so the only thing left standing between the zoning

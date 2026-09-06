@@ -162,4 +162,37 @@ enum ApplicationStatus: string
             self::Approved,
         ], true);
     }
+
+    /**
+     * May money be taken against this filing at all?
+     *
+     * The LOWER bound on payment, and it is a different question from
+     * `isPaid()`. Paid asks whether the first payment has happened; this asks
+     * whether the filing has reached the point where a bill is owed. Draft,
+     * ForApproval and Returned are all before that point: BPLO has not accepted
+     * the form, so nothing has been billed and nothing may be collected.
+     *
+     * ── Why this exists ───────────────────────────────────────────────────
+     *
+     * It was missing, and the gap was live. `PaymentController::pay` refused a
+     * closed filing and a settled one, and had no branch at all for a filing
+     * that had not been billed yet — a hole that did not exist while submission
+     * led STRAIGHT to PendingPayment, because there was then no status between
+     * Draft and the bill. The 6 September flow put ForApproval in that gap, the
+     * wizard called `pay()` immediately after `submit()`, and the money went
+     * through at ForApproval: charged, recorded, and then ignored by
+     * `WorkflowService::onPaymentCompleted`, which returns early on any status
+     * but PendingPayment. The filing sat unmoved with a completed payment
+     * against it, and BPLO's approval then asked the applicant to pay again.
+     *
+     * Do NOT confuse this with the upper bound. The long note in
+     * `PaymentController::pay` explains why payment is deliberately allowed
+     * AFTER PendingPayment — an officer can raise an assessment, and a balance
+     * no screen can settle is worse than one paid late. That reasoning is
+     * untouched. This closes the other end.
+     */
+    public function isBillable(): bool
+    {
+        return $this === self::PendingPayment || $this->isPaid();
+    }
 }

@@ -64,6 +64,7 @@ it('caps the opaque fee profile the way it caps the opaque office form', functio
     // were kept unchallenged at any size.
     test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $permitTypeIds,
         'fee_profile' => ['junk' => str_repeat('x', 40000)],
@@ -72,6 +73,7 @@ it('caps the opaque fee profile the way it caps the opaque office form', functio
     // And an absurd number of fee lines is a validation failure, not a slow write.
     test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $permitTypeIds,
         'fee_profile' => ['lines' => array_fill(0, 201, ['category' => 'Retail'])],
@@ -80,6 +82,7 @@ it('caps the opaque fee profile the way it caps the opaque office form', functio
     // A normal profile still goes through.
     test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $permitTypeIds,
         'fee_profile' => ['gross_sales' => 500000, 'employees' => 4],

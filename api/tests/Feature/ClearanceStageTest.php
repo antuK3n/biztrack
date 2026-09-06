@@ -63,6 +63,7 @@ function draftClearanceApplication(string $name = 'Clearance Stage Cafe'): Appli
 
     $appId = test()->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
         'fee_profile' => [
@@ -97,10 +98,26 @@ function submittedClearanceApplication(string $name = 'Submitted Stage Store'): 
  * That is the reversal in one helper: none of those acts is reachable on a
  * draft, so a fixture that stopped short of the payment would be testing a
  * screen the applicant cannot get to.
+ *
+ * ── BPLO's approval is a step of the fixture, not a detail ────────────────
+ *
+ * This used to submit and pay in two consecutive lines, and that ordering is
+ * no longer reachable at the counter or in the API. The verified procedure puts
+ * BPLO's reading of the main form between them — submit → For Approval → BPLO
+ * approves → Pending Payment → pay — and `ApplicationStatus::isBillable()` now
+ * refuses money before that point, so the old two lines 422 on the payment.
+ *
+ * Driven at the service rather than through POST /assignments/{id}/approve so
+ * it stays two lines and does not disturb the acting user, which is the same
+ * convention `classifyAsOfficer` documents. The classification is a
+ * precondition of approving at all, not a subject here.
  */
 function paidClearanceApplication(string $name = 'Paid Stage Cafe'): Application
 {
     $app = submittedClearanceApplication($name);
+
+    classifyAsOfficer($app);
+    app(WorkflowService::class)->approveMainForm($app->fresh());
 
     test()->postJson("/api/v1/applications/{$app->id}/pay", ['method' => 'gcash'])->assertCreated();
 

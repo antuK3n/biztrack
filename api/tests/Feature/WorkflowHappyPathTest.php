@@ -33,6 +33,7 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
     $typeIds = PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC'])->pluck('id')->all();
     $appRes = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $typeIds,
     ])->assertCreated();
@@ -43,6 +44,8 @@ it('runs the full permit lifecycle and issues permits with validity_days', funct
     expect(Application::find($appId)->status->value)->toBe('pending_payment');
 
     // 4. Pay -> under_review + assignments fan out to 3 departments.
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
     expect(Application::find($appId)->status->value)->toBe('under_review');
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(3);
@@ -128,11 +131,14 @@ it('issues an all-office application to every department queue', function () {
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => $allTypeIds,
     ])->assertCreated()->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     // One assignment per issuing department => 7 queues hit.

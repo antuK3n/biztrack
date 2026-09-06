@@ -811,24 +811,39 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           </div>
         </dl>
         {/*
-          The gate, stated wherever the balance is. Without this sentence the
-          balance is decoration: a number that goes up when you press Apply and
-          never says what it is holding.
+          What the balance means, stated wherever it is shown.
 
-          Two versions rather than one hedged sentence, because "your permit is
-          released when this reaches zero" read against a zero balance is a
-          promise the applicant cannot tell they have already met.
+          ── The accrual it used to describe is gone ─────────────────────────
+
+          Both branches promised that pressing Apply below would add a fee here
+          — "each clearance you apply for adds its fee" — and that the permit
+          was withheld until the running total was settled. Neither is true
+          after 6 September 2026. `WorkflowService::submit()` attaches every
+          required permit and assesses the fees in that order, so the single
+          Tax Order of Payment raised at submission already prices all five;
+          the client confirmed the intent ("the bill will charge all regardless
+          if the applicant selects upload or apply"), and
+          `ClearanceService::reassess()`, which was what actually re-priced on
+          Apply, no longer exists.
+
+          So the ordinary reading of this block is now a settled zero, and what
+          holds the permit is no longer money — it is the five approvals. The
+          non-zero branch is kept because a balance can still appear: an officer
+          may raise the assessment. It says what is owed and stops promising
+          what applying will cost.
         */}
         <p className="mt-3 text-sm text-ink-secondary">
           {owesMoney ? (
             <>
               Your Business Permit is <span className="font-semibold text-ink">not released</span>{' '}
-              until this balance reaches zero. Each clearance you apply for adds its fee here.
+              while this balance is unpaid. Applying for the clearances below adds nothing to it —
+              your Tax Order of Payment already covered them.
             </>
           ) : (
             <>
-              Nothing is outstanding. Applying for a clearance below adds its fee here, and your
-              Business Permit is not released while a balance is unpaid.
+              Nothing is outstanding — your Tax Order of Payment covered every permit below, so
+              applying for them costs nothing further. Your Business Permit is released once all
+              of them are approved.
             </>
           )}
         </p>
