@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Business;
+use App\Services\NotificationService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -14,6 +15,8 @@ use Illuminate\Http\Request;
  */
 class BusinessStatusController extends Controller
 {
+    public function __construct(private NotificationService $notifications) {}
+
     private const LABELS = [
         'active' => 'Active',
         'flagged' => 'Flagged',
@@ -100,6 +103,26 @@ class BusinessStatusController extends Controller
             'to' => $data['status'],
             'reason' => $data['reason'],
         ]);
+
+        /*
+         * Tell the owner — but only when something actually moved.
+         *
+         * Same condition as `status_changed_at` above and for the same reason:
+         * the roster lets an admin re-save the status a business already has,
+         * and the QA sweeps in the audit log did exactly that. An audit row for
+         * "looked at and left alone" is worth keeping; a notification saying
+         * "your business is now Blacklisted" for the second time, weeks later,
+         * is a false alarm to the one person least able to check.
+         */
+        if ($data['status'] !== $from) {
+            $this->notifications->businessStatusChanged(
+                $business,
+                (string) $from,
+                $data['status'],
+                $data['reason'],
+                self::LABELS[$data['status']] ?? $data['status'],
+            );
+        }
 
         return response()->json([
             'data' => [

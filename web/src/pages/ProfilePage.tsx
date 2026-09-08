@@ -15,6 +15,7 @@ import { PageTitle, ProtoCard, SortFilter, type SortFilterOption } from '../comp
 import { businessName, formatBytes, formatDate } from '../lib/format'
 import { documents as documentsApi, permits as permitsApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
+import { useProfilePhoto } from '../lib/useProfilePhoto'
 import type { HeldClearance, Permit, User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 
@@ -107,8 +108,23 @@ async function loadHoldings(): Promise<ProfileHoldings> {
 
 /* ── Account record ───────────────────────────────────────────────────── */
 
-/** Gray avatar circle with the royal ring, matching the Edit Profile modal (PDF p12). */
-function ProfileAvatar() {
+/**
+ * Gray avatar circle with the royal ring, matching the Edit Profile modal
+ * (PDF p12), showing the photo set in Settings once there is one.
+ *
+ * Read-only here. The photo is changed in one place — Settings — so that this
+ * screen stays what it says it is, the account record.
+ */
+function ProfileAvatar({ src }: { src?: string | null }) {
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt=""
+        className="h-24 w-24 shrink-0 rounded-full border-4 border-royal object-cover"
+      />
+    )
+  }
   return (
     <span
       aria-hidden="true"
@@ -505,6 +521,7 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
 
 export function ProfilePage() {
   const user = useAuth((s) => s.user) as ProfileUser | null
+  const photoUrl = useProfilePhoto(user?.has_photo ?? false)
 
   /*
    * Only applicants. An officer opening Profile would otherwise get the permits
@@ -639,7 +656,7 @@ export function ProfilePage() {
 
       <ProtoCard className="mb-6 p-6">
         <div className="flex flex-col items-center gap-5 text-center sm:flex-row sm:text-left">
-          <ProfileAvatar />
+          <ProfileAvatar src={photoUrl} />
           <div className="min-w-0">
             <h2 className="text-xl font-bold text-ink">{fullName(user)}</h2>
             <p className="mt-0.5 text-sm text-ink-secondary">{roleLabel(user)}</p>

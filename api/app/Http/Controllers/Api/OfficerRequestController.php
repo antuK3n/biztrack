@@ -47,17 +47,25 @@ class OfficerRequestController extends Controller
         ]);
 
         $data = $request->validate([
-            'request_type' => ['required', 'in:document,message,meeting'],
+            /*
+             * Optional, and "document" when unsaid.
+             *
+             * An Other Requirement IS a document request — the client is
+             * explicit that there is no Type to choose — so the composer no
+             * longer asks and no longer sends one. The rule stays permissive
+             * rather than being deleted because `message` and `meeting` are
+             * real rows in this table with their own callers; removing the
+             * field outright would break them to tidy up a form.
+             */
+            'request_type' => ['sometimes', 'in:document,message,meeting'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string', 'max:5000'],
             'due_date' => ['nullable', 'date'],
-            /*
-             * Which office the applicant should see this coming from. Defaults
-             * to the requester's own, but the super admin has no department, so
-             * without this their requests reach the applicant attributed to
-             * nobody. Officers may also raise one on another office's behalf.
-             */
-            'department_id' => ['nullable', 'exists:departments,id'],
+            // The note written when the requirement is raised — NOT the review
+            // verdict, which is `remarks` and is written by close().
+            'additional_remarks' => ['nullable', 'string', 'max:2000'],
+            // A blank form, a template, a sample of a valid certificate.
+            'reference' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
             // Meeting fields (officer-provided; no live calendar call — future work).
             'meeting_scheduled_at' => ['nullable', 'date', 'required_if:request_type,meeting'],
             'meeting_duration_minutes' => ['nullable', 'integer', 'min:5', 'max:480'],
@@ -65,22 +73,54 @@ class OfficerRequestController extends Controller
             'meeting_platform' => ['nullable', 'string', 'max:50'],
         ]);
 
+        /*
+         * ── The office is taken from the account, never from the request ─────
+         *
+         * "Do not allow an Admin to manually change the office assigned to the
+         * request. The office must be retrieved from the authenticated account
+         * ... enforced by the backend, not only by hiding the field in the
+         * frontend." So `department_id` is not in the rules above and is not
+         * read here: a caller may post one and it is ignored, which is the only
+         * version of this that a hidden form field cannot be talked out of.
+         *
+         * An account with no office cannot raise a requirement at all. That is
+         * the super admin, by construction — it belongs to no office, oversees
+         * the register rather than working inside it, and holds no
+         * `request.create` in the RBAC matrix, so this is a second lock on a
+         * door already shut rather than a new restriction. Said out loud
+         * because the alternative — writing NULL — produced requirements the
+         * applicant saw as coming from nobody, and which no office's list
+         * could ever match.
+         */
+        $office = $request->user()->department_id;
+        if ($office === null) {
+            throw ValidationException::withMessages([
+                'department_id' => ['This account belongs to no office, so it cannot raise a requirement. Requirements are always raised by an office.'],
+            ]);
+        }
+
+        $reference = $this->storeReferenceFile($request, $application);
+
         $officerRequest = OfficerRequest::create([
             'application_id' => $application->id,
             'requested_by_user_id' => $request->user()->id,
-            'department_id' => $data['department_id'] ?? $request->user()->department_id,
-            'request_type' => $data['request_type'],
+            'department_id' => $office,
+            'request_type' => $data['request_type'] ?? 'document',
             'title' => $data['title'],
             'description' => $data['description'] ?? null,
+            'additional_remarks' => $data['additional_remarks'] ?? null,
+            'reference_path' => $reference['path'],
+            'reference_name' => $reference['name'],
             'due_date' => $data['due_date'] ?? null,
             'meeting_scheduled_at' => $data['meeting_scheduled_at'] ?? null,
             'meeting_duration_minutes' => $data['meeting_duration_minutes'] ?? 30,
             'meeting_link' => $data['meeting_link'] ?? null,
             'meeting_platform' => $data['meeting_platform'] ?? 'google_meet',
+            // Nothing has been submitted, so the applicant owes a document.
             'status' => OfficerRequestStatus::Pending,
         ]);
 
-        Audit::log('request.created', $officerRequest);
+        Audit::log('request.created', $officerRequest, ['department_id' => $office]);
 
         $application->loadMissing('applicant');
         if ($application->applicant) {
@@ -90,6 +130,65 @@ class OfficerRequestController extends Controller
         return response()->json([
             'data' => new OfficerRequestResource($officerRequest->load($this->eager())),
         ], 201);
+    }
+
+    /**
+     * Put the office's optional reference file on the private disk.
+     *
+     * Private, like every other upload here: it is attached to one filing and
+     * readable by that filing's applicant and the office that raised the
+     * requirement, which is a decision the download route makes per request —
+     * not one a public URL can make at all.
+     *
+     * @return array{path: ?string, name: ?string}
+     */
+    private function storeReferenceFile(Request $request, Application $application): array
+    {
+        $file = $request->file('reference');
+        if (! $file) {
+            return ['path' => null, 'name' => null];
+        }
+
+        $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+        $filename = Str::uuid()->toString().'.'.$ext;
+        $dir = "private/requirement-references/{$application->id}";
+        Storage::disk('local')->putFileAs($dir, $file, $filename);
+
+        return ['path' => "{$dir}/{$filename}", 'name' => $file->getClientOriginalName()];
+    }
+
+    /**
+     * Download the office's reference file.
+     *
+     * Two readers, and no third: the applicant the requirement was addressed
+     * to, and the office that raised it. `ApplicationVisibility::authorize`
+     * covers the office side and lets the filing's own applicant through, so
+     * the check is the same one that guards reading the requirement itself —
+     * a file that could be fetched by anyone holding the id would make the
+     * office boundary decorative.
+     */
+    public function reference(Request $request, OfficerRequest $officerRequest)
+    {
+        $officerRequest->loadMissing('application');
+        abort_unless($officerRequest->application, 404, 'The application behind this request no longer exists.');
+        abort_unless($officerRequest->reference_path, 404, 'This requirement has no reference file.');
+
+        ApplicationVisibility::authorize(
+            $request->user(),
+            $officerRequest->application,
+            'This requirement belongs to another office’s application.'
+        );
+
+        abort_unless(
+            Storage::disk('local')->exists($officerRequest->reference_path),
+            404,
+            'The reference file is no longer on file.'
+        );
+
+        return Storage::disk('local')->download(
+            $officerRequest->reference_path,
+            $officerRequest->reference_name ?? 'reference'
+        );
     }
 
     /**
@@ -103,6 +202,16 @@ class OfficerRequestController extends Controller
     {
         $request->validate([
             'status' => ['sometimes', 'string', 'max:40'],
+            /*
+             * Ordering is the server's job because the list is PAGED.
+             *
+             * The screen holds one page of fifty and offers "Load more"; a sort
+             * applied in the browser would reorder those fifty and silently
+             * leave the fifty-first out of an order it belongs in. The reader
+             * would be looking at "the oldest requirement" that is only the
+             * oldest of what happened to be downloaded.
+             */
+            'sort' => ['sometimes', 'in:recent,oldest'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -158,13 +267,48 @@ class OfficerRequestController extends Controller
             $query->where('status', $status);
         }
 
-        $requests = $query->orderByDesc('created_at')
-            ->orderByDesc('id')
+        // `id` breaks the tie in the same direction, so two requirements raised
+        // in the same second keep a stable order instead of swapping between
+        // pages of one listing.
+        $oldestFirst = $request->query('sort') === 'oldest';
+        $requests = $query
+            ->orderBy('created_at', $oldestFirst ? 'asc' : 'desc')
+            ->orderBy('id', $oldestFirst ? 'asc' : 'desc')
             ->paginate($this->perPage($request));
 
         return response()->json([
             'data' => OfficerRequestResource::collection($requests->items()),
-            'meta' => $this->pageMeta($requests),
+            /*
+             * The statuses an office may set, with their labels, sent alongside
+             * the list.
+             *
+             * Here rather than hard-coded in the client because the words are
+             * already decided in PHP — OfficerRequestStatus::label() — and a
+             * second copy in TypeScript is how a screen ends up offering
+             * "Fulfilled" months after the register started calling it
+             * "Approved". One list, one set of words.
+             */
+            'meta' => $this->pageMeta($requests) + [
+                'office_statuses' => array_map(
+                    fn (OfficerRequestStatus $s) => ['value' => $s->value, 'label' => $s->label()],
+                    OfficerRequestStatus::officeSettable(),
+                ),
+                /*
+                 * Every status a row can HOLD, which is a longer list than the
+                 * ones an office may SET.
+                 *
+                 * The filter has to offer "For Review" and "Needs
+                 * Resubmission" — both are states a reader wants to narrow to,
+                 * and neither is settable by hand: the first is reached by the
+                 * owner submitting and the second by a rejection. Sending both
+                 * lists rather than deriving one from the other keeps the same
+                 * single vocabulary the labels already come from.
+                 */
+                'statuses' => array_map(
+                    fn (OfficerRequestStatus $s) => ['value' => $s->value, 'label' => $s->label()],
+                    OfficerRequestStatus::cases(),
+                ),
+            ],
         ]);
     }
 
@@ -185,8 +329,18 @@ class OfficerRequestController extends Controller
             403,
             'This request is not yours to respond to.'
         );
-        // Only a closed request stops accepting replies; pending and submitted both do.
-        if (in_array($officerRequest->status, [OfficerRequestStatus::Fulfilled, OfficerRequestStatus::Rejected], true)) {
+        /*
+         * Only a CLOSED requirement stops accepting replies.
+         *
+         * Pending and Submitted always did. NeedsResubmission now does too, and
+         * that is the point of the state: an office that asked for a clearer
+         * copy has to be able to receive one. Before this, rejecting made the
+         * requirement permanently unanswerable, so the resubmission the office
+         * had just asked for was refused by the same endpoint.
+         *
+         * The rule lives on the enum so this check and the UI cannot drift.
+         */
+        if (! $officerRequest->status?->acceptsResponse()) {
             throw ValidationException::withMessages(['status' => ['This request is closed, so you can no longer respond to it.']]);
         }
 
@@ -262,7 +416,21 @@ class OfficerRequestController extends Controller
         ]);
     }
 
-    /** Officer closes the request (request.create gate) with an outcome. */
+    /**
+     * The office sets the requirement's status (request.create gate).
+     *
+     * Named `close` because that is what it used to be and what the route is
+     * still called; it is now the office's status control, and it can reopen as
+     * well as finish. The client asked for exactly that: an office may set a
+     * requirement to pending, approved or rejected, and correct itself if it
+     * rules the wrong way.
+     *
+     * Not gated on there being a submission waiting. An office needs to be able
+     * to fix a mistake — an approval clicked on the wrong row, a rejection that
+     * should have been an approval — and a control that only appears while a
+     * document happens to be in the queue cannot do that. Every change is
+     * audited and the applicant is told.
+     */
     public function close(Request $request, OfficerRequest $officerRequest): JsonResponse
     {
         $officerRequest->loadMissing('application.applicant');
@@ -304,17 +472,77 @@ class OfficerRequestController extends Controller
         }
 
         $data = $request->validate([
-            'outcome' => ['required', 'in:fulfilled,rejected'],
+            /*
+             * `pending` is here so an office can hand a requirement back
+             * without refusing it — "we asked for the wrong thing, send the
+             * other one" — which previously had no expression at all: the only
+             * ways out of For Review were approve and reject.
+             *
+             * `submitted` is deliberately NOT settable. It means "the applicant
+             * has uploaded something", which is a fact about what the applicant
+             * did; letting an officer assert it would make the status a claim.
+             */
+            'outcome' => ['required', 'in:pending,fulfilled,needs_resubmission,rejected'],
+            /*
+             * A remark is required for anything but acceptance.
+             *
+             * The column existed and nothing ever wrote to it, so an applicant
+             * whose document was turned down saw the status change and no
+             * reason anywhere — the one thing they need in order to act. Saying
+             * "Needs Resubmission" without saying what was wrong just moves the
+             * question to a phone call.
+             *
+             * Accepting needs no words: the outcome is the whole message.
+             */
+            'remarks' => ['required_unless:outcome,fulfilled', 'nullable', 'string', 'max:2000'],
+        ], [
+            'remarks.required_unless' => 'Say why, so the applicant knows what to do next.',
         ]);
 
-        $officerRequest->update([
-            'status' => OfficerRequestStatus::from($data['outcome']),
-            'reviewed_by_user_id' => $request->user()->id,
-            'reviewed_at' => now(),
+        $outcome = OfficerRequestStatus::from($data['outcome']);
+
+        DB::transaction(function () use ($officerRequest, $request, $data, $outcome) {
+            $officerRequest->update([
+                'status' => $outcome,
+                'reviewed_by_user_id' => $request->user()->id,
+                'reviewed_at' => now(),
+                // Kept on acceptance too when one was given, and cleared when it
+                // was not: a stale remark from an earlier rejection sitting under
+                // an approved requirement reads as a fresh complaint.
+                'remarks' => $data['remarks'] ?? null,
+            ]);
+
+            /*
+             * Stamp the verdict on the submission it actually judged.
+             *
+             * The parent carries one status and one remark, which are always
+             * the LATEST verdict — so once a requirement goes round twice the
+             * history read "Submission #1, Submission #2" with a single remark
+             * floating above both, belonging to neither, and changing under the
+             * applicant each time an officer ruled. An office reviews the
+             * newest submission, so that is the row this belongs on.
+             *
+             * A requirement can also be closed with nothing submitted at all —
+             * withdrawn as raised in error — and then there is no submission to
+             * stamp and none is invented.
+             */
+            $latest = $officerRequest->responses()->latest('id')->first();
+            $latest?->update([
+                'review_outcome' => $outcome->value,
+                'review_remarks' => $data['remarks'] ?? null,
+                'reviewed_at' => now(),
+                'reviewed_by_user_id' => $request->user()->id,
+            ]);
+        });
+
+        Audit::log('request.closed', $officerRequest, [
+            'outcome' => $data['outcome'],
         ]);
-        Audit::log('request.closed', $officerRequest, ['outcome' => $data['outcome']]);
 
         if ($officerRequest->application->applicant) {
+            // Same ping either way — the applicant needs to know the office has
+            // ruled, and "needs resubmission" is the outcome they most need to
+            // hear because it is the one that asks something of them.
             $this->notify->requestClosed($officerRequest->fresh()->load('application'), $officerRequest->application->applicant);
         }
 

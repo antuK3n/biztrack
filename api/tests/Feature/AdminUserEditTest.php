@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Department;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
@@ -20,7 +21,16 @@ use Illuminate\Support\Facades\Hash;
  * password it will ever be given.
  */
 
-/** A throwaway officer to edit, so the demo storyline stays intact. */
+/**
+ * A throwaway officer to edit, so the demo storyline stays intact.
+ *
+ * The office is part of the fixture, not decoration. An officer with no
+ * department signs in to an empty queue — AssignmentController sends a
+ * departmentless non-admin down `whereRaw('1=0')` — and the admin endpoint now
+ * refuses to leave an account in that state. This fixture used to build one,
+ * which is precisely the shape the guard exists to prevent; the assertions
+ * below are about passwords and are untouched.
+ */
 function editableOfficer(): User
 {
     $user = User::create([
@@ -31,6 +41,7 @@ function editableOfficer(): User
         'email' => 'edit.target@biztrack.local',
         'mobile_number' => '09170000000',
         'password' => 'biztrack1',
+        'department_id' => Department::where('code', 'BPLO')->value('id'),
         'is_active' => true,
         'email_verified_at' => now(),
     ]);
