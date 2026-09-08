@@ -1,70 +1,81 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
+use App\Services\WorkflowService;
 
 /*
- * Every office that issues a clearance can conduct the visit behind it.
+ * Every office that issues a clearance can book and close the visit behind it.
  *
- * `permit_types.requires_inspection` is true for all six supporting clearances
- * — SANITARY, FSIC, OCCUPANCY, CEC, ZONING, MARKET — and false only for
- * BUSINESS. That is one flag, but it is really a pair of facts that have to
- * agree, and for a long time they did not:
+ * FIVE offices, not six. This file was `SixInspectingOfficesTest` and the count
+ * in its name stopped being true on 6 September 2026, when Market Clearance and
+ * the City Market Office were removed from the system entirely — the client
+ * confirmed with the LGU that neither is needed. A test whose name states a
+ * number the code contradicts is worse than one with a vague name, because the
+ * number reads as the specification.
  *
- *   1. the workflow books a visit per inspecting office — one each, at the
- *      moment that office approves its own review — so a filing carrying all
- *      six clearances gets SIX inspections, not the two it used to; and
- *   2. somebody in each of those six offices has to be able to close one.
+ * `permit_types.requires_inspection` is true for all five supporting clearances
+ * — SANITARY, FSIC, OCCUPANCY, CEC, ZONING — and false only for BUSINESS. That
+ * is one flag, but it is really a pair of facts that have to agree, and for a
+ * long time they did not:
+ *
+ *   1. every one of those five permits gets a site visit — the LGU inspects the
+ *      premises, not the paperwork — so a filing gets FIVE inspections, not the
+ *      two it used to; and
+ *   2. somebody in each of those five offices has to be able to book one and
+ *      close it.
  *
  * (2) is the half that had been missing. `inspection.manage` was on
  * `sanitary_officer` and `fire_inspector` alone, and every /inspections* route
- * is behind it, so OBO, CENRO, CPDO and the Market Office could not even see a
- * visit booked against their own office — the client's report, verbatim: "OBO,
- * CENRO, Market, and Zoning admins cannot approve inspection. Only Sanitary and
- * Fire has it." Because WorkflowService issues only once every review is
- * complete AND every current visit has passed, turning the flag on without the
- * permission would not have improved anything; it would have parked every
- * clearance filing in `for_inspection` with nobody but the super admin able to
- * move it.
+ * is behind it, so OBO, CENRO and CPDO could not even see a visit booked against
+ * their own office — the client's report, verbatim: "OBO, CENRO, Market, and
+ * Zoning admins cannot approve inspection. Only Sanitary and Fire has it."
  *
  * So these tests are the pair. Break either half and one of them goes red.
+ *
+ * What changed with the September flow, and shows up throughout below: a visit
+ * is no longer BOOKED by the office approving its paperwork. Approval moves that
+ * permit to `for_inspection` and stops; the office then CHOOSES a date, because
+ * an automatic date is a promise made by a scheduler that does not know whether
+ * anyone is free. And each permit is released the moment its own office passes
+ * it, rather than the whole filing clearing at once.
  */
 
-/** Which account speaks for each inspecting office. */
+/** Which account speaks for each inspecting office, and which permit it issues. */
 const OFFICE_INSPECTOR = [
-    'CHO' => 'sanitary@biztrack.local',
-    'BFP' => 'fire@biztrack.local',
-    'CPDO' => 'zoning@biztrack.local',
-    'OBO' => 'obo@biztrack.local',
-    'CENRO' => 'cenro@biztrack.local',
+    'CHO' => ['SANITARY', 'sanitary@biztrack.local'],
+    'BFP' => ['FSIC', 'fire@biztrack.local'],
+    'CPDO' => ['ZONING', 'zoning@biztrack.local'],
+    'OBO' => ['OCCUPANCY', 'obo@biztrack.local'],
+    'CENRO' => ['CEC', 'cenro@biztrack.local'],
 ];
 
 /**
- * A paid filing asking for the business permit and all six clearances, with
- * every office assignment approved — so the workflow has booked its visits and
- * the filing is waiting on them.
+ * A paid filing on which every other permit has been applied for and had its
+ * PAPERWORK approved — so all five are `for_inspection` and not one visit has
+ * been booked yet.
  *
- * Each visit was booked by its own office's sign-off, in the order the loop
- * happens to take them, not in one batch at the end. Approving all seven here
- * is what makes the fixture SETTLED rather than what triggers the booking: with
- * every review in, the only thing between this filing and its permits is the
- * six site visits, which is the state each case below wants to start from.
+ * That last clause is the fixture's whole value. Under the old flow approving
+ * the reviews was what created the inspections, so "reviews all in" and "visits
+ * all booked" were the same state and could not be told apart. They are two
+ * states now, and every case below starts from the first one.
  */
 function filingWithEveryClearance(): Application
 {
     $owner = authAs('owner@biztrack.local');
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
-        'name' => 'Six Office Trading '.random_int(10000, 99999),
+        'name' => 'Five Office Trading '.random_int(10000, 99999),
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-'.random_int(10000, 99999),
         'tin' => '123-456-789-000',
-        'address' => ['line1' => '6 Clearance Row', 'barangay_id' => Barangay::first()->id],
+        'address' => ['line1' => '5 Clearance Row', 'barangay_id' => Barangay::first()->id],
         'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 500000]],
     ])->assertCreated()->json('data.id');
 
@@ -84,30 +95,17 @@ function filingWithEveryClearance(): Application
 
     /*
      * The applicant starts each other permit, and THAT is what routes its
-     * office.
-     *
-     * This step did not exist and did not need to: payment used to route all
-     * six offices at once, so the fixture could go straight from paying to
-     * approving. `startClearance()` routes one office at a time now, when the
-     * applicant actually files that permit — which is what keeps `assigned_at`
-     * an honest start for the office's measured service time instead of
-     * charging it for the days somebody spent filling in the other five.
-     *
-     * Without this the filing has exactly one assignment (BPLO's, completed at
-     * the form approval) and the loop below has nothing to iterate.
+     * office. Without this the filing has exactly one assignment — BPLO's,
+     * completed at the form approval — and the loop below has nothing to
+     * iterate.
      */
-    authAs('owner@biztrack.local');
-    foreach (PermitType::where('code', '!=', PermitType::OUTCOME_CODE)->get() as $type) {
-        test()->postJson("/api/v1/applications/{$appId}/clearances/{$type->code}/apply")->assertOk();
+    foreach (OFFICE_INSPECTOR as [$permitCode, $email]) {
+        authAs('owner@biztrack.local');
+        test()->postJson("/api/v1/applications/{$appId}/clearances/{$permitCode}/apply")->assertOk();
     }
 
-    // Confirmed on receipt. Without a person's name on the processing category
-    // no office may approve at all, and what this file is about is which of the
-    // offices gets sent out to the premises.
-    classifyAsOfficer($app);
-
     /*
-     * Each office signs off its own assignment; ApplicationVisibility keeps a
+     * Each office signs off its own paperwork; ApplicationVisibility keeps a
      * reviewer to the filings routed to their department, so no one account can
      * stand in for the rest.
      *
@@ -123,27 +121,45 @@ function filingWithEveryClearance(): Application
         if ($code === 'BPLO') {
             continue;
         }
-        authAs(OFFICE_INSPECTOR[$code]);
+        authAs(OFFICE_INSPECTOR[$code][1]);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
     }
 
     return $app->fresh();
 }
 
-it('books one visit for each of the six clearance offices, and none for the mayor’s permit', function () {
+/** That office books its visit on its own permit, and returns the visit id. */
+function bookVisitFor(Application $app, string $officeCode): int
+{
+    [$permitCode, $email] = OFFICE_INSPECTOR[$officeCode];
+
+    return test()->withHeaders(authAs($email))
+        ->postJson("/api/v1/applications/{$app->id}/permits/{$permitCode}/inspection", [
+            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        ])->assertCreated()->json('data.id');
+}
+
+it('lets each of the five clearance offices book a visit, and books none for the mayor’s permit', function () {
     $app = filingWithEveryClearance();
+
+    // Approving the paperwork booked nothing. The date is a separate choice.
+    expect($app->inspections()->count())->toBe(0);
+
+    foreach (array_keys(OFFICE_INSPECTOR) as $officeCode) {
+        bookVisitFor($app, $officeCode);
+    }
 
     $offices = $app->inspections()->with('department')->get()
         ->pluck('department.code')->sort()->values()->all();
 
     /*
-     * Six, not two. BPLO is absent and that is the rule rather than an
-     * omission: BPLO issues the Mayor's Permit on the strength of the six
-     * clearances, so a seventh visit of its own would be a visit nobody
-     * performs and would stall approveAndIssue behind it forever.
+     * Five, not two, and BPLO is absent. That absence is the rule rather than an
+     * omission: BPLO issues the Mayor's Permit on the strength of the five
+     * clearances, so a sixth visit of its own would be a visit nobody performs
+     * and would stall the final approval behind it forever.
      */
     expect($offices)->toBe(['BFP', 'CENRO', 'CHO', 'CPDO', 'OBO'])
-        ->and($app->status)->toBe(ApplicationStatus::ForInspection)
+        ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
         ->and($app->permits()->count())->toBe(0);
 });
 
@@ -162,15 +178,22 @@ it('gives every inspecting office an active officer to book the visit to', funct
     }
 
     $app = filingWithEveryClearance();
+    foreach (array_keys(OFFICE_INSPECTOR) as $officeCode) {
+        bookVisitFor($app, $officeCode);
+    }
+
     expect($app->inspections()->whereNull('inspector_user_id')->count())->toBe(0);
 });
 
-it('lets each of the six offices see and close its own visit, and issues once all six pass', function () {
+it('lets each of the five offices see and close its own visit, releasing that permit at once', function () {
     $app = filingWithEveryClearance();
 
-    foreach ($app->inspections()->with('department')->get() as $inspection) {
-        $code = $inspection->department->code;
-        authAs(OFFICE_INSPECTOR[$code]);
+    $released = 0;
+    foreach (array_keys(OFFICE_INSPECTOR) as $officeCode) {
+        [$permitCode, $email] = OFFICE_INSPECTOR[$officeCode];
+        $visitId = bookVisitFor($app, $officeCode);
+
+        authAs($email);
 
         /*
          * The list read first, deliberately. `index` is behind
@@ -182,45 +205,62 @@ it('lets each of the six offices see and close its own visit, and issues once al
         $visible = collect(
             test()->getJson('/api/v1/inspections')->assertOk()->json('data')
         )->pluck('id')->all();
-        expect(in_array($inspection->id, $visible, true))
-            ->toBeTrue("{$code} cannot see the inspection booked against its own office");
+        expect(in_array($visitId, $visible, true))
+            ->toBeTrue("{$officeCode} cannot see the inspection booked against its own office");
 
-        test()->postJson("/api/v1/inspections/{$inspection->id}/conduct", [
+        test()->postJson("/api/v1/inspections/{$visitId}/conduct", [
             'result' => 'passed',
             'findings' => 'Premises inspected and found compliant.',
         ])->assertOk();
+
+        /*
+         * Rule 7: the permit is released the moment its OWN office passes it,
+         * with nothing waiting on the other four. This count climbing inside
+         * the loop is that rule — the old flow issued nothing until every
+         * office had finished, which is what the client asked to be changed.
+         */
+        $released++;
+        expect($app->permits()->count())->toBe($released);
+        expect(app(WorkflowService::class)->pivotFor($app->fresh(), $permitCode)->status)
+            ->toBe(ClearanceStatus::Approved);
     }
 
+    // Five permits issued by five offices, and the filing is now in BPLO's
+    // queue for the final approval rather than approved outright — the Mayor's
+    // Permit is BPLO's to mint and is not one of these five.
     $settled = $app->fresh();
-
-    // Seven permits: the Mayor's Permit and the six clearances behind it.
-    expect($settled->status)->toBe(ApplicationStatus::Approved)
-        ->and($settled->permits()->count())->toBe(7);
+    expect($settled->status)->toBe(ApplicationStatus::ForFinalApproval)
+        ->and($settled->permits()->count())->toBe(5);
 });
 
-it('holds the filing until the last of the six visits passes', function () {
+it('holds the final approval until the last of the five visits passes', function () {
     $app = filingWithEveryClearance();
-    $inspections = $app->inspections()->with('department')->get();
 
     /*
-     * The point of the six is that they are six. Five passes must issue
-     * nothing — recordInspection releases the permits only when no CURRENT
-     * inspection on the file is still outstanding (and, since visits are booked
-     * per office as each review lands, only when every review is in too), and
-     * an off-by-one there would hand an applicant a Mayor's Permit while an
-     * office was still on its way out.
+     * The point of the five is that they are five. Four passes must not put the
+     * filing in front of BPLO — `refreshReadiness()` moves it to
+     * `for_final_approval` only when NO required permit is still outstanding,
+     * and an off-by-one there would offer BPLO an Approve button over a filing
+     * an office was still on its way out to.
      */
-    foreach ($inspections->slice(0, 5) as $inspection) {
-        authAs(OFFICE_INSPECTOR[$inspection->department->code]);
-        test()->postJson("/api/v1/inspections/{$inspection->id}/conduct", ['result' => 'passed'])->assertOk();
+    $offices = array_keys(OFFICE_INSPECTOR);
+    foreach (array_slice($offices, 0, 4) as $officeCode) {
+        $visitId = bookVisitFor($app, $officeCode);
+        authAs(OFFICE_INSPECTOR[$officeCode][1]);
+        test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
 
-        expect($app->fresh()->status)->toBe(ApplicationStatus::ForInspection)
-            ->and($app->permits()->count())->toBe(0);
+        expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
     }
 
-    $last = $inspections->last();
-    authAs(OFFICE_INSPECTOR[$last->department->code]);
-    test()->postJson("/api/v1/inspections/{$last->id}/conduct", ['result' => 'passed'])->assertOk();
+    // Four permits are out — each released by its own office — while the
+    // application itself has not moved.
+    expect($app->permits()->count())->toBe(4);
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
+    $last = end($offices);
+    $visitId = bookVisitFor($app, $last);
+    authAs(OFFICE_INSPECTOR[$last][1]);
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval)
+        ->and($app->permits()->count())->toBe(5);
 });

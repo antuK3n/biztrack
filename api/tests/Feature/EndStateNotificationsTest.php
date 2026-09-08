@@ -18,6 +18,18 @@ $deptEmail = [
     'BPLO' => 'bplo@biztrack.local',
     'CHO' => 'sanitary@biztrack.local',
     'BFP' => 'fire@biztrack.local',
+    'CPDO' => 'zoning@biztrack.local',
+    'OBO' => 'obo@biztrack.local',
+    'CENRO' => 'cenro@biztrack.local',
+];
+
+/** The five required clearances and the office that issues each. */
+const END_STATE_OFFICE = [
+    'SANITARY' => 'CHO',
+    'FSIC' => 'BFP',
+    'ZONING' => 'CPDO',
+    'OCCUPANCY' => 'OBO',
+    'CEC' => 'CENRO',
 ];
 
 /** Create + submit + pay an application owned by owner@biztrack.local. */
@@ -38,7 +50,10 @@ function payingApplication(string $businessName, string $registrationNumber): in
         'business_id' => $businessId,
         'data_privacy_consent' => true,
         'application_type' => 'new',
-        'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC'])->pluck('id')->all(),
+        // The business permit alone. Which clearances a filing must obtain is
+        // not the applicant's to choose: attachRequiredPermitTypes() adds all
+        // five at submission, so naming a short list here would only mislead.
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
@@ -52,22 +67,53 @@ function payingApplication(string $businessName, string $registrationNumber): in
 it('notifies the applicant when the application is approved', function () use ($deptEmail) {
     $appId = payingApplication('Notify Test Bakery', 'DTI-88001');
 
-    // Confirmed on receipt. Approval is refused until a person has set the
-    // processing category, and what this case is about is the notification the
-    // applicant gets afterwards. The rejection case below deliberately does not
-    // need it: rejection is ungated, a refused filing having no clock to run.
-    classifyAsOfficer(Application::findOrFail($appId));
+    /*
+     * The applicant opens each of the five permits, which is what routes its
+     * office. Payment no longer does it: routing follows the applicant one
+     * office at a time, so a paid filing nobody has filed a clearance on sits
+     * in BPLO's queue alone.
+     */
+    foreach (array_keys(END_STATE_OFFICE) as $code) {
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
+            ->assertOk();
+    }
 
-    foreach (ApplicationAssignment::where('application_id', $appId)->with('department')->get() as $assignment) {
-        $this->withHeaders(authAs($deptEmail[$assignment->department->code]))
-            ->postJson("/api/v1/assignments/{$assignment->id}/approve", ['remarks' => 'ok'])
+    /*
+     * Each office reads its permit, picks a date, and records the visit — three
+     * acts, not one. Approving the paperwork books nothing now; the office says
+     * when. The processing category needed no confirming here either, because
+     * `bploApprovesForm()` above could not have approved the form without it.
+     */
+    foreach (END_STATE_OFFICE as $code => $deptCode) {
+        $officer = authAs($deptEmail[$deptCode]);
+
+        $assignmentId = ApplicationAssignment::where('application_id', $appId)
+            ->whereHas('department', fn ($d) => $d->where('code', $deptCode))
+            ->value('id');
+
+        $this->withHeaders($officer)
+            ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'ok'])
+            ->assertOk();
+
+        $visitId = $this->withHeaders($officer)
+            ->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
+                'scheduled_at' => now()->addWeekdays(2)->startOfHour()->toDateTimeString(),
+            ])->assertCreated()->json('data.id');
+
+        $this->withHeaders($officer)
+            ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'findings' => 'clean'])
             ->assertOk();
     }
-    foreach (Inspection::where('application_id', $appId)->with('department')->get() as $inspection) {
-        $this->withHeaders(authAs($deptEmail[$inspection->department->code]))
-            ->postJson("/api/v1/inspections/{$inspection->id}/conduct", ['result' => 'passed', 'findings' => 'clean'])
-            ->assertOk();
-    }
+
+    // The five are in, so BPLO's SECOND act is what makes the filing approved.
+    // That is the only place an application becomes Approved now.
+    $bploAssignmentId = ApplicationAssignment::where('application_id', $appId)
+        ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
+        ->value('id');
+    $this->withHeaders(authAs($deptEmail['BPLO']))
+        ->postJson("/api/v1/assignments/{$bploAssignmentId}/approve", ['remarks' => 'All requirements met.'])
+        ->assertOk();
 
     $app = Application::find($appId);
     expect($app->status->value)->toBe('approved');
@@ -87,11 +133,20 @@ it('notifies the applicant when the application is approved', function () use ($
     expect(AppNotification::where('user_id', $owner->id)->where('type', 'issuance')->count())->toBe(1);
     expect(AppNotification::where('user_id', '!=', $owner->id)->where('type', 'decision')->count())->toBe(0);
 
-    // No duplicate generic "Application update" for the same end state.
+    /*
+     * No duplicate generic "Application update" for the same end state.
+     *
+     * Matched on the sentence `applicationStatus()` would actually write —
+     * `… is now “Approved”.` — rather than on the word "Approved" anywhere in
+     * the body, which is what this used to do. Each of the five offices now
+     * announces its own permit as approved and issued the moment it passes its
+     * inspection, so a bare `%Approved%` matches a dozen notices that are not
+     * duplicates of anything and are the point of rule 7.
+     */
     expect(
         AppNotification::where('user_id', $owner->id)
             ->where('type', 'status_change')
-            ->where('body', 'like', '%Approved%')
+            ->where('body', 'like', '%is now “Approved”%')
             ->count()
     )->toBe(0);
 });

@@ -144,8 +144,12 @@ it('still requires a document type for an ordinary requirement', function () {
 });
 
 it('refuses a certificate once the application has left the applicant', function () {
-    // app2 (RxCare Pharmacy) is under review and belongs to juan.
-    $app = Application::where('status', 'under_review')->firstOrFail();
+    // app2 (RxCare Pharmacy) is paid with its offices working, and belongs to
+    // juan. `under_review` was the name for that stage until the two-machine
+    // split moved per-permit work onto `application_permit_types.status`; the
+    // seeded filing sits at `awaiting_other_permits` now. All this case needs
+    // is a filing that has left the applicant's hands, which that one has.
+    $app = Application::where('status', 'awaiting_other_permits')->firstOrFail();
 
     authAs($app->applicant->email);
     $this->postJson("/api/v1/applications/{$app->id}/documents", [
