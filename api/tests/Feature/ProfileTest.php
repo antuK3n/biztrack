@@ -163,3 +163,57 @@ it('changes the password and revokes every other token', function () {
         'password' => 'brand-new-pass1',
     ])->assertOk();
 });
+
+/*
+ * The mobile number is eleven digits in local 09 form, enforced at the endpoint.
+ *
+ * `string|max:20` accepted anything short enough, so the Edit Profile field
+ * saved whatever was typed into it — which is how the demo owner's stored
+ * number became the three characters "09d". The field now refuses a non-digit
+ * as it is typed, but the field is not the only caller, so the rule lives here
+ * too.
+ */
+it('refuses a mobile number that is not eleven digits', function () {
+    $token = loginToken('owner@biztrack.local');
+    $this->app['auth']->forgetGuards();
+
+    $rejected = [
+        '09d',            // the value that actually reached the database
+        '0917123456',     // ten digits
+        '091712345678',   // twelve
+        '09171234a67',    // a letter in the middle
+        '0917 123 4567',  // spaces
+        '+639171234567',  // international form, not the local one stored here
+        '19171234567',    // eleven digits, wrong prefix
+    ];
+
+    foreach ($rejected as $value) {
+        $this->withToken($token)->putJson('/api/v1/auth/profile', [
+            'first_name' => 'Nena',
+            'last_name' => 'Dela Cruz',
+            'mobile_number' => $value,
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('mobile_number');
+    }
+
+    // None of them landed.
+    expect(User::where('email', 'owner@biztrack.local')->first()->mobile_number)
+        ->not->toBeIn($rejected);
+});
+
+it('accepts an eleven-digit mobile number', function () {
+    $token = loginToken('owner@biztrack.local');
+    $this->app['auth']->forgetGuards();
+
+    $this->withToken($token)->putJson('/api/v1/auth/profile', [
+        'first_name' => 'Nena',
+        'last_name' => 'Dela Cruz',
+        'mobile_number' => '09981234567',
+    ])
+        ->assertOk()
+        ->assertJsonPath('data.mobile_number', '09981234567');
+
+    expect(User::where('email', 'owner@biztrack.local')->first()->mobile_number)
+        ->toBe('09981234567');
+});

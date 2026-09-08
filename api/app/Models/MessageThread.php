@@ -18,7 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class MessageThread extends Model
 {
-    protected $fillable = ['application_id', 'department_id'];
+    protected $fillable = ['application_id', 'user_id', 'department_id'];
 
     /**
      * A thread with no office named is BPLO's.
@@ -46,6 +46,26 @@ class MessageThread extends Model
     public function application(): BelongsTo
     {
         return $this->belongsTo(Application::class);
+    }
+
+    /**
+     * The person a GENERAL thread belongs to, null on a filing's thread.
+     *
+     * A general thread is a question asked before there is anything to ask
+     * about — "can I change my email", "what do I need to bring" — so it is
+     * owned by a person rather than by a permit. See migration
+     * 2026_09_03_000020. `(user_id, department_id)` is unique, so it is one
+     * conversation per person per office, the same shape a filing gets.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /** A conversation with no filing behind it. */
+    public function isGeneral(): bool
+    {
+        return $this->application_id === null;
     }
 
     /** The office on the other side of this conversation. */
