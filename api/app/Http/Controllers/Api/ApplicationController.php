@@ -29,6 +29,16 @@ class ApplicationController extends Controller
 
     private array $fullEager = [
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
+        /*
+         * BPLO items 11 / 12 — the named person.
+         *
+         * `BusinessResource` serialises `owner` behind `whenLoaded('owners')`,
+         * so without this the KEY IS ABSENT from the payload rather than null,
+         * and the wizard reopening a draft reads `undefined` and blanks the
+         * name, suffix and gender the applicant had already given. Silent, and
+         * only visible on a reopen — which is exactly how it was found.
+         */
+        'business.owners',
         'documents.documentType', 'feeAssessment', 'payments',
         'assignments.department', 'assignments.officer',
         'inspections.department', 'inspections.inspector',
@@ -151,9 +161,41 @@ class ApplicationController extends Controller
             // Ordinance Sec. 2N: annual (first 20 days of January) or quarterly
             // (first 20 days of Jan/Apr/Jul/Oct). No semi-annual option exists.
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            /*
+             * RA 10173 consent, kept with the FILING it was given for.
+             *
+             * `applications.data_privacy_consent` has been on this table the
+             * whole time and nothing wrote it: the wizard held the tick in React
+             * state, sent it nowhere, and lost it on every reload. So the
+             * applicant was re-asked each time they reopened a draft — which
+             * teaches people to tick without reading — and the register kept no
+             * evidence of a consent it refuses to proceed without.
+             *
+             * `boolean` and not `accepted` here, deliberately. A draft is saved
+             * half-answered by design and an untidied `false` is a real state
+             * (they have not ticked it yet); `accepted` would reject the
+             * autosave of a draft that is simply unfinished. The requirement is
+             * enforced at submit(), which is the moment it actually matters.
+             *
+             * No separate timestamp: the filing already carries `created_at` and
+             * `submitted_at`, and consent is required to submit, so "before
+             * submitted_at" is already in the record. A second date column would
+             * restate what two existing ones say.
+             */
+            'data_privacy_consent' => ['sometimes', 'boolean'],
             'permit_type_ids' => ['required', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'prior_permit_id' => ['nullable', 'exists:permits,id'],
+            /*
+             * Every permit the renewal covers. `prior_permit_id` above stays
+             * the primary — the renewal chain is keyed on it and analytics
+             * counts it — and this is the full set the counter was told about.
+             * Sent as well as, never instead of, the primary: a caller that
+             * sends only this array still gets a chain-keyed filing because
+             * the first id becomes the primary below.
+             */
+            'prior_permit_ids' => ['sometimes', 'array'],
+            'prior_permit_ids.*' => ['exists:permits,id'],
             // The ticked escape, carried on the create call so a draft opened
             // from the identify dialog already holds the answer given there
             // rather than waiting on the follow-up PUT to land.
@@ -171,10 +213,25 @@ class ApplicationController extends Controller
             ]);
         }
 
-        // A prior permit (for renewals/amendments) must belong to the same business.
-        if (! empty($data['prior_permit_id'])) {
-            $priorOk = $business->permits()->whereKey($data['prior_permit_id'])->exists();
-            abort_unless($priorOk, 422, 'The selected prior permit does not belong to this business.');
+        /*
+         * Every prior permit named — primary and set alike — must belong to
+         * this business.
+         *
+         * Checked as one list rather than the primary alone. When the dialog
+         * became multi-select the old single check would have waved through an
+         * array holding another shop's permit as long as the primary was
+         * clean, which is the same hole in a wider doorway: office separability
+         * is a boundary, and a filing that names a permit it has no claim to is
+         * how a reader learns about a business it may not see.
+         */
+        $priorIds = $this->priorPermitIds($data);
+        if ($priorIds !== []) {
+            $ownedCount = $business->permits()->whereKey($priorIds)->count();
+            abort_unless(
+                $ownedCount === count($priorIds),
+                422,
+                'A selected prior permit does not belong to this business.'
+            );
         }
 
         $app = Application::create([
@@ -183,17 +240,22 @@ class ApplicationController extends Controller
             'application_type' => $data['application_type'],
             'title' => $this->cleanTitle($data['title'] ?? null),
             'status' => ApplicationStatus::Draft,
-            'prior_permit_id' => $data['prior_permit_id'] ?? null,
+            'prior_permit_id' => $priorIds[0] ?? null,
             // Contradictory answers resolve the same way they do in
             // PriorPermitController: a named permit wins and the escape is not
             // recorded, so the submit gate can never pass on both at once.
-            'prior_permit_declared_none' => empty($data['prior_permit_id'])
+            // "Named" now means any permit in the set, not just the primary —
+            // ticking three permits and also declaring there are none is the
+            // same contradiction it always was.
+            'prior_permit_declared_none' => $priorIds === []
                 && (bool) ($data['prior_permit_declared_none'] ?? false),
             'payment_mode' => $data['payment_mode'] ?? 'annual',
+            'data_privacy_consent' => (bool) ($data['data_privacy_consent'] ?? false),
             'fee_profile' => $data['fee_profile'] ?? null,
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
+        $app->priorPermits()->sync($priorIds);
         $this->syncLineCapitalization($app);
 
         Audit::log('application.created', $app);
@@ -227,6 +289,10 @@ class ApplicationController extends Controller
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
             'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            // See the note on the same key in store(): `boolean`, not
+            // `accepted`, because a draft may legitimately be saved before the
+            // applicant has ticked it. submit() is the gate.
+            'data_privacy_consent' => ['sometimes', 'boolean'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
@@ -261,6 +327,16 @@ class ApplicationController extends Controller
         if (isset($data['payment_mode'])) {
             $application->update(['payment_mode' => $data['payment_mode']]);
         }
+        /*
+         * `array_key_exists`, not `isset`: the value is a boolean and `false` is
+         * a real answer. `isset` would have made UNTICKING the box impossible —
+         * the write would be skipped and the stored `true` would stand, so an
+         * applicant who changed their mind would find the box ticked again next
+         * time and the record still saying they had agreed.
+         */
+        if (array_key_exists('data_privacy_consent', $data)) {
+            $application->update(['data_privacy_consent' => (bool) $data['data_privacy_consent']]);
+        }
 
         Audit::log('application.updated', $application);
 
@@ -277,6 +353,25 @@ class ApplicationController extends Controller
         }
 
         /*
+         * No consent, no filing.
+         *
+         * The wizard already disables Submit without the tick, and that is not
+         * enough for this one: consent under RA 10173 is the lawful basis for
+         * processing everything else on the form, so "the browser would not have
+         * let you" is a poor answer to give afterwards. Checked here for the
+         * same reason the amendment gate below is — the browser is not the only
+         * way into this endpoint.
+         *
+         * At submit rather than at create, because drafts autosave
+         * half-answered by design and the tick is on step 1 of seven.
+         */
+        if (! $application->data_privacy_consent) {
+            throw ValidationException::withMessages([
+                'data_privacy_consent' => ['Agree to the Data Privacy Consent before submitting this application.'],
+            ]);
+        }
+
+        /*
          * A suspended or blacklisted business cannot file — checked HERE as well
          * as at create.
          *
@@ -290,6 +385,11 @@ class ApplicationController extends Controller
          *
          * `loadMissing` rather than a fresh query — submit() already touches the
          * business through syncLineCapitalization below.
+         *
+         * Second of two gates that arrived here independently. Consent runs
+         * first because it is the lawful basis for processing the form at all;
+         * this one is the LGU's own answer about whether the business may file.
+         * Neither subsumes the other, so both stand.
          */
         $application->loadMissing('business');
         if ($application->business?->isBlockedFromApplying()) {
@@ -437,9 +537,22 @@ class ApplicationController extends Controller
     {
         $this->authorizeOwner($request, $application);
 
+        /*
+         * Cancellable up to and including Pending Payment — before money has
+         * changed hands and before any other office has been given work.
+         * `ApplicationStatus::allowedNext()` mirrors this list and the two must
+         * move together; the enum's docblock says so from the other side.
+         *
+         * `Returned` joins the list, which is new and is not a widening: a
+         * returned filing is one BPLO has handed back, so it is sitting with the
+         * applicant unpaid, which is exactly the position `draft` is in. Under
+         * the old machine it was excluded only because `returned` then meant
+         * "mid-review", which it no longer does.
+         */
         $allowed = [
             ApplicationStatus::Draft,
-            ApplicationStatus::Submitted,
+            ApplicationStatus::ForApproval,
+            ApplicationStatus::Returned,
             ApplicationStatus::PendingPayment,
         ];
         if (! in_array($application->status, $allowed, true)) {
@@ -552,6 +665,14 @@ class ApplicationController extends Controller
      */
     private const AMENDMENT_INPUTS = [
         'amendment_ownership', 'amendment_location', 'amendment_nature', 'amendment_other',
+        /*
+         * A3 belongs in this list as well as in the rules. `update()` keys the
+         * whole section-A write on one of these being present, so a payload
+         * carrying only From/To — which is exactly what changing the structure
+         * and nothing else sends — would otherwise validate cleanly and then be
+         * dropped without a write.
+         */
+        'amendment_from_registration_type', 'amendment_to_registration_type',
     ];
 
     /** @return array<string, array<int, string>> */
@@ -564,7 +685,46 @@ class ApplicationController extends Controller
             // The column is a plain string; 255 is where it truncates, and a
             // silently truncated answer is worse than a rejected one.
             'amendment_other' => ['sometimes', 'nullable', 'string', 'max:255'],
+            /*
+             * Section A3, From/To. Constrained to the four structures the paper
+             * form prints rather than left free text: the same four are the
+             * only values `businesses.registration_type` ever holds, and a
+             * fifth spelling arriving here would be a value no other reader in
+             * the system knows how to render.
+             */
+            'amendment_from_registration_type' => [
+                'sometimes', 'nullable', 'in:sole_proprietorship,partnership,corporation,cooperative',
+            ],
+            'amendment_to_registration_type' => [
+                'sometimes', 'nullable', 'in:sole_proprietorship,partnership,corporation,cooperative',
+            ],
         ];
+    }
+
+    /**
+     * Every prior permit this filing names, de-duplicated, primary first.
+     *
+     * One list from two request shapes. `prior_permit_id` is what the old
+     * single-select dialog sent and what an existing draft still carries;
+     * `prior_permit_ids` is what the multi-select sends. A caller may send
+     * either or both, and the primary is whichever the caller named as such —
+     * falling back to the first of the set, so a renewal that ticks three
+     * permits and names no primary still keys its chain on one of them rather
+     * than on null.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, int>
+     */
+    private function priorPermitIds(array $data): array
+    {
+        $ids = array_map('intval', (array) ($data['prior_permit_ids'] ?? []));
+
+        if (! empty($data['prior_permit_id'])) {
+            // Primary first, and only once however the caller sent it.
+            array_unshift($ids, (int) $data['prior_permit_id']);
+        }
+
+        return array_values(array_unique(array_filter($ids)));
     }
 
     /**
@@ -585,13 +745,30 @@ class ApplicationController extends Controller
      */
     private function amendmentAttributes(array $data, ?string $applicationType): array
     {
-        if ($applicationType !== ApplicationType::Amendment->value) {
+        /*
+         * Renewals ask section A too, and always did on paper.
+         *
+         * MCG-BPLO-FO-002 v2.0 opens with A1 "Do you have any changes or
+         * amendments in the previous business registration?", and A2/A3 are
+         * that question's follow-ups. Gating these columns on
+         * `application_type === amendment` meant a renewal that DID change its
+         * ownership had nowhere to record it, so the answer was taken from the
+         * applicant on paper and thrown away by the system — the BPLO then
+         * renewed a sole proprietorship that had become a corporation.
+         *
+         * `new` still zeroes: a first application amends nothing by definition,
+         * and there is no A1 on MCG-BPLO-FO-001 to ask.
+         */
+        if ($applicationType !== ApplicationType::Amendment->value
+            && $applicationType !== ApplicationType::Renewal->value) {
             return [
                 'has_amendments' => false,
                 'amendment_ownership' => false,
                 'amendment_location' => false,
                 'amendment_nature' => false,
                 'amendment_other' => null,
+                'amendment_from_registration_type' => null,
+                'amendment_to_registration_type' => null,
             ];
         }
 
@@ -599,13 +776,25 @@ class ApplicationController extends Controller
         $location = (bool) ($data['amendment_location'] ?? false);
         $nature = (bool) ($data['amendment_nature'] ?? false);
         $other = trim((string) ($data['amendment_other'] ?? ''));
+        $hasAmendments = $ownership || $location || $nature || $other !== '';
+
+        /*
+         * A3 is only meaningful under a Yes at A1. Written back to null rather
+         * than left alone when A1 is No, so an applicant who picked a structure
+         * and then changed their answer to "nothing has changed" does not file
+         * a renewal that still claims to convert them to a corporation.
+         */
+        $from = $hasAmendments ? ($data['amendment_from_registration_type'] ?? null) : null;
+        $to = $hasAmendments ? ($data['amendment_to_registration_type'] ?? null) : null;
 
         return [
-            'has_amendments' => $ownership || $location || $nature || $other !== '',
+            'has_amendments' => $hasAmendments,
             'amendment_ownership' => $ownership,
             'amendment_location' => $location,
             'amendment_nature' => $nature,
             'amendment_other' => $other === '' ? null : $other,
+            'amendment_from_registration_type' => $from,
+            'amendment_to_registration_type' => $to,
         ];
     }
 

@@ -50,8 +50,21 @@ function requirementFiling(string $businessName, string $registrationNumber, arr
         'business_id' => $businessId,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        /*
+         * RA 10173 consent, carried on the filing itself.
+         *
+         * submit() refuses without it — it is the first of two gates there, and
+         * the lawful basis for processing anything else on the form. This is a
+         * PRECONDITION of this fixture, not its subject: every test below is
+         * about Other Requirements, and a filing that never reached an office
+         * queue cannot have a requirement raised against it.
+         */
+        'data_privacy_consent' => true,
     ])->assertCreated()->json('data.id');
 
+    // Lands on For Approval, not Pending Payment: BPLO reads the main form
+    // before any bill is raised. Nothing here needs a paid filing, so the
+    // fixture stops at submit rather than driving it further.
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     foreach ($offices as $code) {

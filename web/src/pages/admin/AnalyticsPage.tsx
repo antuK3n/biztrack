@@ -580,7 +580,6 @@ const DEPARTMENT_HEADINGS: Record<string, string> = {
   CPDO: 'Zoning',
   OBO: 'Building Official',
   CENRO: 'Environment',
-  'CMO-MARKET': 'Market',
 }
 
 /**
