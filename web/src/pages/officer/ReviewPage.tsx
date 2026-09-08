@@ -816,7 +816,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
-  const decided = rejected || approvedHere || Boolean(data.completed_at)
+  /*
+   * BPLO acts TWICE on one assignment row, and this read the first act as the
+   * end of both.
+   *
+   * The flow gives BPLO the form before payment and the final signature after
+   * every permit is approved. Both go through the same assignment, and
+   * `completeAssignment` stamps `status = completed` and `completed_at` on the
+   * first — so by the time a filing reached For Final Approval, every clause
+   * below was already true. The Mode control was replaced by a static
+   * "Approved" and no Approve button was drawn: the Final Approval tab served
+   * an openable row leading to a screen that could not act on it, and no filing
+   * could ever reach `approved`. The API was willing throughout —
+   * `approveAssignment` maps `for_final_approval` onto `approveOverall`.
+   *
+   * So a filing standing at For Final Approval is never "decided", whatever the
+   * row says. Keyed on the APPLICATION's status rather than the row, because
+   * the row cannot tell BPLO's two acts apart — the same root cause as BPLO's
+   * recorded turnaround covering the whole filing's lifetime. Giving the second
+   * act its own assignment row would fix both at once, and is a larger change
+   * than this screen.
+   */
+  const owesFinalApproval = app.status === 'for_final_approval'
+  const decided = !owesFinalApproval && (rejected || approvedHere || Boolean(data.completed_at))
   // A decided review is a record for good: there is nothing left to change.
   const editing = mode === 'edit' && !decided
 

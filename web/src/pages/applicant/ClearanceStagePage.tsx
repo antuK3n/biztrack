@@ -26,10 +26,12 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  * The reasoning is docs/clearances-after-payment.md and this screen is the half
  * the applicant sees. The flow around it:
  *
- *     wizard (business permit only) → submit → Tax Order of Payment #1 → PAID
+ *     wizard (business permit only) → submit → BPLO approves the form
+ *         → Tax Order of Payment → PAID
  *         → THIS STAGE unlocks
- *         → Apply adds that office's fee to a running balance
- *         → the permit is released when the balance reaches zero
+ *         → Apply sends that clearance to its office (one office at a time)
+ *         → each office approves, books its visit, and that permit issues
+ *         → all five approved → BPLO signs → the business permit is released
  *
  * This is the screen the whole reordering exists for, and three things on it
  * are consequences of the ordering rather than decoration.
@@ -41,17 +43,19 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  *   API (`meta.locked_reason`) and is printed VERBATIM — see the render below
  *   for why a sentence written here would be wrong.
  *
- *   THE BALANCE. Fees accrue here, which they did not when everything was
- *   priced at submit. Applying moves a number on this very screen, so that
- *   number has to be on this screen. A stage that charged the applicant and
- *   showed them nothing would be taking money in the dark.
+ *   THE BALANCE. Fees no longer accrue here, and the copy on this screen had
+ *   not caught up. For a while applying re-assessed the filing and moved a
+ *   running total, so the number lived on this screen and the buttons named it.
+ *   One bill is raised at submission now and it covers all five clearances:
+ *   applying adds nothing. Every sentence that said otherwise — "its fee has
+ *   been added to your balance due", "the permit is not released until the
+ *   balance reaches zero" — was describing a charge that does not happen and a
+ *   gate that is not the gate. The gate is five approvals.
  *
- *   THE PRICE ON THE CARD. `fee_preview` is what applying WOULD add, quoted
- *   before the button is pressed. It was taken off the cards when one Tax Order
- *   of Payment covered everything and the amount could honestly be deferred to
- *   Review & Submit. There is no later screen to defer to now — pressing Apply
- *   IS the moment of commitment — so the amount is back, in the lightest
- *   treatment the card has.
+ *   THE PRICE ON THE CARD. `fee_preview` is what that clearance costs, and it
+ *   stays on the card — an applicant is entitled to know what each office
+ *   charges even when it was all billed together. What it must NOT say is that
+ *   pressing Apply will add it to anything.
  *
  * Two further properties are load-bearing and predate the reordering. They
  * survived it unchanged and must keep surviving:
@@ -64,10 +68,11 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  *      Un-applying and removing an uploaded copy are different intentions and
  *      have their own labelled controls, well away from the two that create.
  *
- *   2. The two buttons have very different consequences. Apply adds that
- *      office's fee to the balance; Submit costs nothing, because nothing is
- *      being issued. A card that showed them as a matched pair without saying
- *      so would be hiding the only difference that matters.
+ *   2. The two buttons have very different consequences — though no longer
+ *      monetary ones. Apply sends the clearance to its office, which routes the
+ *      work and starts that office's clock; Submit hands in a copy of one the
+ *      applicant already holds. Neither moves money now. The difference that
+ *      matters is who ends up with work to do.
  *
  * ── Assumptions built in here, taken rather than asked ────────────────────
  *
@@ -137,6 +142,26 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  * categories.
  */
 const APPLICABILITY: Record<string, string> = {}
+
+/**
+ * Has the applicant applied for this clearance?
+ *
+ * One predicate, because the answer used to be spelled out at five call sites
+ * as `state === 'applied'` (and once as `'applied' || 'issued'`) — and every one
+ * of them silently stopped being true. `state` is `application_permit_types
+ * .status` verbatim now, and `applied` and `issued` are not among its values, so
+ * those five branches were dead: the "switch to a copy" prompt never appeared,
+ * the withdraw link never drew, and the dialog never warned that submitting a
+ * copy would withdraw a live application.
+ *
+ * Applied means the pivot has moved off `not_started`. That deliberately
+ * includes `rejected` and `returned` — the office has acted on it, which is the
+ * strongest possible form of having applied — and excludes `available`, which
+ * means no pivot row exists at all.
+ */
+function hasApplied(state: Clearance['state']): boolean {
+  return state !== 'not_started' && state !== 'available'
+}
 /**
  * What this clearance costs. The number, and as little around it as possible.
  *
@@ -435,7 +460,29 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       const ok = await runAction(code, '', () => clearances.removeHeld(applicationId, code))
       if (!ok) return
     }
-    if (row.state === 'available' || row.state === 'submitted') {
+    /*
+     * "Not started yet", which is two values now — and getting this wrong made
+     * Apply do nothing at all.
+     *
+     * This read `state === 'available' || state === 'submitted'`. Both were
+     * states of the OLD inference, where `state()` guessed from what existed:
+     * nothing attached meant `available`, a held copy meant `submitted`.
+     * `state()` now returns `application_permit_types.status` verbatim, and
+     * `submitted` is not one of its values at all.
+     *
+     * `available` survives, but only for a permit that is not attached — and
+     * every one of the five is attached at submission, as `not_started`. So the
+     * condition was false on every required clearance: the POST never fired,
+     * the office was never routed, and the press fell through to opening the
+     * office sheet. Silently, because nothing here reports a skipped branch.
+     * A filing in that state can never be approved — no office is ever given
+     * the work.
+     *
+     * Written against the enum rather than a list of strings, so a new
+     * ClearanceStatus cannot quietly rejoin this branch.
+     */
+    const notStartedYet = row.state === 'not_started' || row.state === 'available'
+    if (notStartedYet) {
       const ok = await runAction(
         code,
         /*
@@ -444,10 +491,14 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
          * last thing written to it, so a deletion announced and then replaced
          * 200ms later by "Applied for your …" is a deletion nobody was told
          * about.
+         *
+         * No longer says a fee was added: there is no accrual. One bill is
+         * assessed at submission and covers all five, so "its fee has been
+         * added to your balance due" described a charge that does not happen.
          */
         removingCopy
-          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. This office’s fee has been added to your balance due.`
-          : `Applied for your ${row.permit_type.name}. Its fee has been added to your balance due.`,
+          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded.`
+          : `Applied for your ${row.permit_type.name}. It has gone to its office.`,
         () => clearances.apply(applicationId, code),
       )
       if (!ok) return
@@ -506,7 +557,9 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   async function onUnapply(row: Clearance) {
     await runAction(
       row.permit_type.code,
-      `Withdrew your application for the ${row.permit_type.name}. Its fee is off your balance due${
+      // No fee comes off. One bill was raised at submission covering all five,
+      // and withdrawing does not re-assess it.
+      `Withdrew your application for the ${row.permit_type.name}${
         row.has_office_form ? ', and its form section is off this application' : ''
       }.`,
       () => clearances.unapply(applicationId, row.permit_type.code),
@@ -563,7 +616,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   async function onSubmitHeld(row: Clearance, file: File) {
     setHeldPrompt(null)
     const code = row.permit_type.code
-    const switching = row.state === 'applied'
+    const switching = hasApplied(row.state)
     let withdrawn = false
     setBusyCode(code)
     setActionError(null)
@@ -878,10 +931,10 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         applicant can watch the number they were quoted appear.
       */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Choose the ones your business needs.{' '}
-        <span className="font-semibold text-ink">Apply</span> adds that office&rsquo;s fee to your
-        balance due; <span className="font-semibold text-ink">Submit</span> a copy of one you
-        already hold costs nothing.
+        All five are required.{' '}
+        <span className="font-semibold text-ink">Apply</span> sends that clearance to its office;{' '}
+        <span className="font-semibold text-ink">Submit</span> hands in a copy of one you already
+        hold. Your payment covered all five, so neither adds to your bill.
       </p>
 
       {/*
@@ -898,7 +951,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         {visibleRows.map((row) => {
           const code = row.permit_type.code
           const busy = busyCode === code
-          const applied = row.state === 'applied' || row.state === 'issued'
+          const applied = hasApplied(row.state)
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
@@ -1098,7 +1151,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                 offering a control the server will refuse is CLR-4 on a
                 different screen.
               */}
-              {row.state === 'applied' && unlocked && (
+              {hasApplied(row.state) && unlocked && (
                 <p className="mt-2 flex text-xs text-ink-muted">
                   <button
                     type="button"
@@ -1234,7 +1287,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             request first, and this is now a thing on screen called Withdraw,
             here and on the card.
           */
-          confirmLabel={heldPrompt.state === 'applied' ? 'Withdraw & submit' : 'Submit'}
+          confirmLabel={hasApplied(heldPrompt.state) ? 'Withdraw & submit' : 'Submit'}
           confirmDisabled={!heldPromptFile}
           onCancel={() => {
             setHeldPrompt(null)
@@ -1267,15 +1320,14 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             here would make a free, reversible change look like the deletion
             happening in the OTHER dialog, which really is one.
           */}
-          {heldPrompt.state === 'applied' && (
+          {hasApplied(heldPrompt.state) && (
             <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
               <p className="text-sm font-semibold text-blue-900">
                 You applied for this one. Submitting your own copy replaces that.
               </p>
               <p className="mt-1 text-xs leading-relaxed text-blue-800">
                 Your application to{' '}
-                {heldPrompt.permit_type.department?.name ?? 'the issuing office'} is withdrawn, its
-                fee comes off your balance due
+                {heldPrompt.permit_type.department?.name ?? 'the issuing office'} is withdrawn
                 {heldPrompt.has_office_form ? ', and its form section leaves this application' : ''}
                 . Nothing you have typed into that form is deleted — press Apply again and it is
                 still there.
@@ -1372,7 +1424,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           </p>
           <p className="mt-3 text-center text-sm text-ink-secondary">
             A clearance is either one you already hold or one you are asking this office to issue,
-            never both — and applying adds this office’s fee to your balance due.
+            never both.
           </p>
         </ProtoModal>
       )}
