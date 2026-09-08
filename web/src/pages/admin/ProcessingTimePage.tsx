@@ -282,11 +282,12 @@ function OfficeCard({
     >
       <span className="flex items-baseline gap-1.5 overflow-hidden">
         {/*
-         * `whitespace-nowrap` because a code is one token however it is spelt:
-         * CMO-MARKET broke at its hyphen into "CMO-" / "MARKET", which read as
-         * an office called CMO and pushed the whole thin row 23px taller than
-         * the charted one above it. It is the only one of the seven codes with
-         * a hyphen in it, which is why nothing caught this until it was drawn.
+         * `whitespace-nowrap` because a code is one token however it is spelt.
+         * The office this was written for — CMO-MARKET, removed in September
+         * 2026 — broke at its hyphen into "CMO-" / "MARKET", which read as an
+         * office called CMO and pushed the whole thin row 23px taller than the
+         * charted one above it. No current code contains a hyphen, so the rule
+         * guards nothing today and is kept for the next one that does.
          */}
         <span className="whitespace-nowrap text-[13px] font-bold text-ink">{code}</span>
         {/* The office picker needs a name, but the code is what fits. */}
@@ -574,7 +575,7 @@ function SlowdownWarnings({ departments }: { departments: ProcessingTimeDepartme
 
 /*
  * `NotCharted` used to live here: a grey line under the strip reading
- * "Not charted: OBO, CENRO, CMO-MARKET — too few finished reviews a week to
+ * "Not charted: OBO, CENRO — too few finished reviews a week to
  * average." It is gone because every word of it is now on the offices' own
  * cards, where the reader is already looking. Do not bring it back alongside
  * the cards — a footnote repeating what the cards say is how three offices came

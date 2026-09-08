@@ -78,30 +78,16 @@ it('creates a meeting-type request with officer-provided fields', function () {
         ->assertJsonPath('data.meeting_link', 'https://meet.google.com/abc-defg-hij');
 });
 
-it('lets an officer adjust the fee before payment', function () {
-    // Build a fresh pending-payment application for owner@.
-    $owner = authAs('owner@biztrack.local');
-    $barangayId = Barangay::first()->id;
-    $psicId = PsicCode::first()->id;
-    $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
-        'name' => 'FeeAdjust Co', 'registration_type' => 'DTI',
-        'registration_number' => 'DTI-99001', 'tin' => '123-456-789-000',
-        'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
-        'lines' => [['psic_code_id' => $psicId]],
-    ])->json('data.id');
-    $typeId = PermitType::where('code', 'BUSINESS')->value('id');
-    $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
-        'business_id' => $businessId, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
-    ])->json('data.id');
-    $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
-
-    $this->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson("/api/v1/applications/{$appId}/fee/adjust", [
-            'line_items' => [['label' => 'Adjusted permit fee', 'amount' => 1234.00]],
-            'total_amount' => 1234.00,
-        ])
-        ->assertOk();
-});
+/*
+ * "It lets an officer adjust the fee before payment" was here, and it asserted
+ * the opposite of the rule [client, 2026-09-06]: the fee is computed from the
+ * revenue code at submission and BPLO cannot move it. The route is deleted, not
+ * gated, so the case failed with a 404 rather than a 403. What replaced it is
+ * `OfficeActionScopingTest`'s "will not let any office adjust the fee, on its
+ * own filings or anyone else's", which names BPLO and the super admin
+ * explicitly. If the adjustment ever comes back, this case comes back with the
+ * route — `fee.adjust` is still in RbacSeeder for exactly that.
+ */
 
 it('blocks a suspended business from filing a new application', function () {
     $business = Business::where('name', "Nena's Sari-Sari Store")->first();
@@ -116,6 +102,7 @@ it('blocks a suspended business from filing a new application', function () {
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
+            'data_privacy_consent' => true,
         ])
         ->assertStatus(422);
 });
@@ -142,6 +129,7 @@ it('upserts and reads a per-office application form', function () {
     $typeId = PermitType::where('code', 'OCCUPANCY')->value('id');
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId, 'application_type' => 'new', 'permit_type_ids' => [$typeId],
+        'data_privacy_consent' => true,
     ])->json('data.id');
 
     $this->withHeaders($owner)

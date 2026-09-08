@@ -210,7 +210,7 @@ it('ignores issuance dates sent by the applicant', function () {
 });
 
 it('lets a reviewing officer record the issuance dates', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::UnderReview, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -231,7 +231,7 @@ it('lets a reviewing officer record the issuance dates', function () {
 });
 
 it('does not let an officer overwrite the applicant answers', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::UnderReview, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
         'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
@@ -248,7 +248,7 @@ it('does not let an officer overwrite the applicant answers', function () {
 });
 
 it('rejects an issuance date in the future', function () {
-    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::UnderReview, now()->subDay());
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now()->subDay());
 
     $this->withHeaders(authAs('bplo@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
@@ -305,7 +305,7 @@ it('refuses an office-form write from a guest', function () {
 });
 
 it('stops the applicant editing office forms once the application is submitted', function () {
-    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::UnderReview, now());
+    $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now());
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", [

@@ -485,7 +485,7 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
-        {(status === 'submitted' || status === 'under_review') && (
+        {status === 'for_approval' && (
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
@@ -499,18 +499,57 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
-        {status === 'for_inspection' && (
+        {/*
+          * The two stages after payment, which had no card at all.
+          *
+          * The status enum was replaced — `submitted`, `under_review` and
+          * `for_inspection` retired for `for_approval`,
+          * `awaiting_other_permits` and `for_final_approval` — but these cards
+          * were never rewritten to match, so three of the flow's states rendered
+          * NOTHING. `awaiting_other_permits` is the longest of them: the whole
+          * period while the offices work. An applicant checking on their filing
+          * during the stage that takes the most days saw a page with no status
+          * on it.
+          *
+          * The inspection card is folded into Awaiting Other Permits rather than
+          * deleted. Inspection did not go away — it moved onto each permit's own
+          * `ClearanceStatus`, so a scheduled visit is still worth surfacing here
+          * when there is one, it just no longer has an application status of its
+          * own to hang off.
+          *
+          * Neither is an error, so neither takes #bd0000 (DESIGN.md, Red Means
+          * Stop) — yellow for work in progress, orange for a decision pending,
+          * matching the cards that survived.
+          */}
+        {status === 'awaiting_other_permits' && (
           <StatusCard tone="yellow">
             <div className="flex items-center gap-5 py-2 text-ink">
               <MagnifierCheckIcon />
-              <span className="text-4xl font-medium">For Inspection</span>
+              <span className="text-4xl font-medium">Awaiting Other Permits</span>
             </div>
+            <p className="mt-3 text-base text-ink-secondary">
+              Each office works through its own clearance separately, so they will not all
+              finish at the same time.
+            </p>
             {inspection?.scheduled_at && (
               <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
                 <CalendarIcon size={18} />
                 Scheduled Date: {formatDateTime(inspection.scheduled_at)}
               </p>
             )}
+          </StatusCard>
+        )}
+
+        {status === 'for_final_approval' && (
+          <StatusCard tone="orange">
+            <div className="flex items-center gap-5 py-2 text-ink">
+              <HourglassIcon />
+              <span className="text-4xl font-medium">For Final Approval</span>
+            </div>
+            <p className="mt-3 text-base text-ink-secondary">
+              Every office has signed off. BPLO is making the final decision on your Business
+              Permit.
+            </p>
           </StatusCard>
         )}
 
@@ -670,10 +709,19 @@ export function ApplicationDetailPage() {
         {status !== 'draft' && (
           <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
+            {/*
+              Two corrections. They open on PAYMENT, not on submission —
+              `ClearanceService::isUnlocked` is `status->isPaid()`, and payment
+              is now itself two steps away from submitting, so "once this
+              application is submitted" would send an applicant to a locked
+              screen with no idea what they were missing. And nothing here adds
+              to a balance any more: the Tax Order of Payment prices all five up
+              front.
+            */}
             <p className="mt-1 text-sm text-ink-secondary">
-              These open once this application is submitted. Each goes to its own office, and
-              each one you apply for adds its fee to your balance — your permit is released when
-              that balance reaches zero.
+              These open once BPLO approves this application and you have paid. Each goes to its
+              own office, and your payment covers all five — your Business Permit is released once
+              every one of them is approved.
             </p>
             <Link
               to={`/applications/${app.id}/clearances`}

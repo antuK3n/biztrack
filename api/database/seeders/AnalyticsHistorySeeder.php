@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
@@ -12,6 +13,7 @@ use App\Enums\PaymentStatus;
 use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationPermitType;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\BusinessAddress;
@@ -195,16 +197,17 @@ class AnalyticsHistorySeeder extends Seeder
      */
     private const OFFICE_TURNAROUND_DAYS = [
         'BPLO' => 2.0, 'CHO' => 2.5, 'BFP' => 3.0, 'CPDO' => 2.2,
-        // The three offices that had almost no seeded history at all — see
-        // CLEARANCE_ATTACH_RATES below. Targets are their own rather than
+        // The offices that had almost no seeded history at all — see
+        // CLEARANCE_JOURNEY below. Targets are their own rather than
         // copies: OBO signs off a certificate of occupancy against a building
-        // record, which is the slowest desk read of the seven; CENRO checks an
-        // environmental questionnaire against the declared line; and a market
-        // clearance is a stall lookup, which is the quickest thing any of these
-        // offices does. Nothing here is measured from the live register —
-        // there was no history to measure — so they are ordered by how much
-        // paper each decision actually involves.
-        'OBO' => 2.8, 'CENRO' => 2.4, 'CMO-MARKET' => 1.8,
+        // record, which is the slowest desk read of the six; CENRO checks an
+        // environmental questionnaire against the declared line. Nothing here is
+        // measured from the live register — there was no history to measure — so
+        // they are ordered by how much paper each decision actually involves.
+        //
+        // CMO-MARKET was a third entry at 1.8 and went with the Market Clearance
+        // on 6 September 2026.
+        'OBO' => 2.8, 'CENRO' => 2.4,
     ];
 
     /** Shape of the lognormal review duration (generate.R's sdlog). */
@@ -226,74 +229,81 @@ class AnalyticsHistorySeeder extends Seeder
         // active officers per department, so these are not decoration: an office
         // carrying a hundred-odd reviews a year with nobody on its roll would
         // make that screen incoherent in the other direction.
-        'OBO' => 1, 'CENRO' => 1, 'CMO-MARKET' => 1,
+        'OBO' => 1, 'CENRO' => 1,
     ];
 
     /**
-     * How often each supporting clearance is asked for, as [new, renewal].
+     * The order an applicant works through the five office forms after paying,
+     * and how long each one waits behind the one before it, in days.
      *
-     * WHY THIS EXISTS AT ALL. Permit Processing Time Monitoring charted four of
-     * the seven offices. Over the trailing 24 weeks the live register held BPLO
-     * 273 completed reviews, CHO 215, BFP 209, CPDO 58 — and then OBO 3, CENRO
-     * 4, CMO-MARKET 4. `Spc::MIN_COMPLETIONS_PER_WEEK` is 3, so a week needs
-     * three finished reviews before it can be averaged at all; those three
-     * offices could not produce a single chartable week and were demoted to the
-     * payload's `thin` list. The client: "fill it asw".
+     * WHY THIS REPLACED A TABLE OF ATTACH RATES. Until 6 September 2026 this was
+     * `CLEARANCE_ATTACH_RATES` — a per-clearance probability that the filing
+     * asked for it at all, tuned so OBO and CENRO cleared
+     * `Spc::MIN_COMPLETIONS_PER_WEEK` without pretending to BPLO's volume. That
+     * knob no longer exists to turn. `PermitType::REQUIRED_CLEARANCE_CODES` now
+     * holds all five and `WorkflowService::attachRequiredPermitTypes()` puts
+     * every one of them on every filing at submission, so nothing this seeder
+     * chooses can make a filing need four clearances instead of five. Rolling
+     * for them anyway would have produced a set that the workflow immediately
+     * overwrote — the same silent no-op that made this file need rewriting.
      *
-     * It is the same root cause as two other things that broke today, and worth
-     * naming as one fact rather than three coincidences: OBO, CENRO, CPDO and
-     * the Market Office had no `requires_inspection` on the permits they issue,
-     * no `inspection.manage` on the roles that staff them, and next to no seeded
-     * history behind them. They were second-class in the reference data, in the
-     * permission matrix and in the demo register at once, because all three were
-     * written from the three offices the manuscript names (BPLO / CHO / BFP)
-     * plus zoning. This is the third of the three.
+     * So the difference between a busy office and a quiet one is no longer WHAT
+     * is asked for. It is HOW FAR ALONG the applicant is, which is the honest
+     * reading of the flow the LEAD specified: payment routes nobody, and an
+     * office's queue item — and its measured service clock — starts the moment
+     * the applicant opens that office's form (see `startClearance()`). A filing
+     * that paid last Tuesday is in CHO's and BFP's queues and in nobody else's,
+     * not because it does not need a locational clearance but because its owner
+     * has not got round to it yet.
      *
-     * WHY THESE NUMBERS. The trailing 52 weeks carry roughly 11 filings a week.
-     * The rates below are chosen to put each of the three comfortably clear of
-     * the minimum of 3 in most weeks while keeping them visibly the minor
-     * offices they are — the chart should show BPLO/CHO/BFP as the busy desks
-     * and these as the quiet ones, because that is true. Flat-rating them to
-     * BPLO's volume would chart them and lie.
+     * WHY THIS ORDER AND THESE GAPS. Sanitary and fire are the two the applicant
+     * already knows: annual, familiar, nothing to fetch, so they are opened
+     * within a day or two of paying. The other three each need a document from
+     * somewhere else first — a lot description for the locational clearance, the
+     * building record for the certificate of occupancy, an environmental
+     * questionnaire for the CEC — and that errand is what puts days between
+     * them. The whole journey averages under three weeks, which is why filings
+     * from the last few weeks of the window sit part-way through it and the
+     * later offices carry visibly fewer completed reviews than the earlier ones.
      *
-     * The split by application type is the real-world reading, not a knob:
+     * That gap is the fixture's whole claim about office volume, so it is not a
+     * tuning dial: shortening these gaps until every office matches BPLO would
+     * chart all six and lie about all six.
      *
-     *  - OCCUPANCY (OBO) is about the premises. A new business fitting out a
-     *    unit needs a certificate of occupancy; a renewal in the same unit
-     *    mostly does not, so the renewal rate is a fraction of the new one.
-     *  - CEC (CENRO) is an annual environmental compliance certificate, so it
-     *    recurs on renewal nearly as often as it appears on a new filing.
-     *  - MARKET is a stall clearance and applies to market-based businesses
-     *    only, which is why it is the lowest of the three on both counts. It is
-     *    still seeded high enough to chart, which is a deliberate trade: a
-     *    truthful market-stall share of a general business register would leave
-     *    the office un-chartable again and back in the footnote.
-     *
-     * Amendments carry none of these. An amendment changes a detail on a permit
-     * already issued and is routed to BPLO alone, which is the behaviour the
-     * existing `$codes` table already had.
-     *
-     * ZONING is in this table too, and only for renewals. It was never thin
-     * enough to be dropped from the chart — 58 completed reviews against OBO's
-     * 3 — but it was the only one of the four minor offices whose clearance is
-     * asked for on new filings alone, and once the other three were seeded
-     * properly it became the sparse office in their place: around ten chartable
-     * weeks in twenty-four, against twenty-plus for the rest. Moving the
-     * footnote from three offices to one is not a fix. A locational clearance is
-     * re-validated when a business renews at a site the plan may have been
-     * re-zoned around, so a renewal share is the honest way to lift it. The new
-     * rate stays at 0.0 because the `$codes` table above already decides ZONING
-     * for new filings (highly-technical always, 35% otherwise) and a second roll
-     * would double-count it.
+     * It does not run the other way either. The step in front of ZONING is what
+     * separates the busy three from the quiet three; the two after it are kept
+     * shorter than that one on purpose, because a long tail costs the LAST
+     * office its history on the far side of the anomaly window — CENRO's
+     * before-window fell to 18 completed reviews against a floor of 15 when
+     * these were a week each, which is a fixture one bad anchor date away from
+     * measuring nothing.
      *
      * @var array<string, array{float, float}>
      */
-    private const CLEARANCE_ATTACH_RATES = [
-        'OCCUPANCY' => [0.62, 0.30],
-        'CEC' => [0.52, 0.40],
-        'MARKET' => [0.44, 0.34],
-        'ZONING' => [0.0, 0.34],
+    private const CLEARANCE_JOURNEY = [
+        'SANITARY' => [0.2, 1.6],
+        'FSIC' => [0.2, 1.6],
+        'ZONING' => [4.0, 12.0],
+        'OCCUPANCY' => [2.0, 7.0],
+        'CEC' => [2.0, 7.0],
     ];
+
+    /**
+     * Which clearance each office decides, for looking up a permit row from the
+     * assignment the office actually acted on. The inverse of
+     * `permit_types.issuing_department_id`, kept here so the seeder does not
+     * have to re-query it once per review.
+     */
+    private const PERMIT_BY_OFFICE = [
+        'CHO' => 'SANITARY',
+        'BFP' => 'FSIC',
+        'CPDO' => 'ZONING',
+        'OBO' => 'OCCUPANCY',
+        'CENRO' => 'CEC',
+    ];
+
+    /** How often a filing hands in a permit it already holds rather than applying. */
+    private const CLEARANCE_UPLOAD_RATE = [0.04, 0.22];
 
     /* ── register attributes the paper reports on ─────────────────────────── */
 
@@ -423,7 +433,6 @@ class AnalyticsHistorySeeder extends Seeder
         // The market visit had no entry because no seeded filing had ever been
         // routed to the Market Office. It has one now, and without this its
         // inspections would be the only ones on the register with a null type.
-        'CMO-MARKET' => 'market',
     ];
 
     /* ── officer activity ─────────────────────────────────────────────────── */
@@ -610,15 +619,15 @@ class AnalyticsHistorySeeder extends Seeder
     private function bootReferenceData(): void
     {
         /*
-         * All seven offices and all seven permit types, where this used to load
-         * four of each.
+         * All six offices and all six permit types, where this used to load four
+         * of each. Six rather than seven since the City Market Office and Market
+         * Clearance were removed on 6 September 2026.
          *
          * The four were the manuscript's three (BPLO / CHO / BFP) plus zoning,
          * and everything downstream inherited that boundary: no filing could be
-         * routed to OBO, CENRO or the Market Office, so none of them could
-         * accumulate the completed reviews Permit Processing Time Monitoring
-         * needs to fit a control chart. See CLEARANCE_ATTACH_RATES for the
-         * volumes and the reasoning behind them.
+         * routed to OBO or CENRO, so neither could accumulate the completed
+         * reviews Permit Processing Time Monitoring needs to fit a control
+         * chart. See CLEARANCE_JOURNEY for the volumes and the reasoning.
          *
          * The counts are asserted rather than assumed because a missing office
          * fails silently and far away: `reviewerFor()` returns null for an
@@ -626,8 +635,8 @@ class AnalyticsHistorySeeder extends Seeder
          * `$app->applicant` — an APPLICANT approving an office's own assignment,
          * which is a plausible-looking history that is quietly wrong.
          */
-        $officeCodes = ['BPLO', 'CHO', 'BFP', 'CPDO', 'OBO', 'CENRO', 'CMO-MARKET'];
-        $permitCodes = ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET'];
+        $officeCodes = ['BPLO', 'CHO', 'BFP', 'CPDO', 'OBO', 'CENRO'];
+        $permitCodes = ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC'];
 
         $this->departments = Department::whereIn('code', $officeCodes)
             ->get()->keyBy('code')->all();
@@ -764,7 +773,6 @@ class AnalyticsHistorySeeder extends Seeder
             'CPDO' => 'zoning_officer',
             'OBO' => 'obo_staff',
             'CENRO' => 'cenro_officer',
-            'CMO-MARKET' => 'market_admin',
         ];
         $names = [
             'BPLO' => [['Perlita', 'Sandoval'], ['Ignacio', 'Bermudez'], ['Sonia', 'Talusan']],
@@ -773,7 +781,6 @@ class AnalyticsHistorySeeder extends Seeder
             'CPDO' => [['Herminia', 'Alcantara']],
             'OBO' => [['Teodoro', 'Mangahas']],
             'CENRO' => [['Rosalinda', 'Buenaventura']],
-            'CMO-MARKET' => [['Efren', 'Salvacion']],
         ];
 
         foreach (self::REVIEWERS as $code => $headcount) {
@@ -974,25 +981,22 @@ class AnalyticsHistorySeeder extends Seeder
         // highly-technical tier is the one that goes the full four-office route.
         $tier = $this->complexityFor($business, $type);
 
-        // Which permits are being asked for. New filings go the full route;
-        // renewals mostly re-validate health and fire too (both certificates
-        // are annual), a minority are a BPLO re-validation only, and amendments
-        // touch the business permit alone.
-        $codes = match (true) {
-            $tier === 'highly_technical' => ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING'],
-            $type === ApplicationType::New => $this->chance(0.35)
-                ? ['BUSINESS', 'SANITARY', 'FSIC', 'ZONING']
-                : ['BUSINESS', 'SANITARY', 'FSIC'],
-            $type === ApplicationType::Renewal => $this->chance(0.72)
-                ? ['BUSINESS', 'SANITARY', 'FSIC']
-                : ['BUSINESS'],
-            default => ['BUSINESS'],
-        };
-        // array_unique because ZONING can be reached from either the table above
-        // (new filings) or the attach rates (renewals), and a duplicate code
-        // would be synced twice into application_permit_types.
-        $codes = array_values(array_unique([...$codes, ...$this->supportingClearancesFor($type)]));
-        $requested = array_map(fn (string $c) => $this->permitTypes[$c], $codes);
+        /*
+         * There is no longer a set of permits to choose here.
+         *
+         * A `match` on tier and application type used to build a `$codes` list —
+         * business + health + fire, plus zoning on the technical filings — and
+         * sync it onto the draft. `submit()` calls `attachRequiredPermitTypes()`
+         * on the way past, which `syncWithoutDetaching`es all five required
+         * clearances onto every filing regardless, so any shorter list this
+         * seeder picked was silently widened a moment later. Writing it was
+         * inventing a distinction the product had stopped making.
+         *
+         * The wizard is the business permit alone (see `submit()`), so the draft
+         * carries nothing and submission attaches the set. Which offices a
+         * filing actually reaches is decided further down, by how far its
+         * applicant gets through CLEARANCE_JOURNEY before the anchor date.
+         */
 
         // The permit this filing replaces. Real column, real link: it is what
         // the Renewal Compliance indicator counts, and what an applicant picks
@@ -1017,7 +1021,6 @@ class AnalyticsHistorySeeder extends Seeder
             'fee_profile' => $this->feeProfile($business, $type),
             'payment_mode' => $this->chance(0.7) ? 'annual' : 'quarterly',
         ]);
-        $app->permitTypes()->sync(collect($requested)->pluck('id'));
         $app->forceFill(['complexity' => $tier])->save();
 
         if ($tier === 'highly_technical') {
@@ -1030,12 +1033,14 @@ class AnalyticsHistorySeeder extends Seeder
             }
         }
 
-        // ── submit → fee assessment → pending payment ──────────────────────
+        // ── submit → BPLO reads the form ───────────────────────────────────
+        // Submission bills nobody. It routes BPLO and BPLO alone, and the filing
+        // sits at `for_approval` until they have read it.
         $this->travelTo($submittedAt);
         $app = $this->workflow->submit($app);
         $this->counts['applications']++;
 
-        // A slice of very recent filings is genuinely still awaiting payment.
+        // A slice of very recent filings is genuinely still on BPLO's desk.
         $ageDays = $this->daysBetween($submittedAt, $this->anchor);
         if ($ageDays < 6 && $this->chance(0.35)) {
             $this->counts['in_flight']++;
@@ -1043,14 +1048,73 @@ class AnalyticsHistorySeeder extends Seeder
             return;
         }
 
-        // ── payment → under review → routed to the owning offices ──────────
-        $paidAt = $submittedAt->copy()->addSeconds((int) $this->uniform(2 * 3600, 26 * 3600));
+        /*
+         * BPLO's first act, and it is a measured review like any other — same
+         * lognormal draw, same 10% chance of a returned/resubmitted loop — so it
+         * goes through planReviews()/runReview() rather than being written by
+         * hand. `approveAssignment()` reads the filing's status and routes a
+         * BPLO approval at `for_approval` to `approveMainForm()`.
+         *
+         * This is the step whose absence made the whole seeder a no-op. The
+         * trunk used to go submit() → Payment → onPaymentCompleted(), which was
+         * correct while submit() landed on `pending_payment`; it now lands on
+         * `for_approval`, and onPaymentCompleted() returns early on anything
+         * else. Nothing was paid, no office but BPLO was ever routed, no permit
+         * was ever issued, and not one line of it raised an error.
+         */
+        $formAssignment = $app->assignments()->with('department')->first();
+        if ($formAssignment === null) {
+            $this->counts['in_flight']++;
+
+            return;
+        }
+        $this->counts['assignments']++;
+
+        $formReview = $this->planReviews(collect([$formAssignment]))[0];
+        if ($formReview['completed_at']->greaterThanOrEqualTo($this->reviewCutoff)) {
+            $this->counts['in_flight']++;
+
+            return;
+        }
+
+        /*
+         * BPLO confirms the processing category as they pick the form up,
+         * because nothing downstream can be approved until somebody has.
+         * `submit()` seeds a tier from Ra11032::tierFor(), but that is our guess
+         * and requireProcessingCategory() refuses to treat a guess as a
+         * decision — it gates `approveMainForm()` as well as `approveOverall()`,
+         * which is why this has to happen here rather than after payment.
+         *
+         * Filings still with BPLO return above this line and stay marked
+         * `automatic`, which is the truthful state for a form nobody has opened.
+         * So the register keeps rows on both sides of the gate rather than
+         * becoming uniformly categorised.
+         *
+         * `$tier` rather than a fresh draw: it is this seeder's stand-in for the
+         * LGU's published classification (see complexityFor()), it agrees with
+         * what submit() computed, and re-affirming it moves no deadline. The
+         * officer is fixed rather than sampled so this adds no draw to the
+         * shared mt_rand stream, which every later number depends on.
+         */
+        $this->travelTo($formAssignment->assigned_at);
+        Auth::setUser($this->reviewers['BPLO'][0]);
+        $this->workflow->classify($app->fresh(), $tier, $this->reviewers['BPLO'][0]);
+        $app->refresh();
+
+        $formApprovedAt = $this->runReview($app, $formReview);
+
+        // ── payment ────────────────────────────────────────────────────────
+        // The Tax Order of Payment is payable from BPLO's approval, not from
+        // submission, so the clock on it starts there.
+        $paidAt = $formApprovedAt->copy()->addSeconds((int) $this->uniform(2 * 3600, 26 * 3600));
         if ($paidAt->greaterThan($this->anchor)) {
-            $paidAt = $this->anchor->copy();
+            $this->counts['in_flight']++;
+
+            return;
         }
         $this->travelTo($paidAt);
 
-        $fee = $app->feeAssessment;
+        $fee = $app->fresh()->feeAssessment;
         $payment = Payment::create([
             'application_id' => $app->id,
             'fee_assessment_id' => $fee->id,
@@ -1061,38 +1125,20 @@ class AnalyticsHistorySeeder extends Seeder
             'paid_at' => $paidAt,
         ]);
         $this->workflow->onPaymentCompleted($payment);
-
-        /*
-         * BPLO confirms the processing category as the filing reaches the
-         * offices, because that is when an office first has the file in front
-         * of it — and because nothing downstream can be approved until somebody
-         * has. `submit()` seeds a tier from Ra11032::tierFor(), but that is our
-         * guess and requireProcessingCategory() refuses to treat a guess as a
-         * decision; a seeded history of approved filings therefore has to
-         * include the moment a person put their name to the classification, or
-         * it is a history of something the product cannot produce.
-         *
-         * Filings that never got past `pending_payment` return above this line
-         * and stay marked `automatic`, which is the truthful state for a filing
-         * no office has opened. So the register keeps rows on both sides of the
-         * gate rather than becoming uniformly categorised.
-         *
-         * `$tier` rather than a fresh draw: it is this seeder's stand-in for the
-         * LGU's published classification (see complexityFor()), it agrees with
-         * what submit() computed, and re-affirming it moves no deadline. The
-         * officer is fixed rather than sampled so this adds no draw to the
-         * shared mt_rand stream, which every later number depends on.
-         */
-        $this->travelTo($paidAt);
-        Auth::setUser($this->reviewers['BPLO'][0]);
-        $this->workflow->classify($app->fresh(), $tier, $this->reviewers['BPLO'][0]);
         $app->refresh();
 
-        $assignments = $app->assignments()->with('department')->get();
+        // ── the other permits, opened one at a time ────────────────────────
+        $assignments = $this->openClearances($app, $owner, $type, $paidAt);
+        if ($assignments->isEmpty()) {
+            // Paid, and the applicant has not started a single office form yet.
+            $this->counts['in_flight']++;
+
+            return;
+        }
         $this->counts['assignments'] += $assignments->count();
 
         // ── the reviews ────────────────────────────────────────────────────
-        $reviews = $this->planReviews($assignments, $paidAt);
+        $reviews = $this->planReviews($assignments);
         $reject = $this->chance($ageDays < 25 ? 0.05 : 0.07);
 
         // A rejection is a decision made while at least one office still has
@@ -1108,6 +1154,7 @@ class AnalyticsHistorySeeder extends Seeder
         $lastCompletedAt = null;
         foreach ($completable as $review) {
             $lastCompletedAt = $this->runReview($app, $review);
+            $this->bookInspection($app, $review['code'], $lastCompletedAt);
         }
         $allReviewsDone = count($completable) === count($reviews) && $reviews !== [];
 
@@ -1133,20 +1180,27 @@ class AnalyticsHistorySeeder extends Seeder
         /*
          * ── inspections ────────────────────────────────────────────────────
          *
-         * Every row here was booked by WorkflowService::scheduleInspections on
-         * the last office sign-off, one per inspecting office, two working days
-         * out. Nothing is added by hand.
+         * Every row here was booked by `bookInspection()` in the review loop
+         * above, one per office, at the moment that office cleared the paperwork
+         * — the office picks the date, and it picks it for its own permit.
          *
-         * There used to be an addZoningInspection() at this point, writing the
-         * CPDO visit itself because `permit_types.ZONING.requires_inspection`
-         * was false and the workflow therefore never scheduled one — the
-         * Inspections panel's third type was structurally empty and this seeder
-         * filled it in for seeded filings only. All six supporting clearances
-         * are inspected now (see ReferenceSeeder), so the workflow books the
-         * zoning visit like any other and that compensation is gone. It could
-         * not be left in place harmlessly either: it consumed a reviewerFor()
-         * draw per zoning filing, and mt_rand is a single seeded stream shared
-         * by the whole run, so a dead call still moves every number after it.
+         * This loop used to read inspections nobody created. An earlier workflow
+         * booked all of them itself on the last office sign-off, so the seeder
+         * only had to read them back; approval no longer schedules anything (see
+         * `approveClearance()`, which says a visit *will be* scheduled, not that
+         * it has been). The loop went on running over an empty result set and
+         * every filing fell through to the in-flight branch below it.
+         *
+         * There used to be an addZoningInspection() at this point too, writing
+         * the CPDO visit itself because `permit_types.ZONING.requires_inspection`
+         * was false and nothing ever scheduled one — the Inspections panel's
+         * third type was structurally empty and this seeder filled it in for
+         * seeded filings only. All five clearances are inspected now (see
+         * ReferenceSeeder), so zoning is booked like any other and that
+         * compensation is gone. It could not be left in place harmlessly either:
+         * it consumed a reviewerFor() draw per zoning filing, and mt_rand is a
+         * single seeded stream shared by the whole run, so a dead call still
+         * moves every number after it.
          */
         $app->refresh();
 
@@ -1268,21 +1322,43 @@ class AnalyticsHistorySeeder extends Seeder
             return;
         }
 
-        // A failed visit stays on the file forever, so recordInspection's
-        // "every inspection passed" test can never come true again and the
-        // workflow will not issue on its own. The re-inspection that cleared it
-        // is the decision, so issuance is asked for explicitly, at that instant,
-        // through the same public method the workflow uses itself.
+        /*
+         * ── BPLO's second act ──────────────────────────────────────────────
+         *
+         * Every passing visit granted and issued its own permit as it happened
+         * (`recordInspection()` → `grantClearance()`), and the fifth of them put
+         * the filing in `for_final_approval`. What is left is the business
+         * permit, which only BPLO issues.
+         *
+         * `approveAndIssue()` is gone with the single-machine workflow, and this
+         * is asked for on every filing rather than only on the ones that failed
+         * a visit. It used to be inside `if ($failed !== [])`, on the reasoning
+         * that a clean filing had already been approved on the last review — no
+         * longer true of anything, and the guard was what turned a seeder that
+         * issued no permits into a seeder that reported issuing no permits was
+         * fine.
+         *
+         * `refreshReadiness()` first, because a filing whose last permit was
+         * granted by a re-inspection may not have been re-evaluated since.
+         */
         $app->refresh();
-        if ($failed !== [] && $app->status === ApplicationStatus::ForInspection) {
-            $this->travelTo($lastVisitAt ?? $paidAt);
+        if (! $app->status?->isTerminal()) {
+            $decidedAt = ($lastVisitAt ?? $paidAt)->copy()->addSeconds((int) $this->uniform(2 * 3600, 30 * 3600));
+            if ($decidedAt->greaterThan($this->anchor)) {
+                $decidedAt = $this->anchor->copy();
+            }
+            $this->travelTo($decidedAt);
             Auth::setUser($this->reviewers['BPLO'][0]);
-            $this->workflow->approveAndIssue($app->fresh());
+            $this->workflow->refreshReadiness($app->fresh());
+            $app->refresh();
+            if ($app->status === ApplicationStatus::ForFinalApproval) {
+                $this->workflow->approveOverall($app->fresh());
+            }
             $app->refresh();
         }
 
-        // No inspection-bearing permit type: the workflow already approved and
-        // issued on the last review. Either way the application is decided.
+        // Anything still short of `approved` is a filing whose last permit is
+        // outstanding — a live register carries those too.
         if ($app->status === ApplicationStatus::Approved) {
             $this->counts['approved']++;
             $this->counts['permits'] += $app->permits()->count();
@@ -1403,41 +1479,84 @@ class AnalyticsHistorySeeder extends Seeder
     }
 
     /**
-     * Which of OBO's, CENRO's and the Market Office's clearances this filing
-     * asks for.
+     * The applicant works through the five office forms after paying.
      *
-     * Three independent rolls rather than one bundled choice, because they are
-     * three independent facts about a business: whether it is fitting out
-     * premises, whether its line has an environmental questionnaire against it,
-     * and whether it trades from a market stall. Bundling them would produce
-     * filings that carry all three or none, and the three offices' weekly
-     * volumes would then move in lockstep — which would show up on the control
-     * charts as three offices with suspiciously identical shapes.
+     * This is what routes the other five offices. Payment does not: it unlocks
+     * the stage and nothing more, and `startClearance()` is the act that puts a
+     * filing in one office's queue and starts that office's service clock. A
+     * seeder that never called it produced a register in which BPLO was the only
+     * office that had ever seen anything.
      *
-     * The rates and the reasoning behind them are on CLEARANCE_ATTACH_RATES.
-     * `chance()` is the same generator the four original offices are driven by,
-     * drawing from the same seeded `mt_srand` stream, so these filings are
-     * built by the existing machinery rather than a second one bolted alongside.
+     * The loop stops at the anchor rather than compressing the remainder into
+     * it. A filing that paid four days ago has genuinely opened two of the five
+     * forms and no more, and that partial state is where the difference between
+     * a busy office and a quiet one comes from (see CLEARANCE_JOURNEY).
      *
-     * @return list<string>
+     * @return Collection<int, ApplicationAssignment> the offices now holding it
      */
-    private function supportingClearancesFor(ApplicationType $type): array
-    {
-        // An amendment changes a detail on a permit already issued; it is BPLO's
-        // alone and does not re-open any office's clearance.
-        if ($type === ApplicationType::Amendment) {
-            return [];
-        }
+    private function openClearances(
+        Application $app,
+        User $owner,
+        ApplicationType $type,
+        Carbon $paidAt,
+    ): Collection {
+        $openedAt = $paidAt->copy();
 
-        $isNew = $type === ApplicationType::New;
-        $codes = [];
-        foreach (self::CLEARANCE_ATTACH_RATES as $code => [$newRate, $renewalRate]) {
-            if ($this->chance($isNew ? $newRate : $renewalRate)) {
-                $codes[] = $code;
+        foreach (self::CLEARANCE_JOURNEY as $code => [$minGap, $maxGap]) {
+            $openedAt = $openedAt->copy()->addSeconds((int) round($this->uniform($minGap, $maxGap) * 86400));
+
+            // A renewal more often hands in a certificate it already holds; a
+            // new registration has nothing to hand in. Drawn either way so the
+            // shared mt_rand stream does not depend on the branch.
+            $upload = $this->chance(self::CLEARANCE_UPLOAD_RATE[$type === ApplicationType::New ? 0 : 1]);
+
+            if ($openedAt->greaterThan($this->anchor)) {
+                break;
             }
+
+            $this->travelTo($openedAt);
+            Auth::setUser($owner);
+            $this->workflow->startClearance(
+                $app->fresh(),
+                $this->permitTypes[$code],
+                $upload ? ApplicationPermitType::MODE_UPLOAD : ApplicationPermitType::MODE_APPLY,
+            );
         }
 
-        return $codes;
+        $app->refresh();
+
+        // BPLO's queue item is already closed by approveMainForm(); what is left
+        // open is one row per office the applicant has reached.
+        return $app->assignments()->with('department')
+            ->whereNull('completed_at')->get();
+    }
+
+    /**
+     * The office books its site visit, two days after clearing the paperwork.
+     *
+     * Approving a clearance no longer schedules anything — `approveClearance()`
+     * says a visit *will be* scheduled, and this is the office doing it. Without
+     * this call the inspection loop in writeFiling() reads an empty set and
+     * every filing stalls at `for_inspection` forever.
+     *
+     * The office's own reviewer is named rather than a sampled one, so booking a
+     * visit costs no draw from the shared mt_rand stream.
+     */
+    private function bookInspection(Application $app, string $officeCode, Carbon $reviewedAt): void
+    {
+        $code = self::PERMIT_BY_OFFICE[$officeCode] ?? null;
+        if ($code === null) {
+            return;
+        }
+
+        $row = $this->workflow->pivotFor($app->fresh(), $code);
+        if ($row === null || $row->status !== ClearanceStatus::ForInspection) {
+            return;
+        }
+
+        $this->travelTo($reviewedAt);
+        Auth::setUser($this->reviewers[$officeCode][0] ?? $this->reviewers['BPLO'][0]);
+        $this->workflow->scheduleClearanceInspection($row, $reviewedAt->copy()->addDays(2));
     }
 
     /**
@@ -1447,14 +1566,22 @@ class AnalyticsHistorySeeder extends Seeder
      * (generate.R's `rlnorm_mean`), and the injected slowdown multiplies CHO's
      * draw inside the anomaly window.
      *
+     * The clock starts at the assignment's OWN `assigned_at`, not at one moment
+     * shared by the whole filing. It used to be passed in as `$paidAt` because
+     * payment routed all the offices at once; they are routed one at a time now,
+     * days apart, and measuring them all from payment would have credited an
+     * office with queue time that ran before it was handed anything — which is
+     * also what decides whether a CHO review falls inside the anomaly window.
+     *
      * @param  Collection<int, ApplicationAssignment>  $assignments
      * @return list<array{assignment: ApplicationAssignment, code: string, completed_at: Carbon, loop: bool}>
      */
-    private function planReviews($assignments, Carbon $assignedAt): array
+    private function planReviews($assignments): array
     {
         $reviews = [];
         foreach ($assignments as $assignment) {
             $code = $assignment->department->code;
+            $assignedAt = $assignment->assigned_at;
             $target = self::OFFICE_TURNAROUND_DAYS[$code] ?? 2.5;
 
             // Queue time before a reviewer picks the file up: same or next
@@ -1535,7 +1662,29 @@ class AnalyticsHistorySeeder extends Seeder
             }
             $this->travelTo($resubmittedAt);
             Auth::setUser($app->applicant);
-            $this->workflow->resubmit($app->fresh());
+            /*
+             * Two machines, two ways back in. `returnAssignment()` already
+             * chose which one was returned — BPLO's returns the main FORM and
+             * the whole application goes `returned`; any other office returns
+             * its own PERMIT and the application does not move at all. So the
+             * way back differs too: `resubmit()` for the form, and re-opening
+             * the office's form for a permit.
+             *
+             * Calling `resubmit()` for both is what this did, and on a filing
+             * sitting at `awaiting_other_permits` it threw an illegal
+             * transition rather than quietly doing the wrong thing — the one
+             * mercy in the half-migrated version.
+             */
+            $permitCode = self::PERMIT_BY_OFFICE[$review['code']] ?? null;
+            if ($permitCode === null) {
+                $this->workflow->resubmit($app->fresh());
+            } else {
+                $this->workflow->startClearance(
+                    $app->fresh(),
+                    $this->permitTypes[$permitCode],
+                    ApplicationPermitType::MODE_APPLY,
+                );
+            }
             $this->counts['returned_loops']++;
 
             // A returned filing is the moment an applicant has a question, so it
