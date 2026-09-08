@@ -2309,12 +2309,35 @@ export interface OfficeForm {
  * outcome, which is why it has a state of its own instead of being a tick on
  * the application.
  *
- * They are decided AFTER the business permit has been submitted and paid for,
- * not before. Each one applied for is re-assessed onto a running balance, and
- * the permit is not released until that balance reaches zero — which is why
- * `ClearanceMeta` below carries money and this is not merely a list of states.
+ * They are decided AFTER BPLO has approved the form and the bill has been
+ * settled, not before. That one bill covers all five — there is no per-clearance
+ * accrual any more — and the business permit is released when every clearance
+ * has been approved, not when a balance reaches zero.
  */
-export type ClearanceState = 'available' | 'applied' | 'submitted' | 'issued' | 'rejected'
+
+/**
+ * The state of one clearance on the stage — `ClearanceStatus`, not a vocabulary
+ * of its own.
+ *
+ * This used to be `'available' | 'applied' | 'submitted' | 'issued' | 'rejected'`,
+ * which was the OLD inference: `state()` guessed a state from what existed
+ * (pivot attached → applied, held copy → submitted, permit row → issued). It now
+ * returns `application_permit_types.status` verbatim, so of those five values
+ * only `available` and `rejected` were ever sent again — and the four statuses
+ * the server DOES send had no name here at all.
+ *
+ * That gap was not academic. `applyNow` gated its POST on `state === 'available'
+ * || state === 'submitted'`, and TypeScript agreed both were reachable, so the
+ * condition was simply false on every required clearance: Apply posted nothing,
+ * no office was routed, and the filing could never be approved. A type that
+ * describes a vocabulary the server stopped speaking cannot catch that.
+ *
+ * `available` is retained by `ClearanceStatus` for the one case that is not a
+ * pivot status: an optional permit with no row at all. There are no optional
+ * permits today, so nothing produces it — but `state()` still can, so the type
+ * still says so.
+ */
+export type ClearanceState = ClearanceStatus
 
 export interface Clearance {
   permit_type: {
