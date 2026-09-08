@@ -774,7 +774,32 @@ export function RequestsPage() {
    */
   const [page, setPage] = useState(1)
   const [list, setList] = useState<OfficerRequest[]>([])
-  const { data, loading, error, reload } = useAsync(() => requests.page({ page }), [page])
+  /*
+   * Both narrowing controls are QUERY PARAMETERS, not a pass over `list`.
+   *
+   * The same reason the count above is stated rather than implied: this screen
+   * holds one page of a longer register. A browser-side filter would search the
+   * fifty rows that happen to be downloaded and report "no Rejected
+   * requirements" to an office that has eleven of them on page two. Both
+   * therefore go to the server and reset the paging, so what is on screen is
+   * always the whole answer to what was asked.
+   */
+  const [status, setStatus] = useState('')
+  const [sort, setSort] = useState<'recent' | 'oldest'>('recent')
+  const { data, loading, error, reload } = useAsync(
+    () => requests.page({ page, sort, ...(status ? { status } : {}) }),
+    [page, sort, status],
+  )
+
+  // A new question starts at the first page. Without this, changing the filter
+  // while reading page three would ask the server for page three of a list that
+  // may only have one, and the reader would be shown an empty screen for a
+  // filter that does match rows.
+  function ask(next: { status?: string; sort?: 'recent' | 'oldest' }) {
+    if (next.status !== undefined) setStatus(next.status)
+    if (next.sort !== undefined) setSort(next.sort)
+    setPage(1)
+  }
 
   // Append rather than replace, so paging in extends the list being read
   // instead of dropping the reader back at the top. De-duplicated by id: a
@@ -794,6 +819,23 @@ export function RequestsPage() {
    * first be opened, so the control is never drawn from a guess.
    */
   const officeStatuses = data?.meta.office_statuses ?? []
+  /*
+   * The filter's options, in the API's own words. `statuses` is the longer
+   * list — every status a row can hold, including the two no office sets by
+   * hand — because a reader narrowing to "For Review" is asking what is on
+   * their desk, which is the most useful question this screen answers.
+   */
+  const statusOptions = [
+    { value: '', label: 'All statuses' },
+    ...(data?.meta.statuses ?? []),
+  ]
+  // The chosen status in the API's words, for the count line and the empty
+  // state; null while "All statuses" is chosen, which those two read as "say
+  // nothing about status" rather than printing the word "All".
+  const statusLabel = status
+    ? (statusOptions.find((o) => o.value === status)?.label ?? status)
+    : null
+  const sortWords = sort === 'oldest' ? 'oldest first' : 'newest first'
   const total = data?.meta.total ?? 0
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
   const firstLoad = loading && list.length === 0
@@ -811,6 +853,20 @@ export function RequestsPage() {
 
   function patch(updated: OfficerRequest) {
     setList((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+
+    /*
+     * A row that stops answering the question being asked has to leave, and the
+     * total has to leave with it. Approving the last item under a "For Review"
+     * filter otherwise returns the office to a list still showing that item,
+     * still counting it, and still saying one is waiting for them.
+     *
+     * Re-asked rather than spliced out locally, because `total` is the server's
+     * count and cannot be corrected from here.
+     */
+    if (status && updated.status !== status) {
+      if (page === 1) reload()
+      else setPage(1)
+    }
   }
 
   if (open) {
@@ -839,7 +895,21 @@ export function RequestsPage() {
                 Request
               </button>
             )}
-            <SortFilter />
+            <SortFilter
+              sort={{
+                value: sort,
+                options: [
+                  { value: 'recent', label: 'Newest first' },
+                  { value: 'oldest', label: 'Oldest first' },
+                ],
+                onChange: (v) => ask({ sort: v as 'recent' | 'oldest' }),
+              }}
+              filter={{
+                value: status,
+                options: statusOptions,
+                onChange: (v) => ask({ status: v }),
+              }}
+            />
           </span>
         }
       >
@@ -851,24 +921,46 @@ export function RequestsPage() {
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : list.length === 0 ? (
-        <EmptyState
-          icon={DownloadIcon}
-          title="No requests yet"
-          description={
-            isOfficer
-              ? 'Requests you send to applicants for missing documents appear here.'
-              : 'When an office needs more from you, their requests appear here.'
-          }
-          action={
-            isOfficer ? (
-              <PillButton onClick={() => setComposing(true)}>New request</PillButton>
-            ) : undefined
-          }
-        />
+        /*
+         * "Nothing here" and "nothing matching" are different answers, and
+         * giving the first for the second is how a reader concludes the
+         * register is empty when it is their own filter that is narrow.
+         */
+        status ? (
+          <EmptyState
+            icon={DownloadIcon}
+            title="Nothing has that status"
+            description={`No requirement is ${statusLabel ?? status} right now. Every other status is still there — this is the filter, not the register.`}
+            action={<PillButton onClick={() => ask({ status: '' })}>Show all statuses</PillButton>}
+          />
+        ) : (
+          <EmptyState
+            icon={DownloadIcon}
+            title="No requests yet"
+            description={
+              isOfficer
+                ? 'Requests you send to applicants for missing documents appear here.'
+                : 'When an office needs more from you, their requests appear here.'
+            }
+            action={
+              isOfficer ? (
+                <PillButton onClick={() => setComposing(true)}>New request</PillButton>
+              ) : undefined
+            }
+          />
+        )
       ) : (
         <>
-          <p className="mb-3 text-sm text-ink-muted">
-            Showing {list.length.toLocaleString()} of {total.toLocaleString()}, newest first.
+          <p className="mb-3 text-sm text-ink-muted" role="status">
+            {/*
+              Both numbers are named (§6.4): how many rows are on the screen,
+              and how many the question has in total. `total` is the filtered
+              total, because the server counted what was asked for — so the
+              sentence has to say what was asked, or "12" reads as the whole
+              register.
+            */}
+            Showing {list.length.toLocaleString()} of {total.toLocaleString()}
+            {statusLabel ? ` ${statusLabel.toLowerCase()}` : ''}, {sortWords}.
           </p>
           {/*
             A table, because the columns ARE the information.

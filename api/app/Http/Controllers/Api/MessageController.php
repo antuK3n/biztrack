@@ -286,12 +286,27 @@ class MessageController extends Controller
     public function threads(Request $request): JsonResponse
     {
         $request->validate([
+            /*
+             * The inbox's Filter, answered in SQL.
+             *
+             * It has to be here rather than in the browser for the reason the
+             * queue's search had to move: this list is PAGED at fifty, so a
+             * narrowing applied to what was downloaded would tell a clerk with
+             * ninety conversations that nothing is unread while the unread ones
+             * sit on page two. The same mistake, one screen over.
+             *
+             *  unread   — somebody else wrote and the reader has not opened it
+             *  awaiting — the reader's own turn was the last: they are waiting
+             *  quiet    — nothing has been said on the filing at all
+             */
+            'narrow' => ['sometimes', 'in:unread,awaiting,quiet'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
         $user = $request->user();
         $isOfficer = $user->hasPermission('application.view_all');
+        $narrow = $request->query('narrow');
 
         /*
          * One query over applications, not two collections merged in PHP.
@@ -389,6 +404,8 @@ class MessageController extends Controller
                 ->orWhere('status', '!=', 'draft'));
         }
 
+        $this->applyNarrow($query, $user, $narrow);
+
         // Newest activity first; a filing nobody has written on yet sorts by
         // when it last changed, which is what the old sort_key did.
         $applications = $query
@@ -408,7 +425,23 @@ class MessageController extends Controller
         $stats = Message::query()
             ->whereIn('thread_id', $threadIds)
             ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
-            ->selectRaw('thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at')
+            /*
+             * `unread_total` rides along in the same aggregate rather than
+             * being a second pass over the table.
+             *
+             * Same definition the nav badge uses in unreadSummary(): a turn
+             * somebody ELSE sent that this reader has not opened. Your own turn
+             * is never unread to you, which is why the sender is excluded here
+             * rather than the count being taken from the thread. Without this
+             * the inbox could say when a conversation last moved but not
+             * whether the reader had seen it, so "Unread" was a filter the list
+             * held no data to answer.
+             */
+            ->selectRaw(
+                'thread_id, COUNT(*) as messages_total, MAX(id) as last_id, MAX(created_at) as last_at, '
+                .'SUM(CASE WHEN messages.read_at IS NULL AND messages.sender_user_id <> ? THEN 1 ELSE 0 END) as unread_total',
+                [$user->id]
+            )
             ->groupBy('thread_id')
             ->get()
             ->keyBy('thread_id');
@@ -437,17 +470,118 @@ class MessageController extends Controller
          * filings, which is a larger change than this one and is not pretended
          * at here.
          */
+        $enquiries = $this->generalRows($user, $isOfficer, $this->perPage($request))
+            ->filter(fn (array $row) => $this->rowMatchesNarrow($row, $narrow))
+            ->values();
+
         if ($applications->currentPage() === 1) {
-            $rows = $this->generalRows($user, $isOfficer, $this->perPage($request))
+            $rows = $enquiries
                 ->merge($rows)
                 ->sortByDesc(fn (array $row) => $row['updated_at'] ?? '')
                 ->values();
         }
 
+        /*
+         * The enquiries count towards the total, or the screen contradicts
+         * itself.
+         *
+         * `pageMeta` counts what the paginator counted, which is FILINGS —
+         * enquiries are merged in afterwards because they have no filing to be
+         * paged by. The Messages page states "Showing N of M", and BPLO's inbox
+         * read "Showing 3 of 2": three rows on screen, a total that had never
+         * heard of one of them. Counted on every page and not only where they
+         * are merged, so the total does not shrink when the reader pages on.
+         */
+        $meta = $this->pageMeta($applications);
+        $meta['total'] += $enquiries->count();
+
         return response()->json([
             'data' => $rows,
-            'meta' => $this->pageMeta($applications),
+            'meta' => $meta,
         ]);
+    }
+
+    /**
+     * Narrow the inbox to what is waiting on somebody.
+     *
+     * Every clause is scoped with scopeMessagesToReader, so an office asking
+     * "what is unread" is asking about ITS OWN conversation and cannot be told
+     * a filing is unread because another office has mail on it. Without that,
+     * the filter would leak the one fact readsThread() exists to hide: that
+     * some other office said something.
+     *
+     * A null or unknown value narrows nothing. The rule list is validated in
+     * threads(), so an unknown value cannot arrive here from the API — this is
+     * the fail-open default for the one caller that passes null.
+     */
+    private function applyNarrow($query, User $user, ?string $narrow): void
+    {
+        if ($narrow === 'unread') {
+            $query->whereExists(fn ($sub) => $sub->selectRaw('1')
+                ->from('messages')
+                ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+                ->whereColumn('message_threads.application_id', 'applications.id')
+                ->whereNull('messages.read_at')
+                ->where('messages.sender_user_id', '!=', $user->id)
+                ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user)));
+
+            return;
+        }
+
+        if ($narrow === 'awaiting') {
+            /*
+             * The NEWEST readable turn is the reader's own.
+             *
+             * Not "the reader has written at all", which is a different and much
+             * larger set — every conversation you have ever taken part in. The
+             * question this answers is "who owes me an answer", so it is the
+             * last word that decides, and the subquery takes exactly one row.
+             */
+            $lastSender = Message::query()
+                ->select('messages.sender_user_id')
+                ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+                ->whereColumn('message_threads.application_id', 'applications.id')
+                ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user))
+                ->orderByDesc('messages.id')
+                ->limit(1);
+
+            $query->where($lastSender, '=', $user->id);
+
+            return;
+        }
+
+        if ($narrow === 'quiet') {
+            // Nothing said, by anybody the reader can hear. An office never
+            // matches this — its inbox lists a filing only once its own
+            // conversation has something in it — which is why the screen offers
+            // the option to applicants only.
+            $query->whereNotExists(fn ($sub) => $sub->selectRaw('1')
+                ->from('messages')
+                ->join('message_threads', 'message_threads.id', '=', 'messages.thread_id')
+                ->whereColumn('message_threads.application_id', 'applications.id')
+                ->tap(fn ($q) => $this->scopeMessagesToReader($q, $user)));
+        }
+    }
+
+    /**
+     * Does this enquiry row answer the same narrowing question?
+     *
+     * Enquiries are merged into page one in PHP rather than being part of the
+     * query above — they have no filing to page by — so the filter has to be
+     * applied to them separately, and from the row itself. The row already
+     * carries every number the predicate needs, so this reads the same facts
+     * the SQL does rather than a second definition of them.
+     *
+     * @param  array<string, mixed>  $row
+     */
+    private function rowMatchesNarrow(array $row, ?string $narrow): bool
+    {
+        return match ($narrow) {
+            'unread' => ($row['unread_count'] ?? 0) > 0,
+            'awaiting' => ($row['last_message']['mine'] ?? false) === true,
+            'quiet' => ($row['messages_count'] ?? 0) === 0,
+            default => true,
+        };
     }
 
     /**
@@ -518,6 +652,15 @@ class MessageController extends Controller
     private function generalRow(?MessageThread $thread, User $user, Department $bplo, bool $isOfficer): array
     {
         $count = $thread ? Message::where('thread_id', $thread->id)->count() : 0;
+        // Counted here rather than reused from the filing query's aggregate:
+        // an enquiry has no application, so it is not in that query at all.
+        // Same rule — somebody else's turn, not yet opened.
+        $unread = $thread
+            ? Message::where('thread_id', $thread->id)
+                ->whereNull('read_at')
+                ->where('sender_user_id', '!=', $user->id)
+                ->count()
+            : 0;
         $last = $thread
             ? Message::with('sender:id,name')->where('thread_id', $thread->id)->latest('id')->first()
             : null;
@@ -556,10 +699,12 @@ class MessageController extends Controller
                 'name' => $office->name,
                 'thread_id' => $thread?->id,
                 'messages_count' => $count,
+                'unread_count' => $unread,
                 'last_message_at' => optional($last?->created_at)->toISOString(),
                 'can_message' => true,
             ]],
             'messages_count' => $count,
+            'unread_count' => $unread,
             'last_message' => $last ? [
                 'body' => $last->body,
                 'sender_name' => $last->sender?->name,
@@ -613,7 +758,10 @@ class MessageController extends Controller
                     'subtitle' => $app->business?->name ?? $app->tracking_id,
                     'is_officer' => false,
                 ]
-                : $this->officeCounterparty($app, $last),
+                // The office of the newest readable turn — taken from the row's
+                // own office list rather than resolved again, so the title and
+                // the picker cannot name two different offices.
+                : $this->officeCounterparty($app, $newest['name'] ?? null),
             /*
              * Which office is answerable for this filing (checklist item 73).
              *
@@ -633,6 +781,11 @@ class MessageController extends Controller
              */
             'offices' => $offices,
             'messages_count' => $count,
+            // Across every conversation on this filing the reader may open —
+            // for an office that is its own single one. Summed from the office
+            // rows so the row total and the per-office numbers can never
+            // disagree.
+            'unread_count' => (int) collect($offices)->sum('unread_count'),
             'last_message' => $last ? [
                 'body' => $last->body,
                 'sender_name' => $last->sender?->name,
@@ -653,7 +806,7 @@ class MessageController extends Controller
      * they are still IN the list, because an office you have never written to
      * is exactly the one you are about to.
      *
-     * @return list<array{department_id:int, code:?string, name:string, thread_id:?int, messages_count:int, last_message_at:?string, can_message:bool}>
+     * @return list<array{department_id:int, code:?string, name:string, thread_id:?int, messages_count:int, unread_count:int, last_message_at:?string, can_message:bool}>
      */
     private function officeRows(
         Application $app,
@@ -675,6 +828,7 @@ class MessageController extends Controller
                     'name' => $d->name,
                     'thread_id' => $thread?->id,
                     'messages_count' => (int) ($stat->messages_total ?? 0),
+                    'unread_count' => (int) ($stat->unread_total ?? 0),
                     'last_message_at' => $stat
                         ? optional($latest->get($thread->id)?->created_at)->toISOString()
                         : null,
@@ -693,29 +847,42 @@ class MessageController extends Controller
         return $rows;
     }
 
-    /** Who the applicant is talking to: the officer on the file, else the office. */
-    private function officeCounterparty(Application $app, ?Message $latest): array
+    /**
+     * Who the applicant is talking to: the OFFICE. Never a person.
+     *
+     * ── This reverses the old rule, on the client's instruction ─────────────
+     *
+     * It used to be the officer who wrote last, falling back to the office when
+     * nobody had. "Sa Messages list, office name lang ang ipakita, while the
+     * specific officer's name will only appear in the actual chat messages once
+     * that officer responds." Two things were wrong with naming the person:
+     *
+     *  - it DRIFTS. The same conversation was called "Elena Bautista" on Monday
+     *    and "Liza Reyes" on Thursday, because the name was whoever replied
+     *    last. An applicant looking for the conversation they had yesterday had
+     *    nothing stable to look for.
+     *  - it promises a correspondent nobody has. An office is answerable for a
+     *    filing, not a person; whoever happens to pick up the next reply is not
+     *    who the applicant wrote to, and naming them invited "why is somebody
+     *    else answering me".
+     *
+     * Nothing is hidden by this: every turn in the transcript still carries the
+     * name of whoever wrote it and the office they answered for — see
+     * MessageResource and the Bubble that renders it. The name appears where it
+     * is a fact about a message rather than a claim about the conversation.
+     *
+     * `$activeOffice` is the office of the newest readable turn, resolved by
+     * the caller from the same office rows the row itself carries, so the title
+     * and the office list can never disagree.
+     */
+    private function officeCounterparty(Application $app, ?string $activeOffice): array
     {
-        if ($latest && $latest->sender && $latest->sender_user_id !== $app->applicant_user_id) {
-            $office = $app->assignments
-                ->firstWhere('officer_user_id', $latest->sender_user_id)?->department?->name;
-
-            return [
-                'name' => $latest->sender->name,
-                'subtitle' => $office ?? $this->leadOffice($app),
-                'is_officer' => true,
-            ];
-        }
-
-        $assigned = $app->assignments->first(fn ($a) => $a->officer !== null);
-
         return [
-            'name' => $assigned?->officer?->name ?? $this->leadOffice($app),
-            // With no named officer yet the office is the name, so the second
-            // line says which of the applicant's filings this is about.
-            'subtitle' => $assigned?->officer
-                ? ($assigned->department?->name ?? $app->business?->name)
-                : ($app->business?->name ?? $app->tracking_id),
+            'name' => $activeOffice ?? $this->leadOffice($app),
+            // Which of the applicant's filings this is about. The office is
+            // already the name above, so repeating it here would print one fact
+            // twice, two lines apart, looking like two.
+            'subtitle' => $app->business?->name ?? $app->tracking_id,
             'is_officer' => true,
         ];
     }
