@@ -396,6 +396,25 @@ function ApplicationRow({
 }) {
   const [open, setOpen] = useState(false)
   const pending = app.status === 'pending_payment'
+  /*
+   * Unpaid is more than one status, and treating it as one told applicants
+   * their filing was paid when it was not.
+   *
+   * The green "Paid" block was the else of `pending`, so EVERY status but
+   * `pending_payment` earned it — including `draft`, `for_approval` and
+   * `returned`, none of which have been billed yet. A form BPLO had not even
+   * opened reported itself Paid, in green, on the applicant's own tracking
+   * page. Under the previous flow payment came first and the else was nearly
+   * always true; BPLO now reads the form before the bill exists, so the three
+   * statuses in front of payment are ordinary rather than rare.
+   *
+   * `QueuePage` already learned this and keeps `UNPAID_STATUSES`; this is the
+   * same list on the applicant's side. If a status is added in front of
+   * payment, it belongs in both — which is an argument for one shared list,
+   * noted rather than done here because the officer copy is exported from a
+   * page component and moving it is not this fix.
+   */
+  const unpaid = ['draft', 'for_approval', 'returned', 'pending_payment'].includes(app.status)
   const rejected = app.status === 'rejected'
   const payBlockCls =
     'flex w-28 shrink-0 items-center justify-center self-stretch px-3 text-center text-base font-semibold leading-tight text-white'
@@ -497,10 +516,18 @@ function ApplicationRow({
           <Triangle open={open} />
           <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
         </button>
+        {/*
+          * Three states, not two. Only `pending_payment` has a bill waiting, so
+          * only it gets the link; the statuses in front of payment say plainly
+          * that nothing is due yet; and Paid is reserved for a filing that
+          * really has been.
+          */}
         {pending ? (
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
             Pay Online
           </Link>
+        ) : unpaid ? (
+          <span className={`${payBlockCls} bg-ink-muted`}>Not yet billed</span>
         ) : (
           <span className={`${payBlockCls} bg-s-green`}>Paid</span>
         )}
