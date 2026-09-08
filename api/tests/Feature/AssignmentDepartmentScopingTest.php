@@ -60,6 +60,19 @@ function scopedAssignmentFiling(string $name): int
     bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    /*
+     * And the applicant opens SANITARY, which is what reaches CHO.
+     *
+     * Paying no longer routes anybody but BPLO. Under
+     * docs/application-flow-2026-09.md the clearance stage opens on payment and
+     * each office is handed the filing when the owner applies for that office's
+     * permit, so without this line CHO has no assignment and every case below
+     * is arguing about a row that does not exist.
+     */
+    test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/SANITARY/apply")
+        ->assertSuccessful();
+
     return $appId;
 }
 

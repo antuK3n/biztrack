@@ -19,10 +19,19 @@ use Illuminate\Support\Facades\Storage;
  * question the rest of the application does.
  */
 
-/** One requirement on RxCare's under-review filing (routed to BPLO, CHO, BFP). */
+/**
+ * One requirement on RxCare's paid, in-flight filing (routed to BPLO, CHO, BFP).
+ *
+ * `under_review` is not an application status any more — the work it described
+ * belongs to one permit and lives on `application_permit_types.status`
+ * (docs/application-flow-2026-09.md). The seeded RxCare filing is at
+ * `awaiting_other_permits`, which is the same stage of the same story: paid,
+ * with its offices working. Nothing about the document boundary under test
+ * depends on which name that stage has.
+ */
 function scopedDocument(): array
 {
-    $app = Application::where('status', 'under_review')
+    $app = Application::where('status', 'awaiting_other_permits')
         ->whereHas('business', fn ($b) => $b->where('name', 'RxCare Pharmacy'))
         ->firstOrFail();
 
