@@ -140,16 +140,27 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
         ->assertCreated()
         ->json('data.id');
 
+    /*
+     * Submitting still raises the bill; it no longer asks for the money.
+     *
+     * The subject here is that a free-text line of business is priced at all —
+     * the revenue-code catch-all — and that has not changed. What changed is the
+     * status the filing lands on: BPLO reads the form before the applicant is
+     * asked to pay (docs/application-flow-2026-09.md), so submit ends at
+     * `for_approval` and `pending_payment` is where BPLO's approval puts it. The
+     * assessment below is written at submission either way, which is what lets
+     * this case assert the fee without paying it.
+     */
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/submit")
         ->assertOk()
-        ->assertJsonPath('data.status', 'pending_payment');
+        ->assertJsonPath('data.status', 'for_approval');
 
     $fee = FeeAssessment::where('application_id', $appId)->first();
     expect((float) $fee->total_amount)->toBeGreaterThan(0.0);
 });
 
-it('routes the zoning clearance to the City Planning and Development Office', function () {
+it('routes the zoning clearance to the City Planning and Development Office when the applicant opens it', function () {
     $owner = authAs('owner@biztrack.local');
     $businessId = $this->withHeaders($owner)
         ->postJson('/api/v1/businesses', businessPayload(['name' => 'Zoning Test Co']))
@@ -171,6 +182,20 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
     // BPLO accepts the main form first; the bill does not exist before that.
     bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
+    /*
+     * Paying opens the clearance stage; opening ZONING is what reaches CPDO.
+     *
+     * Routing moved off payment and onto the applicant's own act
+     * (`WorkflowService::startClearance`, docs/application-flow-2026-09.md), one
+     * office at a time, so that `assigned_at` measures CPDO's service time and
+     * not the days the owner spent on the other four forms. The rule this case
+     * exists for is unchanged and is the last line: ZONING belongs to CPDO and
+     * to no other office.
+     */
+    $this->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
+        ->assertSuccessful();
 
     $deptCodes = ApplicationAssignment::where('application_id', $appId)
         ->pluck('department_id')

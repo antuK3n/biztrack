@@ -186,11 +186,15 @@ it('will not let one applicant delete another applicant’s document', function 
     Storage::disk('local')->assertExists(ApplicationDocument::find($doc['id'])->stored_path);
 });
 
-it('will not remove a document from an application already under review', function () {
+it('will not remove a document from an application already filed', function () {
     Storage::fake('local');
     $draft = newDraft();
     $doc = uploadDoc($draft['id']);
-    Application::whereKey($draft['id'])->update(['status' => ApplicationStatus::UnderReview]);
+    // `for_approval` is the first status past Draft: the form is filed and BPLO
+    // is reading it. It replaced `under_review`, which this named and which the
+    // 6 September flow retired; what the gate turns on is unchanged — the filing
+    // has left the applicant's hands.
+    Application::whereKey($draft['id'])->update(['status' => ApplicationStatus::ForApproval]);
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->deleteJson("/api/v1/applications/{$draft['id']}/documents/{$doc['id']}")

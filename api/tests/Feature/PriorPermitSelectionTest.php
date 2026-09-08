@@ -207,7 +207,9 @@ it('will not change the prior permit once the application has been submitted', f
     ['application_id' => $appId, 'business' => $business] = renewalDraft();
     $permitId = $business->permits()->firstOrFail()->id;
 
-    Application::findOrFail($appId)->update(['status' => 'submitted']);
+    // `for_approval` is where submission lands now — BPLO is reading the form.
+    // The old value here was `submitted`, a status the flow no longer has.
+    Application::findOrFail($appId)->update(['status' => 'for_approval']);
 
     $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
         'prior_permit_id' => $permitId,
