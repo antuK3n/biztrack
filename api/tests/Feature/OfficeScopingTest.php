@@ -3,6 +3,7 @@
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
+use App\Models\ApplicationPermitType;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
@@ -26,8 +27,18 @@ use Illuminate\Http\UploadedFile;
  */
 
 /**
- * File and pay for an application carrying exactly these permit types, so
- * WorkflowService routes it to exactly those issuing departments.
+ * File, pay for, and open every other permit on an application carrying exactly
+ * these permit types, so it ends up routed to exactly those issuing departments.
+ *
+ * The last step is new and it is not a convenience.
+ * `docs/application-flow-2026-09.md` moved routing off payment and onto the
+ * applicant's own act: the clearances open when the filing is paid, and an
+ * office is handed the filing only once the owner applies for — or hands in a
+ * copy of — that office's permit (`WorkflowService::startClearance`, which
+ * routes one office at a time so `assigned_at` is an honest start for that
+ * office's measured service time). Paying alone now leaves BPLO as the only
+ * assignment, which is why every case in this file that reads as an office
+ * other than BPLO went 403 until this fixture performed the applicant's step.
  *
  * @param  list<string>  $permitCodes
  * @return array{id:int, business_id:int}
@@ -74,6 +85,21 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    /*
+     * The applicant opens each other permit, which is what routes its office.
+     *
+     * BUSINESS is skipped: it is the main form, it is BPLO's, and it was routed
+     * at submission. Driven at the service for the same reason the approval
+     * above is — it keeps the fixture short and does not disturb the acting
+     * user — and with MODE_APPLY because "filled the office's form" is the
+     * ordinary path; the uploaded-copy half is HeldPermitSubmissionTest's.
+     */
+    $app = $app->fresh();
+    $workflow = app(WorkflowService::class);
+    foreach (PermitType::whereIn('code', $permitCodes)->where('code', '!=', 'BUSINESS')->get() as $type) {
+        $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    }
+
     return ['id' => $appId, 'business_id' => $businessId];
 }
 
@@ -85,7 +111,10 @@ function listedApplicationIds(string $email): array
     )->pluck('id')->all();
 }
 
-it('routes a filing only to the offices that own its permit types', function () {
+it('routes a filing only to the offices whose permits the applicant opened', function () {
+    // BPLO from submission, CHO from the applicant opening SANITARY. The other
+    // four offices issue permits this filing never asked for, so nothing reaches
+    // them — which is the precondition every case below depends on.
     $app = fileRoutedApplication('Scoping Sanity Check', ['BUSINESS', 'SANITARY']);
 
     expect(
@@ -762,27 +791,30 @@ it('drops a filing out of an office’s approval queue once that office has appr
     classifyAsOfficer(Application::findOrFail($app['id']));
 
     /*
-     * `for_inspection` is in this filter now, and it has to be.
+     * The filing's own status no longer moves while the offices work, and that
+     * makes this filter shorter rather than longer.
      *
      * What this case is about has not moved: the queue must partition on the
      * OFFICE's own assignment status, not on the filing's, because filtering on
      * the filing alone is what made the office that had just approved be shown
-     * its own finished work again (item 111). What HAS moved is the filing's
-     * status while that is true. WorkflowService::afterReviewProgress used to
-     * hold every filing at `under_review` until the last office signed off; it
-     * books each office's site visit the moment that office approves now, and
-     * the filing reads `for_inspection` from the first booking onward — so CHO
-     * approving here moves it while BFP still has a pending review.
+     * its own finished work again (item 111). What HAS moved is where the
+     * office's progress is recorded. `submitted`, `under_review` and
+     * `for_inspection` are not application statuses any more — they described
+     * one permit's work, and it lives on `application_permit_types.status` now
+     * (docs/application-flow-2026-09.md). A paid filing sits at
+     * `awaiting_other_permits` from the moment the bill clears until every
+     * required permit is approved, whatever its offices are doing inside it.
      *
-     * Leaving `for_inspection` out would have quietly turned the last assertion
-     * into a tautology: BFP's row would have vanished from this list because of
-     * the filing's status, not because of BFP's assignment, and the test would
-     * be measuring the bug it was written to prevent.
+     * `awaiting_other_permits` therefore has to be in this list, for exactly the
+     * reason `for_inspection` had to be before it: leave it out and BFP's row
+     * vanishes because of the FILING's status rather than because of BFP's
+     * assignment, and the last assertion becomes a tautology measuring the bug
+     * it was written to prevent.
      */
     $openIds = fn (string $email) => collect(
         test()->withHeaders(authAs($email))
             ->getJson('/api/v1/assignments?status=pending,in_progress,returned'
-                .'&application_status=submitted,pending_payment,under_review,returned,for_inspection&per_page=200')
+                .'&application_status=for_approval,pending_payment,awaiting_other_permits,returned,for_final_approval&per_page=200')
             ->assertOk()->json('data')
     )->pluck('application.id');
 
@@ -797,14 +829,21 @@ it('drops a filing out of an office’s approval queue once that office has appr
         ->assertOk();
 
     /*
-     * SANITARY is inspected, so CHO's approval books CHO's visit and the filing
-     * moves — parallel, per office, rather than everyone waiting for the
-     * slowest. The filing is genuinely not `under_review` any more: a site
-     * visit is outstanding on it. What remains true, and is the whole point
-     * here, is the line below it — the office that approved is done, and the
-     * office that has not is not.
+     * SANITARY is inspected, so CHO's approval moves CHO's PERMIT to
+     * `for_inspection` — parallel, per office, rather than everyone waiting for
+     * the slowest — and leaves the FILING exactly where it was. That is the
+     * whole reason the second machine exists: one column cannot say "CHO is
+     * inspecting while BFP is still reading", so it no longer tries.
+     *
+     * Asserted because it is the precondition of the two lines below: both
+     * offices' rows are still inside the same application status, so what
+     * separates them can only be their own assignments.
      */
-    expect(Application::find($app['id'])->status->value)->toBe('for_inspection');
+    expect(Application::find($app['id'])->status->value)->toBe('awaiting_other_permits');
+    expect(
+        Application::find($app['id'])->permitTypes()
+            ->where('code', 'SANITARY')->first()->pivot->status->value
+    )->toBe('for_inspection');
     expect($openIds('sanitary@biztrack.local'))->not->toContain($app['id']);
     expect($openIds('fire@biztrack.local'))->toContain($app['id']);
 });

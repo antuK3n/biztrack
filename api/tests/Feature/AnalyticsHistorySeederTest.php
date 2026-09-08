@@ -292,15 +292,19 @@ it('spreads history across the barangays and offices the register actually has',
     expect($barangays)->toBeGreaterThan(8);
 
     /*
-     * All seven offices, not the three the manuscript names.
+     * All six offices, not the three the manuscript names.
      *
      * This asserted `toContain('BPLO', 'CHO', 'BFP')` and passed for a long time
-     * while OBO, CENRO and the Market Office were getting three or four routed
-     * filings each in total — the seeder loaded four departments and four permit
-     * types, so nothing could ever be routed to the other three. Permit
-     * Processing Time Monitoring needs `Spc::MIN_COMPLETIONS_PER_WEEK` finished
-     * reviews in a week before it can average it, so those offices produced no
-     * chartable week at all and the screen showed four of seven.
+     * while OBO and CENRO were getting three or four routed filings each in
+     * total — the seeder loaded four departments and four permit types, so
+     * nothing could ever be routed to the rest. Permit Processing Time
+     * Monitoring needs `Spc::MIN_COMPLETIONS_PER_WEEK` finished reviews in a
+     * week before it can average it, so those offices produced no chartable week
+     * at all and the screen showed four offices of the several that exist.
+     *
+     * Six rather than the seven this once read: the City Market Office was
+     * removed with Market Clearance on 6 September 2026, leaving BPLO and the
+     * five inspecting offices.
      *
      * `toBe` on the exact sorted list rather than `toContain`, so that dropping
      * an office fails here instead of silently reappearing as a footnote on the
@@ -320,12 +324,12 @@ it('spreads history across the barangays and offices the register actually has',
  * Every office can be charted, and the quiet ones are still visibly the quiet
  * ones.
  *
- * The client asked for the three empty offices to be filled ("fill it asw"),
- * and the failure mode of doing that carelessly is a register where all seven
- * offices carry identical volume — which charts, and lies. So both halves are
- * pinned: each office clears the minimum in enough weeks to draw a control
- * chart, AND the three busy offices are still meaningfully busier than the four
- * minor ones.
+ * The client asked for the empty offices to be filled ("fill it asw"), and the
+ * failure mode of doing that carelessly is a register where all six offices
+ * carry identical volume — which charts, and lies. So both halves are pinned:
+ * each office clears the minimum in enough weeks to draw a control chart, AND
+ * the three busy offices are still meaningfully busier than the three minor
+ * ones.
  *
  * Measured the way Spc measures it: bucketed by `completed_at` into ISO weeks,
  * counting only weeks that reach MIN_COMPLETIONS_PER_WEEK.
@@ -377,11 +381,11 @@ it('gives every office enough completed reviews per week to be charted', functio
 
     /*
      * The shape, not just the presence. An occupancy permit, an environmental
-     * certificate, a locational clearance and a market clearance are genuinely
-     * not on every filing the way the health and fire certificates are, so the
-     * busiest of the four minor offices must still sit below the quietest of
-     * the three busy ones. If this ever fails, the attach rates have been
-     * levelled up until the chart stopped telling the truth about the register.
+     * certificate and a locational clearance are genuinely not asked for as
+     * often as the health and fire certificates, so the busiest of the three
+     * minor offices must still sit below the quietest of the three busy ones. If
+     * this ever fails, the attach rates have been levelled up until the chart
+     * stopped telling the truth about the register.
      */
     $quietestBusy = min(array_map(fn ($c) => $stats[$c]['completed'], $busy));
     $busiestMinor = max(array_map(fn ($c) => $stats[$c]['completed'], $minor));

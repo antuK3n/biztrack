@@ -12,19 +12,25 @@ use App\Models\PermitType;
  * applications (in the admin side)". Eight filings sat in `pending_payment` and
  * the Application Verification screen had nowhere to put any of them.
  *
- * The cause is structural, not a missing status. Both existing tabs read
- * `/assignments`, and an unpaid filing has no assignment: WorkflowService::submit
- * takes a draft through `submitted` to `pending_payment`, and the only caller of
- * routeToDepartments is `onPaymentCompleted`. Routing is deliberately withheld
- * until the money lands, because `assigned_at` starts the service-time clock
- * ProcessingTimeAnalytics and StaffingSimulation measure and it must not start
- * inside somebody's unfinished draft. So the queue's status filter already named
- * `pending_payment` and could never have matched a row.
+ * The cause was structural, and the structure changed on 6 September 2026.
+ * It used to be that an unpaid filing had NO assignment at all: routing happened
+ * on payment, so no filter on the assignment feed could ever have surfaced one.
+ * `submit()` now routes to BPLO immediately, so a filing awaiting payment does
+ * have an assignment — BPLO's, already `completed`, because BPLO approving the
+ * form is what raised the bill.
  *
- * These tests hold both halves of that: the absence on the assignment feed is
- * real and expected, and `/applications` is the feed that can answer for the
- * stage — with an exact server-side total, a server-side search, and the office
- * boundary of ApplicationVisibility still closed.
+ * The conclusion survives the premise, for a better reason. This stage is
+ * waiting on the APPLICANT, not on an office: nothing about it is open in
+ * anybody's queue, so there is no office feed it belongs on. `/applications` is
+ * the feed that can answer for it — with an exact server-side total, a
+ * server-side search, and the office boundary of ApplicationVisibility still
+ * closed.
+ *
+ * The stage is `pending_payment` ALONE. `submitted` used to ride along here and
+ * no longer exists; the status that replaced it, `for_approval`, is a real BPLO
+ * review stage with its own tab and its own open assignment, so folding it in
+ * would put work an office owes into the tab for work the applicant owes.
+ * `QueuePage.tsx` names the same single status, deliberately.
  *
  * WHO CAN ACTUALLY REACH THIS TAB, WHICH IS NO LONGER WHAT IT WAS
  * ---------------------------------------------------------------
@@ -48,7 +54,15 @@ use App\Models\PermitType;
  * rediscovered as a bug report.
  */
 
-/** A freshly filed application, sitting unpaid exactly as the wizard leaves it. */
+/**
+ * A filing sitting on the bill, exactly as BPLO's approval leaves it.
+ *
+ * Two calls now, where the wizard used to reach this in one. Submission lands
+ * on `for_approval`; it is BPLO accepting the form that raises the Tax Order of
+ * Payment and puts the filing here, and `ApplicationStatus::isBillable()`
+ * refuses money before that. Driving only the first half would leave every
+ * assertion below describing BPLO's review tab rather than this one.
+ */
 function unpaidFiling(): Application
 {
     $business = Business::where('name', "Nena's Sari-Sari Store")->firstOrFail();
@@ -67,21 +81,30 @@ function unpaidFiling(): Application
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$draft['id']}/submit")
         ->assertOk()
-        ->assertJsonPath('data.status', ApplicationStatus::PendingPayment->value);
+        ->assertJsonPath('data.status', ApplicationStatus::ForApproval->value);
 
-    return Application::findOrFail($draft['id']);
+    return bploApprovesForm($draft['id']);
 }
 
-it('leaves a submitted-but-unpaid filing with no assignment at all', function () {
+it('leaves a filing awaiting payment out of every office’s open queue', function () {
     $filing = unpaidFiling();
 
+    expect($filing->status)->toBe(ApplicationStatus::PendingPayment);
+
     /*
-     * The premise of everything below. If this ever starts failing because
-     * submit began routing, the Pending Payment tab can go back to the
-     * assignment feed — and if it fails because routing moved but the tab did
-     * not, the tab will be showing a stage the register no longer has.
+     * The premise of everything below, and it is no longer "no assignment at
+     * all". Submission routes BPLO, so there is exactly one — BPLO's — and
+     * `approveMainForm()` completed it on the way in. What is true is that
+     * nothing is OPEN: the ball is with the applicant, and no office is owed
+     * anything until the money lands.
+     *
+     * If this ever starts failing because an assignment is open again, the
+     * Pending Payment tab can go back to the assignment feed — and if it fails
+     * because routing moved but the tab did not, the tab will be showing a stage
+     * the register no longer has.
      */
-    expect($filing->assignments()->count())->toBe(0);
+    expect($filing->assignments()->count())->toBe(1)
+        ->and($filing->assignments()->where('status', 'completed')->count())->toBe(1);
 
     /*
      * The assignment feed is read as BPLO, not as the super admin. It is
@@ -89,23 +112,21 @@ it('leaves a submitted-but-unpaid filing with no assignment at all', function ()
      * entry the client asked to remove, and BPLO is the reader that sees every
      * office's assignments anyway (`application.view_any_office`) — so this
      * still asks the strongest available version of the question: the filing is
-     * absent from the whole queue, not merely from one office's slice.
+     * absent from the whole open queue, not merely from one office's slice.
      *
      * Note the tab itself is unaffected. Pending Payment reads `/applications`,
      * which the super admin keeps.
      */
     $bplo = authAs('bplo@biztrack.local');
 
-    // Not on the assignment feed under its own status, and not under any status:
-    // there is no row to filter, so no filter could have produced one.
-    foreach (['pending_payment', 'submitted,pending_payment', ''] as $filter) {
+    foreach (['pending', 'in_progress', 'returned', 'pending,in_progress,returned'] as $filter) {
         $rows = test()->withHeaders($bplo)
-            ->getJson('/api/v1/assignments?per_page=200&application_status='.$filter)
+            ->getJson('/api/v1/assignments?per_page=200&status='.$filter)
             ->assertOk()
             ->json('data');
 
         $ids = array_column(array_column($rows, 'application'), 'id');
-        expect($ids)->not->toContain($filing->id, "assignment feed surfaced it for '{$filter}'");
+        expect($ids)->not->toContain($filing->id, "open assignment feed surfaced it for '{$filter}'");
     }
 });
 
@@ -116,7 +137,7 @@ it('shows an unpaid filing to the admin queue, with an exact server-side total',
     $admin = authAs('admin@biztrack.local');
 
     $body = test()->withHeaders($admin)
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=200')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=200')
         ->assertOk()
         ->json();
 
@@ -128,23 +149,21 @@ it('shows an unpaid filing to the admin queue, with an exact server-side total',
      * rows, and a total assembled from a page is the failure the two older tabs
      * were built to avoid (AssignmentController::index).
      */
-    $stage = Application::whereIn('status', [
-        ApplicationStatus::Submitted, ApplicationStatus::PendingPayment,
-    ])->count();
+    $stage = Application::where('status', ApplicationStatus::PendingPayment)->count();
 
     expect($body['meta']['total'])->toBe($stage)
         ->and($body['meta']['total'])->toBeGreaterThanOrEqual(1);
 
-    // Every row really is pre-payment: the tab cannot quietly widen into review
-    // work the way a browser-side split would.
+    // Every row really is on the bill: the tab cannot quietly widen into BPLO's
+    // review work the way a browser-side split would.
     foreach ($body['data'] as $row) {
-        expect($row['status'])->toBeIn(['submitted', 'pending_payment']);
+        expect($row['status'])->toBe('pending_payment');
     }
 
     // And a page of one still reports the whole stage, which is the property the
     // "Showing 1 of 9" line on the screen depends on.
     $firstPage = test()->withHeaders($admin)
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=1')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=1')
         ->assertOk()
         ->json('meta');
 
@@ -159,7 +178,7 @@ it('never lets the stage filter include a draft', function () {
     // of them — 37 on the live database. The stage is asked for by name, so a
     // draft can only arrive here if somebody widens the list.
     $rows = test()->withHeaders($admin)
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=200')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=200')
         ->assertOk()
         ->json('data');
 
@@ -179,7 +198,7 @@ it('finds an unpaid filing by business name on the server, not in the page', fun
      * answers over the whole scoped set, so a one-row page still finds it.
      */
     $body = test()->withHeaders($admin)
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=1&q=Sari-Sari')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=1&q=Sari-Sari')
         ->assertOk()
         ->json();
 
@@ -189,7 +208,7 @@ it('finds an unpaid filing by business name on the server, not in the page', fun
     // The term narrows the total as well as the rows — otherwise the count
     // beside a search would describe a different list from the one on screen.
     $unsearched = test()->withHeaders($admin)
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=1')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=1')
         ->assertOk()
         ->json('meta.total');
 
@@ -209,7 +228,7 @@ it('keeps the office boundary closed over a filing no office has been routed', f
      * is the leak items 56 and 111 closed.
      */
     $rows = test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=200')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=200')
         ->assertOk()
         ->json('data');
 
@@ -219,7 +238,7 @@ it('keeps the office boundary closed over a filing no office has been routed', f
     // issues the Tax Order of Payment and is the one office role seeded with
     // `application.view_any_office` (RbacSeeder).
     $bplo = test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/applications?status=submitted,pending_payment&per_page=200')
+        ->getJson('/api/v1/applications?status=pending_payment&per_page=200')
         ->assertOk()
         ->json('data');
 
