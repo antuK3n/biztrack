@@ -26,12 +26,12 @@ import type { Application, ApplicationStatus, Assignment, TimelineEntry } from '
  * typical one. Three ways a real filing departs from the straight line, all
  * handled here rather than papered over:
  *
- *  1. INSPECTION IS OFTEN SKIPPED. WorkflowService::afterReviewProgress sends
- *     the last office approval straight to approveAndIssue() when no chosen
- *     permit type has `requires_inspection`. Drawing a greyed-out For Inspection
- *     step on those filings would promise a stage that will never arrive, so the
- *     step is not drawn at all — the client's words were "for those permits that
- *     actually has inspection".
+ *  1. INSPECTION IS NO LONGER AN APPLICATION STAGE. It used to be, and the rail
+ *     branched on it: drawing a greyed-out For Inspection step on a filing whose
+ *     permit types did not inspect would have promised a stage that never
+ *     arrived. Inspection now belongs to each permit's own `ClearanceStatus`,
+ *     running inside Awaiting Other Permits, so the application rail is the same
+ *     five steps for everyone and the branch has gone with the status.
  *  2. RETURNED IS A LOOP, NOT A STAGE. It goes back to the applicant from For
  *     Approval and comes back into For Approval. As a fifth box in the line it
  *     would read as progress, which is the opposite of what it is, so it is an
@@ -59,46 +59,47 @@ interface RailStep {
 }
 
 /**
- * The sequence, for this filing.
+ * The sequence, and it is now the same five steps for every filing.
  *
- * For Inspection appears only when an inspection is genuinely coming. The
- * permit-type flag is the same one `afterReviewProgress` branches on, so the
- * rail and the state machine cannot disagree about it. The two fallbacks matter
- * for old filings: a permit type's flag can be turned off after a filing has
- * already been routed for inspection, and the filing's own inspections — or its
- * own status — are then the better evidence than today's configuration.
+ * It used to branch on whether an inspection was coming, because For Inspection
+ * was an APPLICATION status and drawing it on a filing that would never reach it
+ * promised a stage that never arrives. That branch is gone with the status: the
+ * flow now approves the form, takes payment, then runs each required permit on
+ * its own `ClearanceStatus` — where `for_inspection` still lives, per permit.
+ * Awaiting Other Permits is the one rail step that covers all of that work, so
+ * whether any given office inspects no longer changes the shape of the line.
+ *
+ * `_app` is kept in the signature rather than dropped because the rail being
+ * uniform is a property of today's flow, not a law. If a stage ever becomes
+ * conditional again this is where it branches, and callers need not change.
  */
-function railFor(app: Application): ApplicationStatus[] {
-  const inspects =
-    app.permit_types.some((pt) => pt.requires_inspection) ||
-    (app.inspections?.length ?? 0) > 0 ||
-    app.status === 'for_inspection'
-
-  return [
-    'pending_payment',
-    'under_review',
-    ...(inspects ? (['for_inspection'] as ApplicationStatus[]) : []),
-    'approved',
-  ]
+function railFor(_app: Application): ApplicationStatus[] {
+  return ['for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'approved']
 }
 
 /**
  * Which rail step the filing is standing on.
  *
- * `draft` and `submitted` collapse onto Pending Payment: submission assesses the
- * fee and moves straight on, so they are moments inside that step rather than
- * stages of their own. `returned` collapses onto For Approval because that is
- * where it will resume. `issued` is the web's own name for an approved filing
- * whose permits are out — the same end of the same rail.
+ * `draft` collapses onto For Approval, which is the first thing that happens to
+ * a filing once it is sent — submission no longer has a status of its own, and
+ * payment is no longer the opening step. `returned` collapses onto For Approval
+ * too, because that is literally where it resumes. `issued` is the web's own
+ * name for an approved filing whose permits are out — the same end of the same
+ * rail.
+ *
+ * The three retired statuses (`submitted`, `under_review`, `for_inspection`) are
+ * absent rather than mapped: the migration rewrote every stored row, so a filing
+ * can no longer arrive here carrying one. An unmapped status returns -1, which
+ * the caller already renders as "no position on this rail".
  */
 function positionOf(status: ApplicationStatus, rail: ApplicationStatus[]): number {
   const target: Partial<Record<ApplicationStatus, ApplicationStatus>> = {
-    draft: 'pending_payment',
-    submitted: 'pending_payment',
+    draft: 'for_approval',
+    for_approval: 'for_approval',
+    returned: 'for_approval',
     pending_payment: 'pending_payment',
-    under_review: 'under_review',
-    returned: 'under_review',
-    for_inspection: 'for_inspection',
+    awaiting_other_permits: 'awaiting_other_permits',
+    for_final_approval: 'for_final_approval',
     approved: 'approved',
     issued: 'approved',
   }
@@ -121,7 +122,7 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
   const ending = [...history].reverse().find((h) => h.to_status === status)
   const from = ending?.from_status ? positionOf(ending.from_status, rail) : -1
 
-  return from >= 0 ? from : rail.indexOf('under_review')
+  return from >= 0 ? from : rail.indexOf('for_approval')
 }
 
 /** The rail as nodes, with the returns and the terminal stop written onto it. */
@@ -154,7 +155,9 @@ function buildSteps(app: Application): { steps: RailStep[]; terminal: Applicatio
     .map((s, i) => ({
       status: s,
       state: isTerminal || i < here ? 'done' : i === here ? 'current' : 'upcoming',
-      note: s === 'under_review' ? returnNote : undefined,
+      // The return loop is annotated on For Approval, because that is where a
+      // returned filing goes back to and comes back into.
+      note: s === 'for_approval' ? returnNote : undefined,
     }))
 
   return { steps, terminal: isTerminal ? status : null }
@@ -369,9 +372,8 @@ export function ApplicationProgress({ app }: { app: Application }) {
   const rail = railFor(app)
   const { steps, terminal } = buildSteps(app)
   const meta = applicationStatusMeta(app.status)
-  const inspects = rail.includes('for_inspection')
   const stoppedStage = terminal
-    ? applicationStatusMeta(rail[stoppedAt(history, terminal, rail)] ?? 'under_review').label
+    ? applicationStatusMeta(rail[stoppedAt(history, terminal, rail)] ?? 'for_approval').label
     : ''
 
   return (
@@ -385,16 +387,19 @@ export function ApplicationProgress({ app }: { app: Application }) {
             Application progress
           </h2>
           <p className="text-xs text-ink-muted">
+            {/*
+              * One sentence now, because the rail no longer branches.
+              *
+              * This used to pick between a four-stage summary and a sentence
+              * explaining that THIS filing skipped inspection — the shape of the
+              * line depended on whether any chosen permit type inspected. It no
+              * longer does: inspection moved onto each permit's own status, and
+              * every filing walks the same five stages. A conditional here would
+              * now be describing a difference that does not exist.
+              */}
             {terminal
               ? `This filing ended during ${stoppedStage}. Nothing further will happen to it.`
-              : inspects
-                ? 'Pending Payment → For Approval → For Inspection → Approved'
-                : /*
-                   * Said out loud rather than left as an absence. An admin who
-                   * knows the four-stage process needs to be told this filing has
-                   * three, or they will read the missing step as a bug.
-                   */
-                  'No permit type on this filing requires an inspection, so it goes from For Approval straight to Approved.'}
+              : 'For Approval → Pending Payment → Awaiting Other Permits → For Final Approval → Approved'}
           </p>
         </div>
         <StatusBadge tone={meta.tone} label={meta.label} icon={meta.icon} />

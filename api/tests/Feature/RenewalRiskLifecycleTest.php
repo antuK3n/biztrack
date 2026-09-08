@@ -107,13 +107,19 @@ it('puts every watchlisted permit in exactly one state, summing to the permits s
     Permit::query()->delete();
 
     // One of each state, deliberately including the two that collide: a lapsed
-    // permit WITH a renewal under review, and a far-off permit WITH one.
+    // permit WITH an open renewal, and a far-off permit WITH one.
+    //
+    // `awaiting_other_permits` and `for_approval` are the two live stages a
+    // filed renewal can be sitting in. They replaced `under_review` and
+    // `submitted`, which this used to name and which the 6 September flow
+    // retired; both are still "filed and undecided", which is the only property
+    // Pending Renewal turns on.
     lifecyclePermit(200);                                              // active
     lifecyclePermit(10);                                               // near expiry
-    lifecycleRenewal(lifecyclePermit(200), ApplicationStatus::UnderReview);  // pending
-    lifecycleRenewal(lifecyclePermit(10), ApplicationStatus::Submitted);     // pending
+    lifecycleRenewal(lifecyclePermit(200), ApplicationStatus::AwaitingOtherPermits); // pending
+    lifecycleRenewal(lifecyclePermit(10), ApplicationStatus::ForApproval);     // pending
     lifecyclePermit(-5);                                               // overdue
-    lifecycleRenewal(lifecyclePermit(-5), ApplicationStatus::UnderReview);   // overdue wins
+    lifecycleRenewal(lifecyclePermit(-5), ApplicationStatus::AwaitingOtherPermits);   // overdue wins
 
     $data = lifecycleFeed();
     $lifecycle = $data['lifecycle'];
@@ -166,10 +172,10 @@ it('keeps the four counts against the same population when a barangay is chosen'
 
 /* ── the precedence, stated one rule at a time ─────────────────────────── */
 
-it('counts a lapsed permit as overdue even with a renewal under review', function () {
+it('counts a lapsed permit as overdue even with a renewal in the queue', function () {
     Permit::query()->delete();
     $permit = lifecyclePermit(-5);
-    lifecycleRenewal($permit, ApplicationStatus::UnderReview);
+    lifecycleRenewal($permit, ApplicationStatus::AwaitingOtherPermits);
 
     /*
      * The decision the brief asked to be written down. The permit has lapsed:
@@ -186,13 +192,13 @@ it('counts a submitted renewal as pending whatever the expiry date', function ()
     // Two hundred days out is the case that proves the axis changed: under the
     // old 30/60/90 banding this permit was not on the table at all.
     $far = lifecyclePermit(200);
-    lifecycleRenewal($far, ApplicationStatus::UnderReview);
+    lifecycleRenewal($far, ApplicationStatus::AwaitingOtherPermits);
     expect(lifecycleStateOf($far))->toBe('pending_renewal');
 
     Permit::query()->delete();
 
     $near = lifecyclePermit(3);
-    lifecycleRenewal($near, ApplicationStatus::Submitted);
+    lifecycleRenewal($near, ApplicationStatus::ForApproval);
     expect(lifecycleStateOf($near))->toBe('pending_renewal');
 });
 
