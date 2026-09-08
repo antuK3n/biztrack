@@ -1120,7 +1120,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * The `app.status` half of the test is read off the status rather than off
    * the presence of inspections: a visit can exist on a filing that has already
    * moved past inspection (a failed one stays on the record for good), and a
-   * filing can sit in `for_inspection` before anything is scheduled.
+   * filing can sit in the working stage before anything is scheduled.
+   *
+   * That status is `awaiting_other_permits` now, not `for_inspection`. The
+   * application-level inspection status was retired when inspection moved onto
+   * each permit's own `ClearanceStatus`; the stage an officer is standing in
+   * while visits happen is the one where every office is working its clearance.
+   * The predicate is otherwise unchanged, and it must stay identical to
+   * QueuePage's tab partition for the reason given above.
    *
    * Every other status falls straight through to the sheet, unchanged.
    *
@@ -1128,7 +1135,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * `loading` guard, so nothing below here is a hook and no render path can
    * skip one.
    */
-  if (app.status === 'for_inspection' && !owesReview) {
+  if (app.status === 'awaiting_other_permits' && !owesReview) {
     return (
       <div>
         {backLink}
