@@ -202,6 +202,16 @@ class OfficerRequestController extends Controller
     {
         $request->validate([
             'status' => ['sometimes', 'string', 'max:40'],
+            /*
+             * Ordering is the server's job because the list is PAGED.
+             *
+             * The screen holds one page of fifty and offers "Load more"; a sort
+             * applied in the browser would reorder those fifty and silently
+             * leave the fifty-first out of an order it belongs in. The reader
+             * would be looking at "the oldest requirement" that is only the
+             * oldest of what happened to be downloaded.
+             */
+            'sort' => ['sometimes', 'in:recent,oldest'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -257,8 +267,13 @@ class OfficerRequestController extends Controller
             $query->where('status', $status);
         }
 
-        $requests = $query->orderByDesc('created_at')
-            ->orderByDesc('id')
+        // `id` breaks the tie in the same direction, so two requirements raised
+        // in the same second keep a stable order instead of swapping between
+        // pages of one listing.
+        $oldestFirst = $request->query('sort') === 'oldest';
+        $requests = $query
+            ->orderBy('created_at', $oldestFirst ? 'asc' : 'desc')
+            ->orderBy('id', $oldestFirst ? 'asc' : 'desc')
             ->paginate($this->perPage($request));
 
         return response()->json([
@@ -277,6 +292,21 @@ class OfficerRequestController extends Controller
                 'office_statuses' => array_map(
                     fn (OfficerRequestStatus $s) => ['value' => $s->value, 'label' => $s->label()],
                     OfficerRequestStatus::officeSettable(),
+                ),
+                /*
+                 * Every status a row can HOLD, which is a longer list than the
+                 * ones an office may SET.
+                 *
+                 * The filter has to offer "For Review" and "Needs
+                 * Resubmission" — both are states a reader wants to narrow to,
+                 * and neither is settable by hand: the first is reached by the
+                 * owner submitting and the second by a rejection. Sending both
+                 * lists rather than deriving one from the other keeps the same
+                 * single vocabulary the labels already come from.
+                 */
+                'statuses' => array_map(
+                    fn (OfficerRequestStatus $s) => ['value' => $s->value, 'label' => $s->label()],
+                    OfficerRequestStatus::cases(),
                 ),
             ],
         ]);

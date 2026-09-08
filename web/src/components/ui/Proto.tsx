@@ -431,8 +431,17 @@ function SortFilterMenuPanel({
 }
 
 /**
- * `Sort ⇅  Filter ▽` affordance (p14). With no props it stays the prototype's
- * static ornament; pass `sort`/`filter` menus to make either control real.
+ * `Sort ⇅  Filter ▽` (p14). A half with no menu is not drawn.
+ *
+ * It used to fall back to a static `<span>` carrying the same words and glyph
+ * as the real control — the prototype's ornament, kept so a screen could look
+ * finished before its sorting existed. Three screens then shipped with it:
+ * Messages offered a "Filter" that was not a button, and Other Requirements and
+ * Drafts offered both. A reader cannot tell a control that does nothing from
+ * one that is broken, so every one of them reads as a fault in the app.
+ *
+ * Both halves are now real or absent. If a screen looks bare without them, the
+ * answer is to give it a menu, not to draw one.
  */
 export function SortFilter({
   sort,
@@ -465,7 +474,7 @@ export function SortFilter({
 
   return (
     <span className="flex items-center gap-4 text-sm text-ink-secondary">
-      {sort ? (
+      {sort && (
         <span className="relative">
           <button
             type="button"
@@ -482,10 +491,8 @@ export function SortFilter({
             <SortFilterMenuPanel menu={sort} onClose={() => setOpenMenu(null)} />
           )}
         </span>
-      ) : (
-        <span className="inline-flex items-center gap-1">{sortInner}</span>
       )}
-      {filter ? (
+      {filter && (
         <span className="relative">
           <button
             type="button"
@@ -502,8 +509,6 @@ export function SortFilter({
             <SortFilterMenuPanel menu={filter} dateRange={dateRange} onClose={() => setOpenMenu(null)} />
           )}
         </span>
-      ) : (
-        <span className="inline-flex items-center gap-1">{filterInner}</span>
       )}
     </span>
   )

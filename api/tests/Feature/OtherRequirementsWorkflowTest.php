@@ -358,3 +358,102 @@ it('lets only the office that asked rule on the answer', function () {
         ->postJson("/api/v1/requests/{$id}/close", ['outcome' => 'fulfilled'])
         ->assertOk();
 });
+
+/* ── the list's own controls: narrowing and ordering ─────────────────────── */
+
+/*
+ * The screen offered a "Sort ⇅ Filter ▽" that was drawn and inert — the
+ * prototype's ornament, shipped as if it worked. Both are real now, and both
+ * are QUERY PARAMETERS rather than a pass over the downloaded page: the list is
+ * capped at fifty rows and a browser-side filter would answer "no rejected
+ * requirements" to an office whose rejected ones are on page two.
+ */
+it('narrows the requirements list to one status, over the whole register', function () {
+    $appId = requirementFiling('Filter Test Store', 'DTI-94800', ['CHO']);
+    $office = authAs('sanitary@biztrack.local');
+
+    // Three requirements, taken to three different statuses.
+    $ids = [];
+    foreach (['Sanitary permit', 'Water test', 'Health cards'] as $title) {
+        $ids[$title] = test()->withHeaders($office)
+            ->postJson("/api/v1/applications/{$appId}/requests", ['title' => $title])
+            ->assertCreated()->json('data.id');
+    }
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$ids['Water test']}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$ids['Health cards']}/close", [
+            'outcome' => 'rejected',
+            'remarks' => 'The scan is unreadable.',
+        ])->assertOk();
+
+    $titlesWithStatus = function (string $status) {
+        return collect(
+            test()->withHeaders(authAs('sanitary@biztrack.local'))
+                ->getJson("/api/v1/requests?status={$status}&per_page=200")
+                ->assertOk()->json('data')
+        )->pluck('subject');
+    };
+
+    expect($titlesWithStatus('pending'))->toContain('Sanitary permit')
+        ->and($titlesWithStatus('pending'))->not->toContain('Water test')
+        ->and($titlesWithStatus('fulfilled'))->toContain('Water test')
+        ->and($titlesWithStatus('fulfilled'))->not->toContain('Health cards')
+        ->and($titlesWithStatus('rejected'))->toContain('Health cards')
+        ->and($titlesWithStatus('rejected'))->not->toContain('Sanitary permit');
+});
+
+it('orders the requirements list oldest-first when asked to', function () {
+    $appId = requirementFiling('Order Test Store', 'DTI-94810', ['CHO']);
+    $office = authAs('sanitary@biztrack.local');
+
+    foreach (['First raised', 'Second raised', 'Third raised'] as $title) {
+        test()->withHeaders($office)
+            ->postJson("/api/v1/applications/{$appId}/requests", ['title' => $title])
+            ->assertCreated();
+    }
+
+    $subjects = function (string $query) {
+        return collect(
+            test()->withHeaders(authAs('sanitary@biztrack.local'))
+                ->getJson("/api/v1/requests?{$query}&per_page=200")
+                ->assertOk()->json('data')
+        )->pluck('subject')
+            ->filter(fn ($s) => str_ends_with($s, ' raised'))
+            ->values()->all();
+    };
+
+    // Default is unchanged — newest first, as the screen has always said.
+    expect($subjects('sort=recent'))->toBe(['Third raised', 'Second raised', 'First raised'])
+        ->and($subjects(''))->toBe(['Third raised', 'Second raised', 'First raised'])
+        ->and($subjects('sort=oldest'))->toBe(['First raised', 'Second raised', 'Third raised']);
+});
+
+it('refuses an ordering it does not implement rather than silently ignoring it', function () {
+    // A rejected `sort` has to 422. Accepting the word and quietly returning
+    // the default is how a screen ends up showing one order while its control
+    // claims another.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/requests?sort=alphabetical')
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('sort');
+});
+
+it('sends the filter its options, including the statuses no office can set', function () {
+    $meta = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/requests?per_page=1')->assertOk()->json('meta');
+
+    $settable = collect($meta['office_statuses'])->pluck('value');
+    $all = collect($meta['statuses'])->pluck('value');
+
+    // The filter needs every status a row can HOLD; the buttons need only the
+    // ones an office may SET. Two lists, and the longer one is a superset.
+    expect($all)->toContain('pending', 'submitted', 'fulfilled', 'needs_resubmission', 'rejected')
+        ->and($settable)->not->toContain('submitted')
+        ->and($settable->diff($all))->toBeEmpty()
+        // The words come from the enum, so the filter and the chips agree.
+        ->and(collect($meta['statuses'])->firstWhere('value', 'submitted')['label'])->toBe('For Review')
+        ->and(collect($meta['statuses'])->firstWhere('value', 'fulfilled')['label'])->toBe('Approved');
+});
