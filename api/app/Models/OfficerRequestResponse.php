@@ -11,7 +11,12 @@ class OfficerRequestResponse extends Model
     protected $fillable = [
         'officer_request_id', 'user_id', 'body',
         'application_document_id', 'file_name', 'file_path',
+        // The office's verdict ON THIS submission, so a requirement that goes
+        // round twice can show why #1 was refused as well as what became of #2.
+        'review_outcome', 'review_remarks', 'reviewed_at', 'reviewed_by_user_id',
     ];
+
+    protected $casts = ['reviewed_at' => 'datetime'];
 
     public function officerRequest(): BelongsTo
     {

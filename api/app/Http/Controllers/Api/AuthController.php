@@ -12,9 +12,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Sanctum bearer auth implementing the sprint-1 §E1 contract that the web mock
@@ -239,7 +241,24 @@ class AuthController extends Controller
             // seeded or created before the column existed hold null, and forcing
             // a value on them would make an unrelated name edit fail validation.
             'gender' => ['nullable', 'in:M,F'],
-            'mobile_number' => ['required', 'string', 'max:20'],
+            /*
+             * Eleven digits in local 09 form, and nothing else.
+             *
+             * `string|max:20` accepted anything short enough, and the Edit
+             * Profile field passed on whatever was typed — which is how the
+             * demo owner's number came to be the three characters "09d". A
+             * client-side restriction alone would not have stopped it: the rule
+             * has to hold at the endpoint, because the field is not the only
+             * thing that can call it.
+             *
+             * Deliberately narrower than validateMobile on the web side, which
+             * also accepts +639…; the field now permits digits only, so the
+             * international form cannot be typed and storing two spellings of
+             * one number would only make them harder to compare later.
+             */
+            'mobile_number' => ['required', 'string', 'regex:/^09\d{9}$/'],
+        ], [
+            'mobile_number.regex' => 'A mobile number is 11 digits and starts with 09, as in 09171234567.',
         ]);
 
         $user = $request->user();
@@ -373,5 +392,91 @@ class AuthController extends Controller
     {
         // Verification is simulated for the prototype (no live SMTP required).
         return response()->json(['message' => 'Verification email sent.']);
+    }
+
+    /**
+     * Replace the signed-in user's profile photo.
+     *
+     * Images only, and a tighter list than DocumentController takes: a PDF is a
+     * sensible scan of a permit and a nonsensical avatar, and the `<img>` that
+     * renders this cannot display one anyway. 5 MB rather than the documents'
+     * 10 MB for the same reason — this is a face, not an A4 scan, and the cap
+     * that matters is the one the client checks before uploading.
+     */
+    public function updatePhoto(Request $request): JsonResponse
+    {
+        $request->validate([
+            'photo' => ['required', 'file', 'mimes:jpg,jpeg,png', 'max:5120'],
+        ], [
+            'photo.required' => 'Choose an image to upload.',
+            'photo.mimes' => 'Upload a JPG or PNG image.',
+            'photo.max' => 'That image is over 5 MB. Try a smaller photo.',
+        ]);
+
+        $user = $request->user();
+        $file = $request->file('photo');
+        $ext = strtolower($file->getClientOriginalExtension() ?: $file->guessExtension());
+        $directory = "private/avatars/{$user->id}";
+        $filename = Str::uuid()->toString().'.'.$ext;
+
+        Storage::disk('local')->putFileAs($directory, $file, $filename);
+
+        /*
+         * Write the row before deleting the old file, and only delete once the
+         * new path is safely stored. The other order — delete, then save — loses
+         * the existing photo if the save throws, leaving a row pointing at a
+         * file that is gone and an avatar that 404s.
+         */
+        $previous = $user->avatar_path;
+        $user->avatar_path = "{$directory}/{$filename}";
+        $user->save();
+
+        if ($previous && $previous !== $user->avatar_path) {
+            Storage::disk('local')->delete($previous);
+        }
+
+        Audit::log('user.photo_updated', $user);
+
+        return response()->json(['data' => $this->userPayload($user)]);
+    }
+
+    /**
+     * Stream the signed-in user's own photo.
+     *
+     * There is no user id in the route on purpose. The photo is read off the
+     * authenticated row, so no request can name someone else's file — the
+     * separability rule that governs filings applies to a face as much as to a
+     * permit.
+     */
+    public function showPhoto(Request $request): StreamedResponse
+    {
+        $user = $request->user();
+
+        abort_if($user->avatar_path === null, 404, 'No profile photo.');
+        abort_unless(Storage::disk('local')->exists($user->avatar_path), 404, 'File not found.');
+
+        return Storage::disk('local')->response($user->avatar_path);
+    }
+
+    /**
+     * Drop the photo and fall back to the glyph.
+     *
+     * Without this the control is a one-way door: a photo uploaded by mistake
+     * could be replaced but never taken back off, and "no photo" is the state
+     * every account starts in.
+     */
+    public function destroyPhoto(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $previous = $user->avatar_path;
+
+        if ($previous !== null) {
+            $user->avatar_path = null;
+            $user->save();
+            Storage::disk('local')->delete($previous);
+            Audit::log('user.photo_removed', $user);
+        }
+
+        return response()->json(['data' => $this->userPayload($user)]);
     }
 }

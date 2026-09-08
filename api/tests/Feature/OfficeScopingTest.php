@@ -609,36 +609,55 @@ it('names the office every message turn belongs to', function () {
     expect($codes)->toContain('BFP');
 });
 
-it('refuses an applicant writing to an office that is not on their filing', function () {
-    // The client's requirement, and the reason for the whole change: a hidden
-    // option is a UI decision, so the refusal has to be the API's.
+/*
+ * This test used to assert the opposite: writing to an office not routed the
+ * filing was a 403, "That office is not handling this application". The client
+ * has since asked for the reverse — the owner chooses from the offices the
+ * system has and may open a conversation with any of them — so the rule it
+ * enforced is gone and the test states the new one.
+ *
+ * What did NOT change is who may READ, and that is asserted here too: the
+ * office written to gets the message, and an office nobody wrote to gets
+ * nothing. Widening the addressee list is only safe because that stayed shut.
+ */
+it('lets an applicant write to any office, and only that office reads it', function () {
     $app = fileRoutedApplication('Scoping Wrong Office Cafe', ['BUSINESS', 'SANITARY']);
     $owner = authAs('owner@biztrack.local');
 
+    // The fire office holds no assignment on this filing. Writing to it is now
+    // accepted rather than refused.
     test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$app['id']}/messages", [
             'body' => 'Let me talk to the fire office.', 'department_id' => officeId('BFP'),
         ])
-        ->assertForbidden()
-        ->assertJsonPath('message', 'That office is not handling this application, so it cannot be messaged about it.');
+        ->assertCreated();
 
-    // Reading one is refused on the same terms — an empty list would still
-    // confirm the office is reachable.
-    test()->withHeaders($owner)
-        ->getJson("/api/v1/applications/{$app['id']}/messages?department_id=".officeId('BFP'))
-        ->assertForbidden();
-
-    // The offices that ARE on it are accepted, BPLO included: it coordinates
-    // every filing and is who you write to when you do not know who to ask.
     foreach (['CHO', 'BPLO'] as $code) {
         test()->withHeaders($owner)
             ->postJson("/api/v1/applications/{$app['id']}/messages", [
                 'body' => "Question for {$code}.", 'department_id' => officeId($code),
             ])->assertCreated();
     }
+
+    // The office written to can read its own words, despite no assignment.
+    $fire = collect(test()->withHeaders(authAs('fire@biztrack.local'))
+        ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data'))
+        ->pluck('body');
+
+    expect($fire)->toContain('Let me talk to the fire office.')
+        // And nothing addressed to anybody else.
+        ->not->toContain('Question for CHO.')
+        ->not->toContain('Question for BPLO.');
 });
 
-it('offers an applicant only the offices actually on their filing', function () {
+/*
+ * Also reversed. This asserted ['BPLO', 'CHO'] — the routed offices only — on
+ * the reasoning that "a dropdown of every department in the city would be the
+ * wrong shape". That is now exactly the shape asked for: the owner picks the
+ * office they judge correct, which is not the same question as which offices
+ * are reviewing the permit.
+ */
+it('offers an applicant every configured office on their filing', function () {
     $app = fileRoutedApplication('Scoping Offer Cafe', ['BUSINESS', 'SANITARY']);
 
     $offices = collect(
@@ -646,9 +665,8 @@ it('offers an applicant only the offices actually on their filing', function () 
             ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('meta.offices')
     );
 
-    // Routed to BPLO and CHO, so those two and no others — a dropdown of every
-    // department in the city would be the wrong shape.
-    expect($offices->pluck('code')->sort()->values()->all())->toBe(['BPLO', 'CHO'])
+    expect($offices)->toHaveCount(Department::count())
+        ->and($offices->pluck('code'))->toContain('BPLO')->toContain('CHO')->toContain('BFP')
         ->and($offices->pluck('can_message')->all())->each->toBeTrue();
 });
 
@@ -680,8 +698,10 @@ it('shows an officer only its own office among a filing’s conversations', func
 
     expect($codes('sanitary@biztrack.local'))->toBe(['CHO'])
         ->and($codes('fire@biztrack.local'))->toBe(['BFP'])
-        // BPLO coordinates, so it sees every conversation on the filing.
-        ->and($codes('bplo@biztrack.local'))->toBe(['BFP', 'BPLO', 'CHO']);
+        // BPLO used to see all three here. It now sees its own, like every
+        // other office: coordinating a permit is not a reason to read the
+        // applicant's mail to somebody else.
+        ->and($codes('bplo@biztrack.local'))->toBe(['BPLO']);
 });
 
 it('does not quote another office’s message in the inbox preview', function () {
@@ -789,12 +809,18 @@ it('drops a filing out of an office’s approval queue once that office has appr
     expect($openIds('fire@biztrack.local'))->toContain($app['id']);
 });
 
-it('keeps the whole shared filing readable for BPLO — deliberately', function () {
+it('keeps the shared filing’s WORK readable for BPLO, but not its mail', function () {
     /*
      * The wide view is a workflow requirement, not an oversight: BPLO issues the
      * mayor's permit only once every other office has cleared its part, so it has
-     * to be able to see what each of them asked for and said. If this case ever
-     * fails, the scoping has been pushed one office too far.
+     * to be able to see what each of them asked for and cleared.
+     *
+     * Correspondence is now the exception, at the client's instruction. Reading
+     * the fire office's REQUEST is BPLO's business; reading the applicant's
+     * message to the fire office is not — a conversation reaches the office it
+     * was addressed to and no other. The requests and office-forms assertions
+     * below are unchanged and are the proof that the narrowing was confined to
+     * messaging; only the message assertion is inverted.
      */
     $app = sharedFiling('Item111 BPLO Cafe');
 
@@ -817,7 +843,7 @@ it('keeps the whole shared filing readable for BPLO — deliberately', function 
 
     expect(collect(test()->withHeaders($bplo)
         ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data'))
-        ->pluck('body'))->toContain('Fire office speaking');
+        ->pluck('body'))->not->toContain('Fire office speaking');
 
     expect(collect(test()->withHeaders($bplo)
         ->getJson("/api/v1/applications/{$app['id']}/office-forms")->assertOk()->json('data'))
@@ -841,6 +867,8 @@ it('does not list an inbox row whose only turns belong to another office', funct
 
     expect($rowFor('sanitary@biztrack.local'))->toBeNull()
         ->and($rowFor('fire@biztrack.local'))->not->toBeNull()
-        // BPLO coordinates and keeps the whole register, deliberately.
-        ->and($rowFor('bplo@biztrack.local'))->not->toBeNull();
+        // BPLO used to get a row here on the strength of coordinating the
+        // filing. Nobody wrote to BPLO, so there is nothing for it to read and
+        // the row would be the same silhouette this test exists to prevent.
+        ->and($rowFor('bplo@biztrack.local'))->toBeNull();
 });

@@ -10,8 +10,13 @@
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 export const MOBILE_PATTERN = /^(09\d{9}|\+639\d{9})$/
 
-/** Philippine mobile numbers are 11 digits in local form: 09 + 9 more. */
-const MOBILE_DIGITS = 11
+/**
+ * Philippine mobile numbers are 11 digits in local form: 09 + 9 more.
+ *
+ * Exported because the Edit Profile field caps typing at this length. A second
+ * 11 written into a component is one that stays 11 after this one changes.
+ */
+export const MOBILE_DIGITS = 11
 
 export function validateEmail(value: string): string | undefined {
   const trimmed = value.trim()
