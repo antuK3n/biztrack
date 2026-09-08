@@ -432,9 +432,16 @@ export function OwnersPage() {
               <button
                 type="button"
                 aria-label="Previous page"
+                /*
+                 * aria-disabled, never the native attribute (§6.2): a disabled
+                 * control leaves the tab order, so a keyboard reader loses the
+                 * pager entirely at either end of the list rather than being
+                 * told it has reached one. The handler needs no guard — it
+                 * already clamps to page 1.
+                 */
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1 || loading}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas disabled:opacity-40"
+                aria-disabled={page <= 1 || loading || undefined}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
               >
                 ‹
               </button>
@@ -444,9 +451,11 @@ export function OwnersPage() {
               <button
                 type="button"
                 aria-label="Next page"
+                // Clamped to lastPage, so pressing it on the last page does
+                // nothing — see the note on Previous.
                 onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
-                disabled={page >= lastPage || loading}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas disabled:opacity-40"
+                aria-disabled={page >= lastPage || loading || undefined}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
               >
                 ›
               </button>

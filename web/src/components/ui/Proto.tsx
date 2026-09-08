@@ -183,10 +183,29 @@ export function ProtoModal({
           {onConfirm ? (
             <button
               type="button"
-              onClick={onConfirm}
-              disabled={confirmDisabled}
+              /*
+               * `aria-disabled`, never the native attribute — the rule the
+               * comment on confirmDescribedBy above already argues for, applied
+               * to the prop that was still doing the opposite.
+               *
+               * A `disabled` button leaves the tab order, so a screen-reader
+               * user never reaches the one control that would tell them the
+               * dialog is waiting on something, and a sighted user gets a
+               * greyed button with no stated reason (WCAG 3.3.1/3.3.3). This is
+               * the confirm button of EVERY dialog in the app — Edit Profile,
+               * Change Status, Deactivate, Reassign, Add officer — so it was
+               * the same dead end on each of them.
+               *
+               * The guard moves into the handler. Playwright reads
+               * aria-disabled as not-enabled, so a `.click()` on one still
+               * times out and the tests that rely on that are unaffected.
+               */
+              onClick={() => {
+                if (!confirmDisabled) onConfirm()
+              }}
+              aria-disabled={confirmDisabled || undefined}
               aria-describedby={confirmDescribedBy}
-              className={`${confirmBg} py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95 disabled:opacity-60`}
+              className={`${confirmBg} py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
             >
               {confirmLabel}
             </button>
