@@ -416,15 +416,38 @@ class ClearanceService
             return null;
         }
 
+        /*
+         * Every arm names the step that opens the stage, because that is what
+         * this method is FOR — see the docblock above.
+         *
+         * These sentences were inherited from the submission-gated flow and had
+         * gone comprehensively stale: they promised SIX clearances (five now,
+         * Market having been removed), said they open "as soon as it is
+         * submitted" (they open on payment, and only after BPLO has approved the
+         * form), and described each fee being "added to your balance" (there is
+         * no accrual any more — one bill is assessed at submission).
+         *
+         * Worse, the two statuses an applicant actually waits in — For Approval
+         * and Pending Payment — matched no arm at all and fell through to a
+         * default commented "Unreachable". They are the common case under this
+         * flow, so most waiting applicants were told only that the clearances
+         * were "not open on this application yet", with no way to learn what
+         * would open them. A locked stage that cannot say what unlocks it is the
+         * exact failure this docblock exists to forbid.
+         */
         return match ($application->status) {
-            ApplicationStatus::Draft => 'Finish and submit this application first. The six LGU clearances open here as soon as it is submitted, and you can apply for them one at a time — each one’s fee is added to your balance.',
+            ApplicationStatus::Draft => 'Finish and submit this application first. BPLO reviews your Business Permit form, then you settle the Tax Order of Payment — the five LGU clearances open here once that payment clears.',
+            ApplicationStatus::ForApproval => 'BPLO is reviewing your Business Permit form. Once it is approved you will be given a Tax Order of Payment, and the five LGU clearances open here as soon as you have settled it.',
+            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment for your Business Permit. The five LGU clearances open here the moment that payment clears.',
+            ApplicationStatus::Returned => 'BPLO sent this application back for changes. Make them and submit it again — the five LGU clearances open here once it has been approved and paid for.',
             ApplicationStatus::Rejected => 'This application was not approved, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             ApplicationStatus::Cancelled => 'This application was cancelled, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             /*
-             * Unreachable: `isUnlocked` now returns true for every status not
-             * matched above, so this arm exists only so the method is total. It
-             * says something true and useless rather than throwing, because a
-             * status added to the enum later must not take the screen down.
+             * Genuinely unreachable now, and kept only so the match is total:
+             * every status `isPaid()` accepts returned null at the top of this
+             * method, and every status it rejects has an arm above. Anyone who
+             * sees this string in the wild has found a status added since, which
+             * needs its own sentence here rather than this one.
              */
             default => 'These clearances are not open on this application yet.',
         };
