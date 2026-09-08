@@ -4,9 +4,23 @@ use App\Enums\ApplicationStatus;
 use App\Models\Application;
 
 /*
- * The officer queue splits into two tabs — "For Approval" and "For Inspection" —
- * on the *application's* status, and it used to do that in the browser over an
- * unpaged list of every assignment ever routed.
+ * The officer queue splits into tabs on the *application's* status, and it used
+ * to do that in the browser over an unpaged list of every assignment ever routed.
+ *
+ * WHICH tabs is not what it was. There are four now (QueuePage.tsx), and the two
+ * that partition this endpoint by application status are BPLO's two acts at
+ * opposite ends of the flow: "For Approval" (`for_approval`, `returned`,
+ * `awaiting_other_permits`) and "Final Approval" (`for_final_approval`). Those
+ * are the pair driven below.
+ *
+ * "For Inspection" is deliberately not the other half any more. It filtered on
+ * `for_inspection`, a status of the APPLICATION that no longer exists — the five
+ * permits are inspected independently, so one filing can hold a booked fire
+ * inspection and a passed sanitary one at once, and no single column can say so.
+ * That tab asks `clearance_status` against the reader's own office instead, and
+ * every row in it reads `awaiting_other_permits`. It therefore OVERLAPS For
+ * Approval on this axis, and a pair that overlaps cannot show that the axis
+ * partitions anything.
  *
  * Bounding the list without moving that filter into SQL would have been the
  * worse bug of the two: each tab would filter whichever fifty rows happened to
@@ -30,48 +44,47 @@ it('filters the queue by application status on the server', function () {
     $all = test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('meta');
     expect($all['total'])->toBeGreaterThan(0);
 
-    // Put one routed filing on the inspection side, so the two tabs genuinely
-    // partition the queue rather than one of them holding everything.
+    // Put one routed filing on the final-approval side, so the two tabs
+    // genuinely partition the queue rather than one of them holding everything.
     $moved = Application::whereHas('assignments')->firstOrFail();
-    $moved->update(['status' => ApplicationStatus::ForInspection]);
+    $moved->update(['status' => ApplicationStatus::ForFinalApproval]);
 
     /*
-     * The two tabs this endpoint feeds, as QueuePage.tsx sends them.
+     * The two tabs this endpoint partitions, as QueuePage.tsx sends them.
      *
-     * `submitted` and `pending_payment` used to be in the approval list and are
-     * not any more. They were never reachable through this endpoint: an unpaid
-     * filing has no assignment row (routing happens at payment — see
-     * PendingPaymentQueueTest), so the filter named two statuses it could not
-     * match. They have their own tab now, on `/applications`.
+     * `submitted` and `pending_payment` used to be in the approval list. The
+     * first no longer exists; the second is a stage waiting on the APPLICANT and
+     * has its own tab, on `/applications` (see PendingPaymentQueueTest). Neither
+     * belongs on a feed of what an office owes.
      */
-    $approvalStatuses = ['under_review', 'returned'];
-    $inspectionStatuses = ['for_inspection', 'approved', 'issued'];
+    $approvalStatuses = ['for_approval', 'returned', 'awaiting_other_permits'];
+    $finalStatuses = ['for_final_approval'];
 
     $approval = test()->withHeaders($bplo)
         ->getJson('/api/v1/assignments?application_status='.implode(',', $approvalStatuses))
         ->assertOk()->json();
 
-    $inspection = test()->withHeaders($bplo)
-        ->getJson('/api/v1/assignments?application_status='.implode(',', $inspectionStatuses))
+    $final = test()->withHeaders($bplo)
+        ->getJson('/api/v1/assignments?application_status='.implode(',', $finalStatuses))
         ->assertOk()->json();
 
     /*
-     * The moved filing left the approval side and arrived on the inspection
-     * one, and the two tabs never double-count. Deliberately not asserting that
-     * each tab is strictly smaller than the queue: the seeded storyline routes
-     * one application to three offices, so a status change moves all three at
-     * once and one tab legitimately holds everything.
+     * The moved filing left the approval side and arrived on the final one, and
+     * the two tabs never double-count. Deliberately not asserting that each tab
+     * is strictly smaller than the queue: the seeded storyline routes one
+     * application to three offices, so a status change moves all three at once
+     * and one tab legitimately holds everything.
      */
     expect($approval['meta']['total'])->toBeLessThan($all['total'])
-        ->and($inspection['meta']['total'])->toBeGreaterThan(0)
-        ->and($approval['meta']['total'] + $inspection['meta']['total'])
+        ->and($final['meta']['total'])->toBeGreaterThan(0)
+        ->and($approval['meta']['total'] + $final['meta']['total'])
         ->toBeLessThanOrEqual($all['total']);
 
     foreach ($approval['data'] as $row) {
         expect($row['application']['status'])->toBeIn($approvalStatuses);
     }
-    foreach ($inspection['data'] as $row) {
-        expect($row['application']['status'])->toBeIn($inspectionStatuses);
+    foreach ($final['data'] as $row) {
+        expect($row['application']['status'])->toBeIn($finalStatuses);
     }
 });
 
@@ -79,11 +92,11 @@ it('accepts the filter as a repeated parameter as well as a comma-separated one'
     $bplo = authAs('bplo@biztrack.local');
 
     $csv = test()->withHeaders($bplo)
-        ->getJson('/api/v1/assignments?application_status=under_review,returned')
+        ->getJson('/api/v1/assignments?application_status=for_approval,returned')
         ->assertOk()->json('meta.total');
 
     $repeated = test()->withHeaders($bplo)
-        ->getJson('/api/v1/assignments?application_status[]=under_review&application_status[]=returned')
+        ->getJson('/api/v1/assignments?application_status[]=for_approval&application_status[]=returned')
         ->assertOk()->json('meta.total');
 
     expect($repeated)->toBe($csv);

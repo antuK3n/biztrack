@@ -156,7 +156,7 @@ test.describe('the three BPLO analytics screens', () => {
    *   "Do not put YTD only; it should be the full term"
    *
    * The first was a hard-coded three-office list in DashboardAnalytics that
-   * silently discarded every OBO, CENRO and Market inspection in the register.
+   * silently discarded every OBO and CENRO inspection in the register.
    * Nothing failed and nothing looked wrong — the panel simply drew three
    * confident bars, which is why the check lives at this level too.
    *
@@ -190,7 +190,6 @@ test.describe('the three BPLO analytics screens', () => {
     expect(offices).toEqual([
       'Environmental',
       'Fire Safety',
-      'Market',
       'Occupancy',
       'Sanitary',
       'Zoning',

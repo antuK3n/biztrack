@@ -24,6 +24,7 @@ function amendmentDraft(array $amendmentFields = []): int
 
     return test()->postJson('/api/v1/applications', [
         'business_id' => $business->id,
+        'data_privacy_consent' => true,
         'application_type' => 'amendment',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
         ...$amendmentFields,
@@ -135,6 +136,7 @@ it('leaves the amendment columns alone on a filing that is not an amendment', fu
 
     $appId = $this->postJson('/api/v1/applications', [
         'business_id' => $business->id,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
         'amendment_ownership' => true,
@@ -159,6 +161,7 @@ it('rejects an "Others" longer than the column can hold', function () {
     // A silently truncated answer is worse than a rejected one.
     $this->postJson('/api/v1/applications', [
         'business_id' => $business->id,
+        'data_privacy_consent' => true,
         'application_type' => 'amendment',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
         'amendment_other' => str_repeat('x', 256),
