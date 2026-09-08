@@ -516,55 +516,23 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
     }
   }
 
-  /**
-   * WITHDRAW — take back an application for a clearance. CLR-1.
+  /*
+   * `onUnapply` is gone, and the reason is worth keeping.
    *
-   * This control was deleted in 9e30b44 along with the panel it sat in, and
-   * `storeHeld` has been telling applicants to use it ever since. The client's
-   * objection was to the SHAPE, not to the undo: what stood here was a
-   * secondary button reading "Don't apply for the ‹full clearance name›",
-   * wrapping onto two lines inside a bordered, tinted panel, on all six cards —
-   * *"WHAT THE FUCK IS THIS THE OLD ONE IS GOOD ENOUGH."* The reasoning under
-   * it was never refuted, and the audit of 2026-08-06 measured what its absence
-   * cost: 15 real drafts that could not withdraw a clearance, 5 of which could
-   * not be submitted at all, and one route out — destroy the whole filing.
+   * Withdrawing a clearance was free and reversible, which is why it needed
+   * no confirmation while Apply-over-a-copy did. It is now impossible:
+   * `unapply` refuses a required clearance and all five are required, so the
+   * call could only ever return 422. Every control that reached it has been
+   * removed rather than left to fail politely.
    *
-   * So it comes back as the control the client already accepted on this card:
-   * the quiet inline link that takes an uploaded copy back off, one word,
-   * pushed to the end of its own line, named for its clearance only in its
-   * accessible name. Same weight, same place, opposite half of the card. It is
-   * NOT a second meaning of Apply — that was the original bug (aabbf21) and
-   * making this a toggle again would restore it.
-   *
-   * Nothing is destroyed here. The permit type is detached, the filing is
-   * re-assessed without it, and the office sheet's saved answers stay exactly
-   * where they are (ClearanceService::unapply says why), so re-applying costs
-   * one click and loses nothing. That is the whole reason this needs no
-   * confirmation while Apply-over-a-copy does.
-   *
-   * It used to say the fee came off "an assessment that has not been written
-   * yet", which was true while everything was priced at submit. It is not now:
-   * the balance above these cards is live, and withdrawing takes the fee back
-   * off it. Still free and still reversible — but only up to the point the
-   * office acts, which is what unapply's `officeHasActed` guard is for.
-   *
-   * NOT MODELLED, and this is the place it would show up: whether a clearance
-   * fee already PAID is refundable when the applicant withdraws. Right now the
-   * balance simply falls, and if it falls below what has been paid the filing
-   * is in credit with nothing on any screen offering it back. Listed as an open
-   * question in docs/clearances-after-payment.md; it needs BPLO, not a guess.
+   * Two things it recorded that outlive it. Un-applying never deleted an
+   * office sheet's saved answers (ClearanceService::unapply says why), so if
+   * an optional clearance ever makes withdrawal meaningful again, re-applying
+   * still costs one click and loses nothing. And the open question it carried
+   * is still open: whether a clearance fee already PAID is refundable on
+   * withdrawal. That one needs BPLO rather than a guess, and it is recorded in
+   * docs/questions-for-malabon.md rather than in a function nobody can call.
    */
-  async function onUnapply(row: Clearance) {
-    await runAction(
-      row.permit_type.code,
-      // No fee comes off. One bill was raised at submission covering all five,
-      // and withdrawing does not re-assess it.
-      `Withdrew your application for the ${row.permit_type.name}${
-        row.has_office_form ? ', and its form section is off this application' : ''
-      }.`,
-      () => clearances.unapply(applicationId, row.permit_type.code),
-    )
-  }
 
   /** Take the uploaded copy back off. Its own labelled control — never Submit. */
   async function onRemoveHeld(row: Clearance) {
@@ -616,38 +584,37 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   async function onSubmitHeld(row: Clearance, file: File) {
     setHeldPrompt(null)
     const code = row.permit_type.code
-    const switching = hasApplied(row.state)
-    let withdrawn = false
     setBusyCode(code)
     setActionError(null)
     try {
-      if (switching) {
-        await clearances.unapply(applicationId, code)
-        withdrawn = true
-      }
+      /*
+       * No withdrawal first, and this is a correction of a correction.
+       *
+       * This un-applied before uploading, so applying and holding a copy could
+       * not both be true. That was right while a clearance could be withdrawn.
+       * All five are required now and `unapply` refuses every one of them —
+       * 422, "required on every application and cannot be withdrawn" — so the
+       * call could only throw, and it threw BEFORE the upload, meaning the file
+       * the applicant had chosen was never sent.
+       *
+       * `submitHeld` settles the overlap server-side, which is where a rule
+       * about what may coexist on a filing belongs.
+       */
       const result = await clearances.submitHeld(applicationId, code, file)
       setRows(result.data)
-      // The ledger moves on every mutation, not just the row that was pressed:
-      // applying re-assesses the whole filing. Setting rows without meta is how
-      // a fee gets charged above a balance that has not budged.
+      // The ledger is re-read on every mutation rather than assumed unchanged:
+      // setting rows without meta is how the two drift apart.
       setMeta(result.meta)
-      setNote(
-        switching
-          ? `Withdrew your application for the ${row.permit_type.name} and filed your own copy instead. Nothing was added to your fees.`
-          : `Your ${row.permit_type.name} copy is on file. Nothing was added to your fees.`,
-      )
+      setNote(`Your ${row.permit_type.name} copy is on file.`)
     } catch (err) {
       // Upload failures arrive without a usable message twice over; translate.
-      // A failure AFTER the withdrawal has to say so: the card behind this
-      // dialog has just changed state, and an error that only talks about the
-      // file would leave the applicant unable to explain what they are looking
-      // at. The row is re-read for the same reason.
-      setActionError(
-        withdrawn
-          ? `${uploadErrorMessage(err)} Your application for the ${row.permit_type.name} was withdrawn first, so nothing is on this filing for it now — press Apply to ask for it again, or Submit to try the file again.`
-          : uploadErrorMessage(err),
-      )
-      if (withdrawn) await load()
+      //
+      // The "your application was withdrawn first" branch is gone with the
+      // withdrawal it described. Nothing on the card changes before the upload
+      // now, so a failure here means only that the file did not go — which is
+      // what the plain message says, and there is no state behind the dialog
+      // for the applicant to have to account for.
+      setActionError(uploadErrorMessage(err))
     } finally {
       setBusyCode((c) => (c === code ? null : c))
     }
@@ -1135,43 +1102,24 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
               )}
 
               {/*
-                CLR-1 — the way back out of Apply, in the shape the client kept.
-
-                Deliberately the same treatment as "Remove" above: one word, one
-                line, pushed to the end with ml-auto, underlined text rather than
-                a button face. That is the control the client left standing when
-                everything else came off this card, so it is the one shape on
-                this grid known not to be furniture. The version they threw out
-                was a bordered secondary button reading "Don't apply for the
-                ‹clearance›" inside a tinted panel; nothing of that is back.
-
-                `row.state === 'applied'` and not `applied`, which also covers
-                `issued`. A clearance that has already been issued cannot be
-                withdrawn — the API refuses it (ClearanceController:95-99) — and
-                offering a control the server will refuse is CLR-4 on a
-                different screen.
+                CLR-1’s Withdraw control is GONE, and its absence is the rule.
+              
+                It offered a way back out of Apply, which was right while a clearance
+                could be withdrawn. All five are required now and `unapply` refuses
+                every one of them — 422, "required on every application and cannot
+                be withdrawn" — so the control could only ever produce an error.
+                Offering a control the server will refuse is what CLR-4 forbids.
+              
+                It came back briefly when the dead `state === 'applied'` checks on
+                this screen were repaired: those comparisons had been false for
+                months, so fixing them turned a dead branch into a live one leading
+                straight to a 422. Worth remembering — repairing a broken predicate
+                resurrects whatever it was hiding, and not all of it should return.
+              
+                If an optional clearance is ever added, withdrawal is meaningful for
+                that one and this is where it goes — gated on the permit being
+                optional, not merely on having been applied for.
               */}
-              {hasApplied(row.state) && unlocked && (
-                <p className="mt-2 flex text-xs text-ink-muted">
-                  <button
-                    type="button"
-                    onClick={() => void onUnapply(row)}
-                    disabled={busy}
-                    /*
-                      Named for its clearance, like every other control here.
-                      Six cards share this grid, so a bare "Withdraw" is six
-                      identical controls to anyone moving through them by name.
-                      The visible word stays one word: printing the full
-                      clearance name on the control is what made the old card
-                      unreadable.
-                    */
-                    aria-label={`Withdraw your application for the ${row.permit_type.name}`}
-                    className="ml-auto shrink-0 font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-60"
-                  >
-                    {busy ? 'Withdrawing…' : 'Withdraw'}
-                  </button>
-                </p>
-              )}
 
               <div className="mt-5 flex flex-1 items-end gap-2.5">
                 {/*
@@ -1276,18 +1224,17 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           title="SUBMISSION"
           cancelLabel="Cancel"
           /*
-            CLR-1 — the switch is named on the button that performs it.
+            Always "Submit", where this once read "Withdraw & submit".
 
-            On an applied clearance this confirm does two things, and the second
-            one is the one the applicant came here for. "Submit" alone would
-            withdraw an application for a clearance without ever saying the word
-            on the control that did it — the same unnamed second meaning that
-            makes Apply-over-a-copy a defect (CLR-3). It also makes the server's
-            refusal true: `storeHeld` tells the applicant to withdraw the
-            request first, and this is now a thing on screen called Withdraw,
-            here and on the card.
+            CLR-1 said a control must name everything it does: on an applied
+            clearance this confirm used to withdraw the application before
+            filing the copy, and "Submit" alone would have hidden that second
+            act. The rule stands; the second act is gone. `unapply` refuses a
+            required clearance and all five are required, so nothing is
+            withdrawn here and a label promising it would name something that
+            does not happen — the same defect in the opposite direction.
           */
-          confirmLabel={hasApplied(heldPrompt.state) ? 'Withdraw & submit' : 'Submit'}
+          confirmLabel="Submit"
           confirmDisabled={!heldPromptFile}
           onCancel={() => {
             setHeldPrompt(null)
@@ -1306,34 +1253,15 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           </p>
 
           {/*
-            CLR-1 — what changing your mind actually does, before it is done.
-
-            The client's report was *"I cannot remove my application on the
-            Zoning/Locational Clearance once I changed my mind to Submit instead
-            of Apply."* This is where they changed their mind, so this is where
-            the switch is offered and stated: the two halves of the card are
-            alternatives, and until now only one direction resolved itself.
-
-            Stated plainly rather than as a warning. Nothing is destroyed —
-            withdrawing detaches a permit type, the filing is re-assessed
-            without it, and the office sheet's answers are kept — so a red panel
-            here would make a free, reversible change look like the deletion
-            happening in the OTHER dialog, which really is one.
+            The "your application is withdrawn" panel is gone with the withdrawal.
+          
+            It explained that submitting a copy would withdraw the application
+            first — true when a clearance could be withdrawn, and false since all
+            five became required. `unapply` refuses them, so nothing is withdrawn
+            and the panel described a consequence that does not occur. Telling an
+            applicant their application has been withdrawn when it has not is
+            worse than saying nothing.
           */}
-          {hasApplied(heldPrompt.state) && (
-            <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
-              <p className="text-sm font-semibold text-blue-900">
-                You applied for this one. Submitting your own copy replaces that.
-              </p>
-              <p className="mt-1 text-xs leading-relaxed text-blue-800">
-                Your application to{' '}
-                {heldPrompt.permit_type.department?.name ?? 'the issuing office'} is withdrawn
-                {heldPrompt.has_office_form ? ', and its form section leaves this application' : ''}
-                . Nothing you have typed into that form is deleted — press Apply again and it is
-                still there.
-              </p>
-            </div>
-          )}
           {/* A real <label> wrapping the input: the file control is visually
               replaced but never loses its name or its keyboard reachability. */}
           <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input">
