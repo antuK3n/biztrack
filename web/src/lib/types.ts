@@ -162,6 +162,10 @@ export interface Address {
   telephone?: string | null
   /** BPLO form item A9. */
   website?: string | null
+  /** BPLO form item A7 — the business's mobile, not the account holder's. */
+  mobile_number?: string | null
+  /** BPLO form item A8. */
+  email?: string | null
 }
 
 export interface BusinessLine {
@@ -228,6 +232,8 @@ export interface Business {
   president_officer_name?: string | null
   citizenship?: string | null
   capital_participation_filipino?: string | null
+  /** BPLO item B7 — one capital-investment figure for the whole business. */
+  capital_investment?: string | null
   /**
    * BPLO item B8 (new form) / B7 (renewal form): "Do you have tax incentives
    * from any Government Entity?".
@@ -242,6 +248,20 @@ export interface Business {
   has_tax_incentives?: boolean
   address: Address
   lines: BusinessLine[]
+  /**
+   * BPLO items 11 / 12 — the named person, as the API sends it back.
+   *
+   * The primary `business_owners` row. Optional because a business registered
+   * before the wizard asked has none, and every reader has to cope with that
+   * rather than assume.
+   */
+  owner?: {
+    surname: string | null
+    given_name: string | null
+    middle_name: string | null
+    suffix: string | null
+    gender: string | null
+  } | null
 }
 
 export interface BusinessPayload {
@@ -262,6 +282,14 @@ export interface BusinessPayload {
   president_officer_name?: string | null
   citizenship?: string | null
   capital_participation_filipino?: string | null
+  /**
+   * BPLO item B7 — ONE capital-investment figure for the whole business.
+   *
+   * Not the same thing as the fee profile's per-line `capitalization`, which the
+   * Revenue Code engine prices each line of business against. The paper asks for
+   * a single declared figure; the engine needs a breakdown. Both are kept.
+   */
+  capital_investment?: string | null
   has_tax_incentives?: boolean
   address: {
     line1: string
@@ -273,8 +301,27 @@ export interface BusinessPayload {
     postal_code?: string
     telephone?: string
     website?: string
+    /** BPLO items A7 and A8 — the business's own, not the account holder's. */
+    mobile_number?: string
+    email?: string
   }
   lines: { psic_code_id: number; capitalization?: string; products_services?: string }[]
+  /**
+   * BPLO items 11 / 12 — the named person on the form.
+   *
+   * Separate from the account that filed. The wizard prefills these from the
+   * signed-in user, because for a sole proprietorship they are the same person
+   * and retyping what you gave at sign-up is not a question worth asking — but
+   * the answer is stored against the BUSINESS, so a corporation can name
+   * somebody else without touching anyone's profile.
+   */
+  owner?: {
+    surname?: string | null
+    given_name?: string | null
+    middle_name?: string | null
+    suffix?: string | null
+    gender?: string | null
+  }
 }
 
 /* ── Applications ─────────────────────────────────────────────────────── */
@@ -283,15 +330,82 @@ export type ApplicationType = 'new' | 'renewal' | 'amendment'
 
 export type ApplicationStatus =
   | 'draft'
-  | 'submitted'
-  | 'under_review'
+  | 'for_approval'
   | 'returned'
   | 'pending_payment'
-  | 'for_inspection'
+  | 'awaiting_other_permits'
+  | 'for_final_approval'
   | 'approved'
   | 'issued'
   | 'rejected'
   | 'cancelled'
+
+/**
+ * One other permit's own status — `App\Enums\ClearanceStatus`.
+ *
+ * The second machine. The application has a status and each of the five
+ * required permits has its own, running at the same time
+ * (docs/application-flow-2026-09.md). `available` is not a server value: it is
+ * what the clearance stage shows for an OPTIONAL permit that is not on the
+ * filing at all, which has no pivot row and therefore no status.
+ */
+export type ClearanceStatus =
+  | 'not_started'
+  | 'for_approval'
+  | 'for_inspection'
+  | 'approved'
+  | 'rejected'
+  | 'returned'
+  | 'available'
+
+/**
+ * The clearance statuses the SERVER can send — `App\Enums\ClearanceStatus` and
+ * nothing else. `available` is excluded because no pivot row can carry it: it is
+ * the clearance stage's own word for a permit that is not on the filing at all.
+ * Anything read off a payload is this type; only UI state is the wider one.
+ */
+export type ServerClearanceStatus = Exclude<ClearanceStatus, 'available'>
+
+/** How the applicant satisfied one permit: filled the form, or handed in a copy. */
+export type ClearanceMode = 'apply' | 'upload'
+
+/**
+ * One permit as it stands ON a filing — `ApplicationResource`'s `permit_types`,
+ * which is the `application_permit_types` pivot row joined onto the permit type.
+ *
+ * This is the second state machine made visible. The filing has one status and
+ * each permit on it has another, running at the same time, and a screen that
+ * shows only the first cannot tell an applicant that Zoning is done while Fire
+ * is still out for inspection (docs/application-flow-2026-09.md).
+ *
+ * A superset of the shape `ApplicationListItem` carries, so the detail payload
+ * satisfies the list contract it extends. Two fields are nullable for reasons
+ * worth telling apart, because they look identical on the wire:
+ *
+ *  - `status` / `status_label` are null when there is NO PIVOT ROW — the permit
+ *    is not on this filing at all. Every required permit is attached at
+ *    submission, so on a submitted filing this should not happen.
+ *  - `remarks` / `rejection_reason` are null when the reader MAY NOT SEE THEM.
+ *    An office reads its own words and not the ones beside it
+ *    (`ApplicationVisibility::readsOfficeSheet`), so a fire officer's note comes
+ *    back null to the sanitary officer and populated to the applicant, BPLO and
+ *    the super admin. Never render "no remarks" off a null — you cannot tell it
+ *    from "not yours to read".
+ */
+export interface ApplicationPermitType {
+  id: number
+  code: string
+  name: string
+  requires_inspection: boolean
+  /** One of the five the applicant cannot decline. Optional permits are false. */
+  is_required: boolean
+  status: ServerClearanceStatus | null
+  status_label: string | null
+  mode: ClearanceMode | null
+  remarks: string | null
+  rejection_reason: string | null
+  decided_at: string | null
+}
 
 export interface ApplicationListItem {
   id: number
@@ -320,7 +434,19 @@ export interface ApplicationListItem {
   applicant: { id: number; name: string } | null
   submitted_at: string | null
   deadline_at: string | null
-  permit_types: { code: string; name: string }[]
+  /**
+   * Each permit on the filing with its own status — the second state machine,
+   * carried on the list so a row never has to infer it.
+   *
+   * `status` is null only when there is no pivot row, which on a submitted
+   * filing should not happen: every required permit is attached at submission.
+   */
+  permit_types: {
+    code: string
+    name: string
+    status: ServerClearanceStatus | null
+    status_label: string | null
+  }[]
   created_at: string
 }
 
@@ -344,7 +470,7 @@ export interface FeeLineItem {
   label: string
   amount: string | number
   code?: string
-  /** Collecting office: BPLO, CTO, CHO, CENRO, OBO, BFP, CMO-MARKET. */
+  /** Collecting office: BPLO, CTO, CPDO, CHO, CENRO, OBO, BFP. */
   office?: string
   group?: string
   /** Revenue-code citation, e.g. "Sec. 2A.01". */
@@ -472,6 +598,31 @@ export interface Assignment {
     application_type: ApplicationType
     status: ApplicationStatus
   }
+  /**
+   * This office's own permit on the filing — the second state machine, as seen
+   * from the one seat that owns it.
+   *
+   * The queue needs it because `status` above cannot answer "what is waiting on
+   * me" any more: `approveClearance()` completes the assignment the moment the
+   * paperwork is accepted, which is when the site visit has yet to happen. So a
+   * `completed` assignment covers both "out for inspection" and "finished", and
+   * only this tells them apart.
+   *
+   * Null when the office issues no permit on the filing, or when the caller did
+   * not eager-load `application.permitTypes` — the resource returns null rather
+   * than firing a query per row. BPLO is populated (it issues the Business
+   * Permit) but its value is not a useful signal: that permit reads
+   * `for_approval` from Pending Payment through Final Approval, so BPLO's two
+   * acts are told apart by the APPLICATION's status instead.
+   */
+  clearance: {
+    code: string
+    name: string
+    status: ServerClearanceStatus | null
+    status_label: string | null
+    mode: ClearanceMode | null
+    requires_inspection: boolean
+  } | null
 }
 
 export type InspectionResult = 'passed' | 'failed' | 'conditional'
@@ -695,6 +846,15 @@ export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
   payment_mode?: 'annual' | 'quarterly'
+  /**
+   * RA 10173 consent, as given for THIS filing.
+   *
+   * Read when a draft is reopened so the tick can be put back. It used to live
+   * only in the wizard's React state, so reopening a draft asked again — and the
+   * register kept no record of a consent the submit gate refuses to proceed
+   * without.
+   */
+  data_privacy_consent?: boolean
   /** What this filing amends; null unless `application_type` is `amendment`. */
   amendments?: AmendmentDetails | null
   /** Full resource embeds the complete business (address + lines). */
@@ -717,16 +877,16 @@ export interface Application extends ApplicationListItem {
    */
   ra11032?: Ra11032Standing
   /**
-   * The full record knows which permit types will actually be inspected; the
-   * list resource does not send the flag, hence the narrowing override.
+   * The permits on this filing, each with its own status and the pivot's full
+   * detail — a superset of what `ApplicationListResource` sends, which is why
+   * this narrows the inherited field rather than conflicting with it.
    *
-   * `requires_inspection` is the whole basis of the For Inspection step on the
-   * progression rail. WorkflowService::afterReviewProgress reads the same flag
-   * and, when none of them is set, jumps the last office approval straight to
-   * issuance — so a rail that guessed would draw a stage half these filings
-   * never enter.
+   * The narrowing used to be about `requires_inspection`, which drove a For
+   * Inspection step on the progression rail. That step is gone: inspection is no
+   * longer a stage of the APPLICATION, it is a stage of each PERMIT, and the
+   * flag is read per card rather than folded into one whole-filing guess.
    */
-  permit_types: { id: number; code: string; name: string; requires_inspection: boolean }[]
+  permit_types: ApplicationPermitType[]
   /**
    * Every recorded transition, oldest first — the same rows and the same shape
    * as `GET /applications/{id}/timeline`.
@@ -2094,6 +2254,13 @@ export interface AmendmentDetails {
   nature: boolean
   /** The "Others (specify)" text; non-empty text IS the tick. */
   other: string | null
+  /**
+   * Section A3 of the renewal/amendment form — the structure the business
+   * changed FROM and TO. Null unless A1 was answered Yes, which is the same
+   * "never asked" vs "asked and answered no" distinction the whole block draws.
+   */
+  from_registration_type: string | null
+  to_registration_type: string | null
   /** Ready-to-render labels, e.g. `['Location', 'Others: new co-owner']`. */
   summary: string[]
 }

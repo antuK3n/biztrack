@@ -316,7 +316,7 @@ it('reads the renewal stage as at the observation, not as it stands today', func
         'business_id' => $business,
         'applicant_user_id' => DB::table('users')->value('id'),
         'application_type' => ApplicationType::Renewal->value,
-        'status' => ApplicationStatus::UnderReview->value,
+        'status' => ApplicationStatus::AwaitingOtherPermits->value,
         'prior_permit_id' => $prior,
         'created_at' => '2023-12-20 09:00:00',
         'submitted_at' => '2023-12-26 09:00:00',
@@ -329,7 +329,7 @@ it('reads the renewal stage as at the observation, not as it stands today', func
 
     /*
      * The filing exists TODAY, and reading `applications.status` would report it
-     * as under review at every observation — including the ones months before
+     * as awaiting its other permits at every observation — including the ones months before
      * anybody started the form. The stage has to be reconstructed from the
      * filing's own dates or every early observation carries information from its
      * own future.

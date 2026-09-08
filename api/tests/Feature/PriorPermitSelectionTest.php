@@ -24,6 +24,7 @@ function renewalDraft(?int $priorPermitId = null): array
 
     $appId = test()->postJson('/api/v1/applications', array_filter([
         'business_id' => $business->id,
+        'data_privacy_consent' => true,
         'application_type' => 'renewal',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
         'prior_permit_id' => $priorPermitId,
@@ -105,6 +106,7 @@ it('refuses to submit an amendment that names no permit either', function () {
 
     $appId = $this->postJson('/api/v1/applications', [
         'business_id' => $business->id,
+        'data_privacy_consent' => true,
         'application_type' => 'amendment',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
         'amendment_location' => true,
@@ -205,7 +207,9 @@ it('will not change the prior permit once the application has been submitted', f
     ['application_id' => $appId, 'business' => $business] = renewalDraft();
     $permitId = $business->permits()->firstOrFail()->id;
 
-    Application::findOrFail($appId)->update(['status' => 'submitted']);
+    // `for_approval` is where submission lands now — BPLO is reading the form.
+    // The old value here was `submitted`, a status the flow no longer has.
+    Application::findOrFail($appId)->update(['status' => 'for_approval']);
 
     $this->putJson("/api/v1/applications/{$appId}/prior-permit", [
         'prior_permit_id' => $permitId,

@@ -51,7 +51,14 @@ function officerIn(string $code, string $role, string $email): User
     return $user;
 }
 
-/** A submitted filing routed to one office, with that office's officer named on it. */
+/**
+ * A submitted filing with the named officer holding their office's row.
+ *
+ * submit() routes BPLO, so the filing carries that assignment too; the office
+ * this helper names is added on top of it. That extra row is deliberate and
+ * harmless here — every assertion in this file is scoped to one officer's
+ * caseload, and BPLO's row belongs to nobody.
+ */
 function assignmentHeldBy(User $officer, string $registrationNumber): ApplicationAssignment
 {
     $owner = authAs('owner@biztrack.local');
@@ -67,6 +74,8 @@ function assignmentHeldBy(User $officer, string $registrationNumber): Applicatio
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        // RA 10173 consent is the first gate submit() runs.
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -132,10 +141,17 @@ it('offers every office a role, not just the four that were hard-coded', functio
     $roles = collect(test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson('/api/v1/admin/roles')->assertOk()->json('data'));
 
-    // The four the form used to list, plus the four offices it could not staff.
+    /*
+     * The four the form used to list, plus the offices it could not staff.
+     *
+     * `market_admin` was in this list until the Market Clearance, the CMO Market
+     * Office and its one account were removed [client, 2026-09-06]. Asserting it
+     * here would now be asserting that a deleted office is still staffable.
+     */
     expect($roles->pluck('name'))
         ->toContain('bplo_staff', 'sanitary_officer', 'fire_inspector', 'admin')
-        ->toContain('zoning_officer', 'obo_staff', 'cenro_officer', 'market_admin')
+        ->toContain('zoning_officer', 'obo_staff', 'cenro_officer')
+        ->not->toContain('market_admin')
         // Owners register themselves; minting one here makes an account with no
         // consent record and no business.
         ->not->toContain('business_owner');
@@ -389,7 +405,7 @@ it('tells the form the super-admin seat is taken so it can grey it out', functio
 
     // Every office role stays available however many hold it. This is the half
     // that must NOT be confused with the singleton rule.
-    foreach (['sanitary_officer', 'fire_inspector', 'zoning_officer', 'obo_staff', 'cenro_officer', 'market_admin', 'bplo_staff'] as $office) {
+    foreach (['sanitary_officer', 'fire_inspector', 'zoning_officer', 'obo_staff', 'cenro_officer', 'bplo_staff'] as $office) {
         expect($roles->firstWhere('name', $office)['available'])->toBeTrue("{$office} should stay assignable");
     }
 });

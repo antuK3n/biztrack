@@ -48,7 +48,14 @@ function extraOfficer(string $code, string $role, string $email, string $first =
     return User::where('email', $email)->firstOrFail();
 }
 
-/** A submitted filing routed to the named offices. */
+/**
+ * A submitted filing routed to the named offices.
+ *
+ * The rows are written directly. submit() routes BPLO alone, and the five
+ * clearance offices arrive one at a time as the applicant opens each permit
+ * after paying — driving all of that would make these tests about the workflow
+ * rather than about an office holding more than one account.
+ */
 function filingRoutedTo(array $codes, string $registrationNumber): int
 {
     $owner = authAs('owner@biztrack.local');
@@ -64,6 +71,8 @@ function filingRoutedTo(array $codes, string $registrationNumber): int
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        // RA 10173 consent is the first gate submit() runs.
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
