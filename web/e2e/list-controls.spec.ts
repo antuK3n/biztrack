@@ -416,6 +416,35 @@ test.describe('Other Requirements list controls', () => {
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toContainText('oldest first')
   })
 
+  test('a dialog waiting on an answer keeps its Confirm reachable', async ({ page }) => {
+    /*
+     * AGENTS.md §6.2, and ProtoModal's own comment argued for it twenty lines
+     * above the line breaking it: a `disabled` button leaves the tab order, so
+     * a screen-reader user never reaches the one control that would tell them
+     * the dialog is waiting on something, and a sighted user gets a greyed
+     * button with no stated reason (WCAG 3.3.1/3.3.3).
+     *
+     * This is the confirm button of EVERY dialog in the app — Edit Profile,
+     * Change Status, Deactivate, Reassign, Add officer — so it was the same
+     * dead end on each. Asserted here on the requirement reason dialog, which
+     * is one instance of it; the fix is in the shared component.
+     */
+    await page.locator('tbody tr', { hasText: 'Water potability test' }).getByRole('button').click()
+    await page.getByRole('button', { name: 'Mark Rejected' }).click()
+
+    const confirm = page.getByRole('button', { name: 'Save status' })
+    await expect(confirm).toBeVisible()
+
+    // Announced as unavailable, and still in the tab order to say why.
+    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+    expect(await confirm.evaluate((el) => el.hasAttribute('disabled'))).toBe(false)
+    expect(await confirm.evaluate((el) => (el as HTMLElement).tabIndex)).toBe(0)
+
+    // Answer the question and it becomes pressable.
+    await page.locator('div.fixed.inset-0 textarea').fill('The scan is cut off at the seal.')
+    await expect(confirm).not.toHaveAttribute('aria-disabled', 'true')
+  })
+
   test('an empty filter blames the filter, not the register', async ({ page }) => {
     await page.getByRole('button', { name: /^Filter/ }).click()
     await page.getByRole('option', { name: 'Needs Resubmission' }).click()

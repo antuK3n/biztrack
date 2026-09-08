@@ -57,7 +57,31 @@ async function saveSession(
    */
   setup.setTimeout(150_000)
 
-  await page.goto('/login')
+  /*
+   * Wait for the app to stop reloading itself before running anything in it.
+   *
+   * The FIRST navigation against a freshly raised stack reliably killed this
+   * step with "Execution context was destroyed, most likely because of a
+   * navigation" — and with setup dead, every test depending on it is skipped,
+   * so a whole run reported nothing about the product. It is not a product
+   * fault and not a race in the app: Vite's dependency optimiser discovers the
+   * app's imports on that first load and then forces a full reload, which
+   * throws away the execution context whatever is running in it.
+   *
+   * `domcontentloaded` plus a real element means the reload has already
+   * happened by the time the fetch below runs. The catch is the belt: if it
+   * fires anyway, going round once more costs a second and the alternative is
+   * an entire suite lost to a dev-server behaviour.
+   */
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.goto('/login', { waitUntil: 'domcontentloaded' })
+      await page.getByRole('button', { name: /sign in|log in/i }).first().waitFor({ timeout: 30_000 })
+      break
+    } catch (error) {
+      if (attempt >= 2) throw error
+    }
+  }
 
   /*
    * Waits out a 429 rather than failing on it.
