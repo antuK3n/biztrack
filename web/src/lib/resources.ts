@@ -465,12 +465,27 @@ export const documents = {
 
 /* ── Messaging (per-application thread; v2) ───────────────────────────── */
 
+export interface ThreadFilters extends PageParams {
+  /**
+   * The inbox's Filter, answered in SQL.
+   *
+   * Server-side because the inbox is paged at fifty: narrowing the downloaded
+   * page would tell a clerk with ninety conversations that nothing is unread
+   * while the unread ones sit on page two.
+   *
+   *  unread   — somebody else wrote and this reader has not opened it
+   *  awaiting — the reader's own turn was the last one
+   *  quiet    — nothing has been said on the filing at all
+   */
+  narrow?: 'unread' | 'awaiting' | 'quiet'
+}
+
 export const messages = {
   /** Inbox for the Messages page: one row per conversation, newest first. Paged. */
-  threads: (params: PageParams = {}) =>
+  threads: (params: ThreadFilters = {}) =>
     unwrap<MessageThreadSummary[]>(api.get('/message-threads', { params })),
   /** Same inbox, keeping the page meta. */
-  threadsPage: (params: PageParams = {}) =>
+  threadsPage: (params: ThreadFilters = {}) =>
     unwrapPaged<MessageThreadSummary>(api.get('/message-threads', { params })),
   /**
    * One conversation, oldest message first, with its meta.
@@ -568,6 +583,11 @@ export const messages = {
 
 export interface RequestFilters extends PageParams {
   status?: string
+  /**
+   * Server-side, because the list is paged: sorting the downloaded page would
+   * order fifty rows and leave the fifty-first out of the order it belongs in.
+   */
+  sort?: 'recent' | 'oldest'
 }
 
 export const requests = {
@@ -579,9 +599,15 @@ export const requests = {
    * the statuses an office may set and the words to show for them.
    */
   page: (filters: RequestFilters = {}) =>
-    unwrapPaged<OfficerRequest, PageMeta & { office_statuses: OfficeStatusOption[] }>(
-      api.get('/requests', { params: filters }),
-    ),
+    unwrapPaged<
+      OfficerRequest,
+      PageMeta & {
+        /** What an office may set a status TO. Shorter than `statuses`. */
+        office_statuses: OfficeStatusOption[]
+        /** Every status a row can hold — what the filter offers. */
+        statuses: OfficeStatusOption[]
+      }
+    >(api.get('/requests', { params: filters })),
   /**
    * An office raises a requirement against an application.
    *

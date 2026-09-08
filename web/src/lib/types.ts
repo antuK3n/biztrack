@@ -1822,6 +1822,8 @@ export interface MessageOffice {
   name: string
   thread_id: number | null
   messages_count: number
+  /** Turns this office wrote that the reader has not opened. Never your own. */
+  unread_count: number
   last_message_at: string | null
   can_message: boolean
 }
@@ -1872,6 +1874,14 @@ export interface MessageThreadSummary {
   offices: MessageOffice[]
   /** Every readable turn on the filing: for an office, its own conversation. */
   messages_count: number
+  /**
+   * How many of those the reader has not opened, summed over `offices`.
+   *
+   * The same definition the nav badge counts by — a turn somebody else sent,
+   * still unread — so the inbox and the badge cannot disagree about what is
+   * waiting.
+   */
+  unread_count: number
   last_message: {
     body: string
     sender_name: string | null
