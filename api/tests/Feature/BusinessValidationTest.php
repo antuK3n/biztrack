@@ -4,8 +4,10 @@ use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Department;
+use App\Models\FeeAssessment;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Models\User;
 use Database\Seeders\ReferenceSeeder;
 
 /*
@@ -131,22 +133,34 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
     $appId = $this->withHeaders($owner)
         ->postJson('/api/v1/applications', [
             'business_id' => $businessId,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
         ])
         ->assertCreated()
         ->json('data.id');
 
+    /*
+     * Submitting still raises the bill; it no longer asks for the money.
+     *
+     * The subject here is that a free-text line of business is priced at all —
+     * the revenue-code catch-all — and that has not changed. What changed is the
+     * status the filing lands on: BPLO reads the form before the applicant is
+     * asked to pay (docs/application-flow-2026-09.md), so submit ends at
+     * `for_approval` and `pending_payment` is where BPLO's approval puts it. The
+     * assessment below is written at submission either way, which is what lets
+     * this case assert the fee without paying it.
+     */
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/submit")
         ->assertOk()
-        ->assertJsonPath('data.status', 'pending_payment');
+        ->assertJsonPath('data.status', 'for_approval');
 
-    $fee = \App\Models\FeeAssessment::where('application_id', $appId)->first();
+    $fee = FeeAssessment::where('application_id', $appId)->first();
     expect((float) $fee->total_amount)->toBeGreaterThan(0.0);
 });
 
-it('routes the zoning clearance to the City Planning and Development Office', function () {
+it('routes the zoning clearance to the City Planning and Development Office when the applicant opens it', function () {
     $owner = authAs('owner@biztrack.local');
     $businessId = $this->withHeaders($owner)
         ->postJson('/api/v1/businesses', businessPayload(['name' => 'Zoning Test Co']))
@@ -157,6 +171,7 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
     $appId = $this->withHeaders($owner)
         ->postJson('/api/v1/applications', [
             'business_id' => $businessId,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
             'permit_type_ids' => $typeIds,
         ])
@@ -164,7 +179,23 @@ it('routes the zoning clearance to the City Planning and Development Office', fu
         ->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
+    /*
+     * Paying opens the clearance stage; opening ZONING is what reaches CPDO.
+     *
+     * Routing moved off payment and onto the applicant's own act
+     * (`WorkflowService::startClearance`, docs/application-flow-2026-09.md), one
+     * office at a time, so that `assigned_at` measures CPDO's service time and
+     * not the days the owner spent on the other four forms. The rule this case
+     * exists for is unchanged and is the last line: ZONING belongs to CPDO and
+     * to no other office.
+     */
+    $this->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
+        ->assertSuccessful();
 
     $deptCodes = ApplicationAssignment::where('application_id', $appId)
         ->pluck('department_id')
@@ -227,11 +258,11 @@ it('stores and returns the lessor and emergency contact block', function () {
 it('accepts annual and quarterly payment modes and nothing else', function () {
     // Ordinance Sec. 2N offers exactly these two; a semi-annual option would be
     // the system inventing a payment schedule the ordinance does not grant.
-    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+    $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
     $base = [
         'business_id' => $business->id,
         'application_type' => 'new',
-        'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+        'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ];
 
     $this->withHeaders(authAs('owner@biztrack.local'))
@@ -246,13 +277,14 @@ it('accepts annual and quarterly payment modes and nothing else', function () {
 });
 
 it('defaults the payment mode to annual', function () {
-    $business = App\Models\Business::where('owner_user_id', App\Models\User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
+    $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/applications', [
             'business_id' => $business->id,
+            'data_privacy_consent' => true,
             'application_type' => 'new',
-            'permit_type_ids' => [App\Models\PermitType::where('code', 'BUSINESS')->value('id')],
+            'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
         ])
         ->assertCreated()
         ->assertJsonPath('data.payment_mode', 'annual');

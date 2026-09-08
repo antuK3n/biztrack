@@ -24,10 +24,20 @@ use App\Models\OfficerRequest;
  * screen falling back to `created_by.department` — is kept and still asserted.
  */
 
+/**
+ * Any filing an office could still be asking questions about.
+ *
+ * `submitted` and `under_review` left `ApplicationStatus` with the two-machine
+ * split (docs/application-flow-2026-09.md), so this list named three states the
+ * register can no longer hold and one it can. The replacements are the same
+ * idea in the new vocabulary: a filing that has been read, billed, paid or sent
+ * back, but not yet decided.
+ */
 function openApplicationForRequest(): Application
 {
-    return Application::whereIn('status', ['submitted', 'under_review', 'returned', 'pending_payment'])
-        ->firstOrFail();
+    return Application::whereIn('status', [
+        'for_approval', 'pending_payment', 'awaiting_other_permits', 'for_final_approval', 'returned',
+    ])->firstOrFail();
 }
 
 it('defaults the office to the requesting officer own department', function () {

@@ -46,6 +46,7 @@ function uploadedRequirement(): array
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -103,6 +104,7 @@ it('returns the uploaded bytes, typed and dispositioned as a file', function () 
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -196,7 +198,12 @@ it('keeps message attachments behind the same participant check', function () {
     ['application_id' => $appId] = uploadedRequirement();
 
     $owner = authAs('owner@biztrack.local');
-    Application::findOrFail($appId)->update(['status' => 'submitted']);
+    // `for_approval`, because `submitted` left ApplicationStatus with the
+    // two-machine split — the client's flow moves a submitted form straight to
+    // For Approval, so the state had a name and no duration. All this line is
+    // for is getting the filing off the draft so a message can be posted on it;
+    // the participant check under test does not read the status at all.
+    Application::findOrFail($appId)->update(['status' => 'for_approval']);
 
     $attachmentId = test()->withHeaders($owner)->post("/api/v1/applications/{$appId}/messages", [
         'body' => 'Here is the signed copy.',
