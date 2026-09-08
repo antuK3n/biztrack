@@ -43,7 +43,6 @@ class DemoSeeder extends Seeder
         $bfp = Department::where('code', 'BFP')->first();
         $obo = Department::where('code', 'OBO')->first();
         $cenro = Department::where('code', 'CENRO')->first();
-        $market = Department::where('code', 'CMO-MARKET')->first();
         $cpdo = Department::where('code', 'CPDO')->first();
 
         // --- Demo accounts (one per role) -----------------------------------
@@ -53,7 +52,6 @@ class DemoSeeder extends Seeder
         $this->user('fire@biztrack.local', 'Ferdie', 'Lim', 'M', $password, ['fire_inspector'], $bfp);
         $this->user('obo@biztrack.local', 'Ana', 'Villar', 'F', $password, ['obo_staff'], $obo);
         $this->user('cenro@biztrack.local', 'Ben', 'Cruz', 'M', $password, ['cenro_officer'], $cenro);
-        $this->user('market@biztrack.local', 'Dina', 'Flores', 'F', $password, ['market_admin'], $market);
         // CPDO reviews the zoning / locational clearance queue (tester item 53).
         $this->user('zoning@biztrack.local', 'Elena', 'Bautista', 'F', $password, ['zoning_officer'], $cpdo);
         $this->user('admin@biztrack.local', 'Ramon', 'Santos', 'M', $password, ['admin']);
@@ -107,9 +105,23 @@ class DemoSeeder extends Seeder
          */
         $app1 = $this->application($b1, $owner, ApplicationType::Renewal, ApplicationStatus::Approved, [$businessPt], now()->subDays(20));
         $app1->update(['prior_permit_declared_none' => true]);
+        /*
+         * The chain walks the 6 September flow, the same one $app2 below is
+         * written against. It used to read draft → submitted → pending_payment
+         * → under_review → approved, which names three statuses
+         * `ApplicationStatus` no longer has: `submitted` and `under_review` were
+         * retired with the two-machine split, and a history row is the one place
+         * a dead status survives a refactor unnoticed, because nothing casts it
+         * on the way in. Anything reading this back — the timeline, the
+         * processing-time analytics — was being taught a flow the system cannot
+         * produce.
+         */
         $this->history($app1, [
-            [null, 'draft', $owner], ['draft', 'submitted', $owner], ['submitted', 'pending_payment', null],
-            ['pending_payment', 'under_review', null], ['under_review', 'approved', $bploStaff],
+            [null, 'draft', $owner], ['draft', 'for_approval', $owner],
+            ['for_approval', 'pending_payment', $bploStaff],
+            ['pending_payment', 'awaiting_other_permits', null],
+            ['awaiting_other_permits', 'for_final_approval', null],
+            ['for_final_approval', 'approved', $bploStaff],
         ], now()->subDays(20));
         $this->paidFee($app1, 1150);
         $permit1 = Permit::create([
@@ -138,10 +150,10 @@ class DemoSeeder extends Seeder
             'gender' => 'M', 'is_primary' => true,
         ]);
 
-        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::UnderReview, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
+        $app2 = $this->application($b2, $owner2, ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, [$businessPt, $sanitaryPt, $fsicPt], now()->subDays(3));
         $this->history($app2, [
-            [null, 'draft', $owner2], ['draft', 'submitted', $owner2], ['submitted', 'pending_payment', null],
-            ['pending_payment', 'under_review', null],
+            [null, 'draft', $owner2], ['draft', 'for_approval', $owner2], ['for_approval', 'pending_payment', null],
+            ['pending_payment', 'awaiting_other_permits', null],
         ], now()->subDays(3));
         $this->paidFee($app2, 2610);
         foreach ([[$bplo, AssignmentStatus::Completed], [$cho, AssignmentStatus::InProgress], [$bfp, AssignmentStatus::Pending]] as [$dept, $st]) {

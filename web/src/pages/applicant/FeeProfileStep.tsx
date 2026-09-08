@@ -140,6 +140,48 @@ const CATEGORY_LABEL_BY_SLUG = new Map(CATEGORIES.map((c) => [c.slug, c.label]))
  * the reference list is non-ASCII, so this only ever affects free text, where
  * preserving what was typed matters more than looking like the seeded slugs.
  */
+/**
+ * The declared categories whose fees are priced PER STALL.
+ *
+ * Every one of them is a `conditions.business_category` value on a seeded
+ * FeeRule whose `basis` is `stall_count`: the mayor's-permit market and
+ * fish-broker-market brackets, and garbage Schedule J's two public-market rows
+ * and its private-market row. Five rules, all of them gated on the BUSINESS
+ * permit.
+ *
+ * ── Why this moved here on 6 September 2026 ────────────────────────────────
+ *
+ * The stall count used to be asked whenever the applicant had selected the
+ * MARKET permit type. That was always the wrong question and the removal of the
+ * Market Clearance made it an impossible one: these five rules price a business
+ * permit for someone who OPERATES a market, and operating a market is not the
+ * same as holding a Market Clearance for a stall — the clearance was for the
+ * tenant, these fees are for the landlord. Gating on the clearance meant a
+ * market operator who never touched that card was billed a flat business permit
+ * fee instead of one per stall, and a stall holder who did touch it was asked
+ * how many stalls they ran.
+ *
+ * Asking off the declared category fixes both, and ties the question to the
+ * only thing that actually consumes the answer. If no rule with
+ * `basis: stall_count` survives a future revenue-code revision, this list and
+ * the field it gates should go with them.
+ */
+export const STALL_PRICED_CATEGORIES = [
+  'public_market_100_plus_stalls',
+  'public_market_under_100_stalls',
+  'private_market',
+  'fish_broker_market',
+]
+
+/** Does any line of business declare a category that is priced per stall? */
+export function needsStallCount(
+  categories: Record<number, { category: string }>,
+): boolean {
+  return Object.values(categories).some((c) =>
+    STALL_PRICED_CATEGORIES.includes(normalizeCategory(c.category ?? '')),
+  )
+}
+
 export function normalizeCategory(text: string): string {
   return text
     .toLowerCase()
@@ -347,7 +389,6 @@ export function feeProfileIssues(
     if (issue) issues.push(issue)
   }
   const isRenewal = opts.applicationType === 'renewal'
-  const isNew = opts.applicationType === 'new'
   const has = (code: string) => opts.permitCodes.includes(code)
 
   if (!draft.business_structure) {
@@ -388,20 +429,9 @@ export function feeProfileIssues(
         }),
       )
     }
-    if (isNew) {
-      push(
-        numericIssue({
-          key: `line:${line.id}:capitalization`,
-          label: `Capitalization for ${line.title}`,
-          value: cat.capitalization,
-          required: true,
-          blankMessage: 'Enter the capital you are putting into this line, in pesos.',
-          positive: true,
-          max: MAX_PESOS,
-          maxMessage: 'That is higher than this form accepts. Check the amount in pesos.',
-        }),
-      )
-    }
+    // A per-line capitalization check was here and went with the per-line
+    // field. Capital Investment is one figure now, asked on Business Operation
+    // and checked there — see `capitalInvestmentIssue` below.
   }
 
   if (has('BUSINESS')) {
@@ -571,14 +601,20 @@ export function feeProfileIssues(
     }
   }
 
-  if (has('MARKET')) {
+  /*
+   * Asked off the declared category, not off a permit type — see
+   * STALL_PRICED_CATEGORIES. Required when it is asked at all, because a
+   * category that is priced per stall cannot be priced without the count: a
+   * blank would silently bill a market operator one flat business-permit fee.
+   */
+  if (needsStallCount(draft.categories)) {
     push(
       numericIssue({
         key: 'stall_count',
         label: 'Number of Stalls',
         value: draft.stall_count,
         required: true,
-        blankMessage: 'Enter how many stalls you are applying for.',
+        blankMessage: 'Enter how many stalls are in the market.',
         integer: true,
         positive: true,
         max: MAX_COUNT,
@@ -595,14 +631,33 @@ export function buildFeeProfile(
   draft: FeeProfileDraft,
   opts: {
     applicationType: ApplicationType
-    /** Selected permit-type codes (BUSINESS, OCCUPANCY, MARKET, …). */
+    /** Selected permit-type codes (BUSINESS, OCCUPANCY, ZONING, …). */
     permitCodes: string[]
     /** psic_code_id of each declared line of business, in order. */
     lineIds: number[]
+    /**
+     * BPLO item B7, asked once on Business Operation — the whole business's
+     * capital investment, as typed.
+     *
+     * It used to be asked PER LINE on this step, and that was our invention:
+     * the paper has one box. Two figures for one quantity meant an applicant
+     * could enter ₱150k and ₱100k against their lines and ₱250k as the total,
+     * with nothing to stop the two disagreeing.
+     *
+     * `FeeCalculator` needed no change to accept it. Both the `min_capitalization`
+     * condition and the `capitalization` basis already read
+     * `$line['capitalization'] ?? $profile['capitalization']` — a profile-level
+     * figure was always a supported path, we simply never sent one.
+     *
+     * What DOES change is the arithmetic on a multi-line filing: every line is
+     * now priced against the whole capital rather than its own share, so a rule
+     * graduated by capitalization can land in a higher bracket. That follows the
+     * paper, which asks the city to assess off one total.
+     */
+    capitalInvestment?: string
   },
 ): FeeProfile {
   const isRenewal = opts.applicationType === 'renewal'
-  const isNew = opts.applicationType === 'new'
   const has = (code: string) => opts.permitCodes.includes(code)
 
   const lines: FeeProfileLine[] = []
@@ -623,7 +678,8 @@ export function buildFeeProfile(
        */
       category: normalizeCategory(cat.category),
       ...(isRenewal ? { gross_sales: toNumber(cat.gross_sales) } : {}),
-      ...(isNew ? { capitalization: toNumber(cat.capitalization) } : {}),
+      // No per-line capitalization: it is one figure at profile level now, and
+      // `FeeCalculator` falls back to it for every line.
     })
   }
 
@@ -632,6 +688,11 @@ export function buildFeeProfile(
 
   return {
     ...(lines.length > 0 ? { lines } : {}),
+    // BPLO item B7, at profile level — one figure for the filing, which every
+    // line falls back to. See the note on `capitalInvestment` above.
+    ...(toNumber(opts.capitalInvestment ?? '') === undefined
+      ? {}
+      : { capitalization: toNumber(opts.capitalInvestment ?? '') }),
     ...(draft.business_structure
       ? { business_structure: draft.business_structure as FeeProfile['business_structure'] }
       : {}),
@@ -655,7 +716,9 @@ export function buildFeeProfile(
             : { construction_cost: toNumber(draft.construction_cost) }),
         }
       : {}),
-    ...(has('MARKET') ? { stall_count: toInt(draft.stall_count) } : {}),
+    // Sent whenever the declared category is priced per stall, whatever permits
+    // the filing carries. See STALL_PRICED_CATEGORIES.
+    ...(needsStallCount(draft.categories) ? { stall_count: toInt(draft.stall_count) } : {}),
     flags,
   }
 }
@@ -704,6 +767,68 @@ export function feeProfileToDraft(
 }
 
 /** Labels for the wizard's "Still needed on this part" line. */
+/**
+ * The issue keys belonging to the Business Operation step (paper section B).
+ *
+ * The single source of the split. `feeProfileIssues` produces every issue for
+ * the whole draft, and the draft is now written by two steps — so each step has
+ * to be told which of them are its own, or Business Operation blocks on a
+ * Revenue Code category the applicant has not been shown yet.
+ *
+ * Only these three carry validation. The male/female split and the delivery-unit
+ * counts are optional on the paper and optional here, so they raise nothing.
+ */
+const OPERATION_ISSUE_KEYS = new Set(['floor_area_sqm', 'employees', 'employees_in_lgu'])
+
+/**
+ * BPLO item B7 — the one capital-investment figure, checked as the per-line
+ * capitalization used to be.
+ *
+ * Exported rather than folded into `feeProfileIssues` because the value does not
+ * live in `FeeProfileDraft`: it is `businesses.capital_investment`, held in the
+ * wizard's own form state. Same rules as the field it replaced — required on a
+ * NEW filing, positive, and bounded by the same ceiling — so the merge did not
+ * quietly relax what a new business has to declare.
+ *
+ * A renewal is not asked: its business tax is assessed on last year's gross
+ * sales, not on capital, which is why the old per-line field was `isNew` too.
+ */
+export function capitalInvestmentMissing(
+  value: string,
+  applicationType: ApplicationType,
+): string[] {
+  if (applicationType !== 'new') return []
+
+  const issue = numericIssue({
+    key: 'capital_investment',
+    label: 'Capital Investment',
+    /*
+     * Coerced, and not defensively — this took the whole wizard down.
+     *
+     * `businesses.capital_investment` has no cast on the model, so the API
+     * sends it as a JSON NUMBER. Hydration wrote it straight into form state
+     * with `?? ''`, which does nothing to a number, and the first thing this
+     * validator does is call `.trim()` on it: "rule.value.trim is not a
+     * function", thrown during render, and with no error boundary in the app
+     * the entire page went blank. It only happened on a REOPENED draft of a
+     * business that had a figure saved, which is why it survived a typecheck
+     * and a full test run.
+     *
+     * The real fix is at the boundary — hydration formats it as the text field
+     * expects — and this stays because a validator that a caller can crash is
+     * the wrong shape regardless of who calls it correctly today.
+     */
+    value: String(value ?? ''),
+    required: true,
+    blankMessage: 'Enter the capital you are putting into this business, in pesos.',
+    positive: true,
+    max: MAX_PESOS,
+    maxMessage: 'That is higher than this form accepts. Check the amount in pesos.',
+  })
+
+  return issue ? [issue.label] : []
+}
+
 export function feeProfileMissing(
   draft: FeeProfileDraft,
   opts: {
@@ -711,8 +836,21 @@ export function feeProfileMissing(
     permitCodes: string[]
     lines: { id: number; title: string }[]
   },
+  /**
+   * Which step is asking. Omitted, it answers for the whole draft, which is
+   * what Review needs — a filing is not submittable while anything is missing,
+   * wherever it was meant to be typed.
+   */
+  scope?: 'operation' | 'fees',
 ): string[] {
-  return [...new Set(feeProfileIssues(draft, opts).map((issue) => issue.label))]
+  const issues = feeProfileIssues(draft, opts).filter((issue) => {
+    if (!scope) return true
+    const mine = OPERATION_ISSUE_KEYS.has(issue.key)
+
+    return scope === 'operation' ? mine : !mine
+  })
+
+  return [...new Set(issues.map((issue) => issue.label))]
 }
 
 /* ── Small local pieces (match the wizard's form-sheet language) ────────── */
@@ -841,6 +979,7 @@ export function FeeProfileStep({
   onChange,
   paymentMode,
   onPaymentModeChange,
+  scope = 'fees',
 }: {
   applicationType: ApplicationType
   /**
@@ -857,12 +996,32 @@ export function FeeProfileStep({
   onChange: (next: FeeProfileDraft) => void
   paymentMode: 'annual' | 'quarterly'
   onPaymentModeChange: (next: 'annual' | 'quarterly') => void
+  /**
+   * Which half of this step to draw.
+   *
+   * The fields here were one wizard step, and the paper splits them in two.
+   * MCG-BPLO-FO-001 v2.0 section B "Business Operation" asks for the business
+   * area (B1), the employee counts and their split (B2), how many of them live
+   * in the LGU (B3) and the number of delivery units (B4). The rest of what
+   * this component collects — the Revenue Code category, gross sales, mode of
+   * payment, occupancy group, storeys — appears NOWHERE on that form. It is
+   * ours, for the fee engine and for other offices' sheets.
+   *
+   * So the component is mounted twice: `operation` on the Business Operation
+   * step, drawing section B's four figures, and `fees` on the step after
+   * Documentary Requirements, drawing everything else.
+   *
+   * One component rather than two, because all of it writes the same
+   * `FeeProfileDraft` and shares `NumberField`, the touched-state tracking and
+   * `errorFor`. Splitting the file would have duplicated those three, and the
+   * duplicate would drift the first time a validation rule changed.
+   */
+  scope?: 'operation' | 'fees'
 }) {
   const isRenewal = applicationType === 'renewal'
-  const isNew = applicationType === 'new'
   const hasBusiness = permitCodes.includes('BUSINESS')
   const hasOccupancy = permitCodes.includes('OCCUPANCY')
-  const hasMarket = permitCodes.includes('MARKET')
+  const showStallCount = needsStallCount(value.categories)
   /*
    * The structure carried over from Business Information, matched to its
    * label. Unrecognised values fall through to null and the question is asked
@@ -923,16 +1082,28 @@ export function FeeProfileStep({
     )
   }
 
+  const onOperation = scope === 'operation'
+  const onFees = scope === 'fees'
+
+  /*
+   * Section letters only make sense on the fee half. The operation half is
+   * drawn INSIDE the wizard's Section B, which puts up its own marker, so a
+   * second lettered heading there would number a subsection as though it were a
+   * section of the paper.
+   */
   let sectionLetter = 'C'.charCodeAt(0) // sections continue after C · Documents
   const nextLetter = () => String.fromCharCode(++sectionLetter)
 
   return (
     <div className="space-y-8">
-      <p className="-mt-2 text-xs text-ink-secondary">
-        Your Tax Order of Payment is computed from these, under the Revenue Code (Ord. A10-2016).
-      </p>
+      {onFees && (
+        <p className="-mt-2 text-xs text-ink-secondary">
+          Your Tax Order of Payment is computed from these, under the Revenue Code (Ord. A10-2016).
+        </p>
+      )}
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
+      {onFees && (
       <section>
         <SectionMarker letter={nextLetter()} label="Business Structure & Tax Classification" />
         <div className="mt-4 space-y-5">
@@ -1130,18 +1301,15 @@ export function FeeProfileStep({
                           locked={value.no_gross_sales}
                         />
                       )}
-                      {isNew && (
-                        <NumberField
-                          label="Capitalization (₱)"
-                          required
-                          kind="money"
-                          value={cat.capitalization}
-                          onChange={(next) => setCategory(line.id, { capitalization: next })}
-                          onBlur={() => touch(`line:${line.id}:capitalization`)}
-                          error={errorFor(`line:${line.id}:capitalization`, cat.capitalization)}
-                          placeholder="0.00"
-                        />
-                      )}
+                      {/*
+                        A per-line "Capitalization (₱)" was here, asked of every
+                        new filing. It is one field now — Capital Investment, on
+                        Business Operation — because the paper has one box and
+                        two boxes for one quantity could disagree. `capitalization`
+                        stays on `FeeCategoryDraft` so a draft saved with per-line
+                        figures still loads; nothing writes it any more, and the
+                        hydrate sums the old values into the single field.
+                      */}
                     </div>
                   </div>
                 )
@@ -1179,9 +1347,10 @@ export function FeeProfileStep({
           )}
         </div>
       </section>
+      )}
 
       {/* ── BUSINESS permit: how the business tax is settled ─────────────── */}
-      {hasBusiness && (
+      {onFees && hasBusiness && (
         <section>
           <SectionMarker letter={nextLetter()} label="How You Want to Pay" />
           <div>
@@ -1224,13 +1393,27 @@ export function FeeProfileStep({
         </section>
       )}
 
-      {/* ── BUSINESS permit: premises & operations ───────────────────────── */}
-      {hasBusiness && (
+      {/*
+        ── Section B's four figures (B1-B4) ──────────────────────────────────
+
+        Drawn on the wizard's Business Operation step, because that is where the
+        paper puts them: B1 Business Area, B2 Total No. of Employees with the
+        male/female split, B3 No. of Employees Residing within LGU, B4 No. of
+        Delivery Units.
+
+        They are not repeated on the fee step. They feed the fee engine exactly
+        as before — `buildFeeProfile` reads one `FeeProfileDraft` whichever step
+        wrote it — so moving where they are ASKED changed no calculation.
+
+        Storeys and the business flags stayed behind deliberately: neither is
+        anywhere on MCG-BPLO-FO-001, and putting them under a heading that says
+        "Business Operation" would claim the paper asks for them.
+      */}
+      {onOperation && hasBusiness && (
         <section>
-          <SectionMarker letter={nextLetter()} label="Premises & Operations" />
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
-              label="Floor Area (sqm)"
+              label="Business Area (sqm)"
               required
               kind="money"
               value={value.floor_area_sqm}
@@ -1238,22 +1421,6 @@ export function FeeProfileStep({
               onBlur={() => touch('floor_area_sqm')}
               error={errorFor('floor_area_sqm', value.floor_area_sqm)}
               placeholder="e.g. 45"
-            />
-            {/*
-              Beside Floor Area because it is the same kind of fact and the same
-              four offices want both: BPLO, the Fire Safety (FSIC) sheet, the
-              OBO occupancy sheet and the CPDD locational sheet each ask how many
-              storeys the building has, and until now not one screen asked the
-              applicant. The officer's review sheet has been printing a
-              permanently blank "Storeys" row all along.
-            */}
-            <NumberField
-              label="Number of Storeys"
-              kind="count"
-              value={value.storeys}
-              onChange={(next) => set('storeys', next)}
-              onBlur={() => touch('storeys')}
-              error={errorFor('storeys', value.storeys)}
             />
             <NumberField
               label="Number of Employees"
@@ -1323,6 +1490,30 @@ export function FeeProfileStep({
               placeholder="0"
             />
           </div>
+        </section>
+      )}
+
+      {/*
+        ── What is NOT on the paper ──────────────────────────────────────────
+
+        Storeys and the business flags. Four office sheets want the storey count
+        (BPLO, the FSIC sheet, the OBO occupancy sheet and the CPDD locational
+        sheet) and the flags drive Revenue Code rules — but neither appears on
+        MCG-BPLO-FO-001, so neither belongs under the Business Operation heading.
+      */}
+      {onFees && hasBusiness && (
+        <section>
+          <SectionMarker letter={nextLetter()} label="Building & Premises" />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <NumberField
+              label="Number of Storeys"
+              kind="count"
+              value={value.storeys}
+              onChange={(next) => set('storeys', next)}
+              onBlur={() => touch('storeys')}
+              error={errorFor('storeys', value.storeys)}
+            />
+          </div>
           <div className="mt-5">
             <FieldLabel>Which of these apply to your business?</FieldLabel>
             <div className="grid gap-2.5 sm:grid-cols-2">
@@ -1340,7 +1531,7 @@ export function FeeProfileStep({
       )}
 
       {/* ── OCCUPANCY permit ─────────────────────────────────────────────── */}
-      {hasOccupancy && (
+      {onFees && hasOccupancy && (
         <section>
           <SectionMarker letter={nextLetter()} label="Occupancy Details" />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -1397,8 +1588,16 @@ export function FeeProfileStep({
         </section>
       )}
 
-      {/* ── MARKET clearance ─────────────────────────────────────────────── */}
-      {hasMarket && (
+      {/*
+        ── Stalls, for a business that OPERATES a market ──────────────────────
+
+        Drawn off the declared Revenue Code category, not off a permit type.
+        This was gated on the MARKET permit until 6 September 2026, which asked
+        the stall TENANT how many stalls they ran and never asked the market
+        LANDLORD at all — and it is the landlord whose business permit and
+        garbage fee are priced per stall. See STALL_PRICED_CATEGORIES.
+      */}
+      {onFees && showStallCount && (
         <section>
           <SectionMarker letter={nextLetter()} label="Market Stall Details" />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">

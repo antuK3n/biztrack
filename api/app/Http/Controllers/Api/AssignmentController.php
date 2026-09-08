@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\AssignmentStatus;
+use App\Enums\ClearanceStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\AssignmentResource;
@@ -52,8 +53,25 @@ class AssignmentController extends Controller
             // ?status=pending,in_progress,returned. It was a single value until
             // checklist item 111 needed "everything except completed".
             'status' => ['sometimes'],
-            // Repeatable or comma-separated: ?application_status=submitted,under_review
+            // Repeatable or comma-separated: ?application_status=for_approval,returned
             'application_status' => ['sometimes'],
+            /*
+             * Repeatable or comma-separated: ?clearance_status=for_inspection
+             *
+             * The office's OWN permit on this filing, which is the second state
+             * machine and the only one that answers "what is waiting on me".
+             *
+             * The assignment's own status stopped being able to. Under the flow
+             * verified on 6 September 2026 an office's assignment is marked
+             * `completed` by `approveClearance()` — at the moment the paperwork
+             * is accepted and the permit moves to `for_inspection`, which is
+             * when the office's real work, the site visit, has not happened yet.
+             * So `status=completed` covers both "inspecting" and "finished", and
+             * `status=pending` no longer covers everything outstanding. A queue
+             * built on it alone puts a booked inspection in the same bucket as an
+             * issued clearance.
+             */
+            'clearance_status' => ['sometimes'],
             /*
              * Free-text search over the tracking ID and the business name.
              *
@@ -71,6 +89,14 @@ class AssignmentController extends Controller
             'department', 'officer',
             'application:id,tracking_id,business_id,application_type,status',
             'application.business:id,name',
+            /*
+             * For `AssignmentResource::clearanceRow()`, which reports the state
+             * of this office's own permit. It reads the loaded collection and
+             * returns null rather than lazy-loading, so leaving this out would
+             * quietly blank the status chip on every row of the queue instead of
+             * erroring — hence naming the columns it needs here.
+             */
+            'application.permitTypes:id,code,name,issuing_department_id,requires_inspection',
         ]);
 
         $this->scopeToDepartment($request, $query);
@@ -83,6 +109,38 @@ class AssignmentController extends Controller
         $applicationStatuses = $this->applicationStatuses($request);
         if ($applicationStatuses !== []) {
             $query->whereHas('application', fn ($a) => $a->whereIn('status', $applicationStatuses));
+        }
+
+        /*
+         * Narrow to the state of THIS OFFICE'S permit on the filing.
+         *
+         * The join condition is the whole point: `whereColumn` ties the permit
+         * type's issuing office to the assignment's own department, so an office
+         * is matched on its own clearance and never on one beside it. Without
+         * it, a filing whose FSIC is out for inspection would surface in the
+         * City Health Office's inspection tab — the office boundary
+         * (`ApplicationVisibility`) restated in a query it does not run.
+         *
+         * BPLO matches it like any other office — it issues the Mayor's /
+         * Business Permit — but its row is not useful to filter on, and the
+         * queue does not. That permit is the filing's OUTCOME rather than one of
+         * the five clearances, and its pivot moves accordingly:
+         * `approveMainForm()` puts it at `for_approval` and `approveOverall()`
+         * takes it to `approved`, so it reads `for_approval` for the entire
+         * middle of the flow and answers "is BPLO waiting?" with a yes that is
+         * true from Pending Payment to Final Approval. BPLO's two acts are keyed
+         * to the APPLICATION's status, which distinguishes them; this does not.
+         *
+         * The one thing that follows for free: `for_inspection` never appears on
+         * that pivot, so filtering the inspection tab on it excludes BPLO
+         * without a special case.
+         */
+        $clearanceStatuses = $this->clearanceStatuses($request);
+        if ($clearanceStatuses !== []) {
+            $query->whereHas('application.permitTypes', function ($q) use ($clearanceStatuses) {
+                $q->whereColumn('permit_types.issuing_department_id', 'application_assignments.department_id')
+                    ->whereIn('application_permit_types.status', $clearanceStatuses);
+            });
         }
 
         /*
@@ -170,6 +228,19 @@ class AssignmentController extends Controller
         return $this->statusList(
             $request->query('status'),
             array_map(fn (AssignmentStatus $s) => $s->value, AssignmentStatus::cases()),
+        );
+    }
+
+    /**
+     * The `clearance_status` filter — this office's own permit on the filing.
+     *
+     * @return list<string>
+     */
+    private function clearanceStatuses(Request $request): array
+    {
+        return $this->statusList(
+            $request->query('clearance_status'),
+            array_map(fn (ClearanceStatus $s) => $s->value, ClearanceStatus::cases()),
         );
     }
 
@@ -320,7 +391,7 @@ class AssignmentController extends Controller
         $assignment->update(['officer_user_id' => $request->user()->id]);
 
         return response()->json([
-            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business'])),
+            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
         ]);
     }
 
@@ -337,7 +408,7 @@ class AssignmentController extends Controller
         $this->workflow->returnAssignment($assignment, $data['remarks']);
 
         return response()->json([
-            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business'])),
+            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
         ]);
     }
 
@@ -469,7 +540,7 @@ class AssignmentController extends Controller
         $this->workflow->assignOfficer($assignment, $officer, $data['reason'] ?? null);
 
         return response()->json([
-            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business'])),
+            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
         ]);
     }
 

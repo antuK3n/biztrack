@@ -260,15 +260,28 @@ export interface AmendmentAnswers {
   amendment_location?: boolean
   amendment_nature?: boolean
   amendment_other?: string | null
+  /**
+   * Section A3 — From/To. The API constrains these to the four structures the
+   * paper form prints and writes both back to null whenever A1 is No, so a
+   * caller cannot leave a stale conversion on a renewal that changes nothing.
+   */
+  amendment_from_registration_type?: string | null
+  amendment_to_registration_type?: string | null
 }
 
 /**
- * Which permit a renewal or amendment is for — and, when it is for none of
+ * Which permits a renewal or amendment is for — and, when it is for none of
  * them, whether that was said or merely never asked.
+ *
+ * `prior_permit_id` is the PRIMARY: the renewal chain is keyed on it and the
+ * BPLO form prints it in its header. `prior_permit_ids` is every permit the
+ * filing covers, primary included, because a shop renews the Mayor's Permit,
+ * the Sanitary Permit and the FSIC in one visit rather than one at a time.
  */
 export interface PriorPermitChoice {
   prior_permit_id: number | null
   prior_permit: Permit | null
+  prior_permit_ids: number[]
   declared_none: boolean
 }
 
@@ -298,6 +311,12 @@ export const applications = {
     /** Set on renewal/amendment to link the prior permit (v2). */
     prior_permit_id?: number
     /**
+     * Every permit this renewal covers. Sent alongside `prior_permit_id`, not
+     * instead of it — the primary keys the renewal chain and this is the full
+     * set the applicant ticked.
+     */
+    prior_permit_ids?: number[]
+    /**
      * The applicant's ticked "this business has no BizTrack permit" — the
      * year-one escape for permits issued on paper. Sent instead of, never
      * alongside, `prior_permit_id`: submit accepts either, and a bare null is
@@ -308,6 +327,8 @@ export const applications = {
     fee_profile?: FeeProfile
     /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
     payment_mode?: 'annual' | 'quarterly'
+    /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
+    data_privacy_consent?: boolean
   } & AmendmentAnswers) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
@@ -317,6 +338,7 @@ export const applications = {
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'quarterly'
+      data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
@@ -335,11 +357,17 @@ export const applications = {
    * looked exactly like a renewal of a paper permit — which is how seven
    * renewals of nothing reached the register.
    */
-  setPriorPermit: (id: number, priorPermitId: number | null, declaredNone = false) =>
+  setPriorPermit: (
+    id: number,
+    priorPermitId: number | null,
+    declaredNone = false,
+    priorPermitIds: number[] = [],
+  ) =>
     unwrap<PriorPermitChoice>(
       api.put(`/applications/${id}/prior-permit`, {
         prior_permit_id: priorPermitId,
-        declared_none: priorPermitId === null && declaredNone,
+        prior_permit_ids: priorPermitIds,
+        declared_none: priorPermitId === null && priorPermitIds.length === 0 && declaredNone,
       }),
     ),
   reject: (id: number, reason: string) =>
@@ -702,11 +730,23 @@ export interface AssignmentFilters extends PageParams {
    */
   status?: string
   /**
-   * The *application's* status, which is what the queue tabs split on.
-   * Comma-separated, e.g. 'submitted,pending_payment,under_review,returned'.
+   * The *application's* status, which is what most of the queue tabs split on.
+   * Comma-separated, e.g. 'for_approval,returned,awaiting_other_permits'.
    * Filter here rather than in the browser — see AssignmentPageMeta.
    */
   application_status?: string
+  /**
+   * The state of THIS OFFICE'S own permit on the filing — the second machine.
+   * Comma-separated, e.g. 'for_inspection'.
+   *
+   * Needed because neither status above can answer "what is waiting on me" once
+   * a permit reaches its site visit: `approveClearance()` completes the
+   * assignment when the paperwork is accepted, and the filing stays
+   * `awaiting_other_permits` throughout. The server matches this against the
+   * permit whose issuing office IS the assignment's department, so an office is
+   * never selected on a clearance beside its own.
+   */
+  clearance_status?: string
 }
 
 export const assignments = {

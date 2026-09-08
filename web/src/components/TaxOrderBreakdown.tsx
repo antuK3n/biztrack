@@ -11,7 +11,7 @@ import type { FeeAssessment, FeeLineItem } from '../lib/types'
  */
 
 /** Canonical collecting-office order; unknown offices append after. */
-const OFFICE_ORDER = ['BPLO', 'CTO', 'CPDO', 'CHO', 'CENRO', 'OBO', 'BFP', 'CMO-MARKET']
+const OFFICE_ORDER = ['BPLO', 'CTO', 'CPDO', 'CHO', 'CENRO', 'OBO', 'BFP']
 
 const OFFICE_LABELS: Record<string, string> = {
   BPLO: 'Business Permits & Licensing Office (BPLO)',
@@ -21,7 +21,6 @@ const OFFICE_LABELS: Record<string, string> = {
   CENRO: 'City Environment & Natural Resources Office (CENRO)',
   OBO: 'Office of the Building Official (OBO)',
   BFP: 'Bureau of Fire Protection (BFP)',
-  'CMO-MARKET': 'City Market Administrator (CMO-MARKET)',
 }
 
 function amountOf(item: FeeLineItem): number {

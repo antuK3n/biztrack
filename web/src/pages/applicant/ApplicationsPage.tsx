@@ -12,7 +12,7 @@ import {
 } from '../../components/ui/Proto'
 import { businessName, formatDate } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
-import { applicationStatusMeta } from '../../lib/status'
+import { applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import type {
   Application,
@@ -21,6 +21,7 @@ import type {
   Inspection,
   InspectionResult,
   PermitType,
+  ServerClearanceStatus,
 } from '../../lib/types'
 
 /*
@@ -79,11 +80,25 @@ const SORTS: SortFilterOption[] = [
  * shared status table rather than being written again here, so the filter and
  * the chips cannot drift into two vocabularies for one status.
  */
+/*
+ * The four filing statuses this list can be narrowed to, plus the two terminal
+ * ones.
+ *
+ * `submitted`, `under_review` and `for_inspection` were here and are gone with
+ * the enum. Their replacements are not a rename: `for_approval` and
+ * `for_final_approval` are BPLO's two separate acts, and `awaiting_other_permits`
+ * is the stage that used to be described — wrongly, once five permits could be
+ * at five different points — as one filing-wide "For Inspection".
+ *
+ * `approved`/`issued` stay out (those filings have moved to Profile — see
+ * FINISHED) and so does `draft` (drafts have their own page): offering a status
+ * that can never match is a dead end that reads like a bug.
+ */
 const FILTERABLE_STATUSES: ApplicationStatus[] = [
-  'submitted',
-  'under_review',
+  'for_approval',
   'pending_payment',
-  'for_inspection',
+  'awaiting_other_permits',
+  'for_final_approval',
   'returned',
   'rejected',
   'cancelled',
@@ -153,37 +168,33 @@ interface OfficeProgress {
 }
 
 /**
- * The chip for a status where the FILING's own state is the whole answer.
+ * The chip for a status where the FILING's own state is the whole answer, and
+ * no permit of its own has anything to say yet.
  *
- * A row on this list normally reports the office behind one permit type, and
- * that only means something once the filing has been routed to offices at all.
- * Routing happens on payment — `WorkflowService::routeToDepartments` is called
- * from `onPaymentCompleted` and from nowhere else — so on `submitted` and
- * `pending_payment` there is no assignment to report and no office reading
- * anything. `cancelled` and `rejected` are the far end of the same fact: the
- * filing is decided and no office is working it either.
+ * `rejected` and `cancelled` are the far end of one fact: the filing is decided
+ * and no office is working any part of it, so a per-permit chip would report
+ * work nobody is doing.
  *
- * All four used to fall through to the default at the bottom of `permitChip`
- * and print "For Approval", which is `ApplicationStatus::UnderReview`'s own
- * label — one name answering for five states. On `pending_payment` it printed
- * once per permit type on a row whose other half is an orange "Pay Online"
- * button, so the row contradicted itself: the one person who could move that
- * filing was told, seven times, that somebody else already was.
+ * `pending_payment` earns its place for a different reason. Every permit on the
+ * filing is `not_started` there, and truthfully so — but printing "Not Started"
+ * five times beside an orange Pay Online button buries the one thing the
+ * applicant can act on. The bill is the whole of the answer at that stage.
  *
- * The labels are read from the shared status table and never written again
- * here. `api/tests/Feature/StatusLabelParityTest.php` holds that table
+ * `submitted` was in this table and the status no longer exists. `for_approval`
+ * has deliberately NOT taken its place: the Business Permit really is being read
+ * by BPLO then, which is its own permit's status, and the other five really are
+ * Not Started — the per-permit chips are exact, so nothing is gained by
+ * overriding them with one filing-wide word.
+ *
+ * The labels are read from the shared status table and never written again here.
+ * `api/tests/Feature/StatusLabelParityTest.php` holds that table
  * character-for-character against the PHP enum, so a chip taken from it cannot
  * quietly become a third vocabulary for a state that already has a name.
  *
  * Only the tones are this list's own, because the chip palette here is the
- * prototype's solid blocks rather than status.ts's tinted badges: orange for
- * `pending_payment` is the colour of the Pay Online block on the same row and
- * of status.ts's `attention`, and `submitted`/`cancelled` take gray because
- * this palette has no blue and neither state is asking the applicant for
- * anything.
+ * prototype's solid blocks rather than status.ts's tinted badges.
  */
 const APP_STATE_TONES: Partial<Record<ApplicationStatus, ChipTone>> = {
-  submitted: 'gray',
   pending_payment: 'orange',
   rejected: 'red',
   cancelled: 'gray',
@@ -195,122 +206,103 @@ function appStateChip(status: ApplicationStatus): Chip | undefined {
 }
 
 /**
- * Per-permit chip (prototype p49). Derived from the issuing department's
- * assignment and, once the filing reaches inspection, from that department's
- * own visit — in this order:
- *  - a status that is the filing's own answer (see APP_STATE_TONES) → that chip
- *  - assignment returned → red "Returned"
- *  - app for_inspection, that office's visit failed → red "Inspection Failed"
- *  - app for_inspection, that office's visit passed → tint "Inspection Passed"
- *  - app for_inspection, anything else → yellow "For Inspection"
- *  - assignment completed (or app approved/issued) → green "Approved"
- *  - otherwise → orange "For Approval"
- * Falls back to the coarse app-status chip when the full application (with
- * assignments + inspections + the permit type's department) isn't available yet.
+ * How one permit's own status is coloured.
  *
- * It no longer takes the PermitType. It used to, only to read
- * `requires_inspection` — and consulting that was the bug: see the
- * for_inspection branch below. Nothing else here varies by permit type, so the
- * parameter went with the test that needed it rather than being left as an
- * unused hint that this function still cares.
+ * `for_inspection` keeps the yellow it wore when it was a filing status, and
+ * `approved` the solid green — an applicant who learned those colours should not
+ * have to relearn them because the state moved from the application to the
+ * permit.
+ *
+ * `not_started` is gray and not orange. Orange on this screen means "somebody is
+ * waiting on you for money" (the Pay Online block) or "an office is reading
+ * this"; a permit the applicant has not begun is neither, and it is about to be
+ * given a link that says so in words.
  */
-function permitChip(appStatus: ApplicationStatus, office: OfficeProgress): Chip {
-  // First, and before any assignment is consulted: on these statuses there is
-  // either no assignment yet or none that still means anything, so a chip
-  // derived from one would be reporting work nobody is doing.
-  const own = appStateChip(appStatus)
-  if (own) return own
-
-  if (office.assignment === 'returned') return { tone: 'red', label: 'Returned' }
-
-  /*
-   * While the filing is for_inspection, a row reads "For Inspection" UNLESS
-   * that permit type's own office has already conducted its visit.
-   *
-   * ── The history this branch is carrying, because it has been wrong twice ──
-   *
-   * First: the completed-assignment test used to run before this one, and a
-   * completed assignment is EXACTLY what puts a filing into for_inspection.
-   * afterReviewProgress() fires the moment every assignment reaches Completed
-   * and only then schedules the visits, so the instant the paperwork cleared
-   * the whole list went green. Order fixed — this runs first.
-   *
-   * Second, and the reason `requires_inspection` is not consulted: it is false
-   * on the Mayor's Permit and true on all six clearances, so gating on it let
-   * BUSINESS fall through to "Approved" while the building had not been
-   * visited. The client saw the list flip to green a few seconds after it
-   * loaded and asked what the mistake was; that was it.
-   *
-   * ── What changed, and the line it does not cross ──
-   *
-   * The client then asked for the opposite half: "once a sub-permit is already
-   * approved/done for inspection for a business, but the other sub-permits are
-   * not yet approved/done, still display those that are approved/done already."
-   * Fair — an applicant whose sanitary visit passed on Monday learned nothing
-   * from a screen that read the same on Friday while CENRO dragged.
-   *
-   * So a row now reports its OWN office's visit. What it must never do is
-   * report a permit, and that distinction is the whole design of the label:
-   *
-   *   "Inspection Passed" is a fact about a VISIT — this office came, and the
-   *   premises passed. It claims nothing about issuance and cannot be read as
-   *   claiming it, because an applicant knows a visit and a certificate are
-   *   two different events.
-   *
-   *   "Approved" is a fact about a PERMIT, and no permit exists until
-   *   approveAndIssue() writes it, which recordInspection() does not call until
-   *   EVERY office's current visit has passed. A single failed fire inspection
-   *   takes the whole filing down with it. Putting "Approved" on a row whose
-   *   office happened to finish first tells an applicant they hold a permit
-   *   that does not exist and invites them to stop preparing for the other
-   *   visits — that was the original bug and it stays fixed.
-   *
-   * The tone is `tint-green`, not the solid `green` that "Approved" wears three
-   * lines below. Two states that mean different things must not be one colour
-   * on one list. Colour is not carrying it alone either: the labels differ, and
-   * the note under the accordion spells the difference out in a sentence.
-   *
-   * A failed visit is shown too, and deliberately. Surfacing only the good
-   * outcomes would be a screen that is selectively honest, and a failed
-   * inspection is the single most actionable thing this list can tell anyone.
-   * `conditional` progresses like a pass (InspectionResult::progresses), so it
-   * is grouped with it rather than given a fourth label nobody asked for.
-   */
-  if (appStatus === 'for_inspection') {
-    if (office.inspection === 'failed') return { tone: 'red', label: 'Inspection Failed' }
-    if (office.inspection === 'passed' || office.inspection === 'conditional')
-      return { tone: 'tint-green', label: 'Inspection Passed' }
-    return { tone: 'yellow', label: 'For Inspection' }
-  }
-
-  if (office.assignment === 'completed' || appStatus === 'approved' || appStatus === 'issued')
-    return { tone: 'green', label: 'Approved' }
-  return { tone: 'orange', label: 'For Approval' }
+const CLEARANCE_TONES: Record<ServerClearanceStatus, ChipTone> = {
+  not_started: 'gray',
+  for_approval: 'orange',
+  for_inspection: 'yellow',
+  approved: 'green',
+  rejected: 'red',
+  returned: 'red',
 }
 
 /**
- * Coarse fallback chip from application status alone (before detail loads).
+ * Per-permit chip (prototype p49) — read off THAT PERMIT'S own status.
  *
- * It carried the same default as `permitChip` and so told the same untruths for
- * the moment before the detail response lands — which on a slow connection is
- * the only version of the row a lot of people ever read.
+ * ── What this used to do, and both ways it was wrong ──────────────────────
  *
- * `returned` is handled here and NOT in `permitChip`, deliberately. With the
- * detail loaded, a returned filing knows which office sent it back and only
- * that office's row goes red; with nothing loaded it knows only that the filing
- * is in the applicant's hands, and the one thing it must not say is that the
- * offices are still reading it.
+ * It inferred the chip from the issuing office's ASSIGNMENT and the
+ * APPLICATION's status, because before 6 September 2026 there was nothing else
+ * to read: a permit had no state of its own. Two rules did the work — a
+ * completed assignment meant "Approved", and everything else fell through to
+ * "For Approval" — and the new flow falsifies both.
  *
- * What is left on the default is `under_review` — whose label this is — and
- * `draft`, which never reaches this list (drafts have their own page).
+ *   THE BUSINESS PERMIT WENT GREEN THE MOMENT BPLO ACCEPTED THE FORM.
+ *   `approveMainForm()` completes BPLO's assignment to move the filing to
+ *   Pending Payment. That is BPLO saying "this form is fit to be paid for", not
+ *   "here is your permit" — the permit is issued by `approveOverall()`, five
+ *   approved clearances later. The row said Approved on a filing with no permit
+ *   issued at all.
+ *
+ *   THE OTHER FIVE READ "FOR APPROVAL" BEFORE THEY HAD BEEN APPLIED FOR.
+ *   They were `not_started`: attached to the filing at submission so the bill
+ *   could price them, but not begun. Falling through to the default told the
+ *   applicant five offices were reading paperwork that did not exist, and — the
+ *   real cost — that there was nothing for them to do.
+ *
+ * Both are gone because the chip now reads `permit_types[].status`, which is the
+ * pivot the API keeps and the same value every other screen uses. The inference
+ * is not repaired, it is deleted: a screen holding a second, weaker copy of a
+ * state machine is the defect, and it was wrong within a week of the machine
+ * changing.
+ *
+ * ── What the inspection detail is still for ───────────────────────────────
+ *
+ * `for_inspection` says a visit is due; it cannot say the visit happened. The
+ * office's own latest visit refines it, and the labels keep the distinction the
+ * client asked for:
+ *
+ *   "Inspection Passed" is a fact about a VISIT — this office came, and the
+ *   premises passed. It claims nothing about issuance, and an applicant knows a
+ *   visit and a certificate are two different events.
+ *
+ *   "Approved" is a fact about a PERMIT, and it is now the pivot's own word,
+ *   written by `grantClearance()` when the certificate is actually issued.
+ *
+ * The tone for a passed visit is `tint-green`, not the solid green of Approved:
+ * two states that mean different things must not be one colour on one list.
+ * Colour is not carrying it alone either — the labels differ, and the note under
+ * the accordion spells the difference out in a sentence.
+ *
+ * A failed visit is shown too, and deliberately. Surfacing only the good
+ * outcomes would be a screen that is selectively honest, and a failed inspection
+ * is the single most actionable thing this list can tell anyone. `conditional`
+ * progresses like a pass (InspectionResult::progresses), so it is grouped with
+ * it rather than given a fourth label nobody asked for.
  */
-function fallbackChip(status: ApplicationStatus): Chip {
-  const own = appStateChip(status)
+function permitChip(
+  appStatus: ApplicationStatus,
+  permitStatus: ServerClearanceStatus | null,
+  office: OfficeProgress | undefined,
+): Chip {
+  // A decided or unpaid filing answers for all of its permits at once.
+  const own = appStateChip(appStatus)
   if (own) return own
-  if (status === 'returned') return { tone: 'red', label: applicationStatusMeta(status).label }
-  if (status === 'for_inspection') return { tone: 'yellow', label: 'For Inspection' }
-  if (status === 'approved' || status === 'issued') return { tone: 'green', label: 'Approved' }
-  return { tone: 'orange', label: 'For Approval' }
+
+  // No pivot row: the permit is not on this filing. Nothing to report.
+  if (!permitStatus) return { tone: 'gray', label: 'Not Started' }
+
+  if (permitStatus === 'for_inspection' && office) {
+    if (office.inspection === 'failed') return { tone: 'red', label: 'Inspection Failed' }
+    if (office.inspection === 'passed' || office.inspection === 'conditional')
+      return { tone: 'tint-green', label: 'Inspection Passed' }
+  }
+
+  return {
+    tone: CLEARANCE_TONES[permitStatus],
+    label: clearanceStatusMeta(permitStatus).label,
+  }
 }
 
 /** Solid accordion triangle (p48). */
@@ -465,7 +457,9 @@ function ApplicationRow({
    * accordion that opens onto nothing reads as a broken control.
    */
   const rows =
-    app.permit_types.length > 0 ? app.permit_types : [{ code: '—', name: 'Business Permit' }]
+    app.permit_types.length > 0
+      ? app.permit_types
+      : [{ code: '—', name: 'Business Permit', status: null, status_label: null }]
 
   /*
    * Has at least one office already been and gone?
@@ -480,9 +474,15 @@ function ApplicationRow({
    * something. It does not, and the row does not say it does — but the note
    * removes the last inch of room to read it that way, and it is only shown on
    * the filings where somebody could.
+   *
+   * The outer test was `app.status === 'for_inspection'`, a status that no
+   * longer exists — so the note could never appear. It asks the permits now,
+   * which is where inspection lives: a filing qualifies when it is still
+   * gathering permits and at least one office has already conducted its visit.
    */
   const someOfficeFinished =
-    app.status === 'for_inspection' &&
+    app.status === 'awaiting_other_permits' &&
+    detail !== undefined &&
     rows.some((pt) => officeProgressFor(pt.code).inspection !== undefined)
 
   return (
@@ -512,12 +512,27 @@ function ApplicationRow({
         <>
           <ul className="space-y-2.5">
             {rows.map((pt) => {
-              // Once detail loads, derive per-permit chip from the issuing
-              // department's assignment and its own visit; otherwise fall back
-              // to the coarse app status.
-              const chip = detail
-                ? permitChip(app.status, officeProgressFor(pt.code))
-                : fallbackChip(app.status)
+              /*
+               * The permit's own status carries the chip, from the list payload
+               * — no waiting for the detail request and no inference from it.
+               * The detail is consulted for one thing only: whether the office
+               * has actually conducted the visit a `for_inspection` permit is
+               * waiting on.
+               */
+              const chip = permitChip(
+                app.status,
+                pt.status,
+                detail ? officeProgressFor(pt.code) : undefined,
+              )
+              /*
+               * A permit the applicant has not begun, on a filing where they
+               * can. This is the answer to "where do I apply for them?", put on
+               * the row that raises the question rather than on a page they have
+               * to already know about — the clearance stage was reachable only
+               * from a link further inside the application.
+               */
+              const canStart = pt.status === 'not_started' && app.status === 'awaiting_other_permits'
+
               return (
                 <li
                   key={pt.code}
@@ -527,9 +542,28 @@ function ApplicationRow({
                     {chip.label}
                   </StatusChip>
                   <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{pt.name}</span>
-                  <span className="shrink-0 text-xs italic text-ink-muted">
-                    Submitted: {formatDate(app.submitted_at)}
-                  </span>
+                  {canStart ? (
+                    <Link
+                      to={`/applications/${app.id}/clearances`}
+                      className="shrink-0 text-xs font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                    >
+                      Apply or upload a copy
+                    </Link>
+                  ) : (
+                    /*
+                     * The APPLICATION's submission date, and it only belongs on
+                     * a permit that has actually been started. It was printed on
+                     * every row unconditionally, so five permits nobody had
+                     * touched each claimed to have been submitted on the day the
+                     * main form was — which is a large part of why the rows read
+                     * as though they were already being worked.
+                     */
+                    pt.status !== 'not_started' && (
+                      <span className="shrink-0 text-xs italic text-ink-muted">
+                        Filed: {formatDate(app.submitted_at)}
+                      </span>
+                    )
+                  )}
                   <Link
                     to={`/applications/${app.id}`}
                     className="shrink-0 text-ink-secondary transition-colors hover:text-royal"

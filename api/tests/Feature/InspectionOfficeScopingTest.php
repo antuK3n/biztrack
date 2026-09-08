@@ -26,24 +26,43 @@ use App\Models\PsicCode;
  * and the first one asserts both answers in a single test so the contradiction
  * cannot be half-fixed again.
  *
- * The other half of the rule is that this must not over-tighten. A filing does
- * not advance until every current visit passes, so an office genuinely needs to
- * see that another office's visit happened and how it went; `visibleVisit`
- * below asserts status, result and department survive.
+ * The other half of the rule is that this must not over-tighten. BPLO's final
+ * approval is gated on every required permit being approved, and no permit is
+ * approved until its own visit passes, so an office genuinely needs to see that
+ * another office's visit happened and how it went; the first case below asserts
+ * status, result and department survive.
  */
 
 /** The prose that must never cross an office boundary. */
 const OTHER_OFFICE_FINDINGS = 'Food handlers without current health certificates on the premises.';
 
 /**
- * A paid filing routed to BPLO, CHO and BFP, with every review approved so both
- * clearance offices have a visit booked — and BFP's visit conducted and written
- * up, so there is something on the record for CHO to be refused.
+ * A paid filing routed to BPLO, CHO and BFP, with both clearance offices having
+ * approved their permit and booked a visit — and BFP's visit conducted and
+ * written up, so there is something on the record for CHO to be refused.
  *
- * BFP passes rather than fails on purpose: CHO's visit is left open, so the
- * filing stays `for_inspection` and both assignments stay readable. A leak on a
- * settled filing would be the easier case; this is the state the review sheet
- * is actually open in.
+ * CHO's visit is booked and left unconducted on purpose. Its permit is still
+ * outstanding, so both assignments stay readable and the review sheet is open
+ * in the state an officer actually meets it; a leak on a settled filing would
+ * be the easier case.
+ *
+ * Three steps here are new, and each is a step the 6 September procedure makes
+ * the fixture perform rather than get for free
+ * (docs/application-flow-2026-09.md):
+ *
+ *  - BPLO approves the main form BEFORE the bill exists, so `pay` at
+ *    `for_approval` is refused with "BPLO has not approved this application
+ *    yet";
+ *  - the applicant OPENS each other permit after paying, and that is what
+ *    routes CHO and BFP — payment alone leaves BPLO the only assignment;
+ *  - the office PICKS the inspection date. Approving a permit's paperwork no
+ *    longer books anything: the auto-scheduler promised a date two working days
+ *    out on behalf of an office nobody had asked.
+ *
+ * The BPLO assignment is deliberately not in the approval loop any more. BPLO
+ * acts twice and its first act already happened above; pressing Approve again
+ * at `awaiting_other_permits` is refused, and rightly — there is nothing for it
+ * to approve until every other permit is in.
  *
  * @return array{app: Application, visit: Inspection}
  */
@@ -62,30 +81,42 @@ function filingWithOneOfficesVisitWrittenUp(): array
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY', 'FSIC'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    // BPLO reads the form, which is what raises the bill. Classification comes
+    // with it: an office may not approve until somebody has put their name to
+    // the processing category, and that gate is not what this file is about.
+    bploApprovesForm($appId);
+
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
+    // The applicant opens both other permits, which routes CHO and BFP.
+    foreach (['SANITARY', 'FSIC'] as $code) {
+        test()->withHeaders($owner)
+            ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
+            ->assertSuccessful();
+    }
 
     $app = Application::findOrFail($appId);
 
-    // Confirmed on receipt. An office may not approve until somebody has put
-    // their name to the processing category; that gate is not what this file
-    // is about, and leaving it unmet would stop the fixture before it starts.
-    classifyAsOfficer($app);
+    /*
+     * Each office signs off its own permit and books its own visit — a reviewer
+     * is kept to the filings routed to their department, so no one account
+     * stands in for the rest.
+     */
+    foreach ([['CHO', 'sanitary@biztrack.local', 'SANITARY'], ['BFP', 'fire@biztrack.local', 'FSIC']] as [$code, $email, $permit]) {
+        $assignment = $app->assignments()->whereRelation('department', 'code', $code)->firstOrFail();
 
-    // Each office signs off its own assignment — a reviewer is kept to the
-    // filings routed to their department, so no one account stands in for the
-    // rest. The last sign-off is what books the visits.
-    foreach ($app->assignments()->with('department')->get() as $assignment) {
-        authAs(match ($assignment->department->code) {
-            'BPLO' => 'bplo@biztrack.local',
-            'CHO' => 'sanitary@biztrack.local',
-            'BFP' => 'fire@biztrack.local',
-        });
+        authAs($email);
         test()->postJson("/api/v1/assignments/{$assignment->id}/approve")->assertOk();
+        test()->postJson("/api/v1/applications/{$appId}/permits/{$permit}/inspection", [
+            'scheduled_at' => now()->addWeekdays(2)->toDateString(),
+        ])->assertCreated();
     }
 
     $visit = $app->inspections()

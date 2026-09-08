@@ -42,12 +42,21 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+    // Paying opens the clearance stage; opening ZONING is what puts the filing
+    // in CPDO's queue at all (WorkflowService::startClearance routes one office
+    // at a time now — docs/application-flow-2026-09.md).
+    $this->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
+        ->assertSuccessful();
 
     $cpdoId = Department::where('code', 'CPDO')->value('id');
     $zoningAssignment = ApplicationAssignment::where('application_id', $appId)
@@ -80,12 +89,21 @@ it('lets the zoning officer clear its own assignment but not end the application
 
     $appId = $this->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'ZONING'])->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+    // Paying opens the clearance stage; opening ZONING is what puts the filing
+    // in CPDO's queue at all (WorkflowService::startClearance routes one office
+    // at a time now — docs/application-flow-2026-09.md).
+    $this->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
+        ->assertSuccessful();
 
     // Confirmed on receipt, so the only thing left standing between the zoning
     // officer and their own assignment is the department scoping under test.

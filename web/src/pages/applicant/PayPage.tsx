@@ -113,9 +113,17 @@ export function PayPage() {
           * ever a way out. The sentence above it carries the meaning in text so
           * the button is not the only thing saying what changed.
           */}
+        {/*
+          "Apply for the ones your business needs — each adds its own fee" was
+          two wrong claims in one line. Five of the clearances are required, so
+          choosing among them is not on offer; and this payment already covered
+          all of them, so none of them adds a fee. What is released and when
+          also changed: the gate is five approvals, not a zero balance.
+        */}
         <p className="mt-6 text-center text-sm text-ink-secondary">
-          Your LGU Clearances are now open. Apply for the ones your business needs — each adds its
-          own fee, and your permit is released when your balance reaches zero.
+          Your five LGU Clearances are now open, and this payment already covered them. Apply for
+          each one, or hand in a copy if you already hold it — your Business Permit is released
+          once all five are approved.
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${appId}/clearances`)}>

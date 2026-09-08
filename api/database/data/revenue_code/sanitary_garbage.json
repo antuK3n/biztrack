@@ -2433,7 +2433,6 @@
     "office": "CHO",
     "group": "regulatory",
     "permit_types": [
-      "MARKET",
       "BUSINESS"
     ],
     "conditions": {
@@ -2462,7 +2461,6 @@
     "office": "CHO",
     "group": "regulatory",
     "permit_types": [
-      "MARKET",
       "BUSINESS"
     ],
     "conditions": {
@@ -2491,7 +2489,6 @@
     "office": "CHO",
     "group": "regulatory",
     "permit_types": [
-      "MARKET",
       "BUSINESS"
     ],
     "conditions": {

@@ -796,7 +796,7 @@ test('paying moves the filing into review and into every routed office’s queue
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     }
-    for (const code of ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC', 'MARKET']) {
+    for (const code of ['SANITARY', 'FSIC', 'ZONING', 'OCCUPANCY', 'CEC']) {
       const res = await fetch(`/api/v1/applications/${id}/clearances/${code}/apply`, {
         method: 'POST',
         headers,
@@ -814,7 +814,6 @@ test('paying moves the filing into review and into every routed office’s queue
     const sheets: Record<string, Record<string, string>> = {
       SANITARY: { sanitary_classification: 'Food Establishment' },
       OCCUPANCY: { application_type: 'Full' },
-      MARKET: { market_name: 'Malabon Central Market', stall_no: 'A-12' },
     }
     for (const [code, form_data] of Object.entries(sheets)) {
       const res = await fetch(`/api/v1/applications/${id}/office-forms/${code}`, {
@@ -1166,7 +1165,7 @@ test('the first inspecting office books its own visit and nobody else’s', asyn
    *
    * Since 5da4daa the first inspecting office's approval flips the WHOLE filing
    * to `for_inspection` while the other five assignments are still pending —
-   * deliberately, so City Health need not wait for the Market Office to open
+   * deliberately, so City Health need not wait for the Building Official to open
    * its form. That is exactly the condition under which the review screen used
    * to branch on the filing's status and hand five offices a page with no
    * controls on it (INS-1): a deadlock no action in the product could clear.
