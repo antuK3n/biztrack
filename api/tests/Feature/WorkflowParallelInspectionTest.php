@@ -89,9 +89,27 @@ function parallelFiling(array $openCodes, string $name): Application
     bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    /*
+     * Two acts per permit, because that is now what filing one takes. Apply
+     * OPENS the office's sheet and records that the applicant chose to fill it
+     * in; handing the sheet back is what submits the permit, moves it to
+     * ForApproval and routes the office (WorkflowService::submitClearanceForm).
+     * Apply alone used to do all of it, and told two different people something
+     * untrue — the applicant read "For Approval" on a form they had not touched,
+     * the office opened a queue row with no answers on it.
+     *
+     * Every code here bears a form (PermitType::OFFICE_FORM_CODES), so every one
+     * of them needs both calls to reach an office at all. The sheets are posted
+     * empty on purpose: this file is about which office moves which permit, and
+     * the answers on the form are OfficeFormTest's subject.
+     */
     foreach ($openCodes as $code) {
         authAs('owner@biztrack.local');
         test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
+        test()->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+            'form_data' => [],
+            'submit' => true,
+        ])->assertSuccessful();
     }
 
     return Application::findOrFail($appId);

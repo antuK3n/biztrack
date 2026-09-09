@@ -305,10 +305,29 @@ class ClearanceService
          * `not_started` first; letting them post to `apply` instead would create
          * a second start on a permit an office has already ruled on and lose the
          * remarks explaining why.
+         *
+         * ── And `not_started` stopped being the whole answer again ────────────
+         *
+         * Splitting apply into two acts put a permit in a state this predicate
+         * could not see: the applicant has pressed Apply, `mode` is recorded,
+         * and the status is STILL `not_started` because nothing is routed until
+         * the sheet is handed in. Status alone therefore reported "not applied
+         * for" about a permit the applicant had demonstrably applied for, and
+         * three things broke behind it — `apply` stopped refusing a second
+         * press, `fee_preview` stayed at zero after Apply, and `unapply` refused
+         * with "You have not applied for the ...", which is the only way back
+         * out of Apply and the first half of the Apply-to-Upload switch.
+         *
+         * `mode` is the right second half rather than a patch, because the act
+         * that undoes an application is the act that clears it:
+         * `WorkflowService::unapply` nulls `mode` on the same row (:802). So the
+         * predicate and its inverse now read the same field, and a withdrawn
+         * permit goes back to answering false without a second rule saying so.
          */
         $row = $this->pivotRow($application, $type);
 
-        return $row !== null && $row->status !== ClearanceStatus::NotStarted;
+        return $row !== null
+            && ($row->status !== ClearanceStatus::NotStarted || $row->mode !== null);
     }
 
     /** This permit's pivot row on this filing — the row that carries its status. */
