@@ -458,3 +458,84 @@ test.describe('Other Requirements list controls', () => {
     await expect(page.locator('tbody tr')).toHaveCount(3)
   })
 })
+
+/* ── The owner reads seven offices in one list ────────────────────────────── */
+
+/*
+ * The other half of office separability, and the half the applicant sees.
+ *
+ * The boundary itself is proved server-side (OtherRequirementsWorkflowTest:
+ * seven offices raise on one shared filing and each reads only its own). What
+ * that cannot prove is that the owner is TOLD which office is asking. Their
+ * table has an "Office" column where an officer's has "Submitted", and it is
+ * the only thing on the row that answers "who wants this from me" — a business
+ * owner with a sanitary certificate and a fire clearance outstanding cannot act
+ * on either if both say only "Health Certificate".
+ *
+ * Stubbed: the point is the column, not the register, and seven live offices
+ * raising requirements is what the API suite already does.
+ */
+const OWNER_OFFICES = [
+  { code: 'BPLO', name: 'Business Permits and Licensing Office' },
+  { code: 'CHO', name: 'City Health Office' },
+  { code: 'BFP', name: 'Bureau of Fire Protection' },
+  { code: 'OBO', name: 'Office of the Building Official' },
+  { code: 'CENRO', name: 'City Environment and Natural Resources Office' },
+  { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
+  { code: 'CPDO', name: 'City Planning and Development Office (Zoning)' },
+]
+
+test.describe('the owner is told which office is asking', () => {
+  test.use({ storageState: sessionFor('owner') })
+
+  test.beforeEach(async ({ page }) => {
+    const rows = OWNER_OFFICES.map((office, i) => {
+      const row = requirement(70000 + i, `Document for ${office.code}`, 'pending', 'Pending')
+      return { ...row, from_office: { id: i + 1, code: office.code, name: office.name } }
+    })
+
+    await page.route('**/api/v1/requests*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: rows,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 50,
+            total: rows.length,
+            office_statuses: [],
+            statuses: STATUSES,
+          },
+        }),
+      })
+    })
+
+    await page.goto('/requests')
+    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 1 })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+
+  test('every row names the office that raised it', async ({ page }) => {
+    // The owner's column header is "Office"; an officer's is "Submitted",
+    // because an office reading its own queue is always the answer.
+    await expect(page.getByRole('columnheader', { name: 'Office' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Submitted' })).toHaveCount(0)
+
+    for (const office of OWNER_OFFICES) {
+      const row = page.locator('tbody tr').filter({ hasText: `Document for ${office.code}` })
+      await expect(row, `no row for ${office.code}`).toHaveCount(1)
+      await expect(row, `the ${office.code} row does not say who is asking`).toContainText(office.name)
+    }
+  })
+
+  test('and the offices are told apart, not collapsed into one', async ({ page }) => {
+    const named = await page.locator('tbody tr').evaluateAll((rows) => rows.map((r) => r.textContent ?? ''))
+    const distinct = new Set(
+      OWNER_OFFICES.filter((o) => named.some((text) => text.includes(o.name))).map((o) => o.code),
+    )
+    expect(distinct.size, 'the Office column does not distinguish the seven').toBe(OWNER_OFFICES.length)
+  })
+})
