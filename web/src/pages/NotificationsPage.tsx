@@ -19,6 +19,7 @@ import {
 import { PageTitle } from '../components/ui/Proto'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { formatDateTime } from '../lib/format'
+import { BPLO_ENQUIRY } from '../lib/nav'
 import { notifications } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import type { Notification, User } from '../lib/types'
@@ -150,6 +151,22 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
   return { tone: 'info', Glyph: BellIcon }
 }
 
+/*
+ * A restriction notice is the one row that has to carry an action.
+ *
+ * Its body ends "If you believe this is a mistake, message the City BPLO", and
+ * its link goes to /dashboard — which raises the pop-up that said the same
+ * thing and, until now, also offered no way to do it. The owner was sent in a
+ * circle by two screens agreeing with each other.
+ *
+ * A restoration is deliberately excluded. It is the same event with the
+ * opposite sign, there is nothing to appeal, and an "appeal" button under good
+ * news reads as though something is still wrong.
+ */
+function offersAppeal(n: Notification): boolean {
+  return n.type === 'account_status' && !/restored/i.test(n.title)
+}
+
 function NotificationIcon({ notification }: { notification: Notification }) {
   const { tone, Glyph } = appearanceOf(notification)
 
@@ -268,6 +285,23 @@ export function NotificationsPage() {
                   </Link>
                 ) : (
                   <div className="rounded-xl transition-shadow hover:shadow-raised">{row}</div>
+                )}
+                {/*
+                  Outside the row's own link, never inside it. An anchor within
+                  an anchor is invalid, and browsers recover from it by closing
+                  the outer one early — which would put half the row outside the
+                  link it is supposed to be part of.
+                */}
+                {offersAppeal(n) && (
+                  <div className="border-t border-line px-5 py-3">
+                    <Link
+                      to={BPLO_ENQUIRY}
+                      className="inline-flex items-center gap-2 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                    >
+                      <MailIcon size={15} aria-hidden="true" />
+                      Message the City BPLO
+                    </Link>
+                  </div>
                 )}
               </li>
             )
