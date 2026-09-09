@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import { ChevronDownIcon } from '../icons'
+import { Link } from 'react-router-dom'
+import { ChevronDownIcon, MailIcon } from '../icons'
+import { BPLO_ENQUIRY } from '../../lib/nav'
 
 /*
  * Shared prototype-fidelity primitives (docs/rehaul-spec.md).
@@ -220,9 +222,17 @@ export function ProtoModal({
 
 /**
  * Account restricted modal (p006) — red header, informational body, bold
- * Reference ID, single dismiss block over a red-tint footer. Purely
- * informational: 422s already block filing. Variant flips the copy for
- * suspended vs. blacklisted accounts.
+ * Reference ID, over a red-tint footer. Purely informational as far as filing
+ * goes: 422s already block that. Variant flips the copy for suspended vs.
+ * blacklisted accounts.
+ *
+ * The footer carries the appeal, not just the dismissal. The body has always
+ * told the owner to get in touch if the restriction is wrong — and so does the
+ * notification the LGU sends at the same moment, which ends "message the City
+ * BPLO" — while the only control here was "Understood". An instruction with no
+ * route is worse than none: the reader is told an appeal exists, goes looking,
+ * finds nothing, and concludes the system is refusing them. A restriction stops
+ * them filing anything, so this is the moment they most need a person.
  */
 export function AccountRestrictedModal({
   variant,
@@ -257,13 +267,29 @@ export function AccountRestrictedModal({
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full bg-modal-cancel-red py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
-        >
-          Understood
-        </button>
+        <div className="grid grid-cols-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="bg-modal-cancel-red py-3.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
+          >
+            Understood
+          </button>
+          {/*
+            A link, not a button that navigates: the destination is a page, so
+            it belongs in the browser's own vocabulary — openable in a new tab,
+            announced as a link, and reachable with the keys a reader already
+            uses for one.
+          */}
+          <Link
+            to={BPLO_ENQUIRY}
+            onClick={onClose}
+            className="flex items-center justify-center gap-2 bg-royal py-3.5 text-sm font-semibold text-white underline underline-offset-2 hover:bg-royal-hover"
+          >
+            <MailIcon size={17} aria-hidden="true" />
+            Message the City BPLO
+          </Link>
+        </div>
       </div>
     </div>
   )
