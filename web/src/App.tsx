@@ -39,6 +39,7 @@ import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
+import { RecordsPage } from './pages/admin/RecordsPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -465,6 +466,24 @@ export default function App() {
             element={
               <RequirePermission permission="owner.manage_status">
                 <OwnersPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            The read-only register console, matching the rail entry's gate in
+            nav.ts — see the note there for why it is `user.manage` and not the
+            `application.view_all` this was first written against, which six
+            offices also hold.
+
+            The route and the rail must carry the SAME permission or one of them
+            lies: a rail that hides the entry while the route still admits a
+            typed URL is a screen nobody can find and anybody can reach.
+          */}
+          <Route
+            path="/staff/admin/records"
+            element={
+              <RequirePermission permission="user.manage">
+                <RecordsPage />
               </RequirePermission>
             }
           />
