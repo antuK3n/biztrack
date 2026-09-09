@@ -325,6 +325,42 @@ export function formatAmountInput(raw: string | number | null | undefined): stri
   return `${grouped}.${fraction}`
 }
 
+/**
+ * "1,000" → "1,000.00", once the applicant has left the field.
+ *
+ * Client checklist item 12: "the auto comma is great, but it should also auto
+ * decimal." A peso figure written without its centavos reads as an estimate,
+ * and the applicant is about to see the same amount printed with two decimal
+ * places on the Tax Order of Payment — the two should not disagree on sight.
+ * Reopening a saved draft already shows "1,000.00" (`feeProfileToDraft`'s
+ * `money`, which routes through the API's decimal columns), so before this the
+ * figure changed shape between typing it and coming back to it.
+ *
+ * On blur and nowhere else. Padding on a keystroke appends ".00" as soon as the
+ * first digit lands, and the caret goes with it — the applicant typing 1000.50
+ * left to right gets 1.0005000. Blur is the one moment there is no caret to
+ * fight.
+ *
+ * A value holding no digit is returned exactly as given, blanks included.
+ * Turning an empty box into "0.00" would assert a capital investment nobody
+ * declared, and saying a required amount is missing is `numericIssue`'s job,
+ * not a formatter's.
+ *
+ * What is POSTed is unaffected: every reader strips the separators before
+ * Number() — `toNumber` above, `plainAmount` in ApplyWizard — and the columns
+ * behind these fields are decimal(15,2), so "1,000.00" stores as 1000.00.
+ */
+export function padAmountInput(raw: string): string {
+  if (!/\d/.test(raw)) return raw
+  const grouped = formatAmountInput(raw)
+  const dot = grouped.indexOf('.')
+  // ".5" groups to ".5", and a bare leading point is not an amount — say the 0.
+  const whole = (dot === -1 ? grouped : grouped.slice(0, dot)) || '0'
+  const fraction = dot === -1 ? '' : grouped.slice(dot + 1)
+
+  return `${whole}.${fraction.padEnd(2, '0')}`
+}
+
 /** Headcounts, vehicles, stalls: whole numbers only. */
 export function formatCountInput(raw: string): string {
   return raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
@@ -905,9 +941,17 @@ function FieldError({ children, id }: { children: string; id?: string }) {
 }
 
 /**
- * A number input that formats as it is typed: money groups in thousands,
- * counts stay whole. Nothing but digits (and a decimal point for money) can
- * be entered, so a stray letter never reaches the fee engine.
+ * A number input that formats as it is typed: amounts group in thousands,
+ * counts stay whole. Nothing but digits (and a decimal point for the two
+ * decimal kinds) can be entered, so a stray letter never reaches the fee engine.
+ *
+ * `money` and `area` group and accept decimals identically; they differ only on
+ * blur, where money pads to centavos and an area does not. A floor area is not
+ * currency — "45.00 sqm" claims a precision nobody measured — and it comes back
+ * from a saved draft as "45" (`feeProfileToDraft` uses `str` for it, `money`
+ * only for the peso fields), so padding it would make the field change shape
+ * between typing it and reloading it. That inconsistency is the thing item 12
+ * is about; do not fix it by padding both.
  */
 function NumberField({
   label,
@@ -922,7 +966,7 @@ function NumberField({
 }: {
   label: string
   required?: boolean
-  kind: 'money' | 'count'
+  kind: 'money' | 'area' | 'count'
   value: string
   onChange: (next: string) => void
   onBlur: () => void
@@ -940,7 +984,19 @@ function NumberField({
    */
   locked?: boolean
 }) {
-  const format = kind === 'money' ? formatAmountInput : formatCountInput
+  const format = kind === 'count' ? formatCountInput : formatAmountInput
+  /*
+   * A read-only field is still focusable — deliberately, so a screen reader
+   * reaches it — so it still blurs. Padding it would rewrite an answer the
+   * applicant cannot edit, which is the one place a formatter has no business.
+   */
+  const commit = () => {
+    if (kind === 'money' && !locked) {
+      const padded = padAmountInput(value)
+      if (padded !== value) onChange(padded)
+    }
+    onBlur()
+  }
   return (
     <div>
       {/*
@@ -954,10 +1010,10 @@ function NumberField({
       <label className="block">
         <FieldLabel required={required}>{label}</FieldLabel>
         <input
-          inputMode={kind === 'money' ? 'decimal' : 'numeric'}
+          inputMode={kind === 'count' ? 'numeric' : 'decimal'}
           value={value}
           onChange={(e) => onChange(format(e.target.value))}
-          onBlur={onBlur}
+          onBlur={commit}
           placeholder={placeholder}
           readOnly={locked}
           aria-readonly={locked || undefined}
@@ -1415,7 +1471,7 @@ export function FeeProfileStep({
             <NumberField
               label="Business Area (sqm)"
               required
-              kind="money"
+              kind="area"
               value={value.floor_area_sqm}
               onChange={(next) => set('floor_area_sqm', next)}
               onBlur={() => touch('floor_area_sqm')}
@@ -1564,7 +1620,7 @@ export function FeeProfileStep({
                 <NumberField
                   label="Floor Area (sqm)"
                   required
-                  kind="money"
+                  kind="area"
                   value={value.floor_area_sqm}
                   onChange={(next) => set('floor_area_sqm', next)}
                   onBlur={() => touch('floor_area_sqm')}
