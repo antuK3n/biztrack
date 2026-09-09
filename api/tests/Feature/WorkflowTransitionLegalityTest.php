@@ -95,9 +95,24 @@ function legalityFiling(array $openCodes, string $name): Application
     bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
+    /*
+     * Apply, then hand the sheet in. Applying only OPENS the office's form and
+     * records the choice; `WorkflowService::submitClearanceForm` is what moves
+     * the permit to ForApproval and routes the office. Every code this file
+     * opens bears a form, so without the second call no office is routed and
+     * `legalityAssignmentId` below has nothing to find — which is a fixture that
+     * never arrives at the transition it means to test.
+     *
+     * The sheets go in empty: the legality of the moves is the subject here, not
+     * the answers that triggered them.
+     */
     foreach ($openCodes as $code) {
         authAs('owner@biztrack.local');
         test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
+        test()->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+            'form_data' => [],
+            'submit' => true,
+        ])->assertSuccessful();
     }
 
     return Application::findOrFail($appId);

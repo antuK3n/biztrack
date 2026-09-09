@@ -102,12 +102,27 @@ function filingAwaitingInspection(array $deptEmail, string $name): array
     bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
-    // The applicant opens each permit. THIS is what routes its office — payment
-    // no longer fans the filing out to everyone at once.
+    /*
+     * The applicant opens each permit and then hands its sheet in. Payment no
+     * longer fans the filing out to everyone at once, and neither does Apply:
+     * Apply OPENS the office's form, and it is submitting that form which moves
+     * the permit to ForApproval and routes the office
+     * (WorkflowService::submitClearanceForm). All five codes here bear a form,
+     * so all five need both acts before any office has a queue item to approve
+     * — which is what the loop below goes on to do.
+     *
+     * The sheets go in empty. What is on them is OfficeFormTest's subject; this
+     * file needs only that an office received something.
+     */
     foreach (array_keys(REINSPECTION_OFFICE) as $code) {
         test()->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+                'form_data' => [],
+                'submit' => true,
+            ])->assertSuccessful();
     }
 
     foreach (REINSPECTION_OFFICE as $code => $deptCode) {

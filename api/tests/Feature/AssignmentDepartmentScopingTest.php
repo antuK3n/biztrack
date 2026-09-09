@@ -61,17 +61,32 @@ function scopedAssignmentFiling(string $name): int
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     /*
-     * And the applicant opens SANITARY, which is what reaches CHO.
+     * And the applicant opens SANITARY and hands its sheet in, which is what
+     * reaches CHO.
      *
      * Paying no longer routes anybody but BPLO. Under
      * docs/application-flow-2026-09.md the clearance stage opens on payment and
-     * each office is handed the filing when the owner applies for that office's
-     * permit, so without this line CHO has no assignment and every case below
-     * is arguing about a row that does not exist.
+     * each office is handed the filing when the owner submits that office's
+     * permit, so without these two calls CHO has no assignment and every case
+     * below is arguing about a row that does not exist.
+     *
+     * Two calls because SANITARY carries a form. Apply OPENS the sheet and
+     * stops — it used to announce "For Approval" on a form nobody had filled in
+     * (client, 9 September 2026) — and it is saving the sheet with `submit`
+     * that hands it over and creates the assignment. The answers travel in the
+     * same write on purpose: `ownerMayEdit` closes the sheet the instant it is
+     * submitted, so apply → fill → submit is the only order left, and one PUT
+     * is that order.
      */
     test()->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/clearances/SANITARY/apply")
         ->assertSuccessful();
+
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/SANITARY", [
+            'form_data' => ['sanitary_classification' => 'Food Establishment'],
+            'submit' => true,
+        ])->assertSuccessful();
 
     return $appId;
 }
