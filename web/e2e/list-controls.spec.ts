@@ -459,6 +459,94 @@ test.describe('Other Requirements list controls', () => {
   })
 })
 
+/* ── The owner's home page ────────────────────────────────────────────────── */
+
+/*
+ * The "Other Requirements" panel on the business owner's dashboard printed
+ * every waiting requirement with `tone="orange"` hard-coded, so a REJECTED
+ * document — the one thing on that panel that carries a refusal and a reason —
+ * wore the same amber as an ordinary Pending. The requirements page one click
+ * away has always drawn it red.
+ *
+ * Two screens disagreeing about what a status looks like is worse than either
+ * choice on its own: the owner learns the colour on one page and is then told
+ * something different by the other. Colour is not the only carrier here — the
+ * word "Rejected" is on the chip — but it is the part a reader takes in first,
+ * and amber for a refusal reads as "waiting", which is precisely wrong.
+ *
+ * The tokens are read off the document rather than typed as hex, so this
+ * follows a re-theme instead of going red on one.
+ */
+test.describe('the owner’s home page names a refusal as a refusal', () => {
+  test.use({ storageState: sessionFor('owner') })
+
+  const OWNER_REQUIREMENTS = [
+    requirement(60011, 'Health cards', 'rejected', 'Rejected'),
+    requirement(60012, 'Sanitary permit', 'pending', 'Pending'),
+  ]
+
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/v1/requests*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: OWNER_REQUIREMENTS,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 100,
+            total: OWNER_REQUIREMENTS.length,
+            office_statuses: [],
+            statuses: STATUSES,
+          },
+        }),
+      })
+    })
+
+    await page.goto('/dashboard')
+    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 2 })).toBeVisible()
+  })
+
+  test('a rejected requirement is red on the dashboard, not orange', async ({ page }) => {
+    const token = (name: string) =>
+      page.evaluate(
+        (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
+        name,
+      )
+    const hexToRgb = (hex: string) => {
+      const n = parseInt(hex.replace('#', ''), 16)
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+    }
+    const red = hexToRgb(await token('--color-s-red'))
+    const orange = hexToRgb(await token('--color-s-orange'))
+    expect(red, 'the theme gives red and orange the same value').not.toBe(orange)
+
+    const card = page.locator('li').filter({ hasText: 'Health cards' }).first()
+    const chip = card.getByText('Rejected', { exact: true })
+    await expect(chip).toBeVisible()
+
+    const background = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(background, 'a refusal is drawn in the waiting colour').toBe(red)
+  })
+
+  test('and a pending one stays orange, so the two are told apart', async ({ page }) => {
+    const orange = await page.evaluate(() => {
+      const hex = getComputedStyle(document.documentElement)
+        .getPropertyValue('--color-s-orange')
+        .trim()
+      const n = parseInt(hex.replace('#', ''), 16)
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+    })
+
+    const card = page.locator('li').filter({ hasText: 'Sanitary permit' }).first()
+    const chip = card.getByText('Pending', { exact: true })
+
+    const background = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(background, 'Pending lost its own colour to the fix').toBe(orange)
+  })
+})
+
 /* ── The owner reads seven offices in one list ────────────────────────────── */
 
 /*
