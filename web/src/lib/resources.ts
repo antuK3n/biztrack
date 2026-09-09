@@ -802,6 +802,35 @@ export const inspections = {
   list: (filters: { status?: string; page?: number; per_page?: number } = {}) =>
     unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
+  /**
+   * Book the FIRST visit on one permit. Answers with the inspection it creates.
+   *
+   * Addressed by the permit's CODE and not by an inspection id, unlike every
+   * other call in this object, because there is no inspection yet — this is what
+   * opens one. That is also why it hangs off the application: the pivot row
+   * `application_permit_types` is the thing being moved, and it is keyed on the
+   * pair.
+   *
+   * Booking is a separate act from approving the paperwork, deliberately. The
+   * service used to schedule a visit two working days out the instant an office
+   * approved (`scheduleInspectionFor`); the client's verified procedure is
+   * "Select Inspection Date and Approve Inspection", so the office says when. A
+   * permit sits at `for_inspection` with no visit until somebody calls this, and
+   * before this method existed there was no screen that could.
+   *
+   * Only the office that ISSUES the permit may call it —
+   * `InspectionController::schedule` compares the caller's department against
+   * `permit_types.issuing_department_id` and answers 403 otherwise — so a caller
+   * must not draw the control on another office's clearance.
+   *
+   * `scheduled_at` is a full ISO instant, not a date: the applicant's Awaiting
+   * Other Permits card prints it with `formatDateTime`, so a bare day would show
+   * a visit booked for midnight.
+   */
+  schedule: (applicationId: number, code: string, scheduled_at: string) =>
+    unwrap<Inspection>(
+      api.post(`/applications/${applicationId}/permits/${code}/inspection`, { scheduled_at }),
+    ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
   reschedule: (id: number, scheduled_at: string) =>

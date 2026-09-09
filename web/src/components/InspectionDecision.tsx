@@ -102,6 +102,43 @@ function RejectGlyph() {
   )
 }
 
+/**
+ * The one date-and-time control every booking on this screen uses.
+ *
+ * Three acts pick a date here — opening an office's first visit, moving one that
+ * has not happened yet, and booking a fresh one after a failure — and they were
+ * on their way to three hand-written `<input type="datetime-local">`s with three
+ * copies of the same class list. They are still three separate acts with three
+ * separate handlers, which is the point of keeping the callers apart (see the
+ * `reschedule` prop's note on why sharing a HANDLER between them is how the
+ * failed visit gets overwritten by accident). Sharing the FIELD costs nothing
+ * and keeps the focus ring, the border and the padding from drifting apart.
+ *
+ * `label` is required rather than defaulted because it is the accessible name
+ * and it has to say WHICH visit: a filing carries a visit per inspecting office,
+ * so three fields called "Date and time" are three identical stops for anyone
+ * moving through the page by form control.
+ */
+function InspectionDateInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  return (
+    <input
+      type="datetime-local"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      aria-label={label}
+      className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+    />
+  )
+}
+
 interface RemarkRow {
   complaint: string
   description: string
@@ -497,12 +534,10 @@ export function InspectionDecisionCard({
             <div className="flex flex-wrap items-center gap-2.5">
               {reinspect.open ? (
                 <>
-                  <input
-                    type="datetime-local"
+                  <InspectionDateInput
+                    label={`Re-inspection date and time for the ${office} visit`}
                     value={reinspect.value}
-                    onChange={(e) => reinspect.onChange(e.target.value)}
-                    aria-label={`Re-inspection date and time for the ${office} visit`}
-                    className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+                    onChange={reinspect.onChange}
                   />
                   <button
                     type="button"
@@ -601,12 +636,10 @@ export function InspectionDecisionCard({
           <div className="mt-4">
             {reschedule.open ? (
               <div className="flex flex-wrap items-center gap-2.5">
-                <input
-                  type="datetime-local"
+                <InspectionDateInput
+                  label={`New date and time for the ${office} inspection`}
                   value={reschedule.value}
-                  onChange={(e) => reschedule.onChange(e.target.value)}
-                  aria-label={`New date and time for the ${office} inspection`}
-                  className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+                  onChange={reschedule.onChange}
                 />
                 <button
                   type="button"
@@ -644,6 +677,117 @@ export function InspectionDecisionCard({
 }
 
 /**
+ * The permit an office has approved on paper and not yet sent anyone to look at.
+ *
+ * ── Why there is a card here at all ─────────────────────────────────────────
+ *
+ * Approving a clearance's paperwork moves that permit to `for_inspection` and
+ * books NOTHING (WorkflowService::approveClearance). The scheduler that used to
+ * pick a date two working days out is gone on purpose — "an automatic date is a
+ * promise made to the applicant by a scheduler that does not know whether anyone
+ * is free" — and the client's procedure is two steps, "Select Inspection Date
+ * and Approve Inspection". The second step had no screen: the API route existed,
+ * no client called it, and a permit that reached `for_inspection` stayed there,
+ * which held the whole filing out of For Final Approval.
+ *
+ * ── Not a visit, so not an InspectionDecisionCard ───────────────────────────
+ *
+ * Every prop on that card reads off an `Inspection` row, and the entire point of
+ * this state is that no such row exists. What is shared is the date field, which
+ * is `InspectionDateInput` above.
+ *
+ * `permit` is named on the card and in every accessible name. A filing carries a
+ * clearance per office and this panel already renders their visits side by side,
+ * so a bare "Book this visit" would be one more identical stop — the same defect
+ * the Approve and Reject glyphs on the card above were fixed for.
+ *
+ * ── The date field is open on arrival, unlike reschedule and reinspect ──────
+ *
+ * Those two hide behind a link because they are the SECOND thing to do to a
+ * visit that already exists, and the decision on it is meant to carry the
+ * weight. Here there is nothing else on the card: an office that has just
+ * accepted the paperwork has exactly one act left, and putting it behind a
+ * disclosure would be a click whose only content is "yes, the thing this card is
+ * about". `flow-lifecycle.spec.ts` asserts the booking control is reachable
+ * without one, and that is the right shape.
+ *
+ * Presentational, like InspectionDecisionCard: the caller owns the request, so
+ * the same markup can be driven by a test that never reaches the network.
+ */
+function FirstInspectionCard({
+  permit,
+  value,
+  busy,
+  hintId,
+  onChange,
+  onBook,
+}: {
+  permit: string
+  value: string
+  busy: boolean
+  /** Ties the "pick a date first" sentence to the button it explains. */
+  hintId: string
+  onChange: (value: string) => void
+  onBook: () => void
+}) {
+  return (
+    <li
+      className="overflow-hidden rounded-2xl bg-white shadow-card"
+      aria-label={`${permit} inspection booking`}
+    >
+      {/*
+        Royal, not the yellow the outstanding visits wear. This is the office's
+        own next action rather than a state the premises are in, and the bar is
+        never the only thing saying so — the line below says it in words.
+      */}
+      <div className="h-2.5 bg-royal" />
+      <div className="px-6 py-5">
+        <p className="text-[11px] font-bold uppercase tracking-wide text-ink-muted">{permit}</p>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <CalendarIcon size={30} className="text-royal" />
+          <span className="text-2xl font-medium text-ink">No inspection booked</span>
+        </div>
+        <p className="mt-1.5 max-w-xl text-sm text-ink-secondary">
+          Your office has accepted the paperwork for this permit. Say when an inspector will visit
+          the premises — the permit cannot be issued until a visit passes.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2.5">
+          <InspectionDateInput
+            label={`Date and time of the ${permit} inspection`}
+            value={value}
+            onChange={onChange}
+          />
+          {/*
+            `aria-disabled`, never `disabled`. The button is shut only while
+            there is no date or a request is already on its way, and both are
+            reasons worth reading — a disabled control leaves the tab order and
+            takes the sentence explaining it along. The handler carries the same
+            guard, so a press that lands anyway does nothing rather than sending
+            an empty booking.
+          */}
+          <button
+            type="button"
+            aria-label={`Book the ${permit} visit`}
+            aria-disabled={busy || !value}
+            aria-describedby={value ? undefined : hintId}
+            onClick={() => busy || !value || onBook()}
+            className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover aria-disabled:opacity-60"
+          >
+            {busy ? 'Booking…' : 'Book this visit'}
+          </button>
+        </div>
+        {!value && (
+          <p id={hintId} className="mt-2 text-sm text-ink-muted">
+            Choose a date and time to book the visit.
+          </p>
+        )}
+      </div>
+    </li>
+  )
+}
+
+/**
  * Every visit on a filing, with the decisions wired to the API.
  *
  * This is what a screen embeds. It owns the conduct and reinspect requests and
@@ -666,6 +810,7 @@ export function InspectionDecisionPanel({
   inspections,
   filingStatus,
   onChanged,
+  book,
   className = '',
 }: {
   inspections: Inspection[]
@@ -680,6 +825,23 @@ export function InspectionDecisionPanel({
    */
   filingStatus: string
   onChanged: () => void
+  /**
+   * The reader's OWN clearance, awaiting its first visit — absent when there is
+   * nothing here for this office to book.
+   *
+   * The caller decides, not this panel, and that is deliberate. The rule the
+   * server applies is `permit_types.issuing_department_id === the caller's
+   * department` (InspectionController::schedule, 403 otherwise), and the screen
+   * that knows which permit THIS office issues on THIS filing is the one holding
+   * the assignment payload — `AssignmentResource::clearanceRow()` answers
+   * exactly that question, matched on exactly that column. Recomputing it here
+   * would mean a second, weaker copy: this panel is handed every office's
+   * visits and has no way to tell which permit belongs to whom.
+   *
+   * `applicationId` and `code` are what the endpoint is keyed on; `permit` is
+   * what the card and its accessible names say.
+   */
+  book?: { applicationId: number; code: string; permit: string }
   className?: string
 }) {
   const user = useAuth((s) => s.user)
@@ -689,6 +851,12 @@ export function InspectionDecisionPanel({
   const [reinspectValue, setReinspectValue] = useState('')
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedValue, setReschedValue] = useState('')
+  const [bookValue, setBookValue] = useState('')
+  const [booking, setBooking] = useState(false)
+  const [bookNote, setBookNote] = useState<string | null>(null)
+  /** The visit this panel has just opened, before the caller has re-fetched. */
+  const [booked, setBooked] = useState<Inspection | null>(null)
+  const bookHintId = useId()
   const [error, setError] = useState<string | null>(null)
 
   /*
@@ -746,7 +914,9 @@ export function InspectionDecisionPanel({
   function isCurrentForDepartment(item: Inspection): boolean {
     const code = item.department?.code
     if (!code) return false
-    return !inspections.some((other) => other.department?.code === code && other.id > item.id)
+    // `visits`, not the prop: a visit this panel has just booked supersedes the
+    // office's older ones exactly as one arriving down the wire would.
+    return !visits.some((other) => other.department?.code === code && other.id > item.id)
   }
 
   /*
@@ -857,18 +1027,135 @@ export function InspectionDecisionPanel({
     }
   }
 
-  if (inspections.length === 0) {
+  /*
+   * Opening this office's FIRST visit on its own permit.
+   *
+   * ── Why this one does NOT call `onChanged()` ───────────────────────────────
+   *
+   * Every other write here reloads, because every other write changes something
+   * this panel cannot see: a recorded result issues the permit and can move the
+   * filing off the inspection stage entirely. Booking changes exactly one thing
+   * — `WorkflowService::scheduleClearanceInspection` creates the visit, audits
+   * it and notifies the applicant, and writes no status at all. The permit stays
+   * `for_inspection` and the filing stays where it was. So the reply IS the
+   * whole change, and holding it is not a shortcut around a reload; it is the
+   * complete new state.
+   *
+   * Reloading would also destroy the one thing this act has to leave behind.
+   * `reload()` on the review screen sets `loading` back to true and the sheet
+   * renders its skeleton, which unmounts this panel — taking the confirmation
+   * with it before it can be announced. A screen-reader user would get a card
+   * silently replaced by a different card and no statement that anything
+   * happened (WCAG 4.1.3), which is the whole reason the note exists.
+   *
+   * The sentence is read off the SERVER's copy of the visit rather than off the
+   * input, so a date the API normalised is the date reported back.
+   */
+  async function bookFirstVisit() {
+    if (!book || !bookValue || booking) return
+    setBooking(true)
+    setError(null)
+    setBookNote(null)
+    try {
+      const visit = await inspectionsApi.schedule(
+        book.applicationId,
+        book.code,
+        new Date(bookValue).toISOString(),
+      )
+      setBookValue('')
+      setBooked(visit)
+      setBookNote(
+        `${book.permit} inspection booked for ${formatDate(visit.scheduled_at)}. The applicant has been told the date.`,
+      )
+    } catch (err) {
+      setError(toApiError(err).message)
+    } finally {
+      setBooking(false)
+    }
+  }
+
+  /*
+   * The visits to draw: what the caller was given, plus one this panel has just
+   * opened and the caller has not re-fetched.
+   *
+   * De-duplicated by id, because the caller MAY reload for its own reasons — a
+   * result recorded on another card, an officer reassigned — and the booked
+   * visit would then arrive down the wire as well. Two identical cards for one
+   * appointment is a worse bug than the stale card this fixes.
+   */
+  const visits =
+    booked && !inspections.some((item) => item.id === booked.id)
+      ? [...inspections, booked]
+      : inspections
+
+  /*
+   * The card, and the live region that says what came of it.
+   *
+   * Withdrawn the moment a visit is booked, whether the news came from the
+   * caller's payload or from this panel's own request: there is no longer a
+   * FIRST visit to open, and the way on from the one that now exists is
+   * Reschedule — which the visit's own card carries.
+   *
+   * Rendered by both branches below. The empty state is the COMMON case for a
+   * first booking, because an office that has just accepted its paperwork is
+   * usually the only one on the filing with anything to schedule.
+   */
+  const booker = book && !booked ? (
+    <FirstInspectionCard
+      permit={book.permit}
+      value={bookValue}
+      busy={booking}
+      hintId={bookHintId}
+      onChange={(next) => {
+        setError(null)
+        setBookValue(next)
+      }}
+      onBook={bookFirstVisit}
+    />
+  ) : null
+
+  /*
+   * `role="status"` on a node that is in the tree from the first render.
+   * A live region mounted at the same moment its text appears is not reliably
+   * announced — the assistive technology has nothing to observe changing.
+   */
+  const bookingAnnouncement = (
+    <p role="status" className="mt-3 text-sm font-medium text-s-green empty:mt-0">
+      {bookNote}
+    </p>
+  )
+
+  if (visits.length === 0) {
     /*
      * The filing says For Inspection and carries no visit. That is a real
      * state — the schedule can be pending — and it is worth naming, because the
      * alternative is a heading with nothing under it and an officer wondering
      * which half of the page failed to load.
+     *
+     * For the office that can DO something about it, the sentence is not enough
+     * and never was: this is where a filing dead-ended, because the one act that
+     * moves it on — booking the visit — had no control anywhere in the product.
+     * So the reader who may book sees the booking card, and the reader who may
+     * not still gets the sentence.
      */
     return (
       <section className={className} aria-label="Application status">
-        <p className="rounded-2xl bg-white px-6 py-5 text-center text-sm text-ink-secondary shadow-card">
-          This application is waiting on a site visit, but none has been scheduled yet.
-        </p>
+        {error && (
+          <p
+            role="alert"
+            className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red"
+          >
+            {error}
+          </p>
+        )}
+        {booker ? (
+          <ul>{booker}</ul>
+        ) : (
+          <p className="rounded-2xl bg-white px-6 py-5 text-center text-sm text-ink-secondary shadow-card">
+            This application is waiting on a site visit, but none has been scheduled yet.
+          </p>
+        )}
+        {bookingAnnouncement}
       </section>
     )
   }
@@ -876,11 +1163,23 @@ export function InspectionDecisionPanel({
   return (
     <section className={className} aria-label="Application status">
       {error && (
-        <p className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{error}</p>
+        <p
+          role="alert"
+          className="mb-3 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red"
+        >
+          {error}
+        </p>
       )}
 
       <ul className="space-y-4">
-        {inspections.map((item) => (
+        {/*
+          The office's own unbooked permit comes FIRST, above other offices'
+          visits. It is the only thing on this panel the reader can act on at
+          all — everything below is somebody else's progress — and it was the
+          thing with no control at all until now.
+        */}
+        {booker}
+        {visits.map((item) => (
           <InspectionDecisionCard
             key={item.id}
             item={item}
@@ -935,6 +1234,8 @@ export function InspectionDecisionPanel({
           />
         ))}
       </ul>
+
+      {bookingAnnouncement}
 
       {rejecting && (
         <InspectionRemarksModal

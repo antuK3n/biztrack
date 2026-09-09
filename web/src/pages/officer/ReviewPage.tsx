@@ -1082,6 +1082,66 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   }
 
   /*
+   * ── May THIS office book the first visit on its own clearance? ────────────
+   *
+   * The step that had no screen. `approveClearance` moves a permit to
+   * `for_inspection` and books nothing — the automatic scheduler was removed on
+   * purpose, because "an automatic date is a promise made to the applicant by a
+   * scheduler that does not know whether anyone is free" — so the office picks
+   * the date in a second, separate act. Until this, no client called
+   * `POST /applications/{id}/permits/{code}/inspection`, and a permit that
+   * reached `for_inspection` stayed there: no visit, so nothing to pass, so the
+   * filing never reached For Final Approval.
+   *
+   * ── The office boundary, taken from the payload rather than guessed ────────
+   *
+   * `data.clearance` is `AssignmentResource::clearanceRow()` — the permit this
+   * office issues on this filing, matched on
+   * `issuing_department_id === assignment.department_id`. That is the SAME
+   * column `InspectionController::schedule` checks the caller against before it
+   * answers 403, so the control is drawn exactly where the request will be
+   * accepted and nowhere else. Null when this office issues no permit here, so
+   * an office reading the filing without owning a clearance gets no control.
+   *
+   * The three other candidates were all worse. `app.permit_types` is the
+   * filing's list, shared by every office — driving off it is how a sanitary
+   * officer was once handed OBO's date inputs over a live Save (SEP-3). Office
+   * forms carry a `department_code`, but only for a permit the applicant APPLIED
+   * for; hand in a copy you already hold and there is no sheet, while the permit
+   * still needs its inspection. And a permit-type lookup by code would be this
+   * rule written down a second time, in the browser, where it can drift.
+   *
+   * ── The other three conditions ────────────────────────────────────────────
+   *
+   *  - `requires_inspection`, or there is no visit to book: a desk-only permit
+   *    is granted by `approveClearance` itself and never sits here. BPLO's
+   *    Business Permit is the one in the register today.
+   *  - `status === 'for_inspection'` — the pivot state
+   *    `scheduleClearanceInspection` demands, and the only one it accepts.
+   *  - this office has NO visit on the filing yet. Not "no OPEN visit": after a
+   *    failure the permit STAYS at `for_inspection` (recordInspection keeps the
+   *    failed row), and the way on from there is Schedule re-inspection on the
+   *    failed card, which the panel already draws. Two controls booking the same
+   *    office's next visit, one of them silently discarding the failure from
+   *    view, is the confusion `reinspect` was separated from `reschedule` to
+   *    avoid.
+   *
+   * A courtesy, not the control: the API is still what decides, and a mismatch
+   * surfaces as the panel's error line rather than as an unauthorised write.
+   */
+  const myClearance = data.clearance
+  const myVisits = (app.inspections ?? []).filter(
+    (visit) => visit.department?.code === data.department.code,
+  )
+  const bookFirstInspection =
+    myClearance &&
+    myClearance.requires_inspection &&
+    myClearance.status === 'for_inspection' &&
+    myVisits.length === 0
+      ? { applicationId: app.id, code: myClearance.code, permit: myClearance.name }
+      : undefined
+
+  /*
    * ── The For Inspection screen ─────────────────────────────────────────────
    *
    * A filing waiting on a site visit gets its own, much smaller page, and
@@ -1240,6 +1300,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             inspections={app.inspections ?? []}
             filingStatus={app.status}
             onChanged={reload}
+            book={bookFirstInspection}
           />
 
           {/* The rail the client asked to keep: "but the progress thingy is cool". */}
