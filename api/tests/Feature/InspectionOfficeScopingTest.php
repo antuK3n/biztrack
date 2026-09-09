@@ -95,11 +95,38 @@ function filingWithOneOfficesVisitWrittenUp(): array
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
-    // The applicant opens both other permits, which routes CHO and BFP.
-    foreach (['SANITARY', 'FSIC'] as $code) {
+    /*
+     * The applicant opens both other permits and fills both sheets in, which is
+     * what routes CHO and BFP.
+     *
+     * Apply on its own no longer reaches an office. SANITARY and FSIC both
+     * carry a form, and on a form-bearing permit `startClearance` records the
+     * choice, opens the sheet and stops — Apply's whole job is to OPEN the
+     * form, and it used to announce "For Approval" on a form the applicant had
+     * not touched (client, 9 September 2026). Saving the sheet with `submit` is
+     * what hands it to the office and creates the assignment
+     * (WorkflowService::submitClearanceForm). Every case in this file reads a
+     * visit off an office's own review sheet, so without the second call there
+     * is no assignment to open and the fixture dies looking for one.
+     *
+     * The answers and the submission go in ONE write on purpose. `ownerMayEdit`
+     * hands the sheet back to the office the moment it is submitted, so a save
+     * after a submit would be a 422; apply → fill → submit is the only order
+     * the product now allows, and a single PUT is that order.
+     */
+    foreach ([
+        'SANITARY' => ['sanitary_classification' => 'Food Establishment'],
+        'FSIC' => ['storey_count' => '2', 'floor_area' => '180'],
+    ] as $code => $formData) {
         test()->withHeaders($owner)
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertSuccessful();
+
+        test()->withHeaders($owner)
+            ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+                'form_data' => $formData,
+                'submit' => true,
+            ])->assertSuccessful();
     }
 
     $app = Application::findOrFail($appId);

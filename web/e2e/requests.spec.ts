@@ -29,7 +29,7 @@ const WITH_DELETED_BUSINESS = [
     tracking_id: 'BIZ-2023-00025',
     application_type: 'new',
     title: null,
-    status: 'under_review',
+    status: 'for_approval',
     status_label: 'For Approval',
     // The register no longer holds this one.
     business: null,
@@ -43,7 +43,7 @@ const WITH_DELETED_BUSINESS = [
     tracking_id: 'BIZ-2026-00100',
     application_type: 'renewal',
     title: null,
-    status: 'under_review',
+    status: 'for_approval',
     status_label: 'For Approval',
     business: { id: 5, name: 'Dela Cruz Trading' },
     submitted_at: '2026-06-01T00:00:00.000000Z',

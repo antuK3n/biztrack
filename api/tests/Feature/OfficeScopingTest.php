@@ -34,11 +34,22 @@ use Illuminate\Http\UploadedFile;
  * `docs/application-flow-2026-09.md` moved routing off payment and onto the
  * applicant's own act: the clearances open when the filing is paid, and an
  * office is handed the filing only once the owner applies for — or hands in a
- * copy of — that office's permit (`WorkflowService::startClearance`, which
- * routes one office at a time so `assigned_at` is an honest start for that
- * office's measured service time). Paying alone now leaves BPLO as the only
- * assignment, which is why every case in this file that reads as an office
- * other than BPLO went 403 until this fixture performed the applicant's step.
+ * copy of — that office's permit, one office at a time so `assigned_at` is an
+ * honest start for that office's measured service time. Paying alone now leaves
+ * BPLO as the only assignment, which is why every case in this file that reads
+ * as an office other than BPLO went 403 until this fixture performed the
+ * applicant's step.
+ *
+ * And that step is two acts, not one. `startClearance` records that the
+ * applicant chose to fill in the office's form and opens it; it deliberately
+ * stops there for every form-bearing permit, because Apply used to claim the
+ * applicant had completed a form they had not touched (client, 9 September 2026
+ * — "I still haven't submitted any applications yet the status says it is For
+ * Approval"). `submitClearanceForm` is what hands the sheet in, moves the
+ * permit to ForApproval and routes the office. Every code this fixture is
+ * called with — SANITARY, FSIC, OCCUPANCY, ZONING — is on
+ * `PermitType::OFFICE_FORM_CODES`, so Apply alone creates no assignment at all
+ * and the 403s came back looking exactly like the ones above.
  *
  * @param  list<string>  $permitCodes
  * @return array{id:int, business_id:int}
@@ -86,18 +97,27 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     /*
-     * The applicant opens each other permit, which is what routes its office.
+     * The applicant opens each other permit and hands its sheet in, which is
+     * what routes its office. Two calls, for the reason the header gives.
      *
      * BUSINESS is skipped: it is the main form, it is BPLO's, and it was routed
      * at submission. Driven at the service for the same reason the approval
      * above is — it keeps the fixture short and does not disturb the acting
      * user — and with MODE_APPLY because "filled the office's form" is the
      * ordinary path; the uploaded-copy half is HeldPermitSubmissionTest's.
+     *
+     * Nothing writes an office sheet between the two calls, so this file is
+     * spared the ordering the applicant lives under: once a permit is past
+     * NotStarted the owner may no longer write to it. The two cases below that
+     * do PUT an office form write as an OFFICER recording an issuance date,
+     * which is a different door and open for as long as the office holds the
+     * permit.
      */
     $app = $app->fresh();
     $workflow = app(WorkflowService::class);
     foreach (PermitType::whereIn('code', $permitCodes)->where('code', '!=', 'BUSINESS')->get() as $type) {
         $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+        $workflow->submitClearanceForm($app, $type);
     }
 
     return ['id' => $appId, 'business_id' => $businessId];

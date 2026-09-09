@@ -68,15 +68,26 @@ it('notifies the applicant when the application is approved', function () use ($
     $appId = payingApplication('Notify Test Bakery', 'DTI-88001');
 
     /*
-     * The applicant opens each of the five permits, which is what routes its
-     * office. Payment no longer does it: routing follows the applicant one
-     * office at a time, so a paid filing nobody has filed a clearance on sits
-     * in BPLO's queue alone.
+     * The applicant opens each of the five permits and hands each sheet in, and
+     * it is the second act that routes the office. Payment no longer does it,
+     * and nor does Apply on its own: Apply opens the office's form, and
+     * `WorkflowService::submitClearanceForm` is what submits the permit and puts
+     * it in a queue. A paid filing nobody has FILED a clearance on sits in
+     * BPLO's queue alone, and the loop below would find no assignment to
+     * approve.
+     *
+     * The sheets go in empty — this file is about who is told what at the end,
+     * not about the answers that got the filing there.
      */
     foreach (array_keys(END_STATE_OFFICE) as $code) {
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+                'form_data' => [],
+                'submit' => true,
+            ])->assertSuccessful();
     }
 
     /*

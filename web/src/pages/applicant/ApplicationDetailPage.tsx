@@ -15,7 +15,7 @@ import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { applications } from '../../lib/resources'
-import { applicationStatusMeta } from '../../lib/status'
+import { applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
@@ -419,6 +419,8 @@ export function ApplicationDetailPage() {
     .sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
   const inspection = upcoming[0] ?? app.inspections.find((i) => i.scheduled_at) ?? app.inspections[0]
   const withRemarks = status === 'rejected' || status === 'returned'
+  /* Shared with the officer's progress rail so the two cannot count differently. */
+  const otherPermits = otherPermitProgress(app.permit_types)
 
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
   const remarks: { who: string; text: string }[] = [
@@ -485,12 +487,33 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
+        {/*
+          * ── The three cards between filing and approval ────────────────
+          *
+          * These were two, and both were testing statuses the September flow
+          * change deleted: `submitted`/`under_review` on the first and
+          * `for_inspection` on the second. Neither condition can be true any
+          * more, so an applicant sitting at `for_approval`,
+          * `awaiting_other_permits` or `for_final_approval` — which is most of
+          * the life of a filing — opened "Application Status" and was shown no
+          * status card at all. The bug was invisible from the officer side,
+          * where the same staleness printed raw enum values instead.
+          */}
         {status === 'for_approval' && (
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
               <span className="text-4xl font-medium">For Approval</span>
             </div>
+            {/*
+              * What this stage IS, said plainly, because the client's whole
+              * correction to the flow was that these two are separate: BPLO
+              * reads the form first, and only then is there anything to pay.
+              * An applicant who remembers the old system expects a bill here.
+              */}
+            <p className="mt-2 text-sm italic text-ink-secondary">
+              BPLO is reading your form. Your fees are assessed once it is approved.
+            </p>
             {app.deadline_at && (
               <p className="mt-3 text-base italic text-ink-secondary">
                 Deadline: {formatDate(app.deadline_at)}
@@ -500,26 +523,20 @@ export function ApplicationDetailPage() {
         )}
 
         {/*
-          * The two stages after payment, which had no card at all.
+          * The stage that replaced For Inspection, and it is not a rename.
           *
-          * The status enum was replaced — `submitted`, `under_review` and
-          * `for_inspection` retired for `for_approval`,
-          * `awaiting_other_permits` and `for_final_approval` — but these cards
-          * were never rewritten to match, so three of the flow's states rendered
-          * NOTHING. `awaiting_other_permits` is the longest of them: the whole
-          * period while the offices work. An applicant checking on their filing
-          * during the stage that takes the most days saw a page with no status
-          * on it.
+          * Inspection belongs to ONE permit now, not to the filing, and five
+          * permits move at once — so the honest headline for the applicant is
+          * the set of permits still outstanding, with the next visit named
+          * underneath it when one is booked. This is also the only stage on
+          * this screen where the applicant has work to do, hence the button:
+          * they must apply for each remaining clearance or upload the copy they
+          * already hold, and nothing happens until they do.
           *
-          * The inspection card is folded into Awaiting Other Permits rather than
-          * deleted. Inspection did not go away — it moved onto each permit's own
-          * `ClearanceStatus`, so a scheduled visit is still worth surfacing here
-          * when there is one, it just no longer has an application status of its
-          * own to hang off.
-          *
-          * Neither is an error, so neither takes #bd0000 (DESIGN.md, Red Means
-          * Stop) — yellow for work in progress, orange for a decision pending,
-          * matching the cards that survived.
+          * Neither this card nor For Final Approval is an error, so neither
+          * takes #bd0000 (DESIGN.md, Red Means Stop) — yellow for work in
+          * progress, orange for a decision pending, matching the cards that
+          * survived.
           */}
         {status === 'awaiting_other_permits' && (
           <StatusCard tone="yellow">
@@ -527,28 +544,40 @@ export function ApplicationDetailPage() {
               <MagnifierCheckIcon />
               <span className="text-4xl font-medium">Awaiting Other Permits</span>
             </div>
-            <p className="mt-3 text-base text-ink-secondary">
-              Each office works through its own clearance separately, so they will not all
-              finish at the same time.
+            <p className="mt-2 text-sm italic text-ink-secondary">
+              {otherPermits.outstanding.length === 0
+                ? `All ${otherPermits.total} other permits are approved. BPLO is picking up your application.`
+                : `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
+                  ` · still to come: ${otherPermits.outstanding.join(', ')}.` +
+                  ' Apply for each one, or upload the permit you already hold.'}
             </p>
             {inspection?.scheduled_at && (
               <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
                 <CalendarIcon size={18} />
-                Scheduled Date: {formatDateTime(inspection.scheduled_at)}
+                Next inspection: {formatDateTime(inspection.scheduled_at)}
               </p>
             )}
+            <PillButton className="mt-4" onClick={() => navigate(`/applications/${app.id}/clearances`)}>
+              Go to LGU Clearances
+            </PillButton>
           </StatusCard>
         )}
 
+        {/*
+          * A stage with nothing in it for the applicant to do, which is exactly
+          * why it needs saying: every office has finished and the filing is
+          * sitting on one desk. Without a card it read as the same silence as
+          * the bug above.
+          */}
         {status === 'for_final_approval' && (
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
               <span className="text-4xl font-medium">For Final Approval</span>
             </div>
-            <p className="mt-3 text-base text-ink-secondary">
-              Every office has signed off. BPLO is making the final decision on your Business
-              Permit.
+            <p className="mt-2 text-sm italic text-ink-secondary">
+              Every other permit is in. BPLO is approving your application and releasing your
+              Business Permit.
             </p>
           </StatusCard>
         )}

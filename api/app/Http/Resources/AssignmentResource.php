@@ -55,6 +55,27 @@ class AssignmentResource extends JsonResource
                 'id' => $this->officer->id,
                 'name' => $this->officer->name,
             ] : null,
+            /*
+             * Is `officer` null because NOBODY has claimed this review, or
+             * because this reader may not be told who did?
+             *
+             * The two were indistinguishable and one screen was guessing. The
+             * Office approvals panel printed "Not yet assigned to an officer"
+             * whenever `officer` was null, so the scoping rule above — which is
+             * working exactly as intended — made every other office's row state
+             * a fact about staffing that was not true. On filing 5 a CENRO
+             * session read that sentence under BPLO, whose review was completed
+             * by officer 2.
+             *
+             * A withheld value must never render as a factual claim about the
+             * thing withheld. So the resource says which of the two it is, and
+             * the screen has something honest to print for each.
+             *
+             * `officer_user_id` is deliberately the test rather than the loaded
+             * relation: a deleted staff account leaves the id standing on the
+             * row, and "somebody signed this off" stays true after they leave.
+             */
+            'officer_withheld' => ! $readsWords && $this->officer_user_id !== null,
             'assigned_at' => optional($this->assigned_at)->toISOString(),
             'completed_at' => optional($this->completed_at)->toISOString(),
             /*

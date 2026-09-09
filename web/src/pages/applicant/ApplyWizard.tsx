@@ -193,6 +193,24 @@ const BASE_PHASES: BasePhase[] = [
   'review',
 ]
 
+/**
+ * The amendment form's steps: the base list with its own question in front.
+ *
+ * Only `application_type === 'amendment'` uses this. A renewal ran a variant of
+ * it until 9 September 2026 — see the note on `sequence` below for why it
+ * stopped, and why this stayed.
+ */
+const AMENDMENT_PHASES: BasePhase[] = [
+  'privacy',
+  'amendments',
+  'address',
+  'business',
+  'operation',
+  'documents',
+  'fees',
+  'review',
+]
+
 /*
  * `business` is captioned with the paper's full section title now — "Business
  * Information & Registration" — rather than the half of it that fitted while
@@ -763,6 +781,23 @@ function websiteValid(raw: string): boolean {
   if (trimmed.includes('@') || /\s/.test(trimmed)) return false
 
   return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(trimmed)
+}
+
+/**
+ * BPLO item A8 — the BUSINESS's own e-mail, which became required on
+ * 9 September 2026.
+ *
+ * As lenient as `websiteValid` beside it and for the same reason: the mistake
+ * this field attracts is a wrong KIND of answer — a phone number, a name, a
+ * sentence — not a subtly malformed address. Anything with one @ between two
+ * non-empty parts, a dot in the domain and no whitespace is somebody's real
+ * mailbox as far as this form is concerned, and refusing a valid unusual
+ * address is a worse failure than accepting a typo an officer will notice.
+ */
+function emailValid(raw: string): boolean {
+  const trimmed = raw.trim()
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
 }
 
 /** Strip the display separators before an amount goes to the API. */
@@ -2913,80 +2948,101 @@ export function ApplyWizard() {
   /*
    * ── The running order, which a renewal computes rather than inherits ─────
    *
-   * A new application and an amendment still run the fixed BASE_PHASES. A
-   * renewal does not, because MCG-BPLO-FO-002 does not: its section A1 decides
-   * how much of the rest of the form exists.
+   * ── A renewal runs the same steps as a new application ─────────────────
    *
-   *   A1 unanswered → the question, and nothing past it.
-   *   A1 = No       → the question, then Review. Nothing on the paper after
-   *                   section A applies to a business whose registration has
-   *                   not changed; the details carry over from the permit
-   *                   being renewed.
-   *   A1 = Yes      → the sections covering what was TICKED in A2, then the
-   *                   documentary requirements and the tax profile, then
-   *                   Review.
+   * It did not, and the shape it had was built around one question. MCG-BPLO-FO-002
+   * section A1 — "any changes or amendments in the previous business
+   * registration?" — used to decide how much of the rest of the form existed:
+   * unanswered stopped the wizard dead, No skipped to Review, and Yes opened
+   * only the sections matching what was ticked in A2.
    *
-   * The A2 ticks choosing the steps is the "friendly" half of the request: a
-   * renewal that only moved premises is asked about its address and nothing
-   * else, rather than being walked through six sections to change one field.
+   * The client removed that question on 9 September 2026: *"REMOVE THE
+   * AMENDMENT PART on the BPLO renewal part. We don't need that anymore."*
+   * Their model of a renewal is *"ALMOST the same as the application process.
+   * With the only difference is that you will choose what to renew at the
+   * start"* — the applicant walks the same steps and edits whatever has changed
+   * as they go, rather than declaring up front what they intend to change and
+   * being shown a form cut down to match.
    *
-   * ── Which tick opens which section ──────────────────────────────────────
+   * That is the better shape for a reason the conditional sequence could not
+   * fix: A2's four ticks were a lossy index of the form. A renewal that changed
+   * its telephone number, its employee count or its capitalisation ticked
+   * nothing — none of the four names those — and was then shown a wizard with
+   * no step it could change them on. The applicant's only route was to tick
+   * "Others (specify)" and describe a phone number in prose.
    *
-   *   Location or Address of Business → `address`  (paper item B6)
-   *   Ownership / Nature of Business  → `business` (B1 and the line-of-business
-   *                                     table; the structure itself is A3, and
-   *                                     that is asked on the step below)
-   *   Others (specify)                → `business`, as the catch-all. An
-   *                                     unnamed change has no section of its
-   *                                     own, and the business details are where
-   *                                     the most of it could live. The typed
-   *                                     text rides along to the officer either
-   *                                     way, so nothing is lost if the guess is
-   *                                     wrong.
+   * So the sequence is now `BASE_PHASES` for every filing type, and the one
+   * renewal-specific question — which permits — is asked before the wizard
+   * opens, in the entry dialog, where it always was.
    *
-   * `documents` and `fees` are NOT conditional under a Yes. The paper prints
-   * its documentary requirements and its Gross Sales/Receipts column for every
-   * renewal that fills in section B, and the fee engine is fed from `fees` —
-   * gating them on a tick would price the filing off last year's figures
-   * without anybody having said so.
+   * The `amendments` phase itself is NOT deleted: `application_type ===
+   * 'amendment'` is a separate filing type the client is dealing with
+   * separately, and it still asks A1/A2/A3. Deleting the step to tidy up the
+   * renewal would take the amendment form's only question with it.
    */
-  const sequence: BasePhase[] = useMemo(() => {
-    if (applicationType !== 'renewal') return BASE_PHASES
-
-    if (amendment.hasChanges === null) return ['privacy', 'amendments']
-    if (amendment.hasChanges === false) return ['privacy', 'amendments', 'review']
-
-    const changed: BasePhase[] = []
-    if (amendment.location) changed.push('address')
-    if (amendment.ownership || amendment.nature || amendment.other.trim() !== '') {
-      /*
-       * Both halves of what used to be one step. Splitting Section B out must
-       * not quietly take editable fields away from a renewal: before the split,
-       * ticking Ownership or Nature opened economic organisation and tax
-       * incentives along with everything else, because they lived on the same
-       * step. Pushing only `business` here would have left a renewal no route to
-       * them at all.
-       */
-      changed.push('business', 'operation')
-    }
-
-    return ['privacy', 'amendments', ...changed, 'documents', 'fees', 'review']
-  }, [applicationType, amendment])
+  const sequence: BasePhase[] = useMemo(
+    () => (applicationType === 'amendment' ? AMENDMENT_PHASES : BASE_PHASES),
+    [applicationType],
+  )
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
   const phase: BasePhase = sequence[stepIndex]
   const isLast = stepIndex === sequence.length - 1
 
-  /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
+  /*
+   * ── What this filing is FOR ─────────────────────────────────────────────
+   *
+   * On a NEW application or an amendment: the Mayor's / Business Permit,
+   * implicitly and always. It is what the whole filing is for, the wizard never
+   * offers it as a choice, and the API attaches the five required clearances
+   * alongside it at submission.
+   *
+   * On a RENEWAL: exactly the permits the applicant ticked in the entry dialog,
+   * and NOTHING else — the Mayor's Permit included only if they ticked it.
+   *
+   * The client's rule, 9 September 2026: the six permits expire on six
+   * different dates, so a renewal is of whichever ones are actually due. A shop
+   * whose Sanitary Permit runs out in September and whose FSIC runs to November
+   * renews the one. Forcing the business permit on here would put a renewal of
+   * it — and its fee — onto a filing that never asked for one, which is the
+   * same defect the API had until `attachRequiredPermitTypes` learned to leave
+   * a renewal alone: measured before the fix, a two-permit renewal came out of
+   * submit carrying six.
+   *
+   * Derived from `priorPermitIds` rather than accumulated, so unticking a
+   * permit in the dialog removes it here too. A renewal that names no permit at
+   * all is the paper-permit escape ("this business has no BizTrack permit"),
+   * and that one DOES take the business permit: there is nothing in the
+   * register to renew, so what they are filing is a business permit renewal
+   * against a certificate we never issued.
+   */
   useEffect(() => {
     if (businessTypeId === null) return
+
+    if (applicationType !== 'renewal') {
+      setForm((f) =>
+        f.permit_type_ids.includes(businessTypeId)
+          ? f
+          : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+      )
+
+      return
+    }
+
+    const ticked = priorPermitIds
+      .map((id) => renewablePermits.find((p) => p.id === id)?.permit_type?.code)
+      .filter((code): code is string => typeof code === 'string')
+    const ids = permitTypes.filter((pt) => ticked.includes(pt.code)).map((pt) => pt.id)
+    const next = ids.length > 0 ? ids : [businessTypeId]
+
     setForm((f) =>
-      f.permit_type_ids.includes(businessTypeId)
+      f.permit_type_ids.length === next.length &&
+      next.every((id) => f.permit_type_ids.includes(id))
         ? f
-        : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+        : { ...f, permit_type_ids: next },
     )
-  }, [businessTypeId])
+  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes])
 
   const feeLines = useMemo(
     () =>
@@ -3113,6 +3169,23 @@ export function ApplyWizard() {
           }
           if (!form.name.trim()) missing.push('Business Name')
           /*
+           * Items 11/12 — the named person the filing is in.
+           *
+           * Prefilled from the signed-in account, so for a sole proprietor
+           * these are already answered before the step is opened and the check
+           * costs them nothing. It bites on the case it is for: a corporation
+           * naming somebody other than the account holder, who clears the boxes
+           * and does not refill them.
+           *
+           * Middle name and suffix stay optional — plenty of people have
+           * neither, and a form that insists otherwise is asking them to invent
+           * one. Gender is required because CENRO's paper prints a SEX box and
+           * nothing else on the filing answers it.
+           */
+          if (!form.owner_surname.trim()) missing.push('Owner’s Family Name')
+          if (!form.owner_given_name.trim()) missing.push('Owner’s First Name')
+          if (!form.owner_gender.trim()) missing.push('Owner’s Sex')
+          /*
            * Item 94 — the structure is listed FIRST, and the number is named
            * after the agency that structure implies.
            *
@@ -3138,13 +3211,38 @@ export function ApplyWizard() {
           if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
           else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
           /*
-           * The fields transcribed from the paper BPLO form are all optional —
-           * none of the three paper forms marks any field required, and every
-           * asterisk in this wizard is our own judgement. So nothing below is
-           * listed for being blank; they are listed only when what is in them
-           * cannot be stored, on the same pattern as the emergency contact
-           * number on the Location & Zoning step.
+           * ── The blanket "paper fields are optional" rule ended here ────────
+           *
+           * It read: none of the three paper forms marks any field required,
+           * every asterisk in this wizard is our own judgement, so nothing
+           * transcribed from paper is listed for being blank.
+           *
+           * The client reversed it on 9 September 2026 after seeing the cost.
+           * A filing reached CENRO with no products or services, no employee
+           * split, no landline and no mobile — five of the six boxes on that
+           * office's Business Details block were empty, and the office had
+           * nothing to work from. "Can you make ALL non-optional fields
+           * required now so that we won't have the same problem again."
+           *
+           * So the rule is now per field rather than blanket, and the test is
+           * whether an office can do its job without the answer:
+           *
+           *  REQUIRED — Mobile Number and E-mail Address: how the office
+           *    reaches the applicant, and every business has both.
+           *  OPTIONAL — Telephone (Landline): most sari-sari stores,
+           *    carinderias and market stalls genuinely have none, so requiring
+           *    one buys a false answer rather than a real one (client's
+           *    decision, 9 September 2026).
+           *  OPTIONAL — Website and Trade Name: the same, more so.
+           *
+           * Anything still optional is validated when filled and never demanded
+           * when blank, which is what these three checks were doing for
+           * everything.
            */
+          if (!form.mobile_number.trim()) missing.push('Mobile Number')
+          else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
+          if (!form.email.trim()) missing.push('E-mail Address')
+          else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
           }
@@ -3161,6 +3259,21 @@ export function ApplyWizard() {
           }
           if (form.website.trim() && !websiteValid(form.website)) {
             missing.push('A valid Website Address')
+          }
+          /*
+           * A13-A15, asked only of the structures that have a president or
+           * officer-in-charge — `hasPresidentOrOfficer` already hides them from
+           * a sole proprietorship, and demanding a field nobody is shown would
+           * be a dead end rather than a rule.
+           */
+          if (hasPresidentOrOfficer(form.registration_type)) {
+            if (!form.president_officer_name.trim()) {
+              missing.push('Name of President / OIC')
+            }
+            if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
+            if (!form.capital_participation_filipino.trim()) {
+              missing.push('Capital Participation (Filipino)')
+            }
           }
           if (!percentValid(form.capital_participation_filipino)) {
             missing.push('A Capital Participation between 0 and 100 percent')
@@ -3181,6 +3294,16 @@ export function ApplyWizard() {
          */
         case 'operation': {
           const missing: string[] = []
+          /*
+           * B6 became required on 9 September 2026 with the rest of the paper
+           * fields. It is a closed list of establishment types the applicant
+           * picks from, not free text — there is no business it fails to
+           * describe, and "Others" with its own blank is there for the ones the
+           * list does not name. A blank here is an unanswered question rather
+           * than an inapplicable one, which is the test the whole reversal turns
+           * on.
+           */
+          if (!form.economic_organization) missing.push('Economic Organization')
           if (
             form.economic_organization === 'others' &&
             !form.economic_organization_others.trim()
@@ -3226,6 +3349,28 @@ export function ApplyWizard() {
           if (otherId !== undefined && form.lines.some((l) => l.psic_code_id === otherId)) {
             missing.push('A real PSIC trade in place of the unclassified line')
           }
+          /*
+           * Products / Services, required per line from 9 September 2026.
+           *
+           * The PSIC code says what CATEGORY the trade falls in; this says what
+           * the business actually sells, and three offices print it on their
+           * paper — CENRO's form has a PRODUCTS/SERVICES box beside LINE OF
+           * BUSINESS, and it reached them empty on the filing that prompted
+           * this change. "Retail sale in non-specialized stores" tells a
+           * sanitary inspector nothing about whether there is food on the
+           * premises; "milk tea, fried snacks" tells them everything.
+           *
+           * Named per line, because a filing can declare several and only one
+           * of them may be blank.
+           */
+          form.lines.forEach((line, index) => {
+            if (!(line.products_services ?? '').trim()) {
+              const label = psic.find((c) => c.id === line.psic_code_id)?.title
+              missing.push(
+                `Products / Services for ${label ?? `line of business ${index + 1}`}`,
+              )
+            }
+          })
           /*
            * "Capital for every line of business" was checked here and no longer
            * is. The question moved to Business & Tax Profile, where the `fees`
@@ -4570,20 +4715,21 @@ export function ApplyWizard() {
          * that blank over the answer, which is the draft losing it silently.
          */
         setAmendment(
-          app.amendments
+          /*
+           * Amendments only, since 9 September 2026. A renewal no longer asks
+           * section A at all, so restoring its old answers would put state
+           * behind a step that is not in its sequence — and the API writes
+           * those columns back to false on every renewal save, so what came
+           * back here would be a stale copy of something already cleared.
+           *
+           * Renewal drafts saved BEFORE that change may still carry ticks. They
+           * are deliberately not restored and not re-shown: the applicant edits
+           * whatever changed on the ordinary steps now, which is where BPLO
+           * reads it from.
+           */
+          app.amendments && app.application_type === 'amendment'
             ? {
-                /*
-                 * A1 restores from `has_amendments` for an amendment or a
-                 * renewal saved since the question existed — and stays null for
-                 * a renewal draft written before it, so reopening one asks
-                 * rather than assuming. `has_amendments` false on such a draft
-                 * means "the column defaulted", not "the applicant said no",
-                 * and the two must not be confused.
-                 */
-                hasChanges:
-                  app.application_type === 'renewal' && !app.amendments.has_amendments
-                    ? null
-                    : app.amendments.has_amendments,
+                hasChanges: app.amendments.has_amendments,
                 ownership: app.amendments.ownership,
                 location: app.amendments.location,
                 nature: app.amendments.nature,

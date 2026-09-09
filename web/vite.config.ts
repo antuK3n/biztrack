@@ -44,6 +44,41 @@ export default defineConfig({
     },
     // Cloudflare quick tunnels get a random *.trycloudflare.com hostname.
     allowedHosts: ['.trycloudflare.com'],
+
+    /*
+     * ── Do not watch the end-to-end suite's own output ────────────────────────
+     *
+     * Vite's dev server watches the project root, and Playwright writes into
+     * three directories inside it: the HTML report, the per-test artefacts
+     * (screenshots, traces, error contexts) and the saved sign-in sessions.
+     * Every one of those writes looked like a source change, so the dev server
+     * told every connected browser to reload — including the browser the suite
+     * was driving at that moment.
+     *
+     * What that cost, measured: a run of track-search.spec.ts came back 13
+     * passed, 10 failed, and every failure was the same one — a first
+     * assertion timing out against a page showing the loading spinner, because
+     * the page had just been reloaded out from under it. It looks exactly like
+     * a slow or broken app and is neither; the server log tells the truth in
+     * one line, `page reload playwright-report/index.html`, repeated once a
+     * second while the suite ran.
+     *
+     * It is worse than flaky test results. The same reload lands on a real
+     * person's browser: run the suite while someone is filling in the wizard on
+     * :5173 and the page reloads under them, because both dev servers watch the
+     * same folder.
+     *
+     * Ignored here rather than by moving Playwright's output elsewhere, because
+     * these paths are already what `.gitignore` and the config name, and a
+     * report that lives outside the workspace it describes is one nobody finds.
+     */
+    watch: {
+      ignored: [
+        '**/playwright-report/**',
+        '**/test-results/**',
+        '**/e2e/.auth/**',
+      ],
+    },
   },
 
   /*

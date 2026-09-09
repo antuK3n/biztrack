@@ -160,7 +160,7 @@ it('still assesses fees for a free-text line via the revenue-code catch-all', fu
     expect((float) $fee->total_amount)->toBeGreaterThan(0.0);
 });
 
-it('routes the zoning clearance to the City Planning and Development Office when the applicant opens it', function () {
+it('routes the zoning clearance to the City Planning and Development Office when the applicant hands its form in', function () {
     $owner = authAs('owner@biztrack.local');
     $businessId = $this->withHeaders($owner)
         ->postJson('/api/v1/businesses', businessPayload(['name' => 'Zoning Test Co']))
@@ -184,18 +184,29 @@ it('routes the zoning clearance to the City Planning and Development Office when
     $this->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     /*
-     * Paying opens the clearance stage; opening ZONING is what reaches CPDO.
+     * Paying opens the clearance stage; HANDING IN the zoning sheet is what
+     * reaches CPDO.
      *
      * Routing moved off payment and onto the applicant's own act
      * (`WorkflowService::startClearance`, docs/application-flow-2026-09.md), one
      * office at a time, so that `assigned_at` measures CPDO's service time and
-     * not the days the owner spent on the other four forms. The rule this case
-     * exists for is unchanged and is the last line: ZONING belongs to CPDO and
-     * to no other office.
+     * not the days the owner spent on the other four forms. On 9 September 2026
+     * it moved one step further along the same reasoning: applying only opens
+     * the sheet, and `WorkflowService::submitClearanceForm` — reached here by
+     * saving the sheet with `submit` — is what gives CPDO something to read.
+     *
+     * The rule this case exists for is unchanged and is the last line: ZONING
+     * belongs to CPDO and to no other office.
      */
     $this->withHeaders($owner)
         ->postJson("/api/v1/applications/{$appId}/clearances/ZONING/apply")
         ->assertSuccessful();
+
+    $this->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/ZONING", [
+            'form_data' => [],
+            'submit' => true,
+        ])->assertSuccessful();
 
     $deptCodes = ApplicationAssignment::where('application_id', $appId)
         ->pluck('department_id')

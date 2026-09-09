@@ -65,6 +65,34 @@ Route::middleware('auth:sanctum')->group(function () {
     // Write allowed for the owner (answers) OR a reviewing officer (issuance
     // dates only) — which keys each may set is enforced in the controller.
     Route::put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
+    /*
+     * The zoning sheet's CHECKLIST OF REQUIREMENTS (MCG-CPDD-FO-003 v1.2).
+     *
+     * Owner-only, checked in the controller alongside the same "may this sheet
+     * still be written" test the answers use — the documents are part of the
+     * sheet, not a separate filing, so they close when it does. Under the same
+     * `application.create` group as the clearance stage for the reason stated
+     * there: these are all one decision about what this filing is asking for.
+     */
+    /*
+     * Section X, blank, for the applicant to take to a notary. Outside the
+     * write group on purpose: it is a read, and CPDD holding the notarised scan
+     * has an obvious reason to want the blank it was made from.
+     */
+    Route::get(
+        'applications/{application}/office-forms/{permitTypeCode}/declaration',
+        [OfficeFormController::class, 'declarationTemplate'],
+    );
+    Route::middleware('permission:application.create')->group(function () {
+        Route::post(
+            'applications/{application}/office-forms/{permitTypeCode}/requirements/{documentCode}',
+            [OfficeFormController::class, 'storeRequirement'],
+        );
+        Route::delete(
+            'applications/{application}/office-forms/{permitTypeCode}/requirements/{documentCode}',
+            [OfficeFormController::class, 'destroyRequirement'],
+        );
+    });
 
     // Application create/edit + owner state changes (application.create)
     Route::middleware('permission:application.create')->group(function () {
