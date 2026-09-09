@@ -809,18 +809,26 @@ it('drops a filing out of an office’s approval queue once that office has appr
     expect($openIds('fire@biztrack.local'))->toContain($app['id']);
 });
 
-it('keeps the shared filing’s WORK readable for BPLO, but not its mail', function () {
+it('leaves BPLO the shared filing’s office forms, but neither its mail nor its requirements', function () {
     /*
-     * The wide view is a workflow requirement, not an oversight: BPLO issues the
-     * mayor's permit only once every other office has cleared its part, so it has
-     * to be able to see what each of them asked for and cleared.
+     * What BPLO may read on a filing seven offices share, narrowed twice.
      *
-     * Correspondence is now the exception, at the client's instruction. Reading
-     * the fire office's REQUEST is BPLO's business; reading the applicant's
-     * message to the fire office is not — a conversation reaches the office it
-     * was addressed to and no other. The requests and office-forms assertions
-     * below are unchanged and are the proof that the narrowing was confined to
-     * messaging; only the message assertion is inverted.
+     * The original rule was that BPLO reads everything: it issues the mayor's
+     * permit only once every other office has cleared its part, so it needed to
+     * see what each of them asked for and cleared. The client has narrowed that
+     * twice since, and this test records both:
+     *
+     *  - MAIL, first: a conversation reaches the office it was addressed to and
+     *    no other. Reading the applicant's message to the fire office was never
+     *    BPLO's business.
+     *  - REQUIREMENTS, now: "sa fire ganon, sa kanya lang din dapat, di dapat
+     *    mag-reflect sa BPLO." An office is bounded by what it asked for, and
+     *    BPLO is an office.
+     *
+     * The office FORMS assertion is deliberately left standing. It is a
+     * different claim — the questionnaire each office fills in on a filing it
+     * is routed to — and the client has not spoken about it. If that is also
+     * meant to narrow, this line is where it will be said.
      */
     $app = sharedFiling('Item111 BPLO Cafe');
 
@@ -839,7 +847,11 @@ it('keeps the shared filing’s WORK readable for BPLO, but not its mail', funct
     $bplo = authAs('bplo@biztrack.local');
 
     expect(collect(test()->withHeaders($bplo)->getJson('/api/v1/requests?per_page=200')
-        ->assertOk()->json('data'))->pluck('id'))->toContain($theirs);
+        ->assertOk()->json('data'))->pluck('id'))->not->toContain($theirs);
+
+    // And not by id either, which is the door a list-only narrowing leaves open.
+    test()->withHeaders($bplo)->postJson("/api/v1/requests/{$theirs}/close", ['outcome' => 'fulfilled'])
+        ->assertForbidden();
 
     expect(collect(test()->withHeaders($bplo)
         ->getJson("/api/v1/applications/{$app['id']}/messages")->assertOk()->json('data'))

@@ -338,6 +338,121 @@ it('gives each office its own requirements on one shared filing', function () {
     expect($owner->pluck('from_office.code')->sort()->values()->all())->toBe(['BFP', 'CHO', 'OBO']);
 });
 
+/*
+ * ── Every office, BPLO included ──────────────────────────────────────────────
+ *
+ * The test above proves separability for three offices. This one proves it for
+ * all seven AND closes the exception that was left in it.
+ *
+ * BPLO used to read every office's requirements, and the reasoning was written
+ * down: it coordinates the other offices' clearances and has to be able to
+ * unblock a filing when one goes quiet. The client has ruled the other way —
+ * "sa fire ganon, sa kanya lang din dapat, di dapat mag-reflect sa BPLO" — so
+ * an office is an office: BPLO sees what BPLO asked for.
+ *
+ * CONSEQUENCE, recorded because it is a real loss and not an oversight: nobody
+ * can now unblock another office's requirement. If the fire office raises one
+ * and then goes quiet, the applicant answers into a queue no one is reading and
+ * BPLO cannot approve it on their behalf. The escape hatch that remains is the
+ * super admin, who belongs to no office and still reads the register — see the
+ * test below.
+ */
+it('gives every office its own requirements, and BPLO is an office like the rest', function () {
+    $offices = [
+        'bplo@biztrack.local' => 'BPLO',
+        'sanitary@biztrack.local' => 'CHO',
+        'fire@biztrack.local' => 'BFP',
+        'obo@biztrack.local' => 'OBO',
+        'cenro@biztrack.local' => 'CENRO',
+        'market@biztrack.local' => 'CMO-MARKET',
+        'zoning@biztrack.local' => 'CPDO',
+    ];
+
+    // One filing every office is on, which is the hard case: sharing a filing
+    // is exactly what used to hand each office all seven offices' requirements.
+    $appId = requirementFiling('ABC Store', 'DTI-94020', array_values($offices));
+
+    $raised = [];
+    foreach ($offices as $email => $code) {
+        $raised[$code] = test()->withHeaders(authAs($email))
+            ->postJson("/api/v1/applications/{$appId}/requests", ['title' => "Document for {$code}"])
+            ->assertCreated()->json('data.id');
+    }
+
+    foreach ($offices as $email => $code) {
+        $seen = collect(test()->withHeaders(authAs($email))
+            ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))->pluck('id');
+
+        expect($seen)->toContain($raised[$code]);
+
+        foreach ($raised as $otherCode => $id) {
+            if ($otherCode === $code) {
+                continue;
+            }
+            expect($seen->contains($id))
+                ->toBeFalse("{$code} can see {$otherCode}'s requirement");
+        }
+    }
+
+    // And the applicant sees all seven, each carrying the name of the office
+    // that asked — the other half of the claim, and the half the owner reads.
+    $owner = collect(test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))
+        ->whereIn('id', array_values($raised));
+
+    expect($owner)->toHaveCount(7);
+    expect($owner->pluck('from_office.code')->sort()->values()->all())
+        ->toBe(['BFP', 'BPLO', 'CENRO', 'CHO', 'CMO-MARKET', 'CPDO', 'OBO']);
+});
+
+it('does not let BPLO rule on a requirement another office raised', function () {
+    $appId = requirementFiling('ABC Store', 'DTI-94021', ['CHO', 'BPLO']);
+
+    $id = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Health Certificate'])
+        ->assertCreated()->json('data.id');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->post("/api/v1/requests/{$id}/respond", ['body' => 'Attached.', 'document' => requirementUpload()])
+        ->assertOk();
+
+    // Coordinating the filing is not the same as judging another office's
+    // document: only City Health knows whether that certificate satisfies it.
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/requests/{$id}/close", ['outcome' => 'fulfilled'])
+        ->assertForbidden();
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$id}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+});
+
+/*
+ * The one reader left unbounded, and why.
+ *
+ * The rule the client set is about OFFICES — each sees what it asked for. The
+ * super admin is not one: the account belongs to no department (store() refuses
+ * it a requirement for exactly that reason) and its job is the register itself.
+ * Scoping it by `department_id` would scope it to nothing, which would not be
+ * "the admin sees only its own" but "the admin sees none", and would remove the
+ * only remaining way to look at a requirement an office has abandoned.
+ */
+it('keeps the register-wide view for the super admin, who belongs to no office', function () {
+    $appId = requirementFiling('ABC Store', 'DTI-94022', ['CHO', 'BFP']);
+
+    $health = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Health Certificate'])
+        ->assertCreated()->json('data.id');
+    $fire = test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Fire Safety Certificate'])
+        ->assertCreated()->json('data.id');
+
+    $seen = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))->pluck('id');
+
+    expect($seen)->toContain($health)->toContain($fire);
+});
+
 it('lets only the office that asked rule on the answer', function () {
     $appId = requirementFiling('ABC Store', 'DTI-94011', ['CHO', 'BFP']);
 
