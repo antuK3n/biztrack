@@ -573,6 +573,17 @@ export interface Assignment {
   remarks: string | null
   department: { code: string; name: string }
   officer: { id: number; name: string } | null
+  /**
+   * True when `officer` is null because this READER may not be told who, not
+   * because nobody has claimed the review.
+   *
+   * The two look identical on the wire and one screen was guessing between
+   * them: Office approvals printed "Not yet assigned to an officer" on every
+   * null, so office separability — working exactly as designed — made another
+   * office's completed review read as unstaffed. A withheld value must not
+   * render as a claim about the thing withheld.
+   */
+  officer_withheld?: boolean
   assigned_at: string | null
   completed_at: string | null
   application: {
@@ -2133,7 +2144,69 @@ export interface OfficeForm {
   permit_type_name?: string
   /** Issuing department code (BPLO, CHO, BFP, ...) on the full payload. */
   department_code?: string
+  /**
+   * Has the applicant actually saved anything against this sheet?
+   *
+   * The officer payload carries an entry for every form-bearing permit type on
+   * the filing, saved or not, so that an office is never left inferring from an
+   * absence whether the applicant skipped its form or the screen is broken. A
+   * sheet of derived-only answers looks identical either way, so the server
+   * says which.
+   */
+  form_saved?: boolean
   form_data: Record<string, unknown>
+  /**
+   * The CHECKLIST OF REQUIREMENTS, which only the zoning paper has.
+   *
+   * `null` on the other four sheets and NOT an empty array, because the two
+   * mean different things: null is "this office's form has no checklist", an
+   * empty array would be "this office asks for nothing", and only one of those
+   * is true of CHO, BFP, OBO and CENRO.
+   */
+  requirements?: OfficeFormRequirement[] | null
+}
+
+/**
+ * One row of MCG-CPDD-FO-003 v1.2's checklist, answered for this filing.
+ *
+ * The server decides which rows apply — the owned/rented branch comes from
+ * `businesses.is_rented` and the representative row from item IX — so the
+ * screen renders what it is given rather than re-deriving the paper's rules in
+ * a second place. See `App\Support\ZoningRequirements`.
+ */
+export interface OfficeFormRequirement {
+  /** Stable identifier for the paper's row (TCT, SKETCH, DECLARATION, …). */
+  key: string
+  /**
+   * The document-type code to upload under, or null when nothing is uploaded
+   * here — a row already answered by a business-permit attachment, or by the
+   * sheet itself.
+   */
+  code: string | null
+  label: string
+  note: string
+  /**
+   * Where the answer comes from. `upload` takes a file on this sheet;
+   * `carried` is already on the filing from step 4 of the wizard; `sheet` is
+   * the form itself ("completely filled-up application form").
+   */
+  source: 'upload' | 'carried' | 'sheet'
+  satisfied: boolean
+  document: {
+    id: number
+    filename: string
+    size_bytes: number | null
+    uploaded_at: string | null
+  } | null
+  /**
+   * What answers the row when the answer is not a file.
+   *
+   * CENRO's FOR RENEWAL row is satisfied by a CERTIFICATE the register issued —
+   * a `permits` row, not an attachment — so there is nothing to open and the
+   * permit number is what identifies it. Absent on every row whose answer is a
+   * document.
+   */
+  reference?: string | null
 }
 
 /* ── LGU Clearances (the stage that opens after the first payment) ────── */
@@ -2149,7 +2222,31 @@ export interface OfficeForm {
  * the permit is not released until that balance reaches zero — which is why
  * `ClearanceMeta` below carries money and this is not merely a list of states.
  */
-export type ClearanceState = 'available' | 'applied' | 'submitted' | 'issued' | 'rejected'
+/**
+ * What `ClearanceService::state()` actually sends, which is not what this said.
+ *
+ * It was `'available' | 'applied' | 'submitted' | 'issued' | 'rejected'` — the
+ * INFERRED states of the old model, where a clearance's standing had to be
+ * guessed from what existed: a permit row meant issued, an attached pivot meant
+ * applied, a held copy meant submitted, nothing meant available.
+ *
+ * That inference is gone. `application_permit_types.status` is the fact now, and
+ * `state()` returns it straight through, falling back to `'available'` only for
+ * a permit type with no pivot row at all. So the server has been sending
+ * `not_started`, `for_approval`, `for_inspection`, `approved` and `returned` —
+ * none of which this union contained, and three of the names it did contain
+ * (`applied`, `submitted`, `issued`) the server can no longer produce.
+ *
+ * The cost was not theoretical. Every branch on this type in ClearanceStagePage
+ * was comparing against strings that never arrive, so Apply stopped applying:
+ * `submit()` attaches all five clearances at `not_started`, the Apply handler
+ * ran its POST only for `'available' | 'submitted'`, and the applicant got the
+ * office form opened for a clearance that had never been started — then a 422
+ * on save, because no assignment existed for the office to hold it.
+ *
+ * Aliased rather than re-listed so it cannot drift from `ClearanceStatus` again.
+ */
+export type ClearanceState = ClearanceStatus
 
 export interface Clearance {
   permit_type: {
@@ -2167,6 +2264,16 @@ export interface Clearance {
    * all derived server-side, so it legitimately saves an empty object.
    */
   office_form_complete: boolean
+  /**
+   * Which route the applicant took, or null before they choose.
+   *
+   * `state` used to answer this, because Apply moved the permit straight to
+   * For Approval. Submitting is its own act now — you hand a clearance in by
+   * giving the office something to read — so a permit applied for but not yet
+   * filled in sits at `not_started`, and only `mode` tells it apart from one
+   * nobody has touched.
+   */
+  mode: ClearanceMode | null
   /** The copy the applicant already holds, when they submitted one instead. */
   held_document: {
     id: number

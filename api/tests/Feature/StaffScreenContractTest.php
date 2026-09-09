@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\AuditLog;
+use App\Models\User;
 
 /*
  * The contracts the staff screens read to decide what to render.
@@ -58,7 +59,7 @@ it('allows an audit entry with no recorded actor', function () {
     AuditLog::create([
         'user_id' => null,
         'action' => 'user.logged_in',
-        'auditable_type' => App\Models\User::class,
+        'auditable_type' => User::class,
         'auditable_id' => 1,
         'changes' => null,
     ]);

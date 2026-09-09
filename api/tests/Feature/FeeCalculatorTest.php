@@ -2,9 +2,11 @@
 
 use App\Models\Application;
 use App\Models\Business;
+use App\Models\FeeRule;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Services\FeeCalculator;
+use App\Services\WorkflowService;
 
 function feeApp(array $permitTypeCodes, string $type, array $profile): Application
 {
@@ -157,7 +159,7 @@ it('assessFees persists the itemized tax order with citations', function () {
         'lines' => [['category' => 'retailer', 'gross_sales' => 800000]],
         'gross_sales' => 800000,
     ]);
-    $fee = app(App\Services\WorkflowService::class)->assessFees($app);
+    $fee = app(WorkflowService::class)->assessFees($app);
 
     expect($fee->line_items)->not->toBeEmpty()
         ->and(collect($fee->line_items)->firstWhere('code', 'biztax.retailer')['section'])->toBe('Sec. 2J.02(d)')
@@ -221,7 +223,7 @@ it('records the Sec. 3.D.01(d) ambiguity as a defect on the rule', function () {
     // The ordinance prints four lines at 345.00 without saying whether the
     // last two are additional. The reading is defensible but not certain, so
     // it must stay visible to whoever reconciles this with the LGU.
-    $rule = App\Models\FeeRule::where('code', 'zoning.business_land_use_verification')->firstOrFail();
+    $rule = FeeRule::where('code', 'zoning.business_land_use_verification')->firstOrFail();
 
     expect($rule->defects)->not->toBeEmpty()
         ->and($rule->defects[0])->toContain('345.00');

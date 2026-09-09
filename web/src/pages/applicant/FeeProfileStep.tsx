@@ -479,6 +479,20 @@ export function feeProfileIssues(
         maxMessage: 'Enter a headcount below 100,000.',
       }),
     )
+    /*
+     * ── B2 and B3 became REQUIRED on 9 September 2026 ──────────────────────
+     *
+     * They were optional under this file's standing rule — "none of the paper
+     * forms marks any field required; every asterisk in this wizard is our own
+     * judgement" — and the client reversed that after watching what it cost:
+     * a filing reached CENRO with `employees: 3` and no split at all, so the
+     * CENRO sheet printed empty boxes where its paper asks for MALE and FEMALE.
+     * The office would hand that back.
+     *
+     * The split is not extra information. MCG-CENRO-FO-001 reads "TOTAL NO. OF
+     * EMPLOYEES: MALE ___ FEMALE ___" — the two boxes ARE the total, which is
+     * why they must add up to it below rather than merely not exceed it.
+     */
     for (const [key, label] of [
       ['male_employees', 'Male Employees'],
       ['female_employees', 'Female Employees'],
@@ -488,8 +502,10 @@ export function feeProfileIssues(
           key,
           label,
           value: draft[key],
-          required: false,
-          blankMessage: '',
+          required: true,
+          blankMessage: 'Enter how many of your employees are '
+            +(key === 'male_employees' ? 'male' : 'female')
+            +'. Enter 0 if none.',
           integer: true,
           max: MAX_COUNT,
           maxMessage: 'Enter a headcount below 100,000.',
@@ -501,8 +517,8 @@ export function feeProfileIssues(
         key: 'employees_in_lgu',
         label: 'Employees Residing in Malabon',
         value: draft.employees_in_lgu,
-        required: false,
-        blankMessage: '',
+        required: true,
+        blankMessage: 'Enter how many of your employees live in Malabon. Enter 0 if none.',
         integer: true,
         max: MAX_COUNT,
         maxMessage: 'Enter a headcount below 100,000.',
@@ -510,6 +526,22 @@ export function feeProfileIssues(
     )
     const total = toInt(draft.employees)
     const inLgu = toInt(draft.employees_in_lgu)
+    /*
+     * The split has to reconcile with the headcount typed three fields above
+     * it. Checked only when all three parse, so a half-filled step reports
+     * "this is missing" rather than "these do not add up" — being told your
+     * arithmetic is wrong before you have finished typing it is worse than
+     * being told nothing.
+     */
+    const male = toInt(draft.male_employees)
+    const female = toInt(draft.female_employees)
+    if (total !== undefined && male !== undefined && female !== undefined && male + female !== total) {
+      issues.push({
+        key: 'male_employees',
+        label: 'Male and Female Employees',
+        message: `These must add up to your total of ${total}. You have entered ${male + female}.`,
+      })
+    }
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
@@ -518,32 +550,25 @@ export function feeProfileIssues(
       })
     }
     /*
-     * The split has to be arithmetically possible against the total, on the
-     * same pattern as Employees Residing in Malabon above.
+     * ── The old "cannot EXCEED the total" rule lived here ─────────────────
      *
-     * The rule is "cannot EXCEED", not "must equal", and the looseness is the
-     * point: this step autosaves half-typed, so a sum-must-equal-total rule
-     * would light up the moment somebody types the male count and before they
-     * have reached the female box — an error for having not finished typing.
-     * What it does catch is the real contradiction, 3 male + 4 female against a
-     * total of 5, which is a number the officer would otherwise have to
-     * reconcile at the counter. Reported against both boxes so the applicant can
-     * fix whichever one is wrong.
+     * It was deliberately loose, and the reasoning was sound at the time: the
+     * split was OPTIONAL, this step autosaves half-typed, and a
+     * must-equal-total rule would have lit up the moment somebody typed the
+     * male count and before they reached the female box — an error for not
+     * having finished typing.
+     *
+     * Both halves of that changed together. The client chose must-equal on
+     * 9 September 2026 ("TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE ___" — the two
+     * boxes ARE the total on CENRO's paper), and requiring both fields is what
+     * makes it safe: the check above runs only when male, female and the total
+     * all parse, so a half-typed split reports "Female Employees is missing"
+     * rather than "your arithmetic is wrong". The typing complaint the loose
+     * rule existed to avoid cannot arise.
+     *
+     * The strict rule is a superset — 3 male + 4 female against a total of 5
+     * still fails — so nothing it caught is now let through.
      */
-    const male = toInt(draft.male_employees)
-    const female = toInt(draft.female_employees)
-    if (total !== undefined && (male !== undefined || female !== undefined)) {
-      const declared = (male ?? 0) + (female ?? 0)
-      if (declared > total) {
-        for (const key of ['male_employees', 'female_employees'] as const) {
-          issues.push({
-            key,
-            label: key === 'male_employees' ? 'Male Employees' : 'Female Employees',
-            message: `Male and female together come to ${declared}, which is more than your total of ${total}.`,
-          })
-        }
-      }
-    }
     for (const [key, label] of [
       ['delivery_vehicles_motorized', 'Motorized Delivery Vehicles'],
       ['delivery_vehicles_other', 'Other Delivery Vehicles'],
@@ -778,7 +803,20 @@ export function feeProfileToDraft(
  * Only these three carry validation. The male/female split and the delivery-unit
  * counts are optional on the paper and optional here, so they raise nothing.
  */
-const OPERATION_ISSUE_KEYS = new Set(['floor_area_sqm', 'employees', 'employees_in_lgu'])
+/*
+ * `male_employees` and `female_employees` join this set with B2's other
+ * figures. They are asked ON the Business Operation step, so a filing missing
+ * them has to be stopped THERE — left out, the wizard would let the applicant
+ * walk past the step that asks for them and then refuse to submit at Review,
+ * naming a field two sections back.
+ */
+const OPERATION_ISSUE_KEYS = new Set([
+  'floor_area_sqm',
+  'employees',
+  'employees_in_lgu',
+  'male_employees',
+  'female_employees',
+])
 
 /**
  * BPLO item B7 — the one capital-investment figure, checked as the per-line

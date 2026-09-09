@@ -25,7 +25,7 @@ const OWNER_APPS = [
     tracking_id: 'BIZ-2026-00101',
     application_type: 'new',
     title: null,
-    status: 'under_review',
+    status: 'for_approval',
     status_label: 'For Approval',
     business: { id: 1, name: 'Aling Nena Sari-Sari Store' },
     submitted_at: '2026-06-01T00:00:00.000000Z',
@@ -65,8 +65,8 @@ const OWNER_APPS = [
     tracking_id: 'BIZ-2026-00104',
     application_type: 'new',
     title: null,
-    status: 'for_inspection',
-    status_label: 'For Inspection',
+    status: 'awaiting_other_permits',
+    status_label: 'Awaiting Other Permits',
     business: { id: 4, name: 'Dagupan Auto Supply' },
     submitted_at: '2026-07-20T00:00:00.000000Z',
     deadline_at: '2026-09-01T00:00:00.000000Z',
@@ -253,7 +253,7 @@ const ASSIGNMENTS = [
       tracking_id: 'BIZ-2026-00202',
       business: { name: 'Malasiqui Feeds Trading' },
       application_type: 'renewal',
-      status: 'under_review',
+      status: 'for_approval',
     },
   },
   {
@@ -272,7 +272,7 @@ const ASSIGNMENTS = [
       // place in an A–Z sort.
       business: null,
       application_type: 'new',
-      status: 'under_review',
+      status: 'for_approval',
     },
   },
 ]
@@ -397,7 +397,7 @@ test.describe('officer queue', () => {
             last_page: 1,
             per_page: Number(url.searchParams.get('per_page') ?? 25),
             total: rows.length,
-            application_status_counts: { returned: 1, under_review: 2 },
+            application_status_counts: { returned: 1, for_approval: 2 },
           },
         }),
       })
@@ -473,7 +473,7 @@ test.describe('officer queue', () => {
     // browser is the bug this queue already had once.
     await expect
       .poll(() => requested.at(-1))
-      .toContain('application_status=under_review')
+      .toContain('application_status=for_approval')
     await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(2)
   })
 
@@ -502,7 +502,7 @@ test.describe('officer queue', () => {
      */
     await expect
       .poll(() => applicationQueries.at(-1))
-      .toContain('status=submitted,pending_payment')
+      .toContain('status=pending_payment')
 
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toHaveText(
       'Showing 2 of 2, newest first.',

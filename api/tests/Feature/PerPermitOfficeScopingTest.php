@@ -81,7 +81,20 @@ function paidFilingForScoping(): Application
 function officeWorksPermit(Application $app, string $code, string $remarks): ApplicationPermitType
 {
     $type = PermitType::where('code', $code)->firstOrFail();
-    app(WorkflowService::class)->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    /*
+     * Two calls, because applying and submitting are two acts now.
+     *
+     * `startClearance` records that the applicant chose to fill in the office's
+     * form and opens it; `submitClearanceForm` is what hands it in, moves the
+     * permit to ForApproval and routes the office (client, 9 September 2026 —
+     * "I still haven't submitted any applications yet the status says it is For
+     * Approval"). Every one of these tests is about what an office can read on a
+     * permit it is WORKING, so the fixture has to reach that state, and it now
+     * takes both.
+     */
+    $workflow = app(WorkflowService::class);
+    $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    $workflow->submitClearanceForm($app, $type);
 
     $row = ApplicationPermitType::where('application_id', $app->id)
         ->where('permit_type_id', $type->id)
@@ -308,10 +321,26 @@ it('still shows every office the shared requirements the applicant uploaded', fu
 
 it('does not show one office the questionnaire another office collected', function () {
     $app = paidFilingForScoping();
-    officeWorksPermit($app, 'FSIC', 'BFP working it.');
-    officeWorksPermit($app, 'SANITARY', 'CHO working it.');
 
-    // The applicant answers both sheets, as they would in the clearance stage.
+    /*
+     * The applicant fills both sheets in BEFORE the offices have them, which is
+     * the only order the product now allows: `ownerMayEdit` refuses a write
+     * once a clearance is past NotStarted or Returned, because "we do not
+     * promote any editing of forms once submitted" (client, 9 September 2026).
+     *
+     * This used to apply first and answer afterwards, which worked while a
+     * submitted sheet stayed editable. The reordering is the fixture following
+     * the applicant, not a workaround: apply, answer, submit.
+     */
+    $workflow = app(WorkflowService::class);
+    foreach (['FSIC', 'SANITARY'] as $code) {
+        $workflow->startClearance(
+            $app,
+            PermitType::where('code', $code)->firstOrFail(),
+            ApplicationPermitType::MODE_APPLY,
+        );
+    }
+
     authAs('owner@biztrack.local');
     foreach ([
         'FSIC' => ['storey_count' => '2', 'floor_area' => '180'],
@@ -319,8 +348,13 @@ it('does not show one office the questionnaire another office collected', functi
     ] as $code => $formData) {
         test()->putJson("/api/v1/applications/{$app->id}/office-forms/{$code}", [
             'form_data' => $formData,
+            'submit' => true,
         ])->assertSuccessful();
     }
+
+    // And the offices' own remarks, once they hold the permits.
+    officeWorksPermit($app, 'FSIC', 'BFP working it.');
+    officeWorksPermit($app, 'SANITARY', 'CHO working it.');
 
     /*
      * Read through `GET /assignments/{id}`, not the application endpoint.

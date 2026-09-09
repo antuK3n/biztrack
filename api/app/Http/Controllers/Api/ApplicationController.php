@@ -719,21 +719,30 @@ class ApplicationController extends Controller
     private function amendmentAttributes(array $data, ?string $applicationType): array
     {
         /*
-         * Renewals ask section A too, and always did on paper.
+         * ── Renewals stopped asking section A on 9 September 2026 ────────────
          *
-         * MCG-BPLO-FO-002 v2.0 opens with A1 "Do you have any changes or
-         * amendments in the previous business registration?", and A2/A3 are
-         * that question's follow-ups. Gating these columns on
-         * `application_type === amendment` meant a renewal that DID change its
-         * ownership had nowhere to record it, so the answer was taken from the
-         * applicant on paper and thrown away by the system — the BPLO then
-         * renewed a sole proprietorship that had become a corporation.
+         * They did ask it, and the reason was good: MCG-BPLO-FO-002 v2.0 opens
+         * with A1 "Do you have any changes or amendments in the previous
+         * business registration?", A2 and A3 are its follow-ups, and a renewal
+         * with nowhere to record a change of ownership meant BPLO renewing a
+         * sole proprietorship that had become a corporation.
          *
-         * `new` still zeroes: a first application amends nothing by definition,
-         * and there is no A1 on MCG-BPLO-FO-001 to ask.
+         * The client removed it: *"REMOVE THE AMENDMENT PART on the BPLO
+         * renewal part. We don't need that anymore."* Their model of a renewal
+         * is the application process over again — the applicant walks the same
+         * steps and edits whatever has changed as they go — so the question is
+         * answered by the form itself rather than by a checklist in front of
+         * it. A renewal that changes its ownership now says so on Business
+         * Information, in the same field a new application uses, and BPLO reads
+         * one answer instead of two that can disagree.
+         *
+         * So a renewal zeroes exactly as `new` does. The columns are NOT
+         * dropped and the Amendment filing type still writes them — that type
+         * is being dealt with separately, and deleting the storage under a live
+         * feature to tidy up a different one is how the tidy-up becomes the
+         * outage.
          */
-        if ($applicationType !== ApplicationType::Amendment->value
-            && $applicationType !== ApplicationType::Renewal->value) {
+        if ($applicationType !== ApplicationType::Amendment->value) {
             return [
                 'has_amendments' => false,
                 'amendment_ownership' => false,
