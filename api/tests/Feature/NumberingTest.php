@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Application;
 use App\Models\Business;
 use App\Models\User;
 use App\Support\Numbering;
@@ -74,7 +75,7 @@ it('keeps tracking ids unique across a soft-deleted application', function () {
     // tracking id, and anyone holding a printout still expects it to mean that
     // filing and not somebody else's.
     $first = Numbering::trackingId();
-    $app = App\Models\Application::create([
+    $app = Application::create([
         'business_id' => Business::withTrashed()->value('id'),
         'applicant_user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
         'application_type' => 'new',

@@ -1482,10 +1482,18 @@ class AnalyticsHistorySeeder extends Seeder
      * The applicant works through the five office forms after paying.
      *
      * This is what routes the other five offices. Payment does not: it unlocks
-     * the stage and nothing more, and `startClearance()` is the act that puts a
-     * filing in one office's queue and starts that office's service clock. A
-     * seeder that never called it produced a register in which BPLO was the only
-     * office that had ever seen anything.
+     * the stage and nothing more. A seeder that never opened the forms produced
+     * a register in which BPLO was the only office that had ever seen anything.
+     *
+     * Which call does the routing depends on how the permit was satisfied, and
+     * that split is newer than this seeder. `startClearance()` routes an UPLOAD
+     * on the spot — the file is the answer and it is already on the filing. On
+     * an APPLY it now only records the choice and stops, because all five of
+     * these codes bear an office form and applying is what OPENS that form;
+     * `submitClearanceForm()` is the act that hands the permit over and starts
+     * the office's service clock. Seeding only the first half left ~96% of
+     * filings routed to nobody, and CENRO — reached by apply alone — vanished
+     * from the register entirely.
      *
      * The loop stops at the anchor rather than compressing the remainder into
      * it. A filing that paid four days ago has genuinely opened two of the five
@@ -1521,6 +1529,15 @@ class AnalyticsHistorySeeder extends Seeder
                 $this->permitTypes[$code],
                 $upload ? ApplicationPermitType::MODE_UPLOAD : ApplicationPermitType::MODE_APPLY,
             );
+
+            // Applying opened the form; saving it is what the office receives.
+            // The seeder writes no answers — the analytics it feeds are timings
+            // and queue depths, not form content — so the two acts land at the
+            // same instant here. A real applicant spends days between them, and
+            // that gap belongs to the applicant, not to the office's clock.
+            if (! $upload) {
+                $this->workflow->submitClearanceForm($app->fresh(), $this->permitTypes[$code]);
+            }
         }
 
         $app->refresh();
@@ -1674,16 +1691,20 @@ class AnalyticsHistorySeeder extends Seeder
              * sitting at `awaiting_other_permits` it threw an illegal
              * transition rather than quietly doing the wrong thing — the one
              * mercy in the half-migrated version.
+             *
+             * `submitClearanceForm()` rather than a second `startClearance()`:
+             * the mode was chosen when the permit was opened and has not
+             * changed, and re-applying would only record it again and stop,
+             * leaving the row at `returned` for `approveAssignment()` to trip
+             * over. Saving the sheet is the way back in — it reads `returned`
+             * as "this is yours to finish", moves it to `for_approval`, and
+             * re-routes the office that `returnAssignment()` closed behind it.
              */
             $permitCode = self::PERMIT_BY_OFFICE[$review['code']] ?? null;
             if ($permitCode === null) {
                 $this->workflow->resubmit($app->fresh());
             } else {
-                $this->workflow->startClearance(
-                    $app->fresh(),
-                    $this->permitTypes[$permitCode],
-                    ApplicationPermitType::MODE_APPLY,
-                );
+                $this->workflow->submitClearanceForm($app->fresh(), $this->permitTypes[$permitCode]);
             }
             $this->counts['returned_loops']++;
 

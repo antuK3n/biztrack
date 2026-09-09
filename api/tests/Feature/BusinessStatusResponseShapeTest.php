@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\AuditLog;
 use App\Models\Business;
 
 /*
@@ -66,7 +67,7 @@ it('records the status change as from, to and reason', function () {
         ])
         ->assertOk();
 
-    $log = App\Models\AuditLog::where('action', 'business.status_changed')
+    $log = AuditLog::where('action', 'business.status_changed')
         ->where('auditable_id', $business->id)
         ->latest('id')
         ->firstOrFail();
@@ -91,7 +92,7 @@ it('names the admin who changed the status', function () {
         ])
         ->assertOk();
 
-    $log = App\Models\AuditLog::where('action', 'business.status_changed')
+    $log = AuditLog::where('action', 'business.status_changed')
         ->where('auditable_id', $business->id)
         ->latest('id')
         ->firstOrFail();
