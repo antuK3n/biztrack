@@ -936,9 +936,28 @@ function LinesStep({
     const q = query.trim().toLowerCase()
     const listed = codes.filter((c) => c.code !== OTHER_PSIC_CODE)
     if (q) {
-      const matches = listed.filter(
-        (c) => c.title.toLowerCase().includes(q) || c.code.includes(q),
-      )
+      /*
+       * Search results are grouped too, and this is a correction.
+       *
+       * Item 6's headings were drawn only when the box was EMPTY, on the
+       * argument that a query is answered by relevance and a subject heading
+       * would bury the match somebody typed for. That argument does not survive
+       * contact with the list: "sale" matches 48 of the 135 titles, and 48
+       * ungrouped rows is the same wall the item was raised about — with the
+       * added insult that the categories visibly disappear the moment you type,
+       * which reads as the feature being broken rather than withheld.
+       *
+       * There is no relevance ranking here to protect, either. The filter is a
+       * substring test, so the order it returns is the reference table's, not a
+       * score. Sorting by section replaces an arbitrary order with a
+       * navigable one and loses nothing.
+       */
+      const matches = listed
+        .filter((c) => c.title.toLowerCase().includes(q) || c.code.includes(q))
+        .sort((a, b) => {
+          const rank = psicSectionRank(psicSection(a.code)) - psicSectionRank(psicSection(b.code))
+          return rank !== 0 ? rank : a.title.localeCompare(b.title)
+        })
 
       return { results: matches, commonCount: 0, total: listed.length }
     }
@@ -1194,12 +1213,13 @@ function LinesStep({
                         * count in every group and break the radio semantics for
                         * the sake of tidier JSX.
                         *
-                        * Suppressed while searching: `commonCount` is 0 then,
-                        * and a query is answered by relevance rather than by
-                        * subject.
+                        * Drawn while searching too. `commonCount` is 0 then, so
+                        * `index >= commonCount` is true from the first row and
+                        * the whole result set is headed — which is the point,
+                        * since a query like "sale" returns 48 rows and that is
+                        * the wall this item exists to remove.
                         */}
-                      {commonCount > 0 &&
-                        index >= commonCount &&
+                      {index >= commonCount &&
                         (index === commonCount ||
                           psicSection(results[index - 1].code) !== psicSection(code.code)) && (
                           <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
