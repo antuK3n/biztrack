@@ -141,11 +141,34 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('message-threads', [MessageController::class, 'threads']);
         Route::get('applications/{application}/messages', [MessageController::class, 'index']);
         Route::post('applications/{application}/messages', [MessageController::class, 'store']);
+        /*
+         * A question with no filing behind it, addressed to BPLO.
+         *
+         * No `{user}` means "mine", which is what an applicant always sends —
+         * someone who has registered no business has no application id to put
+         * in a path, and telling them to "contact the City BPLO" while giving
+         * them no way to do it is what this fixes. BPLO names the person whose
+         * enquiry it is opening; the office check is in the controller, so the
+         * two-segment form is not a way in for anybody else.
+         */
+        Route::get('general-messages/{user?}', [MessageController::class, 'generalIndex']);
+        Route::post('general-messages/{user?}', [MessageController::class, 'generalStore']);
         Route::get('message-attachments/{attachment}/download', [MessageController::class, 'downloadAttachment']);
     });
 
     // Officer requests ("Other Requirements")
     Route::get('requests', [OfficerRequestController::class, 'index']);
+    /*
+     * The office's reference file — a blank form or template attached when the
+     * requirement was raised.
+     *
+     * Outside both permission groups below on purpose: the two people who need
+     * it are the APPLICANT, who holds neither `request.create` nor any office
+     * permission, and the office that raised it. Which of them is asking is
+     * decided inside the controller by ApplicationVisibility, the same check
+     * that guards reading the requirement itself.
+     */
+    Route::get('requests/{officerRequest}/reference', [OfficerRequestController::class, 'reference']);
     Route::middleware('permission:request.create')->group(function () {
         Route::post('applications/{application}/requests', [OfficerRequestController::class, 'store']);
         Route::post('requests/{officerRequest}/close', [OfficerRequestController::class, 'close']);
@@ -256,6 +279,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('chatbot/messages', [ChatbotController::class, 'store']);
 
     // Notifications (self-scoped)
+    /*
+     * Both nav badges in one call. Deliberately NOT inside the
+     * `message.participate` group: the badge is drawn on every screen for every
+     * seat, and an officer without that permission still has notifications.
+     * The counts are scoped to the reader inside the controller.
+     */
+    Route::get('unread-summary', [MessageController::class, 'unreadSummary']);
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::post('notifications/read-all', [NotificationController::class, 'readAll']);
     Route::post('notifications/{notification}/read', [NotificationController::class, 'read']);
@@ -366,6 +396,27 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('users', [UserController::class, 'index']);
             Route::post('users', [UserController::class, 'store']);
             Route::put('users/{user}', [UserController::class, 'update']);
+            /*
+             * The roles the officer form may offer, with the labels the register
+             * already holds. On `user.manage` because it exists to fill in that
+             * form; whoever may create an officer may see what an officer can be.
+             */
+            Route::get('roles', [UserController::class, 'roles']);
+        });
+        /*
+         * Caseload read and move sit on `oic.assign`, not `user.manage`.
+         *
+         * Naming who handles a case is the OIC's power, and it is already the
+         * permission guarding the per-application version of exactly this act
+         * (assignments/{assignment}/assign above). Putting the bulk move on
+         * `user.manage` instead would mean an account that may correct a
+         * surname could also empty an office's queue — a different decision
+         * wearing the same permission. The Officer Assignment screen hides the
+         * control when the reader lacks this.
+         */
+        Route::middleware('permission:oic.assign')->group(function () {
+            Route::get('users/{user}/caseload', [UserController::class, 'caseload']);
+            Route::post('users/{user}/reassign-caseload', [UserController::class, 'reassignCaseload']);
         });
         Route::middleware('permission:owner.manage_status')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);

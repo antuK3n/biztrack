@@ -71,8 +71,17 @@ test('the request composer survives a filing whose business was removed', async 
   await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
 
-  // The modal has to open at all — this is the assertion that failed.
-  await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
+  /*
+   * The modal has to open at all — this is the assertion that failed.
+   *
+   * Matched on the composer's real heading rather than on /^request$/i. The
+   * dialog was renamed "Create Other Requirement" when the client's create form
+   * was rebuilt, and this kept asking for the old title: three tests red for a
+   * heading that had simply moved on, which is the failure mode a name-based
+   * locator has. It is still an exact name, not a substring — a modal that
+   * fails to open must still fail this.
+   */
+  await expect(page.getByRole('heading', { name: 'Create Other Requirement' })).toBeVisible({ timeout: 15_000 })
 
   expect(crashes, `the composer threw: ${crashes.join(' | ')}`).toEqual([])
 })
@@ -90,7 +99,7 @@ test('a removed business is named as removed, not left blank', async ({ page }) 
 
   await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
-  await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: 'Create Other Requirement' })).toBeVisible({ timeout: 15_000 })
 
   /*
    * An officer picking a filing to chase needs to know the register dropped
@@ -131,7 +140,7 @@ test('the composer names who the request is going to, readably', async ({ page }
 
   await page.goto('/staff/requests')
   await page.getByRole('button', { name: /request/i }).first().click()
-  await expect(page.getByRole('heading', { name: /^request$/i })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: 'Create Other Requirement' })).toBeVisible({ timeout: 15_000 })
 
   const recipient = page.getByLabel(/to \(recipient\)/i)
   await expect(recipient).toBeVisible()
@@ -142,9 +151,17 @@ test('the composer names who the request is going to, readably', async ({ page }
   // application, and inventing one would be the fake picker in another costume.
   await expect(recipient).toHaveValue('')
 
-  // By value: the option label carries the business name, which is the thing
-  // under test, so selecting by it would assert nothing.
-  await page.getByLabel(/application/i).first().selectOption('90002')
+  /*
+   * By value: the option label carries the business name, which is the thing
+   * under test, so selecting by it would assert nothing.
+   *
+   * The picker is labelled "Business" now, not "Application" — the client's
+   * rebuilt create form asks which BUSINESS this requirement is for, because an
+   * owner with two shops could not tell two filings apart by tracking number
+   * alone. `/application/i` matched an input rather than the select after that
+   * rename, and the failure read "Element is not a <select>".
+   */
+  await page.getByLabel(/business/i).first().selectOption('90002')
 
   /*
    * This stub carries no `applicant`, which is the real nullable case: User

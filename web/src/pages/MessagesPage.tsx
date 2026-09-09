@@ -7,6 +7,7 @@ import { PageTitle, SortFilter } from '../components/ui/Proto'
 import { formatDate } from '../lib/format'
 import { messages as messagesApi } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
+import { useAuth } from '../stores/auth'
 import type { MessageThreadSummary } from '../lib/types'
 
 /*
@@ -38,6 +39,42 @@ import type { MessageThreadSummary } from '../lib/types'
 
 type Sort = 'recent' | 'oldest'
 
+/*
+ * What the Filter menu narrows the inbox to.
+ *
+ * Search answers "which conversation is the one about X". These answer "which
+ * of them needs me", which is the other question an inbox is opened with and
+ * the one it could not answer at all: the control was drawn but inert, so a
+ * BPLO clerk with sixty rows had no way to see the four that had gone unread.
+ *
+ * 'quiet' is offered to applicants only, and deliberately: an office's inbox
+ * lists a filing only once its own conversation has something in it (see
+ * MessageController::threads), so for an officer this option can only ever
+ * return nothing. An option that is always empty is the same lie as a button
+ * that does nothing.
+ */
+type Narrow = 'all' | 'unread' | 'awaiting' | 'quiet'
+
+const NARROW_LABELS: Record<Narrow, string> = {
+  all: 'All conversations',
+  unread: 'Unread',
+  awaiting: 'Awaiting their reply',
+  quiet: 'Not started',
+}
+
+/*
+ * What an empty result MEANS, written out per option rather than assembled
+ * from the label. "Nothing is not started" is what a template produces and it
+ * is not a sentence; each of these says the good news the empty list actually
+ * carries.
+ */
+const NARROW_EMPTY: Record<Narrow, string> = {
+  all: 'No conversations yet',
+  unread: 'You have read everything',
+  awaiting: 'Nothing is waiting on a reply',
+  quiet: 'Every filing has a conversation started',
+}
+
 /** Royal circle with a person glyph, the GUI's conversation avatar. */
 function Avatar({ size = 44 }: { size?: number }) {
   return (
@@ -55,29 +92,30 @@ function Avatar({ size = 44 }: { size?: number }) {
 }
 
 /**
- * The responsible office as one line: "Sanitary Office · Dr. Reyes", or just
- * the office while nobody has picked the file up. Null when the filing has not
- * been routed yet, which the callers say in their own words rather than
- * printing an empty line.
+ * The office answerable for the permit (checklist item 73), or null when the
+ * filing has not been routed yet.
  *
- * `alreadyNamed` is whatever the surrounding UI has already printed — usually
- * the conversation's title. When the assigned officer IS that name, repeating
- * it here turns one fact into what looks like two, so the office is given on
- * its own instead.
+ * The OFFICE and nothing else. It used to append the assigned officer —
+ * "Sanitary Office · Dr. Reyes" — and, when no officer was on it, the pane
+ * added "· no officer assigned yet" beside it. Both are gone on the client's
+ * instruction: a conversation does not need a named officer, and saying one is
+ * missing reads as something being wrong when nothing is. Whoever replies puts
+ * their own name on their reply, which is where a person's name is a fact
+ * rather than a promise — see senderRole() in MessagesPanel.
  */
-function officeLine(thread: MessageThreadSummary, alreadyNamed?: string): string | null {
-  const office = thread.responsible_office
-  if (!office) return null
-  const officer = office.officer && office.officer.name !== alreadyNamed ? office.officer.name : null
-  return officer ? `${office.name} · ${officer}` : office.name
+function officeLine(thread: MessageThreadSummary): string | null {
+  return thread.responsible_office?.name ?? null
 }
 
 function ThreadCard({
   thread,
+  readerOffice,
   active,
   onOpen,
 }: {
   thread: MessageThreadSummary
+  /** The reader's own office, when they have one. Null for an applicant. */
+  readerOffice: string | null
   active: boolean
   onOpen: () => void
 }) {
@@ -86,44 +124,67 @@ function ThreadCard({
     ? `${last.mine ? 'You' : (last.sender_name ?? thread.counterparty.name)}: ${last.body}`
     : 'No messages yet. Start the conversation.'
   /*
-   * The office, said once. Two things on this card already tended to be it —
-   * the conversation's own name when no officer is assigned, and the unlabelled
-   * subtitle beside it — so the office could appear three times in four lines
-   * and read like three separate facts. The labelled line wins and the others
-   * stand down.
+   * "Handled by X" only where X is a fact the card has not already given.
+   *
+   * Three ways it was noise, all of them seen on one screen:
+   *
+   *  - the conversation is already NAMED after that office (the applicant's
+   *    side), so the line repeated the title two rows below it;
+   *  - the reader IS that office. "Handled by Business Permits and Licensing
+   *    Office" on BPLO's own screen, above "Conversation with Business Permits
+   *    and Licensing Office" — the same office, twice, told to itself;
+   *  - the row is a general ENQUIRY, which has no filing and therefore nothing
+   *    being handled. The office is who you are writing to, and the title
+   *    already says so.
    */
-  const office = officeLine(thread, thread.counterparty.name)
-  const handledBy = office && office !== thread.counterparty.name ? office : null
+  const office = thread.kind === 'general' ? null : officeLine(thread)
+  const handledBy =
+    office && office !== thread.counterparty.name && office !== readerOffice ? office : null
   const subtitle =
     thread.counterparty.subtitle && thread.counterparty.subtitle !== thread.responsible_office?.name
       ? thread.counterparty.subtitle
       : null
 
   /*
-   * Which office's mail this is, for an officer reading the staff inbox.
+   * ── "Conversation with X", deleted ───────────────────────────────────────
    *
-   * An officer's counterparty is the applicant, so `is_officer` false on the
-   * counterparty means the READER is the officer — the row is otherwise silent
-   * about which office the conversation belongs to, which for BPLO (who reads
-   * every office's) is genuinely ambiguous. Applicants are not shown this: they
-   * already have "Handled by" above, and naming the same office twice on one
-   * card reads as two facts.
+   * The card used to name, for an officer, the offices a filing was being
+   * discussed with. It was added because an officer's card names the APPLICANT
+   * and is otherwise silent about which office's mail this is — genuinely
+   * ambiguous, the note said, for BPLO, "who reads every office's".
+   *
+   * BPLO does not. readsThread() has no `readsEveryOffice` escape and says so
+   * at length: reading every office's CLEARANCES does not extend to reading
+   * their mail. So the list could only ever hold the reader's own office, and
+   * every card on every office's inbox carried a line naming the office reading
+   * it — under a header already naming it, on a screen they reached from their
+   * own office's menu.
+   *
+   * What would bring it back: an office that may read another's conversation.
+   * If readsThread() ever admits one, this line has a job again, and the rule
+   * is "the offices with messages, minus the reader's own".
    */
-  const readerIsOfficer = !thread.counterparty.is_officer
-  const withOffices = readerIsOfficer
-    ? thread.offices
-        .filter((o) => o.messages_count > 0)
-        .map((o) => o.name)
-        /*
-         * Not when it is the office already named above. On most of BPLO's
-         * rows "Handled by BPLO" and "Conversation with BPLO" are the same
-         * office, and printing it twice reads as two facts. Compared against
-         * `responsible_office.name` and not against `handledBy`, which is the
-         * rendered line and may carry an officer's name after the office.
-         */
-        .filter((name) => name !== thread.responsible_office?.name)
-    : []
-  const conversationOffices = withOffices.length > 0 ? withOffices.join(' · ') : null
+
+  /*
+   * Which business, and which filing of it, this conversation is about.
+   *
+   * The counterparty subtitle carries the business name OR the tracking id —
+   * whichever it has — so an owner with two filings for the same business saw
+   * two identical cards and no way to tell which was which. The tracking id is
+   * the thing that differs, so it is always printed; the business name joins it
+   * only when it is not already said above.
+   *
+   * A general enquiry has neither and prints nothing here: there is no filing.
+   */
+  const identity =
+    thread.kind === 'application' && thread.tracking_id
+      ? [
+          thread.business_name && thread.business_name !== subtitle ? thread.business_name : null,
+          thread.tracking_id,
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : null
 
   return (
     <li>
@@ -144,18 +205,29 @@ function ThreadCard({
                 <span className="font-semibold italic text-ink-secondary"> · {subtitle}</span>
               )}
             </span>
+            {/*
+              A filter for something the card never showed is a filter you
+              cannot check. The badge is the reason a row is in the Unread
+              list — and it carries the number as text, not colour alone, so
+              "3 unread" is readable to a screen reader and in monochrome.
+            */}
+            {thread.unread_count > 0 && (
+              <span className="tnum shrink-0 rounded-full bg-royal px-2 py-0.5 text-[11px] font-bold text-white">
+                {thread.unread_count} unread
+              </span>
+            )}
             <span className="shrink-0 text-xs italic text-ink-muted">
               {formatDate(thread.updated_at)}
             </span>
           </span>
+          {identity && (
+            <span className="mt-0.5 block truncate text-xs font-medium text-ink-muted">
+              {identity}
+            </span>
+          )}
           {handledBy && (
             <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
               Handled by {handledBy}
-            </span>
-          )}
-          {conversationOffices && (
-            <span className="mt-0.5 block truncate text-xs font-semibold text-royal">
-              Conversation with {conversationOffices}
             </span>
           )}
           <span className="mt-0.5 block truncate text-sm text-ink-secondary">{preview}</span>
@@ -166,26 +238,88 @@ function ThreadCard({
 }
 
 export function MessagesPage() {
-  const { data, loading, error, reload } = useAsync<MessageThreadSummary[]>(
-    () => messagesApi.threads(),
-    [],
-  )
+  const user = useAuth((s) => s.user)
+  const readerIsOfficer = Boolean(user?.permissions.includes('application.view_all'))
+  // Their own office, so the cards can stop telling an office its own name.
+  const readerOffice = user?.department?.name ?? null
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
+  const [narrow, setNarrow] = useState<Narrow>('all')
+  const [page, setPage] = useState(1)
+  const [rows, setRows] = useState<MessageThreadSummary[]>([])
 
-  const threads = data ?? []
-  const selectedId = Number(params.get('application')) || null
-  const selected = threads.find((t) => t.application_id === selectedId) ?? null
+  /*
+   * ── The inbox is paged, and now says so ──────────────────────────────────
+   *
+   * `/message-threads` has been capped at fifty rows a page since the lists
+   * were bounded, and this screen asked for one page with `threads()`,
+   * discarded the meta, and rendered the result as though it were the whole
+   * inbox. Nothing on the page said otherwise: no count, no control that could
+   * reach row fifty-one. Two things follow and both are fixed here — the
+   * reader is told how many conversations there are, and the Filter goes to
+   * the server, because a narrowing applied to fifty downloaded rows answers
+   * for fifty rows while claiming to answer for the inbox.
+   */
+  const { data, loading, error, reload } = useAsync(
+    () => messagesApi.threadsPage({ page, ...(narrow !== 'all' ? { narrow } : {}) }),
+    [page, narrow],
+  )
+
+  // Append rather than replace, so "Load more" extends the list being read
+  // instead of dropping the reader back at the top. De-duplicated by row key:
+  // a retried page would otherwise render its rows twice.
+  useEffect(() => {
+    if (!data) return
+    setRows((prev) => {
+      if (data.meta.current_page === 1) return data.data
+      const seen = new Set(prev.map(rowKey))
+      return [...prev, ...data.data.filter((t) => !seen.has(rowKey(t)))]
+    })
+  }, [data])
+
+  // A different question starts at the first page.
+  function narrowTo(next: Narrow) {
+    setNarrow(next)
+    setPage(1)
+  }
+
+  const threads = rows
+  const total = data?.meta.total ?? 0
+  const hasMore = data ? data.meta.current_page < data.meta.last_page : false
+  const firstLoad = loading && rows.length === 0
+  /*
+   * A row is identified by a KEY, not by an application id — an enquiry with
+   * no filing has no id to be identified by. Filings keep their numeric id as
+   * their key, so a link someone already has (?application=12) still opens the
+   * same conversation; the enquiry uses the literal 'general', which
+   * Number() reads as NaN and no filing can collide with.
+   */
+  const rowKey = (t: MessageThreadSummary) =>
+    t.kind === 'general' ? 'general' : String(t.application_id)
+
+  const selectedKey = params.get('application')
+  const selected = threads.find((t) => rowKey(t) === selectedKey) ?? null
 
   // On a wide screen an empty pane is wasted space: open the newest thread.
   useEffect(() => {
-    if (selectedId || threads.length === 0) return
+    if (selectedKey || threads.length === 0) return
     if (window.matchMedia('(min-width: 1024px)').matches) {
-      setParams({ application: String(threads[0].application_id) }, { replace: true })
+      setParams({ application: rowKey(threads[0]) }, { replace: true })
     }
-  }, [selectedId, threads, setParams])
+  }, [selectedKey, threads, setParams])
 
+  /*
+   * Search stays in the browser; the Filter does not.
+   *
+   * They are narrowing different things. The Filter asks a question about
+   * STATE — unread, awaiting a reply — which the register can answer over
+   * every row the reader has, and must, because only fifty are downloaded.
+   * Search is a typed substring over the rows in front of you, refining what
+   * you can already see, and moving it to the server would put a round trip on
+   * every keystroke to no benefit. The honest cost is that a search only looks
+   * at the loaded page, which is why the count below names both numbers.
+   */
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase()
     const matched = needle
@@ -214,9 +348,37 @@ export function MessagesPage() {
     return sort === 'recent' ? ordered.reverse() : ordered
   }, [threads, query, sort])
 
-  function open(applicationId: number) {
-    setParams({ application: String(applicationId) })
+  /*
+   * ── The grouping is gone, and why ────────────────────────────────────────
+   *
+   * There used to be a heading above each group of cards, carrying the business
+   * name and the tracking number. It was written when the inbox listed one row
+   * per CONVERSATION, so a filing routed to four offices produced four cards
+   * that needed something to sit under.
+   *
+   * The list has paged by FILING since then — one row per filing, its offices
+   * named on the row — so every "group" held exactly one card and every heading
+   * repeated what the card underneath it already said:
+   *
+   *     Nena's Sari-Sari Store  BIZ-2026-00001      ← heading
+   *     Nena Makiling · Nena's Sari-Sari Store      ← the card
+   *     BIZ-2026-00001
+   *
+   * Three lines, two facts, in a column 26rem wide. Say it once (§6.4): the
+   * card carries its own identity and the headings are deleted.
+   *
+   * If the inbox ever pages by conversation again, the grouping comes back with
+   * it — that is the condition, and it is the only one.
+   */
+  function open(key: string) {
+    setParams({ application: key })
   }
+
+  // 'all' has to head the list: SortFilter reads options[0] as the neutral
+  // choice and only highlights the control when something else is picked.
+  const narrowOptions = (['all', 'unread', 'awaiting', 'quiet'] as Narrow[])
+    .filter((n) => n !== 'quiet' || !readerIsOfficer)
+    .map((n) => ({ value: n, label: NARROW_LABELS[n] }))
 
   const list = (
     <div className={selected ? 'hidden lg:block' : ''}>
@@ -230,6 +392,11 @@ export function MessagesPage() {
                 { value: 'oldest', label: 'Oldest first' },
               ],
               onChange: (v) => setSort(v as Sort),
+            }}
+            filter={{
+              value: narrow,
+              options: narrowOptions,
+              onChange: (v) => narrowTo(v as Narrow),
             }}
           />
         }
@@ -252,58 +419,120 @@ export function MessagesPage() {
         />
       </label>
 
-      {loading ? (
+      {firstLoad ? (
         <SkeletonList rows={4} />
       ) : error ? (
         <ErrorState error={error} onRetry={reload} />
       ) : visible.length === 0 ? (
-        <EmptyState
-          icon={MailIcon}
-          title={query ? 'No conversations match' : 'No conversations yet'}
-          description={
-            query
-              ? 'Try a different name, business, or tracking number.'
-              : 'Messages about an application will show up here once the conversation starts.'
-          }
-        />
+        /*
+         * Three different nothings, and they need three different answers.
+         * "No conversations yet" told a clerk whose Unread filter was empty
+         * that the city had never written to them — the filter is checked
+         * first because it is the one the reader is least likely to remember
+         * setting.
+         */
+        narrow !== 'all' && !query ? (
+          <EmptyState
+            icon={MailIcon}
+            title={NARROW_EMPTY[narrow]}
+            description="Your other conversations are still here — this is the filter, not the inbox."
+            action={
+              <button
+                type="button"
+                onClick={() => narrowTo('all')}
+                className="rounded-full bg-royal px-5 py-2 text-sm font-semibold text-white hover:bg-royal-hover"
+              >
+                Show all conversations
+              </button>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={MailIcon}
+            title={query ? 'No conversations match' : 'No conversations yet'}
+            description={
+              query
+                ? 'Try a different name, business, or tracking number.'
+                : 'Messages about an application will show up here once the conversation starts.'
+            }
+          />
+        )
       ) : (
-        <ul className="flex flex-col gap-4">
-          {visible.map((t) => (
-            <ThreadCard
-              key={t.application_id}
-              thread={t}
-              active={t.application_id === selectedId}
-              onOpen={() => open(t.application_id)}
-            />
-          ))}
-        </ul>
+        /*
+         * A flat list of cards. Each one names the business it is about and the
+         * filing it belongs to — two filings of one business differ by their
+         * tracking number, which is why the card prints it rather than leaning
+         * on a heading to separate them. See the note on the deleted grouping.
+         */
+        <div className="flex flex-col gap-4">
+          {/*
+            Both numbers named (§6.4). "50 conversations" reads as the whole
+            inbox; "50 of 137" is the only version that tells a clerk there is
+            more of it, which is what this page never said.
+          */}
+          <p className="-mb-2 px-1 text-sm text-ink-muted" role="status">
+            Showing {visible.length.toLocaleString()} of {total.toLocaleString()} conversation
+            {total === 1 ? '' : 's'}
+            {narrow !== 'all' ? ` (${NARROW_LABELS[narrow].toLowerCase()})` : ''}
+            {query ? ', searched within the ones loaded' : ''}.
+          </p>
+          <ul aria-label="Conversations" className="flex flex-col gap-3">
+            {visible.map((t) => (
+              <ThreadCard
+                key={rowKey(t)}
+                thread={t}
+                readerOffice={readerOffice}
+                active={rowKey(t) === selectedKey}
+                onOpen={() => open(rowKey(t))}
+              />
+            ))}
+          </ul>
+          {hasMore && (
+            <button
+              type="button"
+              // aria-disabled, never `disabled`: a screen reader skips a
+              // disabled control and takes its label with it, so the guard is
+              // in the handler instead.
+              aria-disabled={loading}
+              onClick={() => {
+                if (!loading) setPage((p) => p + 1)
+              }}
+              className="rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas aria-disabled:cursor-wait aria-disabled:text-ink-muted"
+            >
+              {loading ? 'Loading…' : 'Load more conversations'}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )
 
   /*
-   * The office answerable for the open filing (item 73), labelled — "Handled
-   * by" is what turns a name into an answer to the question the client asked.
+   * The office answerable for the permit (item 73) — printed only when it is a
+   * SECOND fact.
    *
-   * Three states, because there are three, and a blank line for two of them is
-   * what left the applicant guessing in the first place:
+   * The header used to carry three lines about offices and two of them were
+   * noise. On a general enquiry it read:
    *
-   *   - routed, and the office is not already the title → name it;
-   *   - routed, but the office IS the title (nobody in it has picked the file
-   *     up, so the API named the conversation after the office) → repeating it
-   *     under itself says nothing, and "no officer yet" is the fact the reader
-   *     is missing;
-   *   - not routed at all → say that, rather than imply an office exists.
+   *     Business Permits and Licensing Office
+   *     Handled by Business Permits and Licensing Office · no officer assigned yet
+   *     General enquiry
+   *
+   * — the same office twice, plus an apology for a person nobody asked for.
+   * "No officer assigned yet" is gone entirely on the client's instruction: a
+   * conversation does not need an officer's name on it, and announcing the
+   * absence of one makes a normal state look like a fault. The office line
+   * survives only where it says something the title does not: when the permit
+   * is handled by a DIFFERENT office from the one this conversation is with.
+   *
+   * Nothing is said when the filing has not been routed. "Not yet assigned to
+   * an office" used to be printed there, and it contradicted the picker two
+   * lines below saying which office the conversation is with; where the permit
+   * is in the queue is a question for the filing, not for its mail.
    */
-  const paneOffice = selected ? officeLine(selected, selected.counterparty.name) : null
-  /*
-   * The office is now never the pane's title — see paneTitle below — so the old
-   * "don't print it under itself" case is gone with it. What is left is the
-   * fact it was standing in for: a routed filing whose office has not put
-   * anybody's name on it yet. That is worth saying outright rather than leaving
-   * the reader to notice the missing half of the line.
-   */
-  const paneOfficerPending = Boolean(paneOffice) && !selected?.responsible_office?.officer
+  const paneOffice = selected ? officeLine(selected) : null
+  const handledElsewhere =
+    paneOffice && paneOffice !== selected?.counterparty.name ? paneOffice : null
 
   /*
    * What to call the open pane — and why it stopped being the counterparty.
@@ -363,18 +592,11 @@ export function MessagesPage() {
         <Avatar size={38} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-ink">{paneTitle}</p>
-          <p className="truncate text-xs font-semibold text-royal">
-            {paneOffice ? (
-              <>
-                Handled by {paneOffice}
-                {paneOfficerPending && (
-                  <span className="font-medium text-ink-muted"> · no officer assigned yet</span>
-                )}
-              </>
-            ) : (
-              <span className="font-medium text-ink-muted">Not yet assigned to an office</span>
-            )}
-          </p>
+          {handledElsewhere && (
+            <p className="truncate text-xs font-semibold text-royal">
+              Handled by {handledElsewhere}
+            </p>
+          )}
           {paneSubtitle && (
             <p className="truncate text-sm italic text-ink-secondary">{paneSubtitle}</p>
           )}
@@ -390,8 +612,12 @@ export function MessagesPage() {
       </header>
 
       <MessageThreadView
-        key={selected.application_id}
-        applicationId={selected.application_id}
+        key={rowKey(selected)}
+        target={
+          selected.kind === 'general'
+            ? { kind: 'general', userId: selected.user_id }
+            : { kind: 'application', applicationId: selected.application_id! }
+        }
         className="flex-1 px-5 pb-5 pt-4"
         scrollClassName="min-h-0"
         onSent={reload}

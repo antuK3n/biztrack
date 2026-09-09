@@ -518,6 +518,8 @@ function ApplicationRow({
           <Triangle open={open} />
           <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
         </button>
+        {/* The four states, and why the terminal one is blank, are set out
+            above `ended`. */}
         {pending ? (
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
             Pay Online

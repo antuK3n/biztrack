@@ -10,8 +10,9 @@ import {
   UsersIcon,
 } from '../components/icons'
 import { Logo } from '../components/Logo'
-import { AccountRestrictedModal } from '../components/ui/Proto'
-import { businesses } from '../lib/resources'
+import { AccountRestrictedModal, StatusChip } from '../components/ui/Proto'
+import { businessName } from '../lib/format'
+import { businesses, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 
@@ -60,7 +61,92 @@ function OwnerHome() {
         <HomeCard to="/apply?type=amendment" icon={AmendIcon} label="Amendment Form" />
         <HomeCard to="/requests" icon={ShieldCheckIcon} label="Other Requirements" />
       </div>
+
+      <OtherRequirementsPanel />
     </div>
+  )
+}
+
+/**
+ * "Other Requirements" on the owner's home page.
+ *
+ * The tile above has always LINKED to the requirements page; nothing said there
+ * was anything waiting behind it. An office asking for a health certificate had
+ * no way of reaching the owner except a notification they might have already
+ * dismissed, so the document sat unasked-for and the filing sat blocked.
+ *
+ * Only what is waiting on the OWNER is listed — `awaits_applicant`, which is
+ * Pending and Needs Resubmission together, because to the person who owes a
+ * document those are one situation. Anything with the office is deliberately
+ * absent: a home page that lists work you cannot act on teaches people to
+ * ignore it.
+ */
+function OtherRequirementsPanel() {
+  const { data, loading } = useAsync(() => requests.list({ per_page: 100 }), [])
+
+  const waiting = (data ?? []).filter((r) => r.awaits_applicant)
+  if (loading || waiting.length === 0) return null
+
+  return (
+    <section className="mt-14 w-full max-w-3xl" aria-labelledby="other-requirements-heading">
+      <div className="mb-3 flex items-baseline justify-between gap-3 border-b-2 border-ink/40 pb-2">
+        <h2 id="other-requirements-heading" className="text-xl font-bold text-ink">
+          Other Requirements
+        </h2>
+        <Link to="/requests" className="text-sm font-semibold text-royal underline hover:text-royal-hover">
+          See all
+        </Link>
+      </div>
+      <p className="mb-4 text-sm text-ink-secondary">
+        {waiting.length === 1
+          ? 'One document is waiting on you.'
+          : `${waiting.length} documents are waiting on you.`}
+      </p>
+
+      <ul className="flex flex-col gap-3">
+        {waiting.map((r) => (
+          <li key={r.id} className="rounded-xl bg-white px-5 py-4 shadow-card">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-base font-bold text-ink">{r.subject}</p>
+                {/*
+                  Business name AND number. One owner can hold two shops, and a
+                  "Health Certificate" with neither on it is a request they
+                  cannot act on without opening every one to find out which.
+                */}
+                <p className="text-sm text-ink-secondary">
+                  {businessName(r.application?.business_name ? { name: r.application.business_name } : null)}
+                </p>
+                <p className="tnum text-xs text-ink-muted">
+                  {r.application?.tracking_id || 'Draft — not yet filed'}
+                </p>
+                <p className="mt-1 text-xs text-ink-secondary">
+                  Requested by:{' '}
+                  <span className="font-semibold text-ink">
+                    {r.from_office?.name ?? r.created_by?.department ?? 'the LGU'}
+                  </span>
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-2">
+                <StatusChip tone="orange">{r.status_label}</StatusChip>
+                <Link
+                  to="/requests"
+                  className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                >
+                  View requirement
+                </Link>
+              </div>
+            </div>
+            {/* The reason it came back, where the owner decides what to do next. */}
+            {r.status === 'needs_resubmission' && r.remarks && (
+              <p className="mt-3 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-xs font-medium text-s-red">
+                {r.remarks}
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
