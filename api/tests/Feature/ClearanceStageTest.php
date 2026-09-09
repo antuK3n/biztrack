@@ -210,8 +210,39 @@ function clearanceRow(Application $app, string $code): array
 }
 
 /**
- * Drive one other permit the whole way: applied for, read by its office, a date
- * picked, the visit passed — which issues it.
+ * Hand in a permit the applicant has already applied for.
+ *
+ * Applying and submitting are two acts since 9 September 2026.
+ * `startClearance` records that the applicant chose to fill in the office's
+ * sheet and opens it: the permit stays `not_started` and no office is routed.
+ * `submitClearanceForm` is what HANDS IT IN — it moves the permit to
+ * ForApproval, stamps `submitted_at` and gives the issuing office the work.
+ * The split exists because the old single act lied to both ends of the filing
+ * at once (client, 9 September 2026 — "I still haven't submitted any
+ * applications yet the status says it is For Approval").
+ *
+ * All five other permits carry an office form (`PermitType::OFFICE_FORM_CODES`),
+ * so every one of them now takes both calls. A fixture that only applies leaves
+ * the office queue empty and the test hunting an assignment nobody made.
+ *
+ * The service rather than `PUT /office-forms/{code}`, deliberately: the sheet's
+ * ANSWERS are OfficeFormTest's subject, and posting an empty `form_data` here
+ * to reach the same transition would overwrite whatever the test had filled in.
+ * Tests that care about the answers write them between the two acts — the only
+ * order `ownerMayEdit` allows, since it refuses a write once the permit is past
+ * NotStarted or Returned.
+ */
+function handInClearance(Application $app, string $code): void
+{
+    app(WorkflowService::class)->submitClearanceForm(
+        $app->fresh(),
+        PermitType::where('code', $code)->firstOrFail(),
+    );
+}
+
+/**
+ * Drive one other permit the whole way: applied for, handed in, read by its
+ * office, a date picked, the visit passed — which issues it.
  *
  * Four acts, and the shape of the fixture is itself the rule under test
  * elsewhere in this file. The office boundary is load-bearing at every step:
@@ -231,6 +262,10 @@ function driveClearanceToApproved(Application $app, string $code): void
 
     authAs('owner@biztrack.local');
     test()->postJson("/api/v1/applications/{$app->id}/clearances/{$code}/apply")->assertOk();
+    // Applying opens the sheet; handing it in is what puts the permit in front
+    // of its office. This fixture is about a permit an office WORKS, so it
+    // takes both — see handInClearance.
+    handInClearance($app, $code);
 
     authAs($officer);
     $assignment = ApplicationAssignment::where('application_id', $app->id)
@@ -451,8 +486,11 @@ it('keeps the stage open when an office returns its own permit, and shut when BP
         ->and(clearanceMeta($unpaid)['unlocked'])->toBeFalse();
 
     // The permit's machine: CPDO returns the zoning permit, after payment.
+    // Returning is something an office does to a permit it HOLDS, so the sheet
+    // has to be handed in first — applying alone routes nobody.
     $paid = paidClearanceApplication('Returned Permit Cafe');
     $this->postJson("/api/v1/applications/{$paid->id}/clearances/ZONING/apply")->assertOk();
+    handInClearance($paid, 'ZONING');
 
     $cpdo = ApplicationAssignment::where('application_id', $paid->id)
         ->where('department_id', Department::where('code', 'CPDO')->firstOrFail()->id)
@@ -561,10 +599,25 @@ it('adds nothing to the bill when a permit is started, because it was billed at 
 
     $after = ledger($body['meta']);
 
-    expect($body['data']['state'])->toBe(ClearanceStatus::ForApproval->value)
+    /*
+     * `not_started`, and that is the 9 September split rather than a permit that
+     * failed to start: Apply's whole job is to OPEN the office's sheet, and the
+     * permit is handed in below. The money is what this test is about, so it is
+     * checked at BOTH moments — neither act may move a peso.
+     */
+    expect($body['data']['state'])->toBe(ClearanceStatus::NotStarted->value)
         ->and($after['total_assessed'])->toBe($before['total_assessed'])
         ->and($after['total_paid'])->toBe($before['total_paid'])
         ->and($after['balance_due'])->toBe(0.0);
+
+    handInClearance($app, 'ZONING');
+
+    $submitted = clearanceMeta($app);
+
+    expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::ForApproval->value)
+        ->and($submitted['total_assessed'])->toBe($before['total_assessed'])
+        ->and($submitted['total_paid'])->toBe($before['total_paid'])
+        ->and($submitted['balance_due'])->toBe(0.0);
 });
 
 /*
@@ -645,13 +698,26 @@ it('raises one bill covering everything, and takes no second payment for the oth
 });
 
 /*
- * RENAMED from "routes every chosen clearance to its own office when the
- * payment clears". Routing at payment is what cannot happen now: the applicant
- * has not said how they will satisfy each permit at the moment they pay, and
- * routing all five would put five filings in five queues nobody can act on and
- * start five service-time clocks against work that has not been handed over.
+ * RENAMED TWICE, and the second rename is the 9 September split.
+ *
+ * It was "routes every chosen clearance to its own office when the payment
+ * clears". Routing at payment is what cannot happen: the applicant has not said
+ * how they will satisfy each permit at the moment they pay, and routing all five
+ * would put five filings in five queues nobody can act on and start five
+ * service-time clocks against work that has not been handed over.
+ *
+ * It then became "routes a permit to its own office the moment it is STARTED",
+ * and that name was false for the same reason one step later. Applying is the
+ * applicant opening the office's sheet; it hands the office nothing to read, and
+ * routing on it reproduced the fault at a smaller scale — a queue row with no
+ * answers on it ("I still can't view the application fields") under a status the
+ * applicant had not caused ("I still haven't submitted any applications yet the
+ * status says it is For Approval").
+ *
+ * So both halves are asserted here, because the distinction between them IS the
+ * rule and either half alone reads as the old behaviour.
  */
-it('routes a permit to its own office the moment it is started', function () {
+it('routes a permit to its own office when the form is handed in, and not when it is applied for', function () {
     $app = paidClearanceApplication();
     $cho = Department::where('code', 'CHO')->firstOrFail();
 
@@ -660,8 +726,20 @@ it('routes a permit to its own office the moment it is started', function () {
         ->and(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $cho->id)->exists())
         ->toBeFalse();
 
-    $row = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")
+    // ── Applying: the sheet opens, and nothing else happens ──────────────────
+    $applied = $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")
         ->assertOk()->json('data');
+
+    expect($applied['state'])->toBe(ClearanceStatus::NotStarted->value)
+        ->and($applied['assignment'])->toBeNull()
+        ->and(ApplicationAssignment::where('application_id', $app->id)->count())->toBe(1)
+        ->and(ApplicationAssignment::where('application_id', $app->id)->where('department_id', $cho->id)->exists())
+        ->toBeFalse();
+
+    // ── Handing it in: CHO is given the work ─────────────────────────────────
+    handInClearance($app, 'SANITARY');
+
+    $row = clearanceRow($app, 'SANITARY');
 
     $assignment = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', $cho->id)->first();
@@ -670,7 +748,8 @@ it('routes a permit to its own office the moment it is started', function () {
      * `assigned_at` starts the service-time clock ProcessingTimeAnalytics,
      * StaffingSimulation and DashboardAnalytics measure an office by, so it must
      * be stamped when the office genuinely has work — which is here, and only
-     * here.
+     * here. That was always the rule; what moved is where "here" is, from the
+     * press of Apply to the submission that gives CHO something to read.
      */
     expect($row['state'])->toBe(ClearanceStatus::ForApproval->value)
         ->and($assignment)->not->toBeNull()
@@ -720,9 +799,21 @@ it('refuses to withdraw any of the five, because every one of them is required',
 
     foreach (PermitType::CLEARANCE_ORDER as $code) {
         $this->postJson("/api/v1/applications/{$app->id}/clearances/{$code}/apply")->assertOk();
+
+        /*
+         * Refused at BOTH moments of the 9 September split, because "required"
+         * is a fact about the permit and not about how far it has got. The
+         * pre-submission one is the new hole: a permit sitting at `not_started`
+         * with the sheet open looks the most withdrawable it will ever look,
+         * and `ClearanceService::unapply` must still say no — the bill covering
+         * it was settled before this stage opened.
+         */
         $this->deleteJson("/api/v1/applications/{$app->id}/clearances/{$code}/apply")->assertStatus(422);
 
-        // Still attached, still started, still owed to the applicant.
+        handInClearance($app, $code);
+        $this->deleteJson("/api/v1/applications/{$app->id}/clearances/{$code}/apply")->assertStatus(422);
+
+        // Still attached, still with its office, still owed to the applicant.
         expect(clearanceRow($app, $code)['state'])->toBe(ClearanceStatus::ForApproval->value);
     }
 
@@ -913,6 +1004,8 @@ it('lets a copy replace an application, and does not let an application replace 
 it('will not file a copy of a permit its office has already accepted', function () {
     $app = paidClearanceApplication();
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertOk();
+    // CHO can only accept a sheet it has been given, so the fixture hands it in.
+    handInClearance($app, 'SANITARY');
 
     $assignment = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', Department::where('code', 'CHO')->firstOrFail()->id)
@@ -1067,6 +1160,11 @@ it('reports a permit as approved only once its inspection has passed', function 
     $cpdo = Department::where('code', 'CPDO')->firstOrFail();
 
     $this->postJson("/api/v1/applications/{$app->id}/clearances/ZONING/apply")->assertOk();
+    // Applied for but not handed in: CPDO has nothing yet, and neither does the
+    // badge. The permit reaches `for_approval` on submission (9 September split).
+    expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::NotStarted->value);
+
+    handInClearance($app, 'ZONING');
     expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::ForApproval->value);
 
     $assignment = ApplicationAssignment::where('application_id', $app->id)
