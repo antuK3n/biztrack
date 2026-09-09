@@ -162,7 +162,7 @@ test('every office queue carries its own department’s work, and carries some',
 }) => {
   /*
    * Driven off OFFICES rather than a list retyped here, because the mapping
-   * account → department code IS the claim: if a seventh office is added or a
+   * account → department code IS the claim: if a sixth office is added or a
    * department renamed, this must follow it rather than keep asserting the old
    * shape and passing.
    *
@@ -245,13 +245,13 @@ test('a filing is closed to an office it was never routed to', async ({ request 
    * under test who else is on its filing would be asking the thing being
    * tested. Every office it names as absent is then made to try the door.
    *
-   * A filing routed to all seven is no use here and is simply skipped; on this
+   * A filing routed to all six is no use here and is simply skipped; on this
    * register most are, which is exactly why this searches rather than
    * hard-codes.
    *
-   * The offices made to try the door are the six clearance offices, never BPLO,
+   * The offices made to try the door are the five clearance offices, never BPLO,
    * and that is not a hole. BPLO holds `application.view_any_office` BY DESIGN —
-   * it issues the mayor's permit and coordinates the other six, so it reads the
+   * it issues the mayor's permit and coordinates the other five, so it reads the
    * register the same as the super admin does. Listing it as an outsider would
    * be asserting a product nobody asked for. Its cross-office read is asserted
    * positively at the bottom of this test instead, which is the honest place for
@@ -483,12 +483,12 @@ test('an office’s permit list holds only the clearance that office issues', as
    *
    * PermitController::scopeToReader draws the boundary at the FILING — "permits
    * issued off filings their office was routed to" — not at the issuing office.
-   * A filing routed to six offices produces six clearances, so every one of
-   * those offices is handed all six.
+   * A filing routed to every office produces five clearances, so every one of
+   * those offices was handed all five.
    *
    * Measured on this register: sanitary@biztrack.local's `GET /permits` reports
    * 5,327 rows, and the first page of 200 contains 39 FSIC, 22 CEC, 22
-   * OCCUPANCY, 21 ZONING, 19 MARKET and 38 BUSINESS certificates alongside its
+   * OCCUPANCY, 21 ZONING and 38 BUSINESS certificates alongside its
    * own 39 SANITARY. That is the exact thing the client asked to be checked,
    * and the answer is that the account can see them.
    *
@@ -619,7 +619,7 @@ test('an office reads its own clearance sheet on a shared filing and no other', 
    * The half of the boundary that IS drawn on `issuing_department_id`, kept
    * under test so the permit findings above cannot be read as "office scoping
    * does not exist here". It does, on the office forms, and it was fought for:
-   * a seven-office filing used to hand the CHO officer CENRO's `owner_birthday`
+   * a filing shared by every office used to hand the CHO officer CENRO's `owner_birthday`
    * — a date of birth on a screen that prints an RA 10173 consent notice eight
    * sections earlier (checklist item 111).
    *
@@ -798,8 +798,31 @@ test('a business is closed to an office that never saw one of its filings', asyn
    * trading history — and `/businesses/{id}/prefill` hands back the answers to
    * an application form.
    *
-   * Same construction as the filing test: BPLO names who is on the filing, and
-   * every office it does not name tries both doors.
+   * ── The boundary is the BUSINESS's filings, all of them ───────────────────
+   *
+   * This is the one place where the construction used by the filing test above
+   * does not transfer, and copying it here made this test wrong. A FILING is
+   * closed to an office that is not on THAT filing; a BUSINESS is closed to an
+   * office that is on NONE of its filings —
+   * `BusinessController::authorizeOwnerOrOfficer` asks whether any application
+   * of this business survives `ApplicationVisibility::scope`.
+   *
+   * Reading the routing off a single filing therefore accuses the product of a
+   * leak that is not there. Measured on this register: filing 4998 for Sinag
+   * Mart Enterprises is routed to BPLO and OBO, so CHO looks like an outsider —
+   * and CHO is on three other filings for the same business, so its 200 is
+   * correct and the refusal this test demanded would have been the bug.
+   *
+   * It survived for as long as it did because routing used to be all-or-nothing:
+   * `onPaymentCompleted` handed a paid filing to every office at once, so one
+   * filing's routing was a fair proxy for the business's. Offices are routed one
+   * at a time now, as the applicant reaches each permit, and single-office
+   * filings are ordinary.
+   *
+   * So the union across every filing of the business is what an outsider is
+   * measured against. The business's filings are gathered through BPLO, which
+   * reads across offices by design — asking the office under test which filings
+   * a business has would be asking the thing being tested.
    */
   for (const office of OFFICES) {
     const mine = await getAs(request, office.account, '/api/v1/applications?per_page=40')
@@ -813,7 +836,44 @@ test('a business is closed to an office that never saw one of its filings', asyn
         business: { id: number; name: string } | null
       }
       if (!detail.business) continue
-      const routed = new Set(detail.assignments.map((a) => a.department?.code))
+
+      /*
+       * Every office on every filing this business has ever made.
+       *
+       * Searched by name rather than filtered by id, because `/applications`
+       * takes no `business_id`; the id is then checked on each row, so a
+       * business whose name is a prefix of another's cannot widen the set. A
+       * name that returns more rows than the page holds is skipped rather than
+       * half-counted — a partial union would under-report who is routed, which
+       * is the direction that produces a false leak.
+       */
+      const siblings = await getAs(
+        request,
+        'bplo',
+        `/api/v1/applications?q=${encodeURIComponent(detail.business.name)}&per_page=60`,
+      )
+      if (siblings.status !== 200) continue
+      const meta = siblings.body.meta as { total?: number } | undefined
+      const rows = (siblings.body.data as { id: number; business: { id: number } | null }[]) ?? []
+      if ((meta?.total ?? rows.length) > rows.length) continue
+
+      const routed = new Set<string | undefined>()
+      let complete = true
+      for (const row of rows) {
+        if (row.business?.id !== detail.business.id) continue
+        const sibling = await getAs(request, 'bplo', `/api/v1/applications/${row.id}`)
+        if (sibling.status !== 200) {
+          complete = false
+          break
+        }
+        for (const a of (sibling.body.data as { assignments: AssignmentRow[] }).assignments) {
+          routed.add(a.department?.code)
+        }
+      }
+      // A filing BPLO could not open leaves the union short, and a short union
+      // is exactly what would accuse an office that is legitimately routed.
+      if (!complete) continue
+
       // Same two guards as the filing test above, and for the same reasons:
       // the reader has to be genuinely routed here, and BPLO's cross-office
       // read is a documented exemption rather than an outsider's leak.
@@ -835,7 +895,8 @@ test('a business is closed to an office that never saw one of its filings', asyn
           const res = await getAs(request, outsider.account, url)
           expect(
             REFUSED,
-            `${outsider.code} reached ${detail.business.name} at ${url}`,
+            `${outsider.code} reached ${detail.business.name} at ${url}, ` +
+              `and is on none of its filings (routed: ${[...routed].join(', ')})`,
           ).toContain(res.status)
         }
       }

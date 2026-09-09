@@ -50,8 +50,21 @@ function requirementFiling(string $businessName, string $registrationNumber, arr
         'business_id' => $businessId,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        /*
+         * RA 10173 consent, carried on the filing itself.
+         *
+         * submit() refuses without it — it is the first of two gates there, and
+         * the lawful basis for processing anything else on the form. This is a
+         * PRECONDITION of this fixture, not its subject: every test below is
+         * about Other Requirements, and a filing that never reached an office
+         * queue cannot have a requirement raised against it.
+         */
+        'data_privacy_consent' => true,
     ])->assertCreated()->json('data.id');
 
+    // Lands on For Approval, not Pending Payment: BPLO reads the main form
+    // before any bill is raised. Nothing here needs a paid filing, so the
+    // fixture stops at submit rather than driving it further.
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     foreach ($offices as $code) {
@@ -342,7 +355,13 @@ it('gives each office its own requirements on one shared filing', function () {
  * ── Every office, BPLO included ──────────────────────────────────────────────
  *
  * The test above proves separability for three offices. This one proves it for
- * all seven AND closes the exception that was left in it.
+ * all six AND closes the exception that was left in it.
+ *
+ * Six, not seven: CMO-MARKET was in this list until the Market Clearance was
+ * taken out of the system on 6 September 2026. It is named here rather than
+ * quietly dropped because the office no longer exists to be seeded, so asking
+ * for it produced an assignment with no department at all rather than an
+ * honest failure.
  *
  * BPLO used to read every office's requirements, and the reasoning was written
  * down: it coordinates the other offices' clearances and has to be able to
@@ -364,12 +383,11 @@ it('gives every office its own requirements, and BPLO is an office like the rest
         'fire@biztrack.local' => 'BFP',
         'obo@biztrack.local' => 'OBO',
         'cenro@biztrack.local' => 'CENRO',
-        'market@biztrack.local' => 'CMO-MARKET',
         'zoning@biztrack.local' => 'CPDO',
     ];
 
     // One filing every office is on, which is the hard case: sharing a filing
-    // is exactly what used to hand each office all seven offices' requirements.
+    // is exactly what used to hand each office all six offices' requirements.
     $appId = requirementFiling('ABC Store', 'DTI-94020', array_values($offices));
 
     $raised = [];
@@ -394,15 +412,15 @@ it('gives every office its own requirements, and BPLO is an office like the rest
         }
     }
 
-    // And the applicant sees all seven, each carrying the name of the office
+    // And the applicant sees all six, each carrying the name of the office
     // that asked — the other half of the claim, and the half the owner reads.
     $owner = collect(test()->withHeaders(authAs('owner@biztrack.local'))
         ->getJson('/api/v1/requests?per_page=200')->assertOk()->json('data'))
         ->whereIn('id', array_values($raised));
 
-    expect($owner)->toHaveCount(7);
+    expect($owner)->toHaveCount(6);
     expect($owner->pluck('from_office.code')->sort()->values()->all())
-        ->toBe(['BFP', 'BPLO', 'CENRO', 'CHO', 'CMO-MARKET', 'CPDO', 'OBO']);
+        ->toBe(['BFP', 'BPLO', 'CENRO', 'CHO', 'CPDO', 'OBO']);
 });
 
 it('does not let BPLO rule on a requirement another office raised', function () {

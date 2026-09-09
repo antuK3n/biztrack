@@ -35,8 +35,33 @@ class ApplicationListResource extends JsonResource
             ] : null,
             'submitted_at' => optional($this->submitted_at)->toISOString(),
             'deadline_at' => optional($this->deadline_at)->toISOString(),
+            /*
+             * Each permit with its OWN status, not just its name.
+             *
+             * This sent `{ code, name }` and the tracking screen inferred the
+             * rest — from the issuing office's assignment and the application's
+             * status, which is the only evidence there was before the pivot
+             * existed. Both inferences are now wrong in opposite directions: a
+             * completed BPLO assignment means "the form was accepted", not "the
+             * permit is approved", and a filing at `awaiting_other_permits` says
+             * nothing about whether any particular permit has been applied for.
+             * The screen showed the Business Permit as Approved and five
+             * untouched permits as For Approval on a filing where none of that
+             * was true.
+             *
+             * Two extra columns on a list row, and they remove a whole class of
+             * defect: the tracking screen no longer holds a second, weaker copy
+             * of the state machine, and its rows stop being wrong for the
+             * moment before the detail request lands — which on a slow
+             * connection is the only version many people read.
+             */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(fn ($pt) => ['code' => $pt->code, 'name' => $pt->name])->values()
+                ? $this->permitTypes->map(fn ($pt) => [
+                    'code' => $pt->code,
+                    'name' => $pt->name,
+                    'status' => $pt->pivot?->status?->value,
+                    'status_label' => $pt->pivot?->status?->label(),
+                ])->values()
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
         ];

@@ -36,6 +36,9 @@ function separationApplication(string $businessName, string $registrationNumber)
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        // RA 10173 consent is the first gate submit() runs; without it the filing
+        // never leaves draft and every assertion below is about an empty inbox.
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -146,8 +149,9 @@ it('lets the owner open a conversation with any configured office', function () 
 
     authAs('owner@biztrack.local');
 
-    // Nothing is routed — no assignments exist — and every office is still
-    // offered. Under the old rule this list was BPLO alone.
+    // Only BPLO is routed — submit() hands the form to it and to nobody else —
+    // and yet every office is offered. Under the old rule this list was the
+    // routed offices, which is to say BPLO alone.
     $offices = $this->getJson("/api/v1/applications/{$appId}/messages")
         ->assertOk()->json('meta.offices');
 
@@ -289,10 +293,19 @@ it('keeps the general enquiry apart from the filing conversations', function () 
 it('lets an office read a filing it was written to but never routed', function () {
     [$appId] = separationApplication('ABC Store', 'DTI-70011');
 
-    // Deliberately NO assignment: nothing is routed until the fee clears.
-    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(0);
-
+    /*
+     * Deliberately NO assignment for the office that gets written to.
+     *
+     * submit() routes BPLO and BPLO alone — it reads the form before the bill is
+     * raised — and the other five offices are routed one at a time, when the
+     * applicant opens that clearance after paying. So a freshly filed application
+     * has exactly one assignment, and City Health is not on it.
+     */
     $cho = Department::where('code', 'CHO')->value('id');
+
+    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1)
+        ->and(ApplicationAssignment::where('application_id', $appId)
+            ->where('department_id', $cho)->exists())->toBeFalse();
 
     authAs('owner@biztrack.local');
     $this->postJson("/api/v1/applications/{$appId}/messages", [

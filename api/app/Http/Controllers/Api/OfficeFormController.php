@@ -3,16 +3,24 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
-use App\Enums\ApplicationType;
-use App\Enums\AssignmentStatus;
+use App\Enums\ClearanceStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Application;
+use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
+use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\OfficeFormAnswers;
+use App\Support\PdfFile;
+use App\Support\SheetRequirements;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Per-office application form payloads (UI prototype Parts 4-7, pages 040-044).
@@ -64,11 +72,210 @@ class OfficeFormController extends Controller
             ->values()
             ->map(fn (string $code) => [
                 'permit_type_code' => $code,
-                'form_data' => $this->withDerived($application, $code, $stored[$code]->form_data ?? []),
+                'form_data' => OfficeFormAnswers::derive($application, $code, $stored[$code]->form_data ?? []),
+                /*
+                 * What this office's paper asks the applicant to bring. It
+                 * rides on this payload rather than on an endpoint of its own
+                 * because the sheet renders it, the sheet already loads this,
+                 * and a second round trip would buy nothing — the same
+                 * reasoning ReferenceController gives for the zoning maps.
+                 *
+                 * Which sheets have one is `SheetRequirements`' business, not
+                 * this controller's: CPDD's checklist and CENRO's FOR RENEWAL
+                 * row are two answers to one question, and the officer's review
+                 * screen asks it too.
+                 *
+                 * Null, not empty, for a sheet with none: an empty array reads
+                 * as "this office asks for nothing", which is a claim, and it is
+                 * not one CHO, BFP or OBO have made.
+                 */
+                'requirements' => SheetRequirements::for($application, $code),
             ])
             ->values();
 
         return response()->json(['data' => $forms]);
+    }
+
+    /**
+     * POST — one file into one slot of the zoning checklist.
+     *
+     * Owner only, and only while the sheet itself is theirs to write. The
+     * checklist is part of the sheet: an office that has accepted the form has
+     * accepted the documents attached to it, and swapping a title deed
+     * underneath an approval is the same defect as rewriting an answer.
+     *
+     * Deliberately NOT `HeldPermits`: that mechanism keys its files on
+     * `permit_type_id` and deletes every other row carrying the same permit, so
+     * routing checklist uploads through it would have each new attachment
+     * silently delete the applicant's certificate — and the certificate delete
+     * the checklist. These leave `permit_type_id` null and are found by their
+     * document type. See the note on ZoningRequirements::uploads.
+     */
+    public function storeRequirement(
+        Request $request,
+        Application $application,
+        string $permitTypeCode,
+        string $documentCode,
+    ): JsonResponse {
+        [$permitType] = $this->authorizeRequirementWrite($request, $application, $permitTypeCode, $documentCode);
+
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+        ], [
+            'file.required' => 'Choose the file to upload.',
+            'file.max' => 'The file may not be larger than 10MB.',
+            'file.mimes' => 'Upload a PDF, JPG, or PNG file.',
+        ]);
+
+        $file = $request->file('file');
+        $ext = $file->getClientOriginalExtension() ?: $file->guessExtension();
+        $filename = Str::uuid()->toString().'.'.$ext;
+        $directory = "private/documents/{$application->id}";
+
+        Storage::disk('local')->putFileAs($directory, $file, $filename);
+
+        $document = ApplicationDocument::create([
+            'application_id' => $application->id,
+            'document_type_id' => SheetRequirements::documentType($permitTypeCode, $documentCode)->id,
+            'original_filename' => $file->getClientOriginalName(),
+            'stored_path' => "{$directory}/{$filename}",
+            'mime_type' => $file->getClientMimeType(),
+            'size_bytes' => $file->getSize(),
+        ]);
+        Audit::log('document.uploaded', $document);
+
+        // One file per slot: uploading again replaces, so CPDD never has to work
+        // out which of two tax declarations is the live one.
+        $this->forgetRequirement($application, $documentCode, $document->id);
+
+        return response()->json([
+            'data' => [
+                'permit_type_code' => $permitType->code,
+                'requirements' => SheetRequirements::for($application, $permitTypeCode),
+            ],
+        ], 201);
+    }
+
+    /**
+     * GET — Section X of MCG-CPDD-FO-003 v1.2 as a printable page.
+     *
+     * The declaration is sworn before a notary and the online flow has no step
+     * for that at all (questions-for-malabon C9 item 2). Until the LGU settles
+     * how notarisation is meant to work in this channel, the one useful thing
+     * BizTrack can do is hand the applicant the exact page the notary expects,
+     * with their filing already named on it — so what comes back as a scan can
+     * be matched to an application rather than to a business name.
+     *
+     * Readable by anyone who may view the filing, not just the owner: CPDD
+     * looking at a notarised scan has an obvious reason to want the blank it
+     * was made from.
+     */
+    public function declarationTemplate(Request $request, Application $application, string $permitTypeCode): Response
+    {
+        $this->authorizeView($request, $application);
+        abort_unless($permitTypeCode === 'ZONING', 404, 'That form has no declaration.');
+
+        $application->loadMissing('business');
+
+        /*
+         * Two values, and only two.
+         *
+         * The page used to be handed the business address and the applicant's
+         * name as well, for a masthead and a pre-printed signature line that no
+         * longer exist. What is left is what identifies the filing a scan
+         * belongs to — see the note in the view for why nothing about the
+         * BUSINESS itself is printed on a page that gets sworn to.
+         */
+        $pdf = Pdf::loadView('pdf.zoning-declaration', [
+            'tracking_id' => $application->tracking_id ?? '',
+            'business_name' => $application->business?->name ?? '',
+        ]);
+
+        return PdfFile::render($pdf)->download("locational-clearance-declaration-{$application->tracking_id}.pdf");
+    }
+
+    /** DELETE — take one checklist file back off. */
+    public function destroyRequirement(
+        Request $request,
+        Application $application,
+        string $permitTypeCode,
+        string $documentCode,
+    ): JsonResponse {
+        [$permitType] = $this->authorizeRequirementWrite($request, $application, $permitTypeCode, $documentCode);
+
+        $this->forgetRequirement($application, $documentCode, null);
+
+        return response()->json([
+            'data' => [
+                'permit_type_code' => $permitType->code,
+                'requirements' => SheetRequirements::for($application, $permitTypeCode),
+            ],
+        ]);
+    }
+
+    /**
+     * The three checks both checklist writes share, in one place.
+     *
+     * @return array{0: PermitType}
+     */
+    private function authorizeRequirementWrite(
+        Request $request,
+        Application $application,
+        string $permitTypeCode,
+        string $documentCode,
+    ): array {
+        abort_unless(
+            $application->applicant_user_id === $request->user()->id,
+            403,
+            'This application is not yours.'
+        );
+
+        abort_unless(
+            SheetRequirements::accepts($permitTypeCode, $documentCode),
+            404,
+            'That is not a requirement on this checklist.',
+        );
+
+        $permitType = PermitType::where('code', $permitTypeCode)->firstOrFail();
+
+        abort_unless(
+            $application->permitTypes()->where('permit_types.id', $permitType->id)->exists(),
+            422,
+            'That permit type is not part of this application.'
+        );
+
+        abort_unless(
+            $this->ownerMayEdit($application, $permitType),
+            422,
+            'This form can no longer be edited, so its requirements are fixed as CPDD received them.'
+        );
+
+        return [$permitType];
+    }
+
+    /**
+     * Drop this slot's files, the stored copies with them.
+     *
+     * A "removed" document still on disk is not removed, and it stays
+     * downloadable through /documents/{id}/download for as long as it is there
+     * — the same reasoning, and the same failure, as HeldPermits::forget.
+     */
+    private function forgetRequirement(Application $application, string $documentCode, ?int $keepId): void
+    {
+        $query = ApplicationDocument::where('application_id', $application->id)
+            ->whereHas('documentType', fn ($q) => $q->where('code', $documentCode));
+
+        if ($keepId !== null) {
+            $query->whereKeyNot($keepId);
+        }
+
+        foreach ($query->get() as $old) {
+            if ($old->stored_path && Storage::disk('local')->exists($old->stored_path)) {
+                Storage::disk('local')->delete($old->stored_path);
+            }
+            Audit::log('document.removed', $old);
+            $old->delete();
+        }
     }
 
     /**
@@ -114,6 +321,9 @@ class OfficeFormController extends Controller
             // "present", not "required": a sheet whose every answer is derived
             // (the FSIC form) legitimately posts an empty object.
             'form_data' => ['present', 'array', 'max:512'], // guard against huge payloads
+            // Absent means "save only", which is the safe default: a caller that
+            // does not know about submitting cannot accidentally do it.
+            'submit' => ['sometimes', 'boolean'],
             // Birthdays can never be in the future (CEC "Birthday of Owner").
             'form_data.owner_birthday' => ['sometimes', 'nullable', 'date', 'before:today'],
             // An office cannot have issued a document on a future date.
@@ -153,13 +363,45 @@ class OfficeFormController extends Controller
             $formData = array_intersect_key($submitted, array_flip(self::OFFICER_KEYS)) + $current;
         }
 
-        $formData = $this->withDerived($application, $permitType->code, $formData);
+        $formData = OfficeFormAnswers::derive($application, $permitType->code, $formData);
 
         $form = ApplicationOfficeForm::updateOrCreate(
             ['application_id' => $application->id, 'permit_type_id' => $permitType->id],
             ['form_data' => $formData]
         );
         Audit::log('office_form.saved', $form);
+
+        /*
+         * ── Saving is not submitting. Completing is. ──────────────────────────
+         *
+         * Saving used to submit outright, and that was one act too few. The Save
+         * button was disabled while anything required was missing, so a
+         * half-filled sheet could not be saved at all — and nothing on this
+         * stage autosaves, so leaving the page lost the typing. Making the CEC
+         * sheet blocking on 8 September turned that from a corner into the
+         * ordinary case: Owner's Address and the certification are required, so
+         * the first CEC form anybody opened was unsaveable until it was
+         * finished in one sitting.
+         *
+         * So the client says which it is doing. `submit` is true only when
+         * `officeFormMissing` reports nothing outstanding — the rule lives in
+         * the browser beside the sheet it describes and has no PHP counterpart
+         * to re-check against, which is why this trusts the flag. It is a weak
+         * guarantee and a deliberate one: a forced `submit` on a half-filled
+         * sheet is returned by the office, exactly as a badly-filled one would
+         * be, and that is a much smaller cost than the alternative it replaces.
+         *
+         * Owner only. An officer recording issuance dates writes to the same row
+         * through the same endpoint, and their save must not be read as the
+         * applicant handing the sheet in.
+         *
+         * The service is idempotent and refuses anything past ForApproval, so
+         * re-saving a submitted sheet does not re-notify an office or move a
+         * permit that has already been accepted.
+         */
+        if ($isOwner && $request->boolean('submit')) {
+            app(WorkflowService::class)->submitClearanceForm($application, $permitType);
+        }
 
         return response()->json([
             'data' => [
@@ -206,200 +448,55 @@ class OfficeFormController extends Controller
             return false;
         }
 
-        $assignment = $application->assignments()
-            ->where('department_id', $permitType->issuing_department_id)
-            ->first();
+        /*
+         * ── The permit's own status decides, not the office's assignment ─────
+         *
+         * This looked for an assignment on the issuing office and allowed the
+         * save while it was open. That worked only because Apply routed the
+         * office immediately — and once Apply stopped doing that (see
+         * `WorkflowService::startClearance`), there was no assignment at the
+         * one moment the applicant most needs to write: filling in the form
+         * they have just opened. The save would have been refused with "this
+         * form can no longer be edited", which is the exact error the client
+         * hit from the other direction on 8 September 2026.
+         *
+         * So it asks the permit instead. The applicant owns the sheet while the
+         * office has not yet accepted it — NotStarted (opened, not submitted),
+         * ForApproval (submitted, not yet read) and Returned (sent back to fix)
+         * — and loses it the moment the office moves it on, which is the same
+         * line `ClearanceController::storeHeld` draws for swapping the evidence.
+         *
+         * A permit with no pivot row at all is one this filing does not carry;
+         * `upsert` has already refused that above, so `null` here means a race
+         * rather than a state and is answered conservatively.
+         */
+        $row = $application->permitTypes
+            ->firstWhere('id', $permitType->id)?->pivot
+            ?? $application->permitTypes()->where('permit_types.id', $permitType->id)->first()?->pivot;
 
-        return $assignment !== null && $assignment->status !== AssignmentStatus::Completed;
-    }
-
-    /**
-     * Overlay the answers the system already holds on top of a payload. These
-     * always win: the paper form still carries them, but nobody types them.
-     */
-    private function withDerived(Application $application, ?string $permitTypeCode, array $formData): array
-    {
-        if ($permitTypeCode === null || ! in_array($permitTypeCode, self::FORM_PERMIT_CODES, true)) {
-            return $formData;
-        }
-
-        // Renewals and amendments both act on a business that already operates;
-        // only a genuinely new application is "new" to the inspecting office.
-        $existingBusiness = $application->application_type !== ApplicationType::New;
-
-        // The filing date: submitted_at once the application is filed, today
-        // while it is still being filled in. Never typed by anyone.
-        $derived = [
-            'application_date' => ($application->submitted_at ?? now())->toDateString(),
-        ];
-
-        if ($permitTypeCode === 'ZONING') {
-            // VII. Nature of Application — New Business or Renewal.
-            $derived['application_type'] = $existingBusiness
-                ? 'Renewal of Locational Clearance'
-                : 'New Locational Clearance';
-
-            /*
-             * VIII.A. Floor Area to be/being Utilized. The zoning processing
-             * fee is charged per square metre of total floor area, so CPDD
-             * cannot assess the clearance without this number — and the
-             * applicant already gave it on the Business & Tax Profile, where it
-             * is required of every filing carrying the business permit itself.
-             * Asking again on this sheet would be asking the same question
-             * twice and inviting two answers.
-             *
-             * Left absent rather than zeroed when it is genuinely missing: a
-             * blank box the applicant can be sent back to fill is honest, and
-             * "0 sq. m." on a locational clearance is not.
-             */
-            $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
-            if (is_numeric($floorArea)) {
-                $derived['total_floor_area_sqm'] = (string) (0 + $floorArea);
-            }
-
-            // VIII.B. No. of Storey of Building — the same answer from the same
-            // profile, cast to an int because a building has whole storeys and
-            // "2.0" on a planning form invites a question nobody meant to ask.
-            $storeys = $application->fee_profile['storeys'] ?? null;
-            if (is_numeric($storeys)) {
-                $derived['building_storeys'] = (string) (int) $storeys;
-            }
-
-            /*
-             * VIII.C and VIII.D. Name and address of the lessor, which the form
-             * asks only of a lessee. Location & Zoning has already answered
-             * whether the premises are rented and from whom, and the clearance
-             * already requires the matching Lease Contract or Land Title, so
-             * one line stands in for both boxes and makes the sheet match the
-             * document attached to it.
-             *
-             * `business` is nullable (soft-deleted), so the tenure question
-             * genuinely has no answer on such a filing and the field stays
-             * blank rather than claiming the site is owned.
-             */
-            $business = $application->business;
-            if ($business !== null) {
-                $lessor = trim((string) $business->lessor_name);
-                $derived['site_tenure'] = match (true) {
-                    ! $business->is_rented => 'Owned or occupied by the applicant',
-                    $lessor !== '' => 'Leased from '.$lessor,
-                    default => 'Leased',
-                };
-            }
-
-            /*
-             * IX. Authorized Representative. One answer about the applicant,
-             * not about an office, and the BFP sheet has always asked it — so
-             * when that sheet is part of the filing it keeps the question and
-             * this one carries the answer read-only. When it is not, nobody has
-             * asked, and the zoning sheet takes the input itself.
-             *
-             * The marker is what tells the sheet which of those it is; the
-             * value is derived even when blank, so clearing the name on the BFP
-             * sheet clears it here too. That does mean applying for FSIC after
-             * typing a name here replaces it with the (empty) BFP answer. Two
-             * visible fields that disagree would be worse than losing an
-             * optional name at the moment a second sheet takes the question
-             * over.
-             */
-            if ($application->permitTypes()->where('code', 'FSIC')->exists()) {
-                $derived['authorized_representative_source'] = 'FSIC';
-                $derived['authorized_representative'] = $this->fsicRepresentative($application);
-            }
-        }
-        if ($permitTypeCode === 'SANITARY') {
-            $derived['application_type'] = $existingBusiness ? 'Renewal' : 'New';
-
-            /*
-             * "No. of Workers Requiring Health Certificates" — the same
-             * question the Business & Tax Profile already asks, and the same
-             * one the applicant is BILLED on.
-             *
-             * `sanitary.health_certificate` (Sec. 4D.02) charges ₱50 per
-             * employee per year, `basis: employees`, gated on the
-             * `employees_need_health_certificates` flag — so the number the
-             * City Health Office actually assesses is `fee_profile.employees`,
-             * declared on the profile. This sheet then asked for it a second
-             * time, in a free-text box nothing reads.
-             *
-             * That is the capitalization case again, and it is worse here:
-             * capitalization's two answers merely drifted, whereas these two
-             * appear on the same filing as a number on the CHO's own sheet and
-             * a different number on the Tax Order of Payment for the same fee.
-             * An officer reading "4 workers" beside a bill for five is looking
-             * at a discrepancy the applicant never made.
-             *
-             * So it is derived, exactly as the zoning sheet's floor area is.
-             * Where the flag is not set, no employee needs a certificate and
-             * the fee is not charged — "None" is the honest answer, not blank.
-             *
-             * ASSUMPTION (docs/questions-for-malabon.md §E — the CHO paper form
-             * has been requested and not received): the paper's box means every
-             * employee who must hold a certificate, which is what the ordinance
-             * bills. If CHO confirms it means some narrower subset — office
-             * staff excluded from a food establishment's count, say — then it
-             * is a genuinely separate question and should be asked again here,
-             * AND the fee basis is wrong, because the fee would be billing the
-             * wrong headcount today.
-             */
-            $flags = $application->fee_profile['flags'] ?? [];
-            $needsCertificates = is_array($flags)
-                && in_array('employees_need_health_certificates', $flags, true);
-            $employees = $application->fee_profile['employees'] ?? null;
-
-            $derived['workers_requiring_health_certs'] = match (true) {
-                ! $needsCertificates => 'None',
-                is_numeric($employees) => (string) (int) $employees,
-                // Flagged but no headcount: the profile is half-filled, so say
-                // nothing rather than print a zero the office would act on.
-                default => '',
-            };
-        }
-        if ($permitTypeCode === 'CEC') {
-            $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';
-        }
-        if ($permitTypeCode === 'FSIC') {
-            $forOccupancy = $application->permitTypes()->where('code', 'OCCUPANCY')->exists();
-            $derived['certificate_applied_for'] = match (true) {
-                $forOccupancy => 'FSIC for Certificate of Occupancy',
-                $existingBusiness => 'FSIC for Business Permit (Renewal of Business)',
-                default => 'FSIC for Business Permit (New Business)',
-            };
-        }
-        if ($permitTypeCode === 'MARKET') {
-            /*
-             * The one derived answer on a sheet that is otherwise invented
-             * (checklist item 109 — the office has no paper form). Worth
-             * deriving precisely because it is invented: whether the stall
-             * holder is new to the market or renewing is the single question
-             * the office would certainly ask, and it is the single question the
-             * filing can already answer for itself.
-             */
-            $derived['application_type'] = $existingBusiness
-                ? 'Renewal of Market Clearance'
-                : 'New Market Clearance';
-        }
-        // OCCUPANCY's own "application_type" is Full vs Partial occupancy — a
-        // real applicant decision, not the new/renewal the system already knows.
-
-        return $derived + $formData;
-    }
-
-    /**
-     * The authorised representative as answered on the BFP sheet, or ''.
-     *
-     * Its own query rather than a preloaded relation because withDerived() runs
-     * for one sheet at a time and is reached from both index() and upsert(); a
-     * sheet asking for another sheet's answer is the exception, not the rule,
-     * and it only happens for ZONING.
-     */
-    private function fsicRepresentative(Application $application): string
-    {
-        $form = ApplicationOfficeForm::where('application_id', $application->id)
-            ->whereHas('permitType', fn ($query) => $query->where('code', 'FSIC'))
-            ->first();
-
-        return trim((string) ($form?->form_data['authorized_representative'] ?? ''));
+        /*
+         * ── ForApproval came OFF this list on 9 September 2026 ───────────────
+         *
+         * It was here on the reasoning that the office had not opened the sheet
+         * yet, so correcting a typo before anybody read it cost nothing. The
+         * client overruled it, and their rule is the simpler one: "We do not
+         * promote any editing of forms once submitted."
+         *
+         * That is a defensible line and arguably the safer one. An office that
+         * has the sheet may read it at any moment, and a form that changes
+         * under a reviewer mid-read is worse than an applicant having to ask
+         * for it back — which they can, through Messages, and the office
+         * returning it puts the permit at `Returned` and the sheet back in
+         * their hands.
+         *
+         * So two states are the applicant's: NotStarted, where they are still
+         * filling it in, and Returned, where an office has handed it back for
+         * exactly that purpose.
+         */
+        return $row !== null && in_array($row->status, [
+            ClearanceStatus::NotStarted,
+            ClearanceStatus::Returned,
+        ], true);
     }
 
     /**

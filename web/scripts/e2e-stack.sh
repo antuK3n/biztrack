@@ -56,7 +56,18 @@ trap cleanup EXIT INT TERM
 ( cd "$API" && DB_DATABASE="$E2E_DB" APP_DEBUG=false php artisan serve --port="$API_PORT" ) &
 API_PID=$!
 
-( cd "$ROOT/web" && VITE_API_TARGET="http://localhost:$API_PORT" npx vite --port "$WEB_PORT" --strictPort ) &
+# --host 127.0.0.1 is load-bearing, and demo-up.sh carries the same note for
+# the same reason. Left to itself Vite binds [::1] ONLY, so the dev server is
+# reachable as localhost and invisible as 127.0.0.1.
+#
+# That cost a session. A stale Vite sat on [::1]:5199 while `lsof -iTCP:5199`
+# in its IPv4 form and every `curl 127.0.0.1:5199` said the port was free — so
+# restarting the stack failed with "port already in use" against a port that
+# looked empty, and Playwright talked to a server that accepted nothing. The
+# same suite ran 23/23 in 58s once it was cleared, having taken 1.8 hours and
+# failed ten tests before. Binding both families makes the port answer to the
+# name you check it with.
+( cd "$ROOT/web" && VITE_API_TARGET="http://localhost:$API_PORT" npx vite --port "$WEB_PORT" --strictPort --host 127.0.0.1 ) &
 WEB_PID=$!
 
 echo

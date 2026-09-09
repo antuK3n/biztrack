@@ -1,6 +1,7 @@
 <?php
 
 use App\Support\Spc;
+use Carbon\CarbonImmutable;
 
 /*
  * The PHP port of r/R/spc.R has to agree with the R it replaces, so every
@@ -183,7 +184,7 @@ it('catches an injected slowdown, and the EWMA catches it before the control lim
     );
     foreach ($values as $i => $mean) {
         $weeks[] = [
-            'week_start' => \Carbon\CarbonImmutable::parse('2026-01-05')->addWeeks($i)->toDateString(),
+            'week_start' => CarbonImmutable::parse('2026-01-05')->addWeeks($i)->toDateString(),
             'n' => 5,
             'mean_days' => $mean,
         ];
@@ -217,7 +218,7 @@ it('leaves a stable department in control and reads its trend as steady', functi
     $weeks = [];
     foreach (array_merge(...array_fill(0, 15, [2.0, 3.0])) as $i => $mean) {
         $weeks[] = [
-            'week_start' => \Carbon\CarbonImmutable::parse('2026-01-05')->addWeeks($i)->toDateString(),
+            'week_start' => CarbonImmutable::parse('2026-01-05')->addWeeks($i)->toDateString(),
             'n' => 4,
             'mean_days' => $mean,
         ];

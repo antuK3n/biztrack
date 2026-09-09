@@ -59,6 +59,7 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
 
     $appId = test()->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
         'fee_profile' => [
@@ -74,6 +75,8 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
     ])->assertCreated()->json('data.id');
 
     test()->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
     test()->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
     return Application::findOrFail($appId);
@@ -186,8 +189,16 @@ it('survives the copy outliving the clearance stage', function () {
 it('shows an applicant nothing but their own copies', function () {
     $app = heldCopyFiling();
 
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/MARKET/held", [
-        'file' => UploadedFile::fake()->create('market.pdf', 6, 'application/pdf'),
+    /*
+     * SANITARY, because MARKET no longer exists. Market Clearance and the City
+     * Market Office were removed — the clearance is for stall owners in the
+     * public market, which most businesses are not — so the upload 404'd on a
+     * permit code the register cannot resolve. The clearance chosen was never
+     * the subject here: what is under test is that this list is scoped on
+     * `applicant_user_id` and an officer reads none of it.
+     */
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 6, 'application/pdf'),
     ])->assertSuccessful();
 
     /*

@@ -4,15 +4,18 @@ namespace App\Services;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\AssignmentStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
+use App\Models\ApplicationPermitType;
 use App\Models\PermitType;
 use App\Support\Audit;
 use App\Support\HeldPermits;
 use App\Support\PermitFees;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 /**
  * The LGU clearance stage (docs/clearances-after-payment.md).
@@ -102,7 +105,33 @@ class ClearanceService
          */
         $baseline = $this->assessableTotal($application, $application->permitTypes);
 
-        $rows = $types->map(fn (PermitType $type) => $this->row($application, $type, $baseline))->all();
+        /*
+         * ── A renewal shows the permits it is FOR, not all of them ───────────
+         *
+         * This mapped every clearance the register knows about, which was right
+         * while every filing carried every clearance: rule 1 of
+         * docs/application-flow-2026-09.md makes all five mandatory on a NEW
+         * application, so "all of them" and "this filing's" named the same set.
+         *
+         * A renewal broke that on 9 September 2026. The applicant ticks which
+         * permits they are renewing and may tick any subset — the six expire on
+         * six different dates — so a renewal of the Sanitary Permit alone would
+         * otherwise open this stage showing five cards, four of them for
+         * clearances the filing does not carry, is not billed for and cannot
+         * grant. Pressing Apply on one of those is an applicant adding a permit
+         * to a filing that was already priced and paid.
+         *
+         * So the stage renders the filing's own set. On a new application that
+         * is still all five and nothing changes; `attachRequiredPermitTypes`
+         * has already attached them by the time this stage is reachable, since
+         * it is gated on payment.
+         */
+        $carried = $application->permitTypes->pluck('id')->flip();
+        $rows = $types
+            ->filter(fn (PermitType $type) => $carried->has($type->id))
+            ->map(fn (PermitType $type) => $this->row($application, $type, $baseline))
+            ->values()
+            ->all();
 
         return ['rows' => $rows, 'meta' => $this->meta($application)];
     }
@@ -163,6 +192,21 @@ class ClearanceService
                 ] : null,
             ],
             'state' => $this->state($application, $type, $held !== null),
+            /*
+             * Which route the applicant took: `apply` (fill in the office's
+             * form) or `upload` (hand in a copy they already hold). Null until
+             * they choose.
+             *
+             * On the payload since 9 September 2026, because the STATE stopped
+             * being able to answer it. Apply used to move the permit to
+             * ForApproval immediately, so `state` doubled as "has this been
+             * started"; now that submitting is a separate act, a permit the
+             * applicant has applied for but not yet filled in sits at
+             * `not_started` — indistinguishable, without this, from one they
+             * have never touched. The card has to tell those apart to say
+             * "Finish form".
+             */
+            'mode' => $this->pivotRow($application, $type)?->mode,
             'has_office_form' => $type->hasOfficeForm(),
             /*
              * "Saved at all", not "every field answered". The FSIC sheet's every
@@ -202,20 +246,96 @@ class ClearanceService
      */
     private function state(Application $application, PermitType $type, bool $hasHeld): string
     {
-        $issued = $application->permits->contains(fn ($p) => $p->permit_type_id === $type->id);
-        if ($issued) {
-            return 'issued';
-        }
-        if ($this->isAppliedFor($application, $type)) {
-            return 'applied';
+        /*
+         * The permit's own status, straight through, because it now HAS one.
+         *
+         * This used to infer a state: a permit row exists → issued, the pivot
+         * is attached → applied, a held copy is on file → submitted, otherwise
+         * available. Every one of those was a proxy for a fact the schema did
+         * not record, and the proxies disagreed with each other — a clearance
+         * whose office had returned it read as `applied`, identical to one
+         * nobody had opened.
+         *
+         * `application_permit_types.status` is that fact. The inference is gone
+         * rather than kept as a fallback, because a fallback here is how a
+         * genuine null quietly renders as a plausible wrong badge.
+         */
+        $row = $application->permitTypes->firstWhere('id', $type->id);
+        $status = $row?->pivot?->status;
+
+        if ($status !== null) {
+            return $status->value;
         }
 
-        return $hasHeld ? 'submitted' : 'available';
+        /*
+         * Not attached at all. For an optional permit that is the truth — it
+         * has not been asked for. `hasHeld` still matters: a copy uploaded
+         * before the permit was started is a half-finished action the applicant
+         * should see reflected rather than lose.
+         */
+        return $hasHeld ? ClearanceStatus::NotStarted->value : 'available';
     }
 
     public function isAppliedFor(Application $application, PermitType $type): bool
     {
-        return $application->permitTypes->contains(fn ($pt) => $pt->id === $type->id);
+        /*
+         * Has the applicant STARTED this permit — not "is it attached".
+         *
+         * ── This was a live blocker, not a nicety ─────────────────────────
+         *
+         * It read `permitTypes->contains(...)`, and attachment used to be the
+         * whole of the question: a clearance was on the filing because the
+         * applicant had opted into it, so present meant applied-for.
+         *
+         * `attachRequiredPermitTypes()` broke that on 6 September 2026. All five
+         * required permits are attached at SUBMISSION now — they have to be, or
+         * the one Tax Order of Payment could not price them — so this returned
+         * true for every one of them from the moment the form was filed.
+         * `ClearanceController::apply` aborts when it is true, which meant every
+         * clearance answered "You have already applied for the ..." and NO
+         * APPLICANT COULD APPLY FOR ANYTHING. The stage rendered, the buttons
+         * were there, and all five 422'd.
+         *
+         * The pivot's status is the honest test. `not_started` is precisely "on
+         * the filing so it can be billed, and not yet begun", which is the state
+         * this predicate has to be able to see.
+         *
+         * A REJECTED or RETURNED permit stays "applied for", deliberately. The
+         * applicant's way back in is `refileClearance()`, which resets the row to
+         * `not_started` first; letting them post to `apply` instead would create
+         * a second start on a permit an office has already ruled on and lose the
+         * remarks explaining why.
+         *
+         * ── And `not_started` stopped being the whole answer again ────────────
+         *
+         * Splitting apply into two acts put a permit in a state this predicate
+         * could not see: the applicant has pressed Apply, `mode` is recorded,
+         * and the status is STILL `not_started` because nothing is routed until
+         * the sheet is handed in. Status alone therefore reported "not applied
+         * for" about a permit the applicant had demonstrably applied for, and
+         * three things broke behind it — `apply` stopped refusing a second
+         * press, `fee_preview` stayed at zero after Apply, and `unapply` refused
+         * with "You have not applied for the ...", which is the only way back
+         * out of Apply and the first half of the Apply-to-Upload switch.
+         *
+         * `mode` is the right second half rather than a patch, because the act
+         * that undoes an application is the act that clears it:
+         * `WorkflowService::unapply` nulls `mode` on the same row (:802). So the
+         * predicate and its inverse now read the same field, and a withdrawn
+         * permit goes back to answering false without a second rule saying so.
+         */
+        $row = $this->pivotRow($application, $type);
+
+        return $row !== null
+            && ($row->status !== ClearanceStatus::NotStarted || $row->mode !== null);
+    }
+
+    /** This permit's pivot row on this filing — the row that carries its status. */
+    public function pivotRow(Application $application, PermitType $type): ?ApplicationPermitType
+    {
+        return ApplicationPermitType::where('application_id', $application->id)
+            ->where('permit_type_id', $type->id)
+            ->first();
     }
 
     /**
@@ -243,29 +363,38 @@ class ClearanceService
     // --- unlocking -----------------------------------------------------------
 
     /**
-     * The stage opens when the FIRST payment clears, and not before.
+     * The stage opens when the application is SUBMITTED.
      *
-     * ── Why the first payment and not submission ──────────────────────────────
+     * ── It used to be the first cleared payment, and that was wrong here ──────
      *
-     * ASSUMPTION, taken deliberately and recorded here so it can be argued
-     * with: the client said "payment first, then the others", and the honest
-     * reading of "first" is the money, not the paperwork. Unlocking at
-     * submission would open a chargeable stage on a filing the LGU has not been
-     * paid a peso for, so an applicant could apply for six clearances, route
-     * six offices, and abandon the filing before settling anything. The first
-     * payment is the point at which the applicant has committed and the offices
-     * can safely be given work.
+     * The reasoning for the money gate is kept because it is still the right
+     * reasoning for a system that takes money: unlocking at submission opens a
+     * chargeable stage on a filing the LGU has not been paid a peso for, so an
+     * applicant could apply for six clearances, route six offices, and abandon
+     * the filing before settling anything.
      *
-     * ── Why the ledger and not the status ─────────────────────────────────────
+     * It was wrong because payment in this build is a DUMMY. Nothing clears it,
+     * so `hasClearedPayment` was false forever, every filing stayed locked, and
+     * the six clearances were not "behind a gate" — they were unreachable. Two
+     * separate testers reported them as missing and asked for them back. A gate
+     * nobody can pass is indistinguishable from a deleted feature, and the
+     * argument above is worth nothing if it protects a balance that no real
+     * money ever reaches.
      *
-     * `PermitFees::hasClearedPayment` rather than a `status !== PendingPayment`
-     * test or a new `clearances_unlocked` column. The stage is about money, so
-     * it asks the money. A column would be a second copy of a fact the payments
-     * table already states, and the first time the two disagreed the applicant
-     * would be looking at a stage that says one thing and a bill that says
-     * another.
+     * The client's ordering is intact: the business permit is applied for
+     * first, the Tax Order of Payment is still raised and still assessed, and
+     * the clearances still come after. Only the blocking is gone — "just make
+     * the payment kinda a nonsense step" (2026-09-02).
      *
-     * ── The two statuses that stay shut even after paying ─────────────────────
+     * WHEN PAYMENT BECOMES REAL, revisit this line, and put the question to
+     * BPLO rather than answering it here: may an unpaid filing hold clearances?
+     * If the answer is no, the restoration is `PermitFees::hasClearedPayment`
+     * and the paragraph above is the argument for it.
+     *
+     * ── The statuses that stay shut ───────────────────────────────────────────
+     *
+     * Draft, because a draft is not yet an application; a clearance applied for
+     * against one would raise a balance on a filing that may never be sent.
      *
      * Rejected and Cancelled. There is nothing to apply for under a filing the
      * LGU has closed, and a clearance applied for on one would raise a balance
@@ -280,18 +409,55 @@ class ClearanceService
      * It is allowed here and not surfaced on the screen; if BPLO says a closed
      * filing is closed, this is the one line that changes.
      *
-     * Returned is open, and that is the deliberate reversal of the old rule. A
-     * returned filing has already paid, so it is past the gate; it is also the
-     * one moment an office has told the applicant something is missing, and
-     * "you also need a locational clearance" is a thing offices say.
+     * Returned is open. It is the one moment an office has told the applicant
+     * something is missing, and "you also need a locational clearance" is a
+     * thing offices say.
+     */
+    /*
+     * ── The gate is submission, not payment [client instruction, 2026-09-02] ──
+     *
+     * This asked `PermitFees::hasClearedPayment()` and that made the six
+     * clearances unreachable in practice. Payment in this build is a dummy: no
+     * money moves and nothing clears it, so the gate never opened, every filing
+     * sat locked, and testers reported the other permits as simply GONE. A gate
+     * that no one can pass is indistinguishable from a deleted feature.
+     *
+     * The ORDER the client asked for on 28 August is unchanged — the business
+     * permit is applied for first, the Tax Order of Payment is still raised and
+     * still assessed, and the clearances still come after it. What changed is
+     * that the payment no longer BLOCKS: "just make the payment kinda a
+     * nonsense step" (2026-09-02). Submitting is what opens the stage.
+     *
+     * Draft stays closed, and that is the order surviving rather than an
+     * oversight: a draft is not yet an application, and a clearance applied for
+     * against one would raise a balance on a filing that may never be sent.
+     *
+     * When payment becomes real, this is the one line to reconsider — and the
+     * question to put to BPLO then is whether an unpaid filing may hold
+     * clearances at all, not whether this line should quietly go back.
+     */
+    /*
+     * ── The gate is PAYMENT again [client, verified procedure, 2026-09-06] ────
+     *
+     * This has now been all three things, so the history matters. It began as
+     * payment, moved to submission on 2 September because payment was a dummy
+     * that never cleared — "a gate that no one can pass is indistinguishable
+     * from a deleted feature" — and comes back to payment now that the counter
+     * procedure has been checked against the real office.
+     *
+     * What makes it safe this time is that the thing it waits for actually
+     * happens. Payment is the applicant's own action and completes
+     * synchronously in the same press; nothing external has to clear. The 2
+     * September failure was not that payment was the wrong gate, it was that
+     * the gate was wired to an event the system never emitted.
+     *
+     * `isPaid()` is deliberately a list of paid statuses rather than "not one
+     * of the unpaid ones", so a status added later is unpaid until somebody
+     * says otherwise. Safe default for a gate that guards money.
      */
     public function isUnlocked(Application $application): bool
     {
-        if (in_array($application->status, [ApplicationStatus::Rejected, ApplicationStatus::Cancelled], true)) {
-            return false;
-        }
-
-        return PermitFees::hasClearedPayment($application);
+        return $application->status?->isPaid() ?? false;
     }
 
     /**
@@ -310,20 +476,40 @@ class ClearanceService
             return null;
         }
 
+        /*
+         * Every arm names the step that opens the stage, because that is what
+         * this method is FOR — see the docblock above.
+         *
+         * These sentences were inherited from the submission-gated flow and had
+         * gone comprehensively stale: they promised SIX clearances (five now,
+         * Market having been removed), said they open "as soon as it is
+         * submitted" (they open on payment, and only after BPLO has approved the
+         * form), and described each fee being "added to your balance" (there is
+         * no accrual any more — one bill is assessed at submission).
+         *
+         * Worse, the two statuses an applicant actually waits in — For Approval
+         * and Pending Payment — matched no arm at all and fell through to a
+         * default commented "Unreachable". They are the common case under this
+         * flow, so most waiting applicants were told only that the clearances
+         * were "not open on this application yet", with no way to learn what
+         * would open them. A locked stage that cannot say what unlocks it is the
+         * exact failure this docblock exists to forbid.
+         */
         return match ($application->status) {
-            ApplicationStatus::Draft => 'Finish and submit this application first, then settle the Tax Order of Payment for your business permit. The six LGU clearances open here the moment that payment clears.',
-            ApplicationStatus::Submitted => 'Your Tax Order of Payment is being prepared. Settle it and the six LGU clearances open here — you can apply for them one at a time, and each one’s fee is added to your balance.',
-            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment for your business permit. The six LGU clearances open here the moment that payment clears.',
+            ApplicationStatus::Draft => 'Finish and submit this application first. BPLO reviews your Business Permit form, then you settle the Tax Order of Payment — the five LGU clearances open here once that payment clears.',
+            ApplicationStatus::ForApproval => 'BPLO is reviewing your Business Permit form. Once it is approved you will be given a Tax Order of Payment, and the five LGU clearances open here as soon as you have settled it.',
+            ApplicationStatus::PendingPayment => 'Settle the Tax Order of Payment for your Business Permit. The five LGU clearances open here the moment that payment clears.',
+            ApplicationStatus::Returned => 'BPLO sent this application back for changes. Make them and submit it again — the five LGU clearances open here once it has been approved and paid for.',
             ApplicationStatus::Rejected => 'This application was not approved, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             ApplicationStatus::Cancelled => 'This application was cancelled, so no further clearances can be applied for under it. File a new application if you still need these clearances.',
             /*
-             * Under review, for inspection, returned, approved with no cleared
-             * payment behind them. Not reachable through the product — a filing
-             * only leaves `pending_payment` by paying — but reachable in the
-             * register, where officers have moved filings by hand. Say the true
-             * thing rather than assume it away.
+             * Genuinely unreachable now, and kept only so the match is total:
+             * every status `isPaid()` accepts returned null at the top of this
+             * method, and every status it rejects has an arm above. Anyone who
+             * sees this string in the wild has found a status added since, which
+             * needs its own sentence here rather than this one.
              */
-            default => 'The LGU clearances open once the first payment on this application has cleared. Ours shows nothing settled yet — contact the BPLO if you have already paid.',
+            default => 'These clearances are not open on this application yet.',
         };
     }
 
@@ -365,24 +551,61 @@ class ClearanceService
      * stage opens, so a clearance applied for afterwards would otherwise sit on
      * the filing with no office ever seeing it.
      *
-     * The objection to apply-time routing under the old ordering was real and
-     * no longer applies: `assigned_at` starts the service-time clock that
-     * ProcessingTimeAnalytics, StaffingSimulation and DashboardAnalytics
-     * measure an office by, and stamping it inside somebody's unfinished draft
-     * charged the office for the days the applicant spent typing. There is no
-     * draft here. The stage opens on a paid filing, so `assigned_at` is stamped
-     * the moment the office genuinely has work.
+     * The objection to apply-time routing under the old ordering was real:
+     * `assigned_at` starts the service-time clock that ProcessingTimeAnalytics,
+     * StaffingSimulation and DashboardAnalytics measure an office by, and
+     * stamping it inside somebody's unfinished draft charged the office for the
+     * days the applicant spent typing.
+     *
+     * What answers it is NOT that this stage only opens on a paid filing — it
+     * no longer does, since the gate moved to submission (see `isUnlocked`).
+     * It is that `WorkflowService::routeClearance` refuses to route at all
+     * until `PermitFees::hasClearedPayment`, so applying while unpaid attaches
+     * the permit type and its fee and creates no assignment. The office is
+     * given the work by `routeToDepartments` when the payment clears, and
+     * `assigned_at` is stamped then.
+     *
+     * That guard is therefore load-bearing, and it is the thing to check before
+     * anyone concludes an unpaid filing can be pushed into an office queue.
      */
     public function apply(Application $application, PermitType $type): void
     {
         DB::transaction(function () use ($application, $type) {
-            $application->permitTypes()->syncWithoutDetaching([$type->id]);
-            $application->load('permitTypes');
-
-            app(WorkflowService::class)->routeClearance($application, $type);
-            $this->reassess($application);
+            app(WorkflowService::class)->startClearance(
+                $application,
+                $type,
+                ApplicationPermitType::MODE_APPLY,
+            );
 
             Audit::log('clearance.applied', $application, ['permit_type' => $type->code]);
+        });
+    }
+
+    /**
+     * The applicant hands in a permit they already hold.
+     *
+     * The other half of `apply`, and it goes through the same door on purpose.
+     * Both put the permit into `for_approval` and both route it to its office;
+     * the only difference is `mode`, which tells the office whether there is a
+     * form to read or only an image.
+     *
+     * It does NOT skip the inspection, and that is the client's decision rather
+     * than an oversight (6 September 2026): the LGU inspects the premises, not
+     * the paperwork, so a business handing in last year's Fire Safety
+     * certificate is still visited. Nor does it reduce the fee — the bill was
+     * settled at submission and charges for a permit either way, because the
+     * fee covers that inspection.
+     */
+    public function submitHeld(Application $application, PermitType $type): void
+    {
+        DB::transaction(function () use ($application, $type) {
+            app(WorkflowService::class)->startClearance(
+                $application,
+                $type,
+                ApplicationPermitType::MODE_UPLOAD,
+            );
+
+            Audit::log('clearance.held_submitted', $application, ['permit_type' => $type->code]);
         });
     }
 
@@ -416,12 +639,41 @@ class ClearanceService
      */
     public function unapply(Application $application, PermitType $type): void
     {
+        /*
+         * A REQUIRED permit cannot be withdrawn, and this is the rule that
+         * changed. Five of the six are mandatory now
+         * (PermitType::REQUIRED_CLEARANCE_CODES), so "changing your mind" is not
+         * a move that exists for them — the application cannot be approved
+         * without them, and detaching one would leave a filing that has been
+         * paid for and can never complete.
+         *
+         * Market Clearance is the one that can still come off, because it is
+         * the one that was optional to begin with.
+         */
+        if ($type->isRequiredClearance()) {
+            throw ValidationException::withMessages([
+                'permit_type' => [$type->name.' is required on every application and cannot be withdrawn.'],
+            ]);
+        }
+
         DB::transaction(function () use ($application, $type) {
             $application->permitTypes()->detach($type->id);
             $application->load('permitTypes');
 
-            app(WorkflowService::class)->withdrawClearanceRouting($application, $type);
-            $this->reassess($application);
+            /*
+             * The fee is NOT re-assessed. One bill, raised at submission,
+             * covering everything (docs/application-flow-2026-09.md rule 4) —
+             * and by the time this stage is open the applicant has already paid
+             * it. Re-pricing here would lower `total_assessed` below
+             * `total_paid` on a filing whose money is already in, which is a
+             * refund and not an assessment. Refundability is an open question
+             * with BPLO; until it is answered, withdrawing an optional permit
+             * costs what it cost.
+             */
+            ApplicationAssignment::where('application_id', $application->id)
+                ->where('department_id', $type->issuing_department_id)
+                ->where('status', AssignmentStatus::Pending->value)
+                ->delete();
 
             Audit::log('clearance.unapplied', $application, ['permit_type' => $type->code]);
         });
@@ -441,15 +693,22 @@ class ClearanceService
      * is for a direct caller, so that reaching this on an unsubmitted filing
      * cannot invent a Tax Order of Payment for it.
      */
-    private function reassess(Application $application): void
-    {
-        if ($application->feeAssessment()->doesntExist()) {
-            return;
-        }
-
-        app(WorkflowService::class)->assessFees($application);
-        $application->load('feeAssessment');
-    }
+    /*
+     * `reassess()` is gone.
+     *
+     * It re-priced the filing every time a clearance was applied for or
+     * withdrawn, which was the whole point while clearances were chosen after
+     * payment and accrued a running balance. There is no balance now: the bill
+     * is raised once at submission over every permit the filing will need, and
+     * the applicant pays it before the other permits even open
+     * (docs/application-flow-2026-09.md rule 4).
+     *
+     * Nothing replaces it. If a second payment ever comes back — a clearance
+     * choosable after the bill, an LGU adding a requirement mid-flight — this
+     * method and the `PermitFees::hasOutstandingBalance` release gate come back
+     * together, and the argument for both is in the superseded
+     * `clearances-after-payment.md`.
+     */
 
     /**
      * Has this clearance's office already acted? Then it cannot be withdrawn.

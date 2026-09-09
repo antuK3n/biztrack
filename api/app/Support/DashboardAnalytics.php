@@ -139,7 +139,6 @@ final class DashboardAnalytics
         'OBO' => 'Occupancy',
         'CENRO' => 'Environmental',
         'CPDO' => 'Zoning',
-        'CMO-MARKET' => 'Market',
     ];
 
     /**
