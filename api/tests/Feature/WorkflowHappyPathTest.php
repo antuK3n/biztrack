@@ -98,16 +98,40 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     expect(Application::find($appId)->status->value)->toBe('awaiting_other_permits');
 
     /*
-     * 6. The other permits are open now, and the applicant starts each one.
+     * 6. The other permits are open now, and the applicant applies for each one
+     * and then HANDS IT IN. Two acts, not one, since 9 September 2026.
      *
-     * THIS is what routes its office — one at a time, when the permit is
-     * actually filed. So the assignment count climbs with the loop rather than
-     * arriving in a fan-out at payment.
+     * Apply records that the applicant chose to fill in the office's sheet and
+     * opens it; it routes nobody and leaves the permit `not_started`. Saving the
+     * sheet with `submit` is what gives the office something to read, and THAT
+     * is what routes it — one at a time, as each permit is genuinely filed, so
+     * the assignment count climbs with the loop rather than arriving in a
+     * fan-out at payment.
+     *
+     * The walk goes through `PUT /office-forms/{code}` rather than the service
+     * because this file is the lifecycle as the applicant actually travels it,
+     * and that endpoint is the door they press. An empty `form_data` is
+     * legitimate — `upsert` validates it `present`, not `required`, because the
+     * FSIC sheet's every answer is derived — and the answers themselves are
+     * OfficeFormTest's subject, not this one's.
      */
+    $routed = 1; // BPLO alone, from the payment.
     foreach (array_keys(HAPPY_PATH_OFFICE) as $code) {
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+
+        // Nobody new: applying opened a form, it did not file a permit.
+        expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe($routed);
+
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+                'form_data' => [],
+                'submit' => true,
+            ])->assertOk();
+
+        $routed++;
+        expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe($routed);
     }
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(6);
 
@@ -232,10 +256,25 @@ it('routes one queue item per office, and only as that office’s permit is file
      */
     expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1);
 
+    /*
+     * And applying is still not filing. Every one of the five is applied for
+     * first — which opens five office sheets and routes nobody — and the queues
+     * stay at one until each sheet is handed in. "Filed" in this test's name
+     * means submitted, which is the distinction the 9 September split drew.
+     */
     foreach (array_keys(HAPPY_PATH_OFFICE) as $code) {
         $this->withHeaders(authAs('owner@biztrack.local'))
             ->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")
             ->assertOk();
+    }
+    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(1);
+
+    foreach (array_keys(HAPPY_PATH_OFFICE) as $code) {
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->putJson("/api/v1/applications/{$appId}/office-forms/{$code}", [
+                'form_data' => [],
+                'submit' => true,
+            ])->assertOk();
     }
 
     // One assignment per issuing department => all six queues hit, once each.

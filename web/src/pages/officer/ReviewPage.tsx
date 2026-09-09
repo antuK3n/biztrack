@@ -20,7 +20,13 @@ import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/
 import { admin, applications, assignments, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
+import type {
+  AdminUser,
+  AppDocument,
+  Application,
+  FeeProfile,
+  OfficeFormRequirement,
+} from '../../lib/types'
 
 /*
  * Admin Review sheet (PDF p56, p67–p76): the officer reads the application as
@@ -205,6 +211,73 @@ function Field({ label, value, className = '' }: { label: string; value: string;
       <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
       <dd className={recordValue}>{value || '—'}</dd>
     </dl>
+  )
+}
+
+/**
+ * The zoning sheet's CHECKLIST OF REQUIREMENTS, as the deciding office reads it.
+ *
+ * The applicant sees this list on their own sheet and CPDD is the office that
+ * acts on it — a locational clearance is decided against a title deed, a tax
+ * declaration and a sketch of the site, none of which the form answers carry. A
+ * checklist visible to only one of the two seats would be half a feature, and
+ * the same "two doors, two answers" shape this file has been repaired for
+ * repeatedly, so `ApplicationResource` builds it from the same
+ * `App\Support\ZoningRequirements` the applicant's screen reads.
+ *
+ * It names the files rather than offering them: every one of them is an
+ * ordinary `ApplicationDocument` and is already listed, with its own view and
+ * download controls, under Uploaded Requirements below. A second download path
+ * to the same file is a second thing to keep working.
+ *
+ * Read-only, and not because of a permission — which rows apply is derived from
+ * the filing, and what satisfies each is a file the applicant attached. The
+ * office acts on this by approving or returning the clearance.
+ */
+function RequirementsRead({ code, rows }: { code?: string; rows: OfficeFormRequirement[] }) {
+  const outstanding = rows.filter((r) => !r.satisfied).length
+
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-white px-4 py-3">
+      {/*
+        The two papers that ask for documents call the box different things —
+        CPDD's "CHECKLIST OF REQUIREMENTS" and CENRO's "REQUIREMENTS FOR
+        APPLICATION" — and an officer reading their own form against the screen
+        should see their own heading.
+      */}
+      <p className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+        {code === 'CEC' ? 'Requirements for Application' : 'Checklist of Requirements'}
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">
+        {outstanding === 0
+          ? 'Everything on this list is on the filing.'
+          : `${outstanding} of ${rows.length} not on the filing. The files are under Uploaded Requirements below.`}
+      </p>
+      <ul className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+            <span
+              aria-hidden
+              className={`shrink-0 font-bold ${row.satisfied ? 'text-s-green' : 'text-ink-muted'}`}
+            >
+              {row.satisfied ? '✓' : '—'}
+            </span>
+            <span className="font-medium text-ink">{row.label}</span>
+            {row.document !== null ? (
+              <span className="break-all text-xs text-ink-secondary">
+                {row.document.filename}
+              </span>
+            ) : row.reference ? (
+              <span className="tnum text-xs text-ink-secondary">{row.reference}</span>
+            ) : (
+              <span className="text-xs text-ink-muted">
+                {row.source === 'sheet' ? 'not submitted yet' : 'not on file'}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -1142,11 +1215,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
       : undefined
 
   /*
-   * ── The For Inspection screen ─────────────────────────────────────────────
+   * ── The "nothing left for this office" screen ─────────────────────────────
    *
-   * A filing waiting on a site visit gets its own, much smaller page, and
-   * returns before any of the review sheet below is built — but only for an
-   * office that has nothing left to review on it.
+   * A filing still being worked gets its own, much smaller page, and returns
+   * before any of the review sheet below is built — but only for an office that
+   * has nothing left to do on it.
    *
    * ── The premise this rested on, and why it is gone (INS-1) ────────────────
    *
@@ -1202,22 +1275,44 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * The `app.status` half of the test is read off the status rather than off
    * the presence of inspections: a visit can exist on a filing that has already
    * moved past inspection (a failed one stays on the record for good), and a
-   * filing can sit in the working stage before anything is scheduled.
-   *
-   * That status is `awaiting_other_permits` now, not `for_inspection`. The
-   * application-level inspection status was retired when inspection moved onto
-   * each permit's own `ClearanceStatus`; the stage an officer is standing in
-   * while visits happen is the one where every office is working its clearance.
-   * The predicate is otherwise unchanged, and it must stay identical to
-   * QueuePage's tab partition for the reason given above.
+   * filing can sit at this stage before anything is scheduled.
    *
    * Every other status falls straight through to the sheet, unchanged.
    *
-   * Safe as an early return: every hook on this component runs above the
-   * `loading` guard, so nothing below here is a hook and no render path can
-   * skip one.
+   * ── Re-keyed for the September flow (8 September 2026) ────────────────────
+   *
+   * This tested `app.status === 'for_inspection'`, and that status no longer
+   * exists on an application — inspection belongs to one permit now. The branch
+   * had therefore stopped firing altogether, silently: every office that had
+   * finished its review was handed the whole application form back, which is
+   * the exact thing the client twice asked to have removed.
+   *
+   * The stage it was describing is now `awaiting_other_permits`, and the shape
+   * is unchanged underneath. `approveClearance` completes an office's
+   * assignment at the moment it accepts the paperwork and leaves the permit at
+   * `for_inspection`, so an office in the old "reviewed, now waiting on the
+   * visit" seat reads exactly as it always did: `!owesReview`, on a filing that
+   * has not finished.
+   *
+   * `for_final_approval` is included, because five offices sitting finished
+   * while BPLO signs off are in the same position — with ONE exception, and it
+   * is load-bearing. BPLO's own assignment was completed by `approveMainForm`
+   * at the very start, so `owesReview` is false for BPLO here too, and BPLO's
+   * Approve at this status is what calls `approveOverall()` and mints the
+   * Mayor's Permit. Hand BPLO the compact box and that button is nowhere in the
+   * product — the INS-1 deadlock above, rebuilt at the other end of the
+   * process. The exception is keyed on the ASSIGNMENT's department, not on the
+   * reader's permissions, because that is what `approveAssignment` itself
+   * branches on.
    */
-  if (app.status === 'awaiting_other_permits' && !owesReview) {
+  const bploSignsOffHere =
+    data.department.code === 'BPLO' && app.status === 'for_final_approval'
+  const nothingLeftForThisOffice =
+    (app.status === 'awaiting_other_permits' || app.status === 'for_final_approval') &&
+    !owesReview &&
+    !bploSignsOffHere
+
+  if (nothingLeftForThisOffice) {
     return (
       <div>
         {backLink}
@@ -1283,10 +1378,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
           {/*
            * `reload`, not a local patch of the card. Recording the last
-           * outstanding visit as passed issues the permit and moves
-           * `app.status` off `for_inspection` altogether — at which point this
-           * whole branch stops applying and the officer should be looking at
-           * the approved filing, not at a stale card.
+           * outstanding visit as passed issues this office's permit, and once
+           * the last required permit lands `refreshReadiness` moves the filing
+           * on — at which point this whole branch stops applying and the
+           * officer should be looking at the filing as it now is, not at a
+           * stale card.
            */}
           {/*
            * `filingStatus` is not a formality. The panel needs the FILING's
@@ -1925,6 +2021,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * lead with and goes straight to the record it coordinates.
            */}
           {ownOfficeForms.map((form) => {
+            /*
+             * `form_saved` is the server saying whether the applicant has
+             * actually answered anything here.
+             *
+             * This block used to render only sheets that had been SAVED, so a
+             * filing whose applicant had applied but not yet opened the form
+             * showed nothing at all — the CENRO report of 9 September 2026,
+             * "why do I only see the BPLO application form only". Every
+             * form-bearing sheet on the filing now arrives whether or not it
+             * has been filled in, which fixes the absence but creates a new way
+             * to be misread: a sheet carrying only derived answers looks
+             * identical to one the applicant completed. So it says which.
+             */
             const entries = Object.entries(form.form_data ?? {})
             return (
               <section
@@ -1938,6 +2047,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <h2 className="mt-1 text-[15px] font-bold text-ink">
                   {form.permit_type_name ?? form.permit_type_code} — the clearance you are deciding
                 </h2>
+                {form.form_saved === false && (
+                  <p className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-3 py-2 text-sm leading-relaxed text-ink">
+                    <span className="font-semibold">Not filled in yet.</span> The applicant has
+                    applied for this clearance but has not saved any answers on your form. What is
+                    below is what the system already knows about the filing.
+                  </p>
+                )}
                 {entries.length === 0 ? (
                   <p className="mt-3 text-sm text-ink-secondary">
                     The applicant recorded no answers on your office’s form.
@@ -1955,6 +2071,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   * sheet that ran on down the page, which stopped being true
                   * the moment the disclosure below went in.
                   */}
+                {form.requirements && form.requirements.length > 0 && (
+                  <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
+                )}
                 <p className="mt-3 text-xs text-ink-muted">
                   The applicant’s own filing — address, line of business, uploaded requirements and
                   fee declaration — is folded away below, under{' '}
@@ -2360,15 +2479,31 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * admin, who hold `application.view_any_office`, still get every
            * sheet here, which is the coordination they need.
            */}
+          {/*
+           * ── Section D is DRAWN ONLY WHEN IT HAS SOMETHING IN IT ────────────
+           *
+           * The client, seeing its empty state: "can you remove this part since
+           * this is highly unnecessary."
+           *
+           * They are right, and the reason is structural rather than a matter
+           * of taste. Office separability means a clearance office can never
+           * have anything here — every other office's sheet is withheld from it
+           * by design — so for five of the six seats this section was a
+           * permanent heading over a permanent apology. A section that can only
+           * ever be empty is not information; it is a promise the screen cannot
+           * keep, and it pushed the officer's own work further down the page to
+           * make room for it.
+           *
+           * It still renders, populated, for BPLO and the super admin, who hold
+           * `application.view_any_office` and coordinate across offices. That is
+           * the one seat where "other offices' answers" is a real category with
+           * real contents, and it is why this is a conditional rather than a
+           * deletion.
+           */}
+          {otherOfficeForms.length > 0 && (
           <section className="mt-9">
             <SectionHeading letter="D">Other Offices’ Form Answers</SectionHeading>
-            {otherOfficeForms.length === 0 ? (
-              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
-                {ownOfficeForms.length > 0
-                  ? 'Nothing here. Your office’s form is at the top of this sheet, and the other offices’ forms on this filing are theirs to read.'
-                  : 'No per-office form on this application is yours to read.'}
-              </p>
-            ) : (
+            {(
               otherOfficeForms.map((form, formIndex) => {
                 const entries = Object.entries(form.form_data ?? {})
                 return (
@@ -2393,11 +2528,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         ))}
                       </div>
                     )}
+                    {form.requirements && form.requirements.length > 0 && (
+                      <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
+                    )}
                   </div>
                 )
               })
             )}
           </section>
+          )}
 
           {/* E — Applicant-declared fee inputs (revenue-code profile) */}
           <section className="mt-9">

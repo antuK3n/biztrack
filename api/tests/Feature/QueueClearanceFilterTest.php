@@ -71,7 +71,11 @@ function permitReaching(Application $app, string $code, string $to): Application
 {
     $workflow = app(WorkflowService::class);
     $type = PermitType::where('code', $code)->firstOrFail();
+    // Applying opens the form; submitting it is what puts the permit in front
+    // of its office. This fixture wants a permit an office is holding, so it
+    // does both — see WorkflowService::submitClearanceForm.
     $workflow->startClearance($app, $type, ApplicationPermitType::MODE_APPLY);
+    $workflow->submitClearanceForm($app, $type);
 
     $row = ApplicationPermitType::where('application_id', $app->id)
         ->where('permit_type_id', $type->id)

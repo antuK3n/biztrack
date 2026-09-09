@@ -35,26 +35,38 @@ final class HeldPermits
     /**
      * The single held copy on this filing for this clearance, if any.
      *
-     * The predicate is `permit_type_id`, NOT the HELD_ document type — which is
-     * a weaker test than the name suggests, and worth knowing before a third
-     * writer of that column appears. Today exactly two paths set it
-     * (ClearanceController::storeHeld through `store` below, and
-     * DocumentController's `permit_type_id` parameter), both of them under a
-     * HELD_ type, so the two predicates select the same rows. `permit_type_id`
-     * is the one to keep: it is what makes the copy findable at all, and the
-     * document type is derived from it a line further down. A row carrying the
-     * column under some other type would be counted as a held copy here — and
-     * that is the correct failure, because everything downstream (the card's
-     * `submitted` state, the mutual exclusion with applying, PermitController's
-     * "your own copy" row) keys on the same column. The name to fix in that
-     * case is the other writer's, not this filter.
+     * The predicate WAS `permit_type_id` alone, on the reasoning that only a
+     * held copy ever carried the column, so the narrower test bought nothing.
+     * That note ended by naming the failure it would take: *"A row carrying the
+     * column under some other type would be counted as a held copy here."*
+     *
+     * The zoning sheet's checklist of requirements is the third writer that
+     * note was waiting for (MCG-CPDD-FO-003 v1.2 — a title, a tax declaration,
+     * a sketch, a notarised declaration, all of them attached to one clearance
+     * and none of them a certificate the applicant holds). It could have set
+     * `permit_type_id`, and then `forgetAllExcept` below would have made each
+     * new checklist upload delete the applicant's certificate, and the
+     * certificate delete the checklist — files gone from disk, silently, on an
+     * ordinary press of Upload.
+     *
+     * So the two mechanisms no longer share a predicate. A held copy is
+     * `permit_type_id` AND a HELD_ document type; a checklist upload leaves
+     * `permit_type_id` null and is found by its own type
+     * (`ZoningRequirements::uploads`). Both halves are asserted here rather than
+     * one, because the whole point is that the column is no longer sufficient
+     * on its own.
      */
     public static function find(Application $application, PermitType $permitType): ?ApplicationDocument
     {
+        return self::query($application, $permitType)->latest('id')->first();
+    }
+
+    /** Every held copy for this clearance — the one filter both readers use. */
+    private static function query(Application $application, PermitType $permitType)
+    {
         return ApplicationDocument::where('application_id', $application->id)
             ->where('permit_type_id', $permitType->id)
-            ->latest('id')
-            ->first();
+            ->whereHas('documentType', fn ($q) => $q->where('code', 'like', self::CODE_PREFIX.'%'));
     }
 
     /**
@@ -128,8 +140,10 @@ final class HeldPermits
     /** @param  int|null  $keepId  the row to spare, or null to drop them all */
     public static function forgetAllExcept(Application $application, PermitType $permitType, ?int $keepId): int
     {
-        $query = ApplicationDocument::where('application_id', $application->id)
-            ->where('permit_type_id', $permitType->id);
+        // The same narrowed filter `find` uses, and for the reason written
+        // there: a checklist upload is not a held copy and must not be deleted
+        // by one being replaced.
+        $query = self::query($application, $permitType);
 
         if ($keepId !== null) {
             $query->whereKeyNot($keepId);

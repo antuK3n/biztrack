@@ -4,7 +4,9 @@ namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
 use App\Support\ApplicationVisibility;
+use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
+use App\Support\SheetRequirements;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -201,18 +203,74 @@ class ApplicationResource extends JsonResource
              * office on the filing because every office needs them to do its
              * job. Do not extend this filter over them.
              */
-            'office_forms' => $this->relationLoaded('officeForms')
-                ? $this->officeForms
-                    ->filter(fn ($form) => ApplicationVisibility::readsOfficeSheet(
-                        $request->user(),
-                        $form->permitType?->issuing_department_id,
+            /*
+             * ── Every form-bearing sheet on the filing, saved or not ─────────
+             *
+             * This mapped the SAVED `officeForms` rows and nothing else, and the
+             * client found what that costs on 9 September 2026: a CENRO session
+             * opened a filing it had been routed — its permit applied for, at
+             * `for_approval`, its assignment open — and saw the BPLO form and
+             * nothing of its own, because the applicant had not yet opened the
+             * CEC sheet. No row, no entry, and an office left to infer from an
+             * absence whether it was looking at a gap in the paperwork or a bug.
+             *
+             * `OfficeFormController::index` never behaved that way: it
+             * synthesises an entry for every form-bearing permit type on the
+             * application, derived answers filled in, precisely "so the wizard
+             * can render the derived answers on a form the applicant has not
+             * opened yet". So `/office-forms` showed the sheet and
+             * `/assignments/{id}` did not — the same filing, two doors, two
+             * answers, which is the shape this file has been repaired for four
+             * times over (SEP-1, SEP-6, INS-8, and the leak that started it).
+             *
+             * Both doors now build the list the same way and derive through the
+             * same `OfficeFormAnswers`. `form_saved` is what an officer needs on
+             * top: a sheet of derived-only answers looks identical whether the
+             * applicant filled it in or never touched it, and the screen has to
+             * be able to say which.
+             *
+             * The office boundary is unchanged and still applied per sheet: the
+             * applicant sees all, BPLO and the super admin see all, and every
+             * other reviewer sees only what its own department issues.
+             */
+            'office_forms' => $this->relationLoaded('officeForms') && $this->relationLoaded('permitTypes')
+                ? $this->permitTypes
+                    ->filter(fn ($type) => in_array(
+                        $type->code,
+                        OfficeFormAnswers::FORM_PERMIT_CODES,
+                        true,
                     ))
-                    ->map(fn ($form) => [
-                        'permit_type_code' => $form->permitType?->code,
-                        'permit_type_name' => $form->permitType?->name,
-                        'department_code' => $form->permitType?->department?->code,
-                        'form_data' => $form->form_data,
-                    ])->values()
+                    ->filter(fn ($type) => ApplicationVisibility::readsOfficeSheet(
+                        $request->user(),
+                        $type->issuing_department_id,
+                    ))
+                    ->map(function ($type) {
+                        $stored = $this->officeForms
+                            ->first(fn ($form) => $form->permit_type_id === $type->id);
+
+                        return [
+                            'permit_type_code' => $type->code,
+                            'permit_type_name' => $type->name,
+                            'department_code' => $type->department?->code,
+                            'form_saved' => $stored !== null,
+                            'form_data' => OfficeFormAnswers::derive(
+                                $this->resource,
+                                $type->code,
+                                $stored->form_data ?? [],
+                            ),
+                            /*
+                             * What this office's paper asks the applicant to
+                             * bring, and it is on THIS door for the same reason
+                             * `form_data` had to be: CPDD is deciding a
+                             * locational clearance against a title deed, a tax
+                             * declaration and a sketch of the site, and CENRO a
+                             * renewal against last year's certificate. A list
+                             * the applicant can see and the reviewing office
+                             * cannot is half a feature. Both doors, one builder.
+                             */
+                            'requirements' => SheetRequirements::for($this->resource, $type->code),
+                        ];
+                    })->values()
                 : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
                 'line_items' => $this->feeLineItems($request),

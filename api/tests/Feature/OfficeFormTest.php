@@ -2,6 +2,7 @@
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationOfficeForm;
 use App\Models\Business;
@@ -304,12 +305,61 @@ it('refuses an office-form write from a guest', function () {
     ])->assertUnauthorized();
 });
 
-it('stops the applicant editing office forms once the application is submitted', function () {
+/*
+ * REWRITTEN, because its premise was backwards.
+ *
+ * It said a submitted APPLICATION closed the office sheets — and if that were
+ * true no applicant could ever fill one in. The five clearances are reached
+ * after the filing has been submitted, accepted by BPLO and paid for
+ * (docs/clearances-after-payment.md), so `awaiting_other_permits` is precisely
+ * the state these sheets are written in. The old case only passed because
+ * `ownerMayEdit` looked for an assignment on the issuing office and this
+ * hand-built fixture never had one; it was asserting the absence of a routing
+ * step, not a rule about editing.
+ *
+ * The line is drawn on the PERMIT now (`OfficeFormController::ownerMayEdit`,
+ * 9 September 2026). The sheet is the applicant's while their clearance is
+ * `not_started` — applied for, opened, still being filled in — and while it is
+ * `returned`, where an office has handed it back for exactly that purpose. It
+ * stops being theirs from `for_approval` onward: "We do not promote any editing
+ * of forms once submitted" (client), and an office may be reading it at that
+ * moment. Asserted per permit rather than per filing because the five move
+ * independently.
+ */
+it('stops the applicant editing an office form once its own clearance has been submitted', function () {
     $app = officeFormApp(['FSIC'], ApplicationType::New, ApplicationStatus::AwaitingOtherPermits, now());
+    $fsicId = PermitType::where('code', 'FSIC')->value('id');
 
-    $this->withHeaders(authAs('owner@biztrack.local'))
+    // The permit's status is the only thing moving here. Driving it through the
+    // workflow would need the filing built and paid for twice over, and what is
+    // under test is the gate rather than how a permit arrives at each state.
+    $permitAt = fn (ClearanceStatus $status) => $app->permitTypes()
+        ->updateExistingPivot($fsicId, ['status' => $status->value]);
+
+    $write = fn (string $remarks) => test()->withHeaders(authAs('owner@biztrack.local'))
         ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", [
-            'form_data' => ['fsic_remarks' => 'too late'],
-        ])
-        ->assertStatus(422);
+            'form_data' => ['fsic_remarks' => $remarks],
+        ]);
+
+    // Applied for and open: this is the clearance stage, and it is the window
+    // the whole rework exists to keep open.
+    $permitAt(ClearanceStatus::NotStarted);
+    $write('still mine to write')->assertOk();
+
+    // Handed in. BFP has it.
+    $permitAt(ClearanceStatus::ForApproval);
+    $write('too late')->assertStatus(422);
+
+    // And past it — the office has accepted the paperwork and booked a visit
+    // against these answers.
+    $permitAt(ClearanceStatus::ForInspection);
+    $write('too late')->assertStatus(422);
+
+    // Returned: the office asked for a correction, which is the clearest
+    // possible case for the sheet being editable again.
+    $permitAt(ClearanceStatus::Returned);
+    $write('fixed as BFP asked')->assertOk();
+
+    // Neither refusal wrote anything, and the last permitted write did.
+    expect(savedForm($app, 'FSIC')['fsic_remarks'])->toBe('fixed as BFP asked');
 });

@@ -25,13 +25,6 @@ const OWNER_APPS = [
     tracking_id: 'BIZ-2026-00101',
     application_type: 'new',
     title: null,
-    /*
-     * `for_approval`, not `under_review`. The latter was deleted with
-     * `submitted` and `for_inspection` on 6 September 2026, and a stub is only
-     * worth anything while it describes something the API can produce — this
-     * one had already drifted into asserting the shape of a dead enum. The
-     * label was right all along, which is exactly how it went unnoticed.
-     */
     status: 'for_approval',
     status_label: 'For Approval',
     business: { id: 1, name: 'Aling Nena Sari-Sari Store' },
@@ -72,14 +65,6 @@ const OWNER_APPS = [
     tracking_id: 'BIZ-2026-00104',
     application_type: 'new',
     title: null,
-    /*
-     * And this one is not a rename. `for_inspection` was a status of the whole
-     * FILING, which stopped being expressible the moment five permits could be
-     * at five different points at once — one filing can have a fire inspection
-     * booked, a sanitary inspection passed and zoning not yet applied for.
-     * `awaiting_other_permits` is the filing-level stage that replaced it; the
-     * inspection now lives on each permit's own status.
-     */
     status: 'awaiting_other_permits',
     status_label: 'Awaiting Other Permits',
     business: { id: 4, name: 'Dagupan Auto Supply' },
@@ -244,16 +229,12 @@ const ASSIGNMENTS = [
       business: { name: 'Zamora Printing Press' },
       application_type: 'new',
       /*
-       * The three statuses in this block are the For Approval tab's own —
-       * QueuePage's APPROVAL_STATUSES, which is `for_approval`, `returned` and
-       * `awaiting_other_permits`. A stub outside that set produces a queue the
-       * tab cannot hold, and this file has been wrong about it twice: first
-       * with `submitted` (a filing has no assignment before it is routed), then
-       * with `under_review` (deleted with the enum on 6 September 2026, so the
-       * tab's own filter matched none of it and the queue came back empty).
-       *
-       * `returned` and `for_approval` are kept side by side because the Filter
-       * test below needs two things to partition.
+       * `returned`, not `submitted`. A pre-payment filing cannot reach this feed
+       * at all — it has no assignment row until payment routes it — so a stub
+       * that put one here was describing something the API cannot produce, and
+       * it stopped matching the queue the moment those statuses moved to their
+       * own tab. `returned` is the approval tab's other real status, so the
+       * Filter test below still has two things to partition.
        */
       status: 'returned',
     },
@@ -299,18 +280,11 @@ const ASSIGNMENTS = [
 /*
  * The Pending Payment tab's rows, which come off a different endpoint.
  *
- * The reason written here used to be "an unpaid filing has no assignment row at
- * all", because routing happened on payment. That is no longer true and the
- * comment was defending an architecture that has gone: `submit()` routes BPLO
- * straight away, and payment routes nobody — each of the other five offices is
- * routed by `startClearance()` when the APPLICANT opens that clearance. So a
- * filing awaiting payment does have an assignment: BPLO's, already `completed`,
- * because BPLO approving the main form is what raised the bill.
- *
- * The tab still reads `/applications`, for a better reason: this stage is
- * waiting on the applicant, not on an office, so there is no office whose queue
- * it belongs in. That is also why none of these rows has a `/staff/queue/:id` —
- * an officer has nothing here to open.
+ * They have to: an unpaid filing has no assignment row at all. Routing is
+ * WorkflowService::routeToDepartments and its only caller is onPaymentCompleted,
+ * so nothing exists on /assignments until the fees are settled — which is why
+ * every one of these is an application, not an assignment, and why none of them
+ * has a `/staff/queue/:id` to link to.
  */
 const UNPAID = [
   {
@@ -516,18 +490,15 @@ test.describe('officer queue', () => {
 
   /* ── Pending Payment ──────────────────────────────────────────────────── */
 
-  test('Pending Payment is the applicant’s stage, asked for off /applications', async ({ page }) => {
+  test('Pending Payment shows the filings the assignment feed cannot hold', async ({ page }) => {
     await page.getByRole('button', { name: 'Pending Payment' }).click()
 
     /*
-     * A different endpoint, and the whole stage asked for in ONE request. It
-     * used to be `submitted,pending_payment` — two statuses because a filing
-     * could sit unrouted before it was read. `submitted` was deleted on
-     * 6 September 2026 and `for_approval` took over the stage in front of the
-     * bill; that has its own tab and does not belong here, so this stage is one
-     * status. A stage split across two requests would have to be totalled in the
-     * browser, which is the "count one page and call it the queue" failure the
-     * other tabs were built to avoid.
+     * A different endpoint, and the whole pre-payment stage asked for in ONE
+     * request. Both halves matter: the assignment feed can never answer for this
+     * stage, and a stage split across two requests would have to be totalled in
+     * the browser — which is the "count one page and call it the queue" failure
+     * the other two tabs were built to avoid.
      */
     await expect
       .poll(() => applicationQueries.at(-1))
@@ -540,11 +511,8 @@ test.describe('officer queue', () => {
 
     /*
      * Nothing on this tab is an officer's to open, and the rows say so rather
-     * than looking broken. Not because there is no assignment — BPLO's exists
-     * and is closed — but because the stage is waiting on the applicant to pay,
-     * so there is no decision for an officer to make and no review sheet to
-     * open. The rows carry no `/staff/queue/:id`, and the line beside them names
-     * who is actually being waited on.
+     * than looking broken: there is no assignment, so there is no review sheet,
+     * so there is no `/staff/queue/:id` to link to.
      */
     await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(0)
     await expect(page.getByText(/Waiting on the applicant’s payment/).first()).toBeVisible()
@@ -571,14 +539,9 @@ test.describe('officer queue', () => {
     await page.getByRole('button', { name: 'Pending Payment' }).click()
     await page.getByRole('button', { name: /^Filter/ }).click()
 
-    /*
-     * A tab never offers a status it excludes. `For Approval` is the one to
-     * check for by name because it is a real stage with a tab of its own now,
-     * one step EARLIER than this — BPLO approves the main form before the bill
-     * is raised. Offering it here would let an officer narrow the payment queue
-     * to a stage that has already been passed, which can only ever return
-     * nothing.
-     */
+    // A tab never offers a status it excludes — and, since the pre-payment
+    // statuses moved here, For Approval no longer offers two that could only
+    // ever return nothing.
     await expect(page.getByRole('option', { name: 'All in Pending Payment' })).toBeVisible()
     await expect(page.getByRole('option', { name: 'Pending Payment', exact: true })).toBeVisible()
     await expect(page.getByRole('option', { name: 'For Approval', exact: true })).toBeHidden()

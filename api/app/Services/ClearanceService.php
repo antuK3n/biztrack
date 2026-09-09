@@ -105,7 +105,33 @@ class ClearanceService
          */
         $baseline = $this->assessableTotal($application, $application->permitTypes);
 
-        $rows = $types->map(fn (PermitType $type) => $this->row($application, $type, $baseline))->all();
+        /*
+         * ── A renewal shows the permits it is FOR, not all of them ───────────
+         *
+         * This mapped every clearance the register knows about, which was right
+         * while every filing carried every clearance: rule 1 of
+         * docs/application-flow-2026-09.md makes all five mandatory on a NEW
+         * application, so "all of them" and "this filing's" named the same set.
+         *
+         * A renewal broke that on 9 September 2026. The applicant ticks which
+         * permits they are renewing and may tick any subset — the six expire on
+         * six different dates — so a renewal of the Sanitary Permit alone would
+         * otherwise open this stage showing five cards, four of them for
+         * clearances the filing does not carry, is not billed for and cannot
+         * grant. Pressing Apply on one of those is an applicant adding a permit
+         * to a filing that was already priced and paid.
+         *
+         * So the stage renders the filing's own set. On a new application that
+         * is still all five and nothing changes; `attachRequiredPermitTypes`
+         * has already attached them by the time this stage is reachable, since
+         * it is gated on payment.
+         */
+        $carried = $application->permitTypes->pluck('id')->flip();
+        $rows = $types
+            ->filter(fn (PermitType $type) => $carried->has($type->id))
+            ->map(fn (PermitType $type) => $this->row($application, $type, $baseline))
+            ->values()
+            ->all();
 
         return ['rows' => $rows, 'meta' => $this->meta($application)];
     }
@@ -166,6 +192,21 @@ class ClearanceService
                 ] : null,
             ],
             'state' => $this->state($application, $type, $held !== null),
+            /*
+             * Which route the applicant took: `apply` (fill in the office's
+             * form) or `upload` (hand in a copy they already hold). Null until
+             * they choose.
+             *
+             * On the payload since 9 September 2026, because the STATE stopped
+             * being able to answer it. Apply used to move the permit to
+             * ForApproval immediately, so `state` doubled as "has this been
+             * started"; now that submitting is a separate act, a permit the
+             * applicant has applied for but not yet filled in sits at
+             * `not_started` — indistinguishable, without this, from one they
+             * have never touched. The card has to tell those apart to say
+             * "Finish form".
+             */
+            'mode' => $this->pivotRow($application, $type)?->mode,
             'has_office_form' => $type->hasOfficeForm(),
             /*
              * "Saved at all", not "every field answered". The FSIC sheet's every
@@ -264,10 +305,29 @@ class ClearanceService
          * `not_started` first; letting them post to `apply` instead would create
          * a second start on a permit an office has already ruled on and lose the
          * remarks explaining why.
+         *
+         * ── And `not_started` stopped being the whole answer again ────────────
+         *
+         * Splitting apply into two acts put a permit in a state this predicate
+         * could not see: the applicant has pressed Apply, `mode` is recorded,
+         * and the status is STILL `not_started` because nothing is routed until
+         * the sheet is handed in. Status alone therefore reported "not applied
+         * for" about a permit the applicant had demonstrably applied for, and
+         * three things broke behind it — `apply` stopped refusing a second
+         * press, `fee_preview` stayed at zero after Apply, and `unapply` refused
+         * with "You have not applied for the ...", which is the only way back
+         * out of Apply and the first half of the Apply-to-Upload switch.
+         *
+         * `mode` is the right second half rather than a patch, because the act
+         * that undoes an application is the act that clears it:
+         * `WorkflowService::unapply` nulls `mode` on the same row (:802). So the
+         * predicate and its inverse now read the same field, and a withdrawn
+         * permit goes back to answering false without a second rule saying so.
          */
         $row = $this->pivotRow($application, $type);
 
-        return $row !== null && $row->status !== ClearanceStatus::NotStarted;
+        return $row !== null
+            && ($row->status !== ClearanceStatus::NotStarted || $row->mode !== null);
     }
 
     /** This permit's pivot row on this filing — the row that carries its status. */

@@ -12,7 +12,7 @@ import {
 } from '../../components/ui/Proto'
 import { businessName, formatDate } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
-import { applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
+import { applicationStatusMeta, clearanceStatusMeta, isPaidStatus } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import type {
   Application,
@@ -291,7 +291,7 @@ function permitChip(
   if (own) return own
 
   // No pivot row: the permit is not on this filing. Nothing to report.
-  if (!permitStatus) return { tone: 'gray', label: 'Not Started' }
+  if (!permitStatus) return { tone: 'gray', label: 'Not Yet Submitted' }
 
   if (permitStatus === 'for_inspection' && office) {
     if (office.inspection === 'failed') return { tone: 'red', label: 'Inspection Failed' }
@@ -396,26 +396,28 @@ function ApplicationRow({
 }) {
   const [open, setOpen] = useState(false)
   const pending = app.status === 'pending_payment'
-  /*
-   * Unpaid is more than one status, and treating it as one told applicants
-   * their filing was paid when it was not.
-   *
-   * The green "Paid" block was the else of `pending`, so EVERY status but
-   * `pending_payment` earned it — including `draft`, `for_approval` and
-   * `returned`, none of which have been billed yet. A form BPLO had not even
-   * opened reported itself Paid, in green, on the applicant's own tracking
-   * page. Under the previous flow payment came first and the else was nearly
-   * always true; BPLO now reads the form before the bill exists, so the three
-   * statuses in front of payment are ordinary rather than rare.
-   *
-   * `QueuePage` already learned this and keeps `UNPAID_STATUSES`; this is the
-   * same list on the applicant's side. If a status is added in front of
-   * payment, it belongs in both — which is an argument for one shared list,
-   * noted rather than done here because the officer copy is exported from a
-   * page component and moving it is not this fix.
-   */
-  const unpaid = ['draft', 'for_approval', 'returned', 'pending_payment'].includes(app.status)
   const rejected = app.status === 'rejected'
+  /*
+   * ── The payment block has three states now, not two ───────────────────────
+   *
+   * It was `pending ? "Pay Online" : "Paid"`, and that was sound while
+   * submission led straight to `pending_payment`: a filing was either being
+   * billed or past it, with nothing in between. The September flow put
+   * `for_approval` in that gap — BPLO reads the form BEFORE there is a bill —
+   * so the else-branch started printing a green "Paid" on filings where not a
+   * peso had been charged. A false claim about money, on the applicant's main
+   * screen, in the strongest colour the palette has.
+   *
+   * `draft`, `for_approval` and `returned` are all before the bill and say so.
+   *
+   * A terminal filing gets NO block, and that is deliberate rather than a
+   * fourth label. Status alone cannot say whether a rejected filing had already
+   * paid — the list payload carries no payment — so any wording here would be a
+   * guess dressed as a fact. The row already carries its rejection note, which
+   * is what that filing is actually about.
+   */
+  const ended = app.status === 'rejected' || app.status === 'cancelled'
+  const settled = isPaidStatus(app.status)
   const payBlockCls =
     'flex w-28 shrink-0 items-center justify-center self-stretch px-3 text-center text-base font-semibold leading-tight text-white'
 
@@ -516,20 +518,16 @@ function ApplicationRow({
           <Triangle open={open} />
           <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
         </button>
-        {/*
-          * Three states, not two. Only `pending_payment` has a bill waiting, so
-          * only it gets the link; the statuses in front of payment say plainly
-          * that nothing is due yet; and Paid is reserved for a filing that
-          * really has been.
-          */}
+        {/* The four states, and why the terminal one is blank, are set out
+            above `ended`. */}
         {pending ? (
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
             Pay Online
           </Link>
-        ) : unpaid ? (
-          <span className={`${payBlockCls} bg-ink-muted`}>Not yet billed</span>
-        ) : (
+        ) : settled ? (
           <span className={`${payBlockCls} bg-s-green`}>Paid</span>
+        ) : ended ? null : (
+          <span className={`${payBlockCls} bg-shell-deep !text-ink-secondary`}>Not billed yet</span>
         )}
       </div>
 
