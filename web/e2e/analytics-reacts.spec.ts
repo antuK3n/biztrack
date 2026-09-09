@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { sessionFor, waitForAnalytics } from './helpers'
+import { mergedStorageState, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * Do the dashboards answer to the register, or do they merely draw?
@@ -65,7 +65,13 @@ import { sessionFor, waitForAnalytics } from './helpers'
  * the three cannot drift apart.
  */
 const BPLO_SESSION = sessionFor('bplo')
-const SANITARY_SESSION = sessionFor('sanitary')
+/*
+ * The sanitary session went with the block that used it. That block drove the
+ * RA 11032 processing-category gate as a clearance office, and no clearance
+ * office can meet it any more: `approveAssignment` sends every office but BPLO
+ * to `approveClearance`, which never calls `requireProcessingCategory`. See the
+ * note above `fileUncategorised`.
+ */
 const SUPER_ADMIN_SESSION = sessionFor('admin')
 
 /**
@@ -263,8 +269,20 @@ test.describe('the dashboard answers to the register', () => {
      *
      * If this ever does skip, the fix is to restart e2e-stack.sh: it re-copies
      * the register into the slot and the pool comes back.
+     *
+     * ── The status list was three-fifths dead ─────────────────────────────
+     *
+     * It read `submitted,pending_payment,under_review,returned,for_inspection`.
+     * `submitted`, `under_review` and `for_inspection` are retired as
+     * APPLICATION statuses — inspection is per-permit on `ClearanceStatus` now,
+     * and the flow is draft → for_approval → pending_payment →
+     * awaiting_other_permits → for_final_approval → approved. `whereIn` on a
+     * status that does not exist matches nothing, so the pool was two statuses
+     * wide and this test SKIPPED, which is the failure the docblock above calls
+     * the worst outcome available: a rule nobody checked, reported as a pass.
      */
-    const LIVE = 'submitted,pending_payment,under_review,returned,for_inspection'
+    const LIVE =
+      'for_approval,pending_payment,awaiting_other_permits,for_final_approval,returned'
     const dashboard = await api(page, '/api/v1/analytics/dashboard')
     const monthStart = String(
       ((dashboard.body?.data ?? {}) as { month_start?: string }).month_start ?? '',
@@ -396,107 +414,166 @@ test.describe('the dashboard answers to the register', () => {
  * server-only guard is an officer pressing a button and being told no with no
  * idea what to do next.
  *
- * The uncategorised filing is found, not written down. `submit()` seeds a tier
- * from Ra11032::tierFor(), so every filing made through the product arrives
- * categorised and the gate is quiet on it; what is left null are the rows that
- * predate submission-time classification, and the register holds a handful.
- * They are also the rows an id would go stale on fastest, since categorising one
- * is a single control away.
+ * ── Whose gate it is, and what "uncategorised" means ────────────────────────
+ *
+ * BOTH answers changed on 6 September 2026 and the two changes cancel the old
+ * fixture out entirely.
+ *
+ * The gate is BPLO's alone. `approveAssignment` routes by office now:
+ * BPLO-on-For-Approval runs `approveMainForm`, BPLO-on-For-Final-Approval runs
+ * `approveOverall`, and those two are the only callers of
+ * `requireProcessingCategory`. Any other office approving its own permit goes
+ * to `approveClearance`, which never asks. So this block ran as the sanitary
+ * office against a rule the sanitary office cannot meet: the 422 it got back was
+ * keyed on `status`, not `complexity`, because the filing it found was not one
+ * BPLO-anything could act on.
+ *
+ * "Uncategorised" is about PROVENANCE, not a null. `submit()` seeds a tier from
+ * `Ra11032::tierFor()`, so `complexity` is never null on anything filed through
+ * the product and a null-check finds nothing to test. What the gate waits for is
+ * a PERSON — `complexity_set_by_user_id`, which the payload reports as
+ * `ra11032.source === 'officer'`. Looking for `tier === null` was therefore
+ * looking for pre-2026 rows, and this stack's register holds none in a state
+ * BPLO can approve.
+ *
+ * The filing is MADE rather than found, for the same reason clearances.spec.ts
+ * makes its own: every filing BPLO can approve is uncategorised the moment it is
+ * submitted, so creating one costs four calls and cannot skip. The register
+ * holds no `for_approval` rows at all (measured on the copied register: 0),
+ * which is exactly the "reported as a pass" outcome the docblock forbids.
  */
+
+/** Sign the owner in alongside this office, so a filing can be made to review. */
+const OWNER_AND_BPLO = mergedStorageState(['owner.json', 'bplo.json'])
 
 /**
- * An open review this office owes, on a filing nobody has categorised.
+ * A freshly filed application, waiting for BPLO and categorised by nobody.
  *
- * `GET /assignments` is this office's own queue, so every row in it is a row
- * this session may open — `GET /assignments/{id}` is narrowed a second time by
- * authorizeDepartment and answers 403 for anyone else's. Only `pending`,
- * `in_progress` and `returned`: a completed assignment renders the sheet as a
- * closed record with no Mode pills and no Approve at all.
+ * Through the API, and minimal: `ApplicationController::submit` gates on RA
+ * 10173 consent and on the business not being blocked, and on nothing else, so
+ * no documents and no fee profile are needed to reach For Approval.
  */
-async function findUncategorisedReview(
+async function fileUncategorised(
   page: Page,
-): Promise<{ assignmentId: number; applicationId: number; trackingId: string } | null> {
+): Promise<{ assignmentId: number; applicationId: number; trackingId: string }> {
   await page.goto('/staff/queue')
 
+  const made = await page.evaluate(async () => {
+    const token = localStorage.getItem('biztrack.token.public')
+    const headers = {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    }
+    const json = async (res: Response) => (await res.json()).data
+
+    const barangays = await json(await fetch('/api/v1/reference/barangays', { headers }))
+    const psic = (
+      await json(await fetch('/api/v1/reference/psic-codes', { headers }))
+    ).filter((c: { code: string }) => c.code !== '00000')
+    const permitTypes = await json(await fetch('/api/v1/reference/permit-types', { headers }))
+
+    const business = await json(
+      await fetch('/api/v1/businesses', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          name: `E2E RA 11032 gate ${Date.now()}`,
+          registration_type: 'DTI',
+          registration_number: 'DTI-E2E-011',
+          tin: '123-456-789-000',
+          address: {
+            line1: '3 Playwright St.',
+            // Malabon City Hall, which is in Longos. The address step checks the
+            // real city polygon AND that the pin agrees with the barangay.
+            barangay_id: (barangays.find((b: { name: string }) => b.name === 'Longos') ??
+              barangays[0]).id,
+            latitude: 14.6572,
+            longitude: 120.9573,
+          },
+          emergency_contact_name: 'Ana Dela Cruz',
+          emergency_contact_number: '0917 123 4567',
+          lines: [{ psic_code_id: psic[0].id, capitalization: 500000 }],
+        }),
+      }),
+    )
+    const app = await json(
+      await fetch('/api/v1/applications', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          business_id: business.id,
+          application_type: 'new',
+          permit_type_ids: [
+            permitTypes.find((pt: { code: string }) => pt.code === 'BUSINESS').id,
+          ],
+          data_privacy_consent: true,
+        }),
+      }),
+    )
+    const submitted = await fetch(`/api/v1/applications/${app.id}/submit`, {
+      method: 'POST',
+      headers,
+    })
+    if (!submitted.ok) {
+      throw new Error(`submitting answered ${submitted.status}: ${await submitted.text()}`)
+    }
+    return (await submitted.json()).data as { id: number; tracking_id: string }
+  })
+
+  /*
+   * BPLO's queue item on it. `GET /assignments` is this office's own queue, so
+   * every row in it is a row this session may open — `GET /assignments/{id}` is
+   * narrowed again by authorizeDepartment and answers 403 for anyone else's.
+   */
   const list = await api(
     page,
-    '/api/v1/assignments?application_status=under_review&status=pending,in_progress,returned&per_page=50',
+    '/api/v1/assignments?application_status=for_approval&status=pending,in_progress,returned&per_page=100',
   )
   const rows = (list.body?.data ?? []) as { id: number; application: { id: number } | null }[]
+  const assignment = rows.find((row) => row.application?.id === made.id)
+  expect(assignment, `${made.tracking_id} was filed but never routed to BPLO`).toBeTruthy()
 
-  for (const row of rows) {
-    if (!row.application) continue
-    const detail = await api(page, `/api/v1/applications/${row.application.id}`)
-    // A row this session cannot read in full is skipped, not fatal: visibility
-    // can answer 403 for a filing whose routing moved between the two calls.
-    const app = detail.body?.data as
-      | { id: number; tracking_id: string; ra11032?: { tier: string | null } }
-      | undefined
-    if (!app?.ra11032) continue
-    if (app.ra11032.tier === null) {
-      return { assignmentId: row.id, applicationId: app.id, trackingId: app.tracking_id }
-    }
-  }
+  // And nobody has put their name to its tier, which is the state under test.
+  const detail = await api(page, `/api/v1/applications/${made.id}`)
+  const app = detail.body?.data as { ra11032?: { source: string | null } } | undefined
+  expect(app?.ra11032?.source, 'a freshly filed application arrived pre-categorised').toBe(
+    'automatic',
+  )
 
-  return null
+  return { assignmentId: assignment!.id, applicationId: made.id, trackingId: made.tracking_id }
 }
 
-/**
- * The same uncategorised filing, found from the register rather than a queue.
+/*
+ * `findUncategorisedFiling` is gone, and its whole reason went with it.
  *
- * BPLO needs its own door and this is not duplication for its own sake: BPLO
- * coordinates every filing and signs off FIRST, so its assignments on the old
- * uncategorised rows are all `completed` and its review queue is empty of them.
- * Looking for one there found nothing and skipped the test, which is the worst
- * outcome available — a rule nobody checked, reported as a pass.
+ * It hunted the register for a filing whose `ra11032.tier` was null, preferring
+ * one no office still owed a review on so that the two tests above would not be
+ * starved of fixtures. Neither half applies now: an uncategorised filing is one
+ * nobody has PUT THEIR NAME TO rather than one with a null tier (see above), and
+ * the fixtures are made rather than found, so there is nothing to starve. The
+ * status list it searched — `submitted,pending_payment,under_review,returned,
+ * for_inspection` — was three-fifths retired statuses, which meant `whereIn`
+ * quietly matched a fraction of what it read as.
  *
- * `GET /applications` is scoped by ApplicationVisibility, and BPLO's scope is
- * the register, so this reaches the filings its own queue no longer holds.
- *
- * A filing NOT in `under_review` is preferred, and that is fixture care rather
- * than fussiness. Rejecting is terminal, so this test spends an uncategorised
- * filing every run — and uncategorised filings are exactly what the two tests
- * above need. Taking one an office still owes a review on would starve the
- * review-sheet test first; taking one already past review starves nothing.
+ * `fileUncategorised` replaces it for every caller.
  */
-async function findUncategorisedFiling(
-  page: Page,
-): Promise<{ applicationId: number; trackingId: string; status: string } | null> {
-  await page.goto('/staff/queue')
-
-  const list = await api(
-    page,
-    '/api/v1/applications?status=submitted,pending_payment,under_review,returned,for_inspection&per_page=100',
-  )
-  const rows = (list.body?.data ?? []) as { id: number }[]
-  const uncategorised: { applicationId: number; trackingId: string; status: string }[] = []
-
-  for (const row of rows) {
-    // The list resource does not carry `ra11032` — the tier only travels on the
-    // single-filing payload, so each candidate costs a read.
-    const detail = await api(page, `/api/v1/applications/${row.id}`)
-    const app = detail.body?.data as
-      | { id: number; tracking_id: string; status: string; ra11032?: { tier: string | null } }
-      | undefined
-    if (!app?.ra11032) continue
-    if (app.ra11032.tier === null) {
-      uncategorised.push({ applicationId: app.id, trackingId: app.tracking_id, status: app.status })
-    }
-  }
-
-  return (
-    uncategorised.find((app) => app.status !== 'under_review') ?? uncategorised[0] ?? null
-  )
-}
 
 test.describe('an uncategorised filing cannot be approved', () => {
-  test.use({ storageState: SANITARY_SESSION })
+  /*
+   * BPLO, not the sanitary office, and both sessions at once.
+   *
+   * BPLO because it is the only office the gate applies to (see the note above
+   * `fileUncategorised`), and the owner alongside it because the filing has to
+   * be made before BPLO has anything to refuse. The tokens are keyed by portal,
+   * so the two sessions coexist in one browser.
+   */
+  test.use({ storageState: OWNER_AND_BPLO })
 
   test('the review sheet shuts Approve and says what to do about it', async ({ page }) => {
-    const target = await findUncategorisedReview(page)
-    test.skip(target === null, 'every filing on this office’s queue already has a category')
+    const target = await fileUncategorised(page)
 
-    await page.goto(`/staff/queue/${target!.assignmentId}`)
+    await page.goto(`/staff/queue/${target.assignmentId}`)
     // The sheet opens in View, where there is no Approve to shut. The rule is a
     // property of the deciding screen, so the test has to be on it.
     await page.getByRole('group', { name: 'Mode' }).getByRole('button', { name: 'Edit' }).click()
@@ -551,10 +628,17 @@ test.describe('an uncategorised filing cannot be approved', () => {
       page.getByText(/Choose this application’s processing category under For Office Use Only/i),
     ).toBeVisible()
 
-    // Still under review. A shut button that submitted anyway would be the
-    // worst of both worlds.
-    const after = await api(page, `/api/v1/applications/${target!.applicationId}`)
-    expect((after.body?.data as { status?: string })?.status).toBe('under_review')
+    /*
+     * Still waiting for BPLO. A shut button that submitted anyway would be the
+     * worst of both worlds.
+     *
+     * `for_approval`, not `under_review`: that status was retired with the old
+     * flow, and the assertion outlived it — this test failed reading back
+     * `awaiting_other_permits` from a filing the stale queue filter had picked
+     * up by accident, which says nothing whatever about the gate.
+     */
+    const after = await api(page, `/api/v1/applications/${target.applicationId}`)
+    expect((after.body?.data as { status?: string })?.status).toBe('for_approval')
   })
 
   test('the API refuses a direct approval with a 422 keyed on complexity', async ({ page }) => {
@@ -565,10 +649,9 @@ test.describe('an uncategorised filing cannot be approved', () => {
      * refactor, every test above would still pass and permits would issue with
      * no statutory clock behind them.
      */
-    const target = await findUncategorisedReview(page)
-    test.skip(target === null, 'every filing on this office’s queue already has a category')
+    const target = await fileUncategorised(page)
 
-    const refused = await api(page, `/api/v1/assignments/${target!.assignmentId}/approve`, {
+    const refused = await api(page, `/api/v1/assignments/${target.assignmentId}/approve`, {
       method: 'POST',
       body: {},
     })
@@ -589,7 +672,9 @@ test.describe('an uncategorised filing cannot be approved', () => {
 })
 
 test.describe('rejection is deliberately not gated', () => {
-  test.use({ storageState: BPLO_SESSION })
+  // BPLO plus the owner, for the same reason as the block above: the filing to
+  // be refused has to be filed first.
+  test.use({ storageState: OWNER_AND_BPLO })
 
   test('an uncategorised filing can still be refused', async ({ page }) => {
     /*
@@ -598,33 +683,43 @@ test.describe('rejection is deliberately not gated', () => {
      * demanding a tier before rejecting would stop an officer saying no for the
      * sake of a field nothing will ever measure — RA 11032 has no deadline for a
      * transaction that was refused. `requireProcessingCategory` is called from
-     * approveAssignment and approveAndIssue and from nowhere else; this is what
+     * `approveMainForm` and `approveOverall` and from nowhere else; this is what
      * proves that stayed true after today's change.
      *
      * Run as BPLO because `application.reject` is BPLO's and the super admin's.
-     * The six clearance offices decide their own review and cannot refuse the
+     * The five clearance offices decide their own permit and cannot refuse the
      * filing outright, which is why the sheet above showed no Reject at all.
      */
-    const target = await findUncategorisedFiling(page)
-    test.skip(target === null, 'no uncategorised filing is under review')
+    const target = await fileUncategorised(page)
 
-    const refusal = await api(page, `/api/v1/applications/${target!.applicationId}/reject`, {
+    const refusal = await api(page, `/api/v1/applications/${target.applicationId}/reject`, {
       method: 'POST',
       body: { reason: 'Automated end-to-end check: rejection must not require a category.' },
     })
 
     expect(
       refusal.status,
-      `rejecting the uncategorised ${target!.trackingId} was blocked: ${JSON.stringify(refusal.body)}`,
+      `rejecting the uncategorised ${target.trackingId} was blocked: ${JSON.stringify(refusal.body)}`,
     ).toBe(200)
 
-    const after = await api(page, `/api/v1/applications/${target!.applicationId}`)
-    const app = after.body?.data as { status?: string; ra11032?: { tier: string | null } }
+    const after = await api(page, `/api/v1/applications/${target.applicationId}`)
+    const app = after.body?.data as { status?: string; ra11032?: { source: string | null } }
     expect(app?.status).toBe('rejected')
-    // And it went through WITHOUT one being invented on the way, which would
-    // satisfy the gate by putting a statutory deadline on a filing that never
-    // had one.
-    expect(app?.ra11032?.tier, 'the refusal quietly assigned a processing category').toBeNull()
+    /*
+     * And it went through without anyone's name being put to the tier on the
+     * way, which would satisfy the gate by fabricating the very thing it exists
+     * to demand.
+     *
+     * Read off `source`, not off a null `tier`: `submit()` seeds a tier from
+     * `Ra11032::tierFor()`, so the column is never null on anything filed
+     * through the product and `toBeNull()` was asserting a state the flow
+     * cannot produce. `automatic` is "the system guessed"; `officer` is
+     * "somebody chose".
+     */
+    expect(
+      app?.ra11032?.source,
+      'the refusal quietly put an officer’s name to the processing category',
+    ).toBe('automatic')
   })
 })
 
