@@ -334,6 +334,18 @@ class UserController extends Controller
                 'open_reviews' => $summary['reviews'],
                 'open_inspections' => $summary['inspections'],
                 'total' => $summary['total'],
+                /*
+                 * Named on, but finished — so the dialog can reconcile itself
+                 * with the OIC register, which lists every assignment an
+                 * officer's name is on. Nothing here moves; see Caseload.
+                 */
+                'finished_reviews' => $summary['finished_reviews'],
+                /*
+                 * The work itself, so the dialog can name what it is moving
+                 * rather than only counting it. Capped; `total` above stays the
+                 * exact figure and the screen says when the list is shorter.
+                 */
+                'cases' => Caseload::cases($user),
                 'candidates' => $candidates->map(fn (User $c) => [
                     'id' => $c->id,
                     'name' => $c->name,
@@ -372,10 +384,29 @@ class UserController extends Controller
             // Null is meaningful: release to the office queue. `present` so a
             // caller has to say which they mean rather than fall into one.
             'to_user_id' => ['present', 'nullable', 'integer', 'exists:users,id'],
-            'scope' => ['required', Rule::in(['all', 'reviews', 'inspections'])],
+            /*
+             * Two ways to say what moves, and exactly one of them is required.
+             *
+             * `cases` names the rows, which is how the dialog asks: the admin
+             * ticks the permits this officer is holding. It is the ordinary
+             * case — one filing going to a colleague because it is stuck, while
+             * the rest of the caseload stays where it is — and no category can
+             * express that.
+             *
+             * `scope` stays because "move everything" is a real intent that
+             * should not need forty ids enumerated to state it, and because the
+             * Deactivate path releases a whole caseload through this endpoint
+             * with no list to hand it.
+             */
+            'scope' => ['required_without:cases', 'nullable', Rule::in(['all', 'reviews', 'inspections'])],
+            'cases' => ['required_without:scope', 'nullable', 'array', 'min:1'],
+            'cases.*.kind' => ['required', Rule::in(['review', 'inspection'])],
+            'cases.*.id' => ['required', 'integer'],
             'reason' => ['required', 'string', 'max:1000'],
         ], [
             'reason.required' => 'Say why this caseload is moving — it is recorded against both officers.',
+            'scope.required_without' => 'Choose which permits to move.',
+            'cases.required_without' => 'Choose which permits to move.',
         ]);
 
         $target = $data['to_user_id'] ? User::findOrFail($data['to_user_id']) : null;
@@ -403,11 +434,80 @@ class UserController extends Controller
             }
         }
 
-        $moved = DB::transaction(function () use ($user, $target, $data) {
+        /*
+         * A move that would move nothing is refused, not quietly performed.
+         *
+         * The endpoint used to answer 200 with `{"total": 0}` and the dialog
+         * printed a tick: an admin typed a reason, pressed the button, was told
+         * it had happened, and nothing had. That is the exact defect the
+         * Reassign dialog was rebuilt to remove — a control reporting success
+         * without acting — surviving at the one input nobody tried.
+         *
+         * Counted per SCOPE rather than off the total, because the total hides
+         * the interesting case: an officer holding reviews and no inspections
+         * has a caseload, so a total-based guard would wave an
+         * inspections-only move through and report zero moved.
+         */
+        /*
+         * A picked list is checked against what the officer ACTUALLY holds,
+         * before anything moves.
+         *
+         * `cases` arrives from a browser. Without this the endpoint would take
+         * any id and hand another officer's filing to whoever the dialog named
+         * — a reassignment nobody asked for, recorded against an admin who did
+         * not choose it. Finished work is refused by the same check, because
+         * `Caseload::reviews()` excludes it: a completed review keeps the name
+         * of the officer who made it.
+         *
+         * Refused whole rather than filtered down to the valid rows. A dialog
+         * that asked to move three and moved two, silently, is the "reported
+         * success without acting" defect wearing a smaller hat.
+         */
+        $picked = collect($data['cases'] ?? []);
+        if ($picked->isNotEmpty()) {
+            $heldReviews = Caseload::reviews($user)->pluck('id');
+            $heldInspections = Caseload::inspections($user)->pluck('id');
+
+            $strays = $picked->reject(fn (array $case) => $case['kind'] === 'review'
+                ? $heldReviews->contains($case['id'])
+                : $heldInspections->contains($case['id']));
+
+            if ($strays->isNotEmpty()) {
+                throw ValidationException::withMessages([
+                    'cases' => ["{$user->name} is not holding all of the cases you picked. Some may have been moved or finished since this page was opened — close it and try again."],
+                ]);
+            }
+        }
+
+        $available = $picked->isNotEmpty() ? $picked->count() : match ($data['scope']) {
+            'reviews' => Caseload::reviews($user)->count(),
+            'inspections' => Caseload::inspections($user)->count(),
+            default => Caseload::summary($user)['total'],
+        };
+
+        if ($available === 0) {
+            $finished = Caseload::finishedReviews($user)->count();
+
+            throw ValidationException::withMessages([
+                'scope' => [$finished > 0
+                    ? "{$user->name} has no open work to move. The {$finished} review(s) they are named on are finished, and a completed review keeps the name of the officer who made it."
+                    : "{$user->name} is not holding anything, so there is nothing to move."],
+            ]);
+        }
+
+        $moved = DB::transaction(function () use ($user, $target, $data, $picked) {
             $moved = ['reviews' => 0, 'inspections' => 0];
 
-            if ($data['scope'] !== 'inspections') {
-                $moved['reviews'] = Caseload::reviews($user)->get()
+            // A picked list narrows both queries; `scope` is ignored when one
+            // is given, because the list already says exactly what moves.
+            $pickedReviews = $picked->where('kind', 'review')->pluck('id');
+            $pickedInspections = $picked->where('kind', 'inspection')->pluck('id');
+            $scope = $picked->isNotEmpty() ? null : ($data['scope'] ?? 'all');
+
+            if ($scope !== 'inspections' && ($picked->isEmpty() || $pickedReviews->isNotEmpty())) {
+                $moved['reviews'] = Caseload::reviews($user)
+                    ->when($picked->isNotEmpty(), fn ($q) => $q->whereIn('id', $pickedReviews))
+                    ->get()
                     ->each(function ($assignment) use ($target, $data) {
                         $assignment->update(['officer_user_id' => $target?->id]);
                         Audit::log('assignment.reassigned', $assignment, [
@@ -417,8 +517,10 @@ class UserController extends Controller
                     })->count();
             }
 
-            if ($data['scope'] !== 'reviews') {
-                $moved['inspections'] = Caseload::inspections($user)->get()
+            if ($scope !== 'reviews' && ($picked->isEmpty() || $pickedInspections->isNotEmpty())) {
+                $moved['inspections'] = Caseload::inspections($user)
+                    ->when($picked->isNotEmpty(), fn ($q) => $q->whereIn('id', $pickedInspections))
+                    ->get()
                     ->each(function ($inspection) use ($target, $data) {
                         $inspection->update(['inspector_user_id' => $target?->id]);
                         Audit::log('inspection.reassigned', $inspection, [
@@ -430,7 +532,10 @@ class UserController extends Controller
 
             Audit::log('user.caseload_reassigned', $user, [
                 'to_user_id' => $target?->id,
-                'scope' => $data['scope'],
+                'scope' => $scope,
+                // The picked list is recorded too: "scope: null" on its own
+                // would leave the trail unable to say what an admin chose.
+                'cases' => $picked->isNotEmpty() ? $picked->values()->all() : null,
                 'reason' => $data['reason'],
             ] + $moved);
 

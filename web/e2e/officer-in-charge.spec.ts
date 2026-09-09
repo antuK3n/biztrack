@@ -427,3 +427,167 @@ test.describe('the business owner is told who holds their filing', () => {
     await expect(page).toHaveURL(/\/messages\?application=777/)
   })
 })
+
+/* ── Reassign on Officer Assignment: Scope is the permits held ────────────── */
+
+/*
+ * The other Reassign, and a different question from the one above.
+ *
+ * The Officer in Charge page starts from a CASE and moves the one. This starts
+ * from an OFFICER and moves what they hold — somebody has left, or is on leave.
+ * Its Scope field used to be three categories (everything / reviews only /
+ * inspections only), which cannot express the ordinary act: one filing going to
+ * a colleague because it is stuck while the rest of the caseload stays put. It
+ * is the list of permits now, and the admin ticks them.
+ */
+const HELD_CASES = [
+  {
+    kind: 'review',
+    id: 41,
+    application_id: 541,
+    tracking_id: 'BIZ-2026-00041',
+    business: 'Aling Nena Bakery',
+    office: { code: 'CHO', name: 'City Health Office' },
+    permit: 'Sanitary Permit / Health Certificate',
+    status_label: 'Pending',
+    at: '2026-09-01T02:00:00.000000Z',
+  },
+  {
+    kind: 'review',
+    id: 42,
+    application_id: 542,
+    tracking_id: 'BIZ-2026-00042',
+    business: 'Riverside Carinderia',
+    office: { code: 'CHO', name: 'City Health Office' },
+    permit: 'Sanitary Permit / Health Certificate',
+    status_label: 'In progress',
+    at: '2026-09-02T02:00:00.000000Z',
+  },
+]
+
+test.describe('Reassign on Officer Assignment', () => {
+  test.use({ storageState: sessionFor('admin') })
+
+  let moved: unknown[]
+
+  test.beforeEach(async ({ page }) => {
+    moved = []
+
+    await page.route('**/api/v1/admin/roles*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
+    await page.route('**/api/v1/reference/departments*', (route) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [] }) }))
+
+    await page.route('**/api/v1/admin/users?*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: [{
+            id: 50,
+            first_name: 'Rodel',
+            last_name: 'Cruz',
+            email: 'rodel@biztrack.local',
+            mobile_number: '09170000000',
+            gender: 'M',
+            is_active: true,
+            department: { id: 2, code: 'CHO', name: 'City Health Office' },
+            roles: ['sanitary_officer'],
+            created_at: '2026-08-01T00:00:00.000000Z',
+          }],
+          meta: { current_page: 1, last_page: 1, per_page: 20, total: 1 },
+        }),
+      }))
+
+    await page.route('**/api/v1/admin/users/50/caseload', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            user: { id: 50, name: 'Rodel Cruz' },
+            department: { id: 2, code: 'CHO', name: 'City Health Office' },
+            open_reviews: 2,
+            open_inspections: 0,
+            total: 2,
+            finished_reviews: 1,
+            cases: HELD_CASES,
+            candidates: [{ id: 13, name: 'Carlos Dizon', email: 'sanitary@biztrack.local', open_total: 0 }],
+          },
+        }),
+      }))
+
+    await page.route('**/api/v1/admin/users/50/reassign-caseload', async (route) => {
+      moved.push(route.request().postDataJSON())
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { moved_reviews: 1, moved_inspections: 0, total: 1, to: { id: 13, name: 'Carlos Dizon' } } }),
+      })
+    })
+
+    await page.goto('/staff/admin/users')
+    await expect(page.getByRole('heading', { name: /officer assignment/i })).toBeVisible({ timeout: 30_000 })
+    await page.getByRole('button', { name: 'Reassign' }).first().click()
+  })
+
+  test('Scope lists the permits the officer is holding', async ({ page }) => {
+    const dialog = page.getByRole('dialog')
+
+    await expect(dialog).toContainText('the permits Rodel Cruz is holding')
+
+    for (const held of HELD_CASES) {
+      const row = dialog.getByRole('listitem').filter({ hasText: held.business })
+      await expect(row, `${held.business} is not listed`).toHaveCount(1)
+      // Business number, office and permit — the shape the rest of the feature
+      // uses, and what tells two rows of one business apart.
+      await expect(row).toContainText(held.tracking_id)
+      await expect(row).toContainText(held.office.name)
+      await expect(row).toContainText(held.permit)
+    }
+
+    // Everything ticked to start with: "this officer has gone, move their work"
+    // is still the common act and should not cost a click per case.
+    for (const box of await dialog.getByRole('checkbox').all()) {
+      await expect(box).toBeChecked()
+    }
+    await expect(dialog).toContainText('Also named on 1 finished review')
+  })
+
+  test('only the ticked permits are sent', async ({ page }) => {
+    const dialog = page.getByRole('dialog')
+
+    const second = dialog.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
+    await second.getByRole('checkbox').uncheck()
+
+    await dialog.getByLabel(/reassign to/i).selectOption('13')
+    await dialog.getByRole('textbox').fill('That filing is stuck.')
+    await dialog.getByRole('button', { name: /move caseload/i }).click()
+
+    await expect.poll(() => moved.length).toBe(1)
+    expect(moved[0]).toMatchObject({
+      to_user_id: 13,
+      cases: [{ kind: 'review', id: 41 }],
+      reason: 'That filing is stuck.',
+    })
+    // The category is not sent beside the list: the API takes one or the other,
+    // and both would be two answers to "what moves" with no rule saying which.
+    expect(moved[0]).not.toHaveProperty('scope')
+  })
+
+  test('untick everything and there is nothing to confirm', async ({ page }) => {
+    const dialog = page.getByRole('dialog')
+
+    await dialog.getByRole('button', { name: 'Clear all' }).click()
+    await dialog.getByRole('textbox').fill('Changed my mind.')
+
+    /*
+     * The endpoint refuses an empty move (it used to answer 200 with a zero and
+     * the screen printed a tick). This stops the reader reaching that far, and
+     * says why before they have typed anything.
+     */
+    await expect(dialog).toContainText('Nothing falls under the scope chosen above')
+    const confirm = dialog.getByRole('button', { name: /move caseload|release to office/i })
+    await expect(confirm).toHaveAttribute('aria-disabled', 'true')
+  })
+})

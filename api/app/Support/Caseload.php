@@ -63,9 +63,27 @@ class Caseload
     }
 
     /**
-     * The two counts, for a dialog that has to say what it is about to do.
+     * Reviews this officer is NAMED on but which are finished.
      *
-     * @return array{reviews: int, inspections: int, total: int}
+     * Not part of a caseload — nothing here can be moved, and rewriting the name
+     * on a completed review would falsify the record of who did the work. It is
+     * reported because two screens otherwise contradict each other about one
+     * officer: the super admin's OIC register lists every assignment a name is
+     * on, so it says "Liza Reyes is officer in charge of two filings", while a
+     * caseload counting only open work says she is holding nothing. Both are
+     * true. Saying only one of them is what made it look like a bug.
+     */
+    public static function finishedReviews(User $officer): Builder
+    {
+        return ApplicationAssignment::query()
+            ->where('officer_user_id', $officer->id)
+            ->whereIn('status', self::CLOSED_ASSIGNMENTS);
+    }
+
+    /**
+     * The counts, for a dialog that has to say what it is about to do.
+     *
+     * @return array{reviews: int, inspections: int, total: int, finished_reviews: int}
      */
     public static function summary(User $officer): array
     {
@@ -76,6 +94,92 @@ class Caseload
             'reviews' => $reviews,
             'inspections' => $inspections,
             'total' => $reviews + $inspections,
+            'finished_reviews' => self::finishedReviews($officer)->count(),
         ];
+    }
+
+    /**
+     * The open work itself, named — one row per filing the officer holds.
+     *
+     * The Reassign dialog used to say "Open reviews: 2" and stop, so the admin
+     * confirmed a move without ever seeing WHICH filings were changing hands.
+     * Everywhere else on this feature the client asks for the work by name —
+     * business, business number, office, permit — and this was the one screen
+     * that reduced it to a count.
+     *
+     * Reviews and inspections in one list, each saying which it is, because
+     * they are one caseload to the person holding them and the dialog's Scope
+     * control already splits them when that matters.
+     *
+     * Capped. An officer with two hundred cases is a real possibility on a live
+     * register and a dialog is not a queue screen; the count above stays exact,
+     * and `$limit` only bounds what is printed.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function cases(User $officer, int $limit = 50): array
+    {
+        $reviews = self::reviews($officer)
+            ->with([
+                'department:id,code,name',
+                'application:id,tracking_id,business_id',
+                'application.business:id,name',
+                'application.permitTypes:id,code,name,issuing_department_id',
+            ])
+            ->get()
+            ->map(fn (ApplicationAssignment $a) => [
+                'kind' => 'review',
+                'id' => $a->id,
+                'application_id' => $a->application_id,
+                'tracking_id' => $a->application?->tracking_id,
+                // Null when the business has been removed from the register;
+                // the filing stays and the row still has to render.
+                'business' => $a->application?->business?->name,
+                'office' => $a->department ? ['code' => $a->department->code, 'name' => $a->department->name] : null,
+                /*
+                 * This office's own permit on the filing — what the officer is
+                 * actually reviewing. Matched on the issuing department rather
+                 * than taken as "the first permit", so a six-clearance filing
+                 * names the sanitary permit to City Health and the fire one to
+                 * BFP instead of naming the same permit to all six.
+                 *
+                 * Null is a real answer and the key is always present: an office
+                 * can be routed a filing that carries no permit it issues.
+                 */
+                'permit' => optional(
+                    $a->application?->permitTypes?->firstWhere('issuing_department_id', $a->department_id)
+                )->name,
+                'status_label' => $a->status?->label(),
+                'at' => optional($a->assigned_at)->toISOString(),
+            ]);
+
+        $inspections = self::inspections($officer)
+            ->with([
+                'department:id,code,name',
+                'application:id,tracking_id,business_id',
+                'application.business:id,name',
+            ])
+            ->get()
+            ->map(fn (Inspection $i) => [
+                'kind' => 'inspection',
+                'id' => $i->id,
+                'application_id' => $i->application_id,
+                'tracking_id' => $i->application?->tracking_id,
+                'business' => $i->application?->business?->name,
+                'office' => $i->department ? ['code' => $i->department->code, 'name' => $i->department->name] : null,
+                // A site visit is about the premises rather than one permit.
+                'permit' => null,
+                'status_label' => $i->status?->label(),
+                'at' => optional($i->scheduled_at)->toISOString(),
+            ]);
+
+        return $reviews->concat($inspections)
+            // Oldest first: the case that has been held longest is the one an
+            // admin is most likely to be moving, and it would otherwise be the
+            // one pushed off the end of a capped list.
+            ->sortBy(fn (array $row) => $row['at'] ?? '')
+            ->take($limit)
+            ->values()
+            ->all();
     }
 }
