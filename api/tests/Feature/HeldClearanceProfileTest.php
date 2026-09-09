@@ -189,8 +189,16 @@ it('survives the copy outliving the clearance stage', function () {
 it('shows an applicant nothing but their own copies', function () {
     $app = heldCopyFiling();
 
-    $this->postJson("/api/v1/applications/{$app->id}/clearances/MARKET/held", [
-        'file' => UploadedFile::fake()->create('market.pdf', 6, 'application/pdf'),
+    /*
+     * SANITARY, because MARKET no longer exists. Market Clearance and the City
+     * Market Office were removed — the clearance is for stall owners in the
+     * public market, which most businesses are not — so the upload 404'd on a
+     * permit code the register cannot resolve. The clearance chosen was never
+     * the subject here: what is under test is that this list is scoped on
+     * `applicant_user_id` and an officer reads none of it.
+     */
+    $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/held", [
+        'file' => UploadedFile::fake()->create('sanitary.pdf', 6, 'application/pdf'),
     ])->assertSuccessful();
 
     /*

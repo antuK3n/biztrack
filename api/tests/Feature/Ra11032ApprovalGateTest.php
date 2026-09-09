@@ -1,11 +1,14 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\AssignmentStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\AuditLog;
+use App\Models\Business;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Ra11032;
@@ -24,12 +27,20 @@ use Illuminate\Validation\ValidationException;
  * officer, not a control. Anyone holding a token can POST the approval
  * directly. These tests hold the server's half.
  *
- * Two approval paths reach Approved and they do not share a call: the last
- * office's review goes through approveAssignment(), and a filing already at
- * for_inspection is released by the last passing inspection, which never
- * touches approveAssignment at all. Both are covered below, because gating
- * only the first would leave permits mintable through the second — and the
- * register already holds pre-gate rows sitting in exactly that state.
+ * The gate is BPLO's, and since 6 September 2026 it is asked at BPLO's FIRST
+ * act rather than at whichever office happened to sign off last. That is the
+ * change this file absorbed: `requireProcessingCategory()` used to sit on the
+ * one approval every office shared, and there is no such approval any more —
+ * the other five offices approve a PERMIT (`approveClearance`), which is not
+ * gated on the tier at all, because the tier is a property of the filing and
+ * BPLO is the office that reads the filing.
+ *
+ * Two calls still reach it and they do not share a code path:
+ * `approveMainForm()`, entered through `approveAssignment()` when BPLO presses
+ * Approve on a For Approval filing, and `approveOverall()`, which is where the
+ * Mayor's Permit is minted. Both are covered below, because gating only the
+ * first would leave permits mintable through the second — and the register
+ * already holds pre-gate rows sitting in exactly that state.
  *
  * ── The two fixtures, and which of them is the case that matters ─────────────
  *
@@ -50,14 +61,36 @@ use Illuminate\Validation\ValidationException;
  * ones built on uncategorised() does. That asymmetry is the point of the file.
  */
 
-/** An under-review filing with its category cleared, as pre-gate rows are. */
+/**
+ * A freshly submitted filing: For Approval, with BPLO's queue item pending.
+ *
+ * Built by driving `submit()` rather than by querying the seeded register,
+ * which is what this used to do — it looked for a filing at `under_review`, a
+ * status that no longer exists, and there is no seeded filing sitting at
+ * `for_approval` to put in its place. Submitting is also the more honest
+ * fixture: For Approval with one pending BPLO assignment is precisely what
+ * submission produces, so the gate is being asked about the state the product
+ * actually creates rather than one a test wrote by hand.
+ */
+function gateFiling(): Application
+{
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+
+    $app = Application::create([
+        'business_id' => Business::where('owner_user_id', $owner->id)->firstOrFail()->id,
+        'applicant_user_id' => $owner->id,
+        'application_type' => ApplicationType::New,
+        'status' => ApplicationStatus::Draft,
+    ]);
+    $app->permitTypes()->sync(PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id'));
+
+    return app(WorkflowService::class)->submit($app);
+}
+
+/** That filing with its category cleared, as pre-gate rows are. */
 function uncategorised(): Application
 {
-    $app = Application::query()
-        ->where('status', ApplicationStatus::UnderReview->value)
-        ->whereNotNull('submitted_at')
-        ->whereHas('assignments', fn ($q) => $q->where('status', AssignmentStatus::Pending->value))
-        ->firstOrFail();
+    $app = gateFiling();
 
     $app->forceFill([
         'complexity' => null,
@@ -70,12 +103,12 @@ function uncategorised(): Application
 
 /**
  * The same filing carrying a tier the SYSTEM guessed and nobody has claimed —
- * the state every filing is in the moment it reaches an office.
+ * the state every filing is in the moment it reaches BPLO.
  *
- * Written to the columns rather than produced by re-submitting the filing,
- * because submit() only runs on a draft and this has to keep the pending
- * assignment the approval needs. The values are exactly the three submit()
- * leaves behind: our rule's tier, and no name against it.
+ * The values are exactly the three submit() leaves behind: our rule's tier, and
+ * no name against it. Restated here rather than simply trusted from submit()
+ * so that a change to what submission seeds fails this fixture loudly instead
+ * of turning every case below into the null fixture wearing another name.
  */
 function automaticallyCategorised(): Application
 {
@@ -103,13 +136,13 @@ function pendingAssignmentOn(Application $app): ApplicationAssignment
         ->firstOrFail();
 }
 
-/** Any officer of the office whose assignment this is. */
+/** Any officer of the office whose assignment this is — BPLO's, on this filing. */
 function officerBehind(ApplicationAssignment $assignment): User
 {
     return User::where('department_id', $assignment->department_id)->firstOrFail();
 }
 
-it('refuses an office approval while the filing has no category', function () {
+it('refuses BPLO’s approval of the form while the filing has no category', function () {
     $app = uncategorised();
     $assignment = pendingAssignmentOn($app);
 
@@ -137,7 +170,7 @@ it('lets that same approval through once a category is chosen', function () {
     expect($assignment->fresh()->status)->toBe(AssignmentStatus::Completed);
 });
 
-it('refuses an office approval on a category the system guessed', function () {
+it('refuses BPLO’s approval on a category the system guessed', function () {
     /*
      * THE CASE THE ORIGINAL BUG WOULD HAVE FAILED.
      *
@@ -158,12 +191,12 @@ it('refuses an office approval on a category the system guessed', function () {
 });
 
 it('mints no permits on a filing carrying only the system’s guess', function () {
-    // The other approval path, on the same shape. Gating only approveAssignment
-    // would leave permits mintable by the last passing inspection instead.
+    // The other approval path, on the same shape. Gating only the form approval
+    // would leave the Mayor's Permit mintable through the final one instead.
     $app = automaticallyCategorised();
     $before = Permit::where('application_id', $app->id)->count();
 
-    expect(fn () => app(WorkflowService::class)->approveAndIssue($app))
+    expect(fn () => app(WorkflowService::class)->approveOverall($app))
         ->toThrow(ValidationException::class);
 
     expect(Permit::where('application_id', $app->id)->count())->toBe($before)
@@ -262,7 +295,7 @@ it('mints no permits on an uncategorised filing', function () {
     $app = uncategorised();
     $before = Permit::where('application_id', $app->id)->count();
 
-    expect(fn () => app(WorkflowService::class)->approveAndIssue($app))
+    expect(fn () => app(WorkflowService::class)->approveOverall($app))
         ->toThrow(ValidationException::class);
 
     expect(Permit::where('application_id', $app->id)->count())->toBe($before)
@@ -279,8 +312,8 @@ it('names the category as the field at fault so the screen can point at it', fun
     $app = uncategorised();
 
     try {
-        app(WorkflowService::class)->approveAndIssue($app);
-        $this->fail('approveAndIssue accepted a filing with no processing category.');
+        app(WorkflowService::class)->approveOverall($app);
+        $this->fail('approveOverall accepted a filing with no processing category.');
     } catch (ValidationException $e) {
         expect($e->errors())->toHaveKey('complexity');
     }

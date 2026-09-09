@@ -188,7 +188,7 @@ it('leaves permits beyond the widest threshold alone', function () {
 
 it('does not chase a permit whose renewal is already filed', function () {
     $permit = reminderPermit(15);
-    fileRenewalAgainst($permit, ApplicationStatus::UnderReview);
+    fileRenewalAgainst($permit, ApplicationStatus::AwaitingOtherPermits);
 
     $this->artisan('biztrack:scan-permits')->assertSuccessful();
 
@@ -250,7 +250,7 @@ it('escalates to a renewal nudge only once the permit has been lapsed a week', f
 
 it('flips a past-due permit silently when its renewal is already filed', function () {
     $permit = reminderPermit(-3);
-    fileRenewalAgainst($permit, ApplicationStatus::UnderReview);
+    fileRenewalAgainst($permit, ApplicationStatus::AwaitingOtherPermits);
 
     $this->artisan('biztrack:scan-permits')->assertSuccessful();
 
