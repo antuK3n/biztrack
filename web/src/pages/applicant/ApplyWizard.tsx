@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import { checkPin, withinMalabon } from '../../lib/malabonGeo'
+import { psicSection, psicSectionRank } from '../../lib/psic'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -946,8 +947,33 @@ function LinesStep({
     )
     const promoted = new Set(common.map((c) => c.id))
 
+    /*
+     * Item 6 — the rest is ordered by SECTION so it can carry headings.
+     *
+     * The shortlist answers for eight trades. The other 127 arrived in
+     * reference-table order, which is no order the applicant can use: a single
+     * unbroken scroll where bakeries, clinics and repair shops interleave, and
+     * the only way to find one is to read all of it. Sorting by section is what
+     * makes a heading possible at all — a heading can only be drawn where the
+     * subject actually changes, so the grouping has to exist in the data before
+     * it can exist on the screen.
+     *
+     * Title within section, so the run under each heading is alphabetical and
+     * skimmable rather than arbitrary.
+     *
+     * Only when the box is EMPTY. A query is answered by relevance, and
+     * scattering matches under headings would bury the one the applicant typed
+     * for — which is also why `commonCount` is already 0 while searching.
+     */
+    const rest = listed
+      .filter((c) => !promoted.has(c.id))
+      .sort((a, b) => {
+        const rank = psicSectionRank(psicSection(a.code)) - psicSectionRank(psicSection(b.code))
+        return rank !== 0 ? rank : a.title.localeCompare(b.title)
+      })
+
     return {
-      results: [...common, ...listed.filter((c) => !promoted.has(c.id))],
+      results: [...common, ...rest],
       commonCount: common.length,
       total: listed.length,
     }
@@ -1150,11 +1176,35 @@ function LinesStep({
                           Most common
                         </li>
                       )}
-                      {commonCount > 0 && index === commonCount && (
-                        <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
-                          All other trades ({total - commonCount})
-                        </li>
-                      )}
+                      {/*
+                        * Item 6 — a heading wherever the SECTION changes, so the
+                        * 127 trades past the shortlist are skimmed rather than
+                        * read.
+                        *
+                        * "All other trades (127)" used to stand here alone, and
+                        * naming the size of a list is not the same as making it
+                        * navigable: it told the applicant exactly how much
+                        * scrolling was ahead and nothing about where to stop.
+                        *
+                        * Drawn on CHANGE rather than by slicing the array into
+                        * groups, because the rows are one radiogroup and the
+                        * index each row reports is its position in it. Splitting
+                        * the list into per-section arrays would restart that
+                        * count in every group and break the radio semantics for
+                        * the sake of tidier JSX.
+                        *
+                        * Suppressed while searching: `commonCount` is 0 then,
+                        * and a query is answered by relevance rather than by
+                        * subject.
+                        */}
+                      {commonCount > 0 &&
+                        index >= commonCount &&
+                        (index === commonCount ||
+                          psicSection(results[index - 1].code) !== psicSection(code.code)) && (
+                          <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+                            {psicSection(code.code)}
+                          </li>
+                        )}
                       <li>
                         <button
                           type="button"
