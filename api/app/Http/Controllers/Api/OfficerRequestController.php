@@ -219,9 +219,30 @@ class OfficerRequestController extends Controller
         $query = OfficerRequest::with($this->eager());
         $user = $request->user();
 
-        if (ApplicationVisibility::readsEveryOffice($user)) {
-            // BPLO and the super admin coordinate every office's requests.
-        } elseif ($user->hasPermission('application.view_all')) {
+        /*
+         * The super admin, and nobody else, reads the register whole.
+         *
+         * `readsEveryOffice` is held by two roles — BPLO and the super admin —
+         * and BPLO used to ride in on it, so a requirement the fire office
+         * raised appeared in BPLO's list. The client has ruled that an office
+         * sees what that office asked for, BPLO included: "sa fire ganon, sa
+         * kanya lang din dapat, di dapat mag-reflect sa BPLO."
+         *
+         * The line between the two is the office itself, not the permission: an
+         * account that BELONGS to a department is bounded by it, and the super
+         * admin belongs to none. That is also why scoping the admin the same way
+         * would be wrong rather than merely stricter — `department_id` is null
+         * there, so the office branch below would match nothing and the
+         * oversight role would read an empty list.
+         *
+         * What this costs, said out loud: nobody can now unblock another
+         * office's requirement. BPLO held that hand deliberately, to keep a
+         * filing moving when an office went quiet. The super admin is what is
+         * left of it.
+         */
+        if (ApplicationVisibility::readsEveryOffice($user) && $user->department_id === null) {
+            // Oversight of the register: reads everything, raises nothing.
+        } elseif ($user->hasPermission(ApplicationVisibility::VIEW_ALL)) {
             /*
              * Checklist item 111: an office sees its OWN requirements, not every
              * requirement on a filing it happens to share.
@@ -456,13 +477,18 @@ class OfficerRequestController extends Controller
          * behalf, and the audit row would carry the wrong department's judgement.
          *
          * Same two doors as index(): your own office, or a request you raised
-         * yourself on another office's behalf. BPLO and the super admin keep the
-         * wider hand deliberately — BPLO coordinates every other office's
-         * clearance and has to be able to unblock a filing when an office has
-         * gone quiet, which is the whole reason it holds view_any_office.
+         * yourself on another office's behalf.
+         *
+         * BPLO used to keep a wider hand here, on the reasoning that it
+         * coordinates the other offices' clearances and must be able to unblock
+         * a filing when one goes quiet. The client has ruled that an office is
+         * bounded by what it asked for, BPLO included — and closing is the
+         * stronger act of the two, so if BPLO may not READ another office's
+         * requirement it certainly may not rule on one. Only the super admin,
+         * who belongs to no office, is still outside this.
          */
         $user = $request->user();
-        if (! ApplicationVisibility::readsEveryOffice($user)) {
+        if (! (ApplicationVisibility::readsEveryOffice($user) && $user->department_id === null)) {
             abort_unless(
                 $officerRequest->requested_by_user_id === $user->id
                     || ($user->department_id && $officerRequest->department_id === $user->department_id),

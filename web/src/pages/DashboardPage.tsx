@@ -13,6 +13,7 @@ import { Logo } from '../components/Logo'
 import { AccountRestrictedModal, StatusChip } from '../components/ui/Proto'
 import { businessName } from '../lib/format'
 import { businesses, requests } from '../lib/resources'
+import { REQUIREMENT_CHIP_TONE } from '../lib/status'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 
@@ -128,7 +129,22 @@ function OtherRequirementsPanel() {
                 </p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-2">
-                <StatusChip tone="orange">{r.status_label}</StatusChip>
+                {/*
+                  The same tone map the Other Requirements page uses, not a
+                  hard-coded orange. Every row here is waiting on the owner, so
+                  amber was nearly always right — but a REJECTED document is
+                  also waiting on them, and drawing a refusal in the waiting
+                  colour told them to expect a form to fill rather than a
+                  decision to answer. The page one click away said red.
+
+                  The fallback stays orange rather than the requirements page's
+                  grey: everything on THIS panel is waiting on the owner by
+                  construction, so a status the API adds later is still
+                  something they owe, and grey would read as "nothing to do".
+                */}
+                <StatusChip tone={REQUIREMENT_CHIP_TONE[r.status] ?? 'orange'}>
+                  {r.status_label}
+                </StatusChip>
                 <Link
                   to="/requests"
                   className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"

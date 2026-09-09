@@ -168,3 +168,18 @@ function destinationFor(user: User, item: NavItem): string | undefined {
   }
   return item.to
 }
+
+/**
+ * Where an owner goes to ask the City BPLO about something.
+ *
+ * The general enquiry — the conversation that exists with no filing behind it.
+ * It is the right destination for an appeal precisely because a restricted
+ * account may have nothing filed to hang the question on, and because
+ * `MessageController::generalRows` synthesises the row for an owner who has
+ * never written, so the link never lands on an empty screen.
+ *
+ * `application=general` is the Messages page's own row key for it (see the note
+ * on `rowKey` in MessagesPage): filings key by id, and the enquiry takes the
+ * literal, which `Number()` reads as NaN and no filing can collide with.
+ */
+export const BPLO_ENQUIRY = '/messages?application=general'
