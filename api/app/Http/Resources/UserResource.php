@@ -24,6 +24,13 @@ class UserResource extends JsonResource
                 'code' => $this->department->code,
                 'name' => $this->department->name,
             ] : null,
+            /*
+             * Whether to fetch the photo, not where it lives. `avatar_path`
+             * points into the private disk, and a client that knew it could ask
+             * for another account's file by editing the path; the photo route
+             * serves the signed-in user's own row instead of taking a path.
+             */
+            'has_photo' => $this->avatar_path !== null,
             'is_active' => (bool) $this->is_active,
             'email_verified_at' => optional($this->email_verified_at)->toISOString(),
             'roles' => $this->roleNames(),

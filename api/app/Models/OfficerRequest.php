@@ -12,6 +12,11 @@ class OfficerRequest extends Model
     protected $fillable = [
         'application_id', 'requested_by_user_id', 'department_id', 'title',
         'description', 'request_type', 'status', 'due_date',
+        // The note written when the requirement is RAISED, and the office's
+        // optional reference file (a blank form, a template). Both are separate
+        // from `remarks`/`file_path`, which travel the other way — see the
+        // migration that added them.
+        'additional_remarks', 'reference_path', 'reference_name',
         'file_name', 'file_path', 'application_document_id',
         'meeting_scheduled_at', 'meeting_duration_minutes', 'meeting_link',
         'meeting_platform', 'external_calendar_event_id',

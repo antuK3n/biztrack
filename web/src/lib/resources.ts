@@ -1,9 +1,14 @@
 import axios from 'axios'
 import { api } from './api'
+import { formatBytes } from './format'
 import type {
   AdminBusiness,
+  AdminCaseload,
+  AdminRole,
   AdminUser,
   AdminUserPayload,
+  CaseloadMove,
+  CaseloadMovePayload,
   AnalyticsSummary,
   Application,
   ApplicationListItem,
@@ -49,10 +54,14 @@ import type {
   RenewalReminderResult,
   RenewalModelReport,
   RenewalRiskReport,
-  RequestType,
+  CreateRequirementPayload,
+  OfficeStatusOption,
+  RequestStatus,
   RiskAction,
   RiskBand,
   TimelineEntry,
+  User,
+  ReleasedCaseload,
 } from './types'
 
 /*
@@ -550,12 +559,27 @@ export const documents = {
 
 /* ── Messaging (per-application thread; v2) ───────────────────────────── */
 
+export interface ThreadFilters extends PageParams {
+  /**
+   * The inbox's Filter, answered in SQL.
+   *
+   * Server-side because the inbox is paged at fifty: narrowing the downloaded
+   * page would tell a clerk with ninety conversations that nothing is unread
+   * while the unread ones sit on page two.
+   *
+   *  unread   — somebody else wrote and this reader has not opened it
+   *  awaiting — the reader's own turn was the last one
+   *  quiet    — nothing has been said on the filing at all
+   */
+  narrow?: 'unread' | 'awaiting' | 'quiet'
+}
+
 export const messages = {
   /** Inbox for the Messages page: one row per conversation, newest first. Paged. */
-  threads: (params: PageParams = {}) =>
+  threads: (params: ThreadFilters = {}) =>
     unwrap<MessageThreadSummary[]>(api.get('/message-threads', { params })),
   /** Same inbox, keeping the page meta. */
-  threadsPage: (params: PageParams = {}) =>
+  threadsPage: (params: ThreadFilters = {}) =>
     unwrapPaged<MessageThreadSummary>(api.get('/message-threads', { params })),
   /**
    * One conversation, oldest message first, with its meta.
@@ -613,6 +637,34 @@ export const messages = {
       }),
     )
   },
+  /*
+   * The enquiry that has no filing behind it — always BPLO.
+   *
+   * No id in the path means "mine", which is what an applicant sends: someone
+   * who has registered no business has no tracking id to put in a URL. An
+   * officer passes the person's id; the office check is on the server, so the
+   * two-argument form is not a way in for anybody else.
+   */
+  generalWithMeta: async (
+    userId?: number | null,
+  ): Promise<{ data: Message[]; meta: MessageTranscriptMeta }> => {
+    const res = await api.get<{ data: Message[]; meta: MessageTranscriptMeta }>(
+      userId ? `/general-messages/${userId}` : '/general-messages',
+    )
+    return { data: res.data.data, meta: res.data.meta }
+  },
+  sendGeneral: (body: string, attachment?: File | null, userId?: number | null) => {
+    const url = userId ? `/general-messages/${userId}` : '/general-messages'
+    if (attachment) {
+      const form = new FormData()
+      form.append('body', body)
+      form.append('attachment', attachment)
+      return unwrap<Message>(
+        api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+      )
+    }
+    return unwrap<Message>(api.post(url, { body }))
+  },
   /** Attachment save-to-disk (the resource's download_url carries no bearer). */
   attachmentDownload: (id: number, filename: string) =>
     downloadBlob(`/message-attachments/${id}/download`, filename),
@@ -625,26 +677,57 @@ export const messages = {
 
 export interface RequestFilters extends PageParams {
   status?: string
+  /**
+   * Server-side, because the list is paged: sorting the downloaded page would
+   * order fifty rows and leave the fifty-first out of the order it belongs in.
+   */
+  sort?: 'recent' | 'oldest'
 }
 
 export const requests = {
   /** Requests visible to the caller, newest first. Paged (default 50). */
   list: (filters: RequestFilters = {}) =>
     unwrap<OfficerRequest[]>(api.get('/requests', { params: filters })),
-  /** Same list, keeping the page meta. */
+  /**
+   * Same list, keeping the page meta — which also carries `office_statuses`,
+   * the statuses an office may set and the words to show for them.
+   */
   page: (filters: RequestFilters = {}) =>
-    unwrapPaged<OfficerRequest>(api.get('/requests', { params: filters })),
-  /** Officer creates a request against an application. */
-  create: (
-    applicationId: number,
-    body: {
-      request_type: RequestType
-      subject: string
-      body: string
-      /** Office the applicant sees this from; defaults to the requester's own. */
-      department_id?: number
-    },
-  ) => unwrap<OfficerRequest>(api.post(`/applications/${applicationId}/requests`, body)),
+    unwrapPaged<
+      OfficerRequest,
+      PageMeta & {
+        /** What an office may set a status TO. Shorter than `statuses`. */
+        office_statuses: OfficeStatusOption[]
+        /** Every status a row can hold — what the filter offers. */
+        statuses: OfficeStatusOption[]
+      }
+    >(api.get('/requests', { params: filters })),
+  /**
+   * An office raises a requirement against an application.
+   *
+   * No `department_id` and no `request_type`. The office is taken from the
+   * signed-in account server-side — sending one is ignored — and an Other
+   * Requirement is a document request by definition, so neither is the
+   * officer's to choose. Multipart whenever a reference file is attached,
+   * because a blank form or template travels with the request.
+   */
+  create: (applicationId: number, body: CreateRequirementPayload) => {
+    const { reference, ...fields } = body
+    const url = `/applications/${applicationId}/requests`
+    if (!reference) return unwrap<OfficerRequest>(api.post(url, fields))
+
+    const form = new FormData()
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== undefined && value !== null && value !== '') form.append(key, String(value))
+    }
+    form.append('reference', reference)
+    return unwrap<OfficerRequest>(
+      api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    )
+  },
+  /** The office's reference file (a blank form, a template), opened in a tab. */
+  viewReference: (id: number, target?: Window | null) =>
+    viewBlob(`/requests/${id}/reference`, target),
   /** Owner responds; optional document is posted as multipart. */
   respond: (id: number, body: string, document?: File | null, documentTypeId?: number) => {
     if (document) {
@@ -661,8 +744,24 @@ export const requests = {
     return unwrap<OfficerRequest>(api.post(`/requests/${id}/respond`, { body }))
   },
   /** Officer closes a submitted request. */
-  close: (id: number, outcome: 'fulfilled' | 'rejected') =>
-    unwrap<OfficerRequest>(api.post(`/requests/${id}/close`, { outcome })),
+  /**
+   * The office rules on a submission.
+   *
+   * `needs_resubmission` sends it back with a reason and keeps the requirement
+   * alive — the client's "do not mark it completed after rejection". `rejected`
+   * remains in the API for withdrawing a requirement raised in error, which is
+   * a different act and is not offered on the review screen.
+   *
+   * `remarks` is required by the API for anything but an approval.
+   */
+  close: (
+    id: number,
+    outcome: RequestStatus,
+    remarks?: string,
+  ) =>
+    unwrap<OfficerRequest>(
+      api.post(`/requests/${id}/close`, { outcome, ...(remarks ? { remarks } : {}) }),
+    ),
 }
 
 /* ── Payments ─────────────────────────────────────────────────────────── */
@@ -769,6 +868,35 @@ export const inspections = {
   list: (filters: { status?: string; page?: number; per_page?: number } = {}) =>
     unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
+  /**
+   * Book the FIRST visit on one permit. Answers with the inspection it creates.
+   *
+   * Addressed by the permit's CODE and not by an inspection id, unlike every
+   * other call in this object, because there is no inspection yet — this is what
+   * opens one. That is also why it hangs off the application: the pivot row
+   * `application_permit_types` is the thing being moved, and it is keyed on the
+   * pair.
+   *
+   * Booking is a separate act from approving the paperwork, deliberately. The
+   * service used to schedule a visit two working days out the instant an office
+   * approved (`scheduleInspectionFor`); the client's verified procedure is
+   * "Select Inspection Date and Approve Inspection", so the office says when. A
+   * permit sits at `for_inspection` with no visit until somebody calls this, and
+   * before this method existed there was no screen that could.
+   *
+   * Only the office that ISSUES the permit may call it —
+   * `InspectionController::schedule` compares the caller's department against
+   * `permit_types.issuing_department_id` and answers 403 otherwise — so a caller
+   * must not draw the control on another office's clearance.
+   *
+   * `scheduled_at` is a full ISO instant, not a date: the applicant's Awaiting
+   * Other Permits card prints it with `formatDateTime`, so a bare day would show
+   * a visit booked for midnight.
+   */
+  schedule: (applicationId: number, code: string, scheduled_at: string) =>
+    unwrap<Inspection>(
+      api.post(`/applications/${applicationId}/permits/${code}/inspection`, { scheduled_at }),
+    ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
   reschedule: (id: number, scheduled_at: string) =>
@@ -988,11 +1116,45 @@ export interface AdminUserFilters extends PageParams {
   role?: string
   /** Narrow to one office — what the review screen's officer picker wants. */
   department_id?: number
+  /** Tri-state: omit for both, true for active only, false for inactive only. */
+  is_active?: boolean
+  /** Leave citizens out — the Officer Assignment screen wants staff only. */
+  staff?: boolean
 }
 
 export interface AdminBusinessFilters extends PageParams {
   q?: string
   status?: BusinessStatus
+}
+
+/** Which audit rows to read. All optional; omitting every one reads the trail. */
+export interface AuditLogFilters extends PageParams {
+  action?: string
+  /** Short model name — 'Business', 'User'. The API prepends the namespace. */
+  auditable_type?: string
+  auditable_id?: number
+  /** The actor, by user id. */
+  user_id?: number
+}
+
+/**
+ * Put the staff-directory filters on the wire in a shape the API accepts.
+ *
+ * `is_active` is the whole reason this exists. Axios serialises a boolean query
+ * param as the string "true"/"false", and Laravel's `boolean` validation rule
+ * accepts true, false, 1, 0, "1" and "0" — but NOT "true"/"false". So passing a
+ * plain boolean through 422'd the entire directory and put the Officer
+ * Assignment screen into an error state the moment anyone filtered by status.
+ *
+ * The API now folds those two spellings as well, so this is belt and braces —
+ * but 1/0 is the unambiguous form and it is what this sends.
+ */
+function userParams(filters: AdminUserFilters): Record<string, unknown> {
+  const { is_active, staff, ...rest } = filters
+  const params: Record<string, unknown> = { ...rest }
+  if (is_active !== undefined) params.is_active = is_active ? 1 : 0
+  if (staff !== undefined) params.staff = staff ? 1 : 0
+  return params
 }
 
 export const admin = {
@@ -1005,11 +1167,11 @@ export const admin = {
    */
   users: (filters: AdminUserFilters = {}) =>
     unwrap<AdminUser[]>(
-      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...filters } }),
+      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...userParams(filters) } }),
     ),
   /** Same directory, keeping the page meta. Prefer this on the Users screen. */
   usersPage: (filters: AdminUserFilters = {}) =>
-    unwrapPaged<AdminUser>(api.get('/admin/users', { params: filters })),
+    unwrapPaged<AdminUser>(api.get('/admin/users', { params: userParams(filters) })),
   /** Real business roster for the Owner Status table (v2). Paged (default 50). */
   businesses: (filters: AdminBusinessFilters = {}) =>
     unwrap<AdminBusiness[]>(api.get('/admin/businesses', { params: filters })),
@@ -1019,13 +1181,43 @@ export const admin = {
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
+  /**
+   * The roles an officer account may be given, with the labels the API holds.
+   *
+   * The screen used to carry its own list of four role names and its own map of
+   * labels, so four of the city's seven offices could not be staffed at all and
+   * three roles rendered as raw `obo_staff`. `roles.display_name` has held the
+   * right words since the first migration.
+   */
+  roles: () => unwrap<AdminRole[]>(api.get('/admin/roles')),
   createUser: (body: AdminUserPayload) => unwrap<AdminUser>(api.post('/admin/users', body)),
   updateUser: (id: number, body: Partial<AdminUserPayload>) =>
     unwrap<AdminUser>(api.put(`/admin/users/${id}`, body)),
-  toggleActive: (id: number) => unwrap<AdminUser>(api.post(`/admin/users/${id}/toggle-active`)),
-  auditLogs: async (page = 1): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
+  /**
+   * Toggle activation, and report what the change released.
+   *
+   * Deactivation hands the officer's open work back to their office, so the
+   * caller needs the counts to say what happened rather than just that it did.
+   */
+  toggleActive: async (id: number): Promise<{ user: AdminUser; released: ReleasedCaseload | null }> => {
+    const res = await api.post<{ data: AdminUser; meta?: { released?: ReleasedCaseload } }>(
+      `/admin/users/${id}/toggle-active`,
+    )
+    return { user: res.data.data, released: res.data.meta?.released ?? null }
+  },
+  /** What this officer is holding, and which colleagues could take it. */
+  caseload: (id: number) => unwrap<AdminCaseload>(api.get(`/admin/users/${id}/caseload`)),
+  /** Move it. `to_user_id: null` releases it to the office queue. */
+  reassignCaseload: (id: number, body: CaseloadMovePayload) =>
+    unwrap<CaseloadMove>(api.post(`/admin/users/${id}/reassign-caseload`, body)),
+  auditLogs: async (
+    pageOrFilters: number | AuditLogFilters = 1,
+  ): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
+    // Historically this took a bare page number and several callers still pass
+    // one; a filter object is the shape that can also ask about one record.
+    const params = typeof pageOrFilters === 'number' ? { page: pageOrFilters } : pageOrFilters
     const res = await api.get<{ data: AuditLog[]; meta?: Partial<PageMeta> }>('/admin/audit-logs', {
-      params: { page },
+      params,
     })
     return {
       data: res.data.data,
@@ -1033,4 +1225,92 @@ export const admin = {
       total: res.data.meta?.total ?? res.data.data.length,
     }
   },
+}
+
+/* ── Unread badges ────────────────────────────────────────────────────── */
+
+export interface UnreadSummary {
+  messages: number
+  notifications: number
+}
+
+/**
+ * What is waiting for the signed-in user, for the two nav badges.
+ *
+ * One call for both numbers: the nav draws them together on every screen, and
+ * two polls would be two round trips on each one. Counts are scoped on the
+ * server exactly like the conversations themselves — a badge that counted mail
+ * the reader may not open would leak its existence as a number.
+ */
+export const unread = {
+  summary: () => unwrap<UnreadSummary>(api.get('/unread-summary')),
+}
+
+/* ── Profile photo ────────────────────────────────────────────────────── */
+
+/*
+ * The rules for "Edit Profile Picture", in one place — the same reasoning as
+ * pages/applicant/uploads.ts, which does this for application documents. Two
+ * screens draw the avatar (Settings and Profile) and one of them uploads; a
+ * second idea of "5 MB" or "JPG or PNG" living in a component is how a screen
+ * starts accepting a file the API then refuses.
+ *
+ * These must agree with AuthController::updatePhoto — mimes:jpg,jpeg,png and
+ * max:5120. Narrower than a document upload on purpose: an <img> cannot render
+ * a PDF, and this is a face rather than an A4 scan.
+ */
+export const ACCEPTED_PHOTO_EXTENSIONS = ['jpg', 'jpeg', 'png']
+export const PHOTO_ACCEPT_ATTR = '.jpg,.jpeg,.png'
+export const MAX_PHOTO_BYTES = 5 * 1024 * 1024
+
+/**
+ * Why this image cannot be sent, checked before it leaves the browser — so the
+ * answer names the actual defect instead of arriving as a bare 422 after the
+ * upload has already cost the user their connection.
+ */
+export function photoRejection(file: File): string | null {
+  const ext = file.name.includes('.') ? file.name.split('.').pop()!.toLowerCase() : ''
+  if (!ACCEPTED_PHOTO_EXTENSIONS.includes(ext)) {
+    return `“${file.name}” is not an image we can show. Choose a JPG or PNG.`
+  }
+  if (file.size === 0) {
+    return `“${file.name}” is empty. Check the file opens on your device, then choose it again.`
+  }
+  if (file.size > MAX_PHOTO_BYTES) {
+    return `“${file.name}” is ${formatBytes(file.size)}. The limit is 5 MB — try a smaller photo.`
+  }
+  return null
+}
+
+export const profilePhoto = {
+  /**
+   * The signed-in user's photo as a blob: URL, or null when they have none.
+   *
+   * Not an <img src="/api/v1/auth/profile/photo">: the route is behind Sanctum
+   * and an img tag sends no Authorization header, so the browser would render a
+   * broken image. Same fix as DocumentActions — fetch with the interceptor
+   * attached, then hand the tag an object URL.
+   *
+   * The caller owns the URL and must revokeObjectURL it, or every save leaks
+   * the previous image for the life of the tab.
+   */
+  objectUrl: async (): Promise<string | null> => {
+    try {
+      const res = await api.get('/auth/profile/photo', { responseType: 'blob' })
+      return URL.createObjectURL(res.data as Blob)
+    } catch (error) {
+      // 404 is the ordinary "no photo set" answer, not a failure to report.
+      if (axios.isAxiosError(error) && error.response?.status === 404) return null
+      throw error
+    }
+  },
+
+  upload: (file: File): Promise<User> => {
+    const body = new FormData()
+    body.append('photo', file)
+    // POST, not PUT: PHP fills $_FILES from a multipart body only on POST.
+    return unwrap<User>(api.post('/auth/profile/photo', body))
+  },
+
+  remove: (): Promise<User> => unwrap<User>(api.delete('/auth/profile/photo')),
 }

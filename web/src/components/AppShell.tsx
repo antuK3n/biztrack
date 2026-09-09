@@ -7,6 +7,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
  */
 import { loginPathFor, portalPath } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
+import { unread as unreadApi } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useNotifications } from '../stores/notifications'
@@ -21,6 +22,7 @@ const ROLE_LABELS: Record<string, string> = {
   zoning_officer: 'Zoning officer',
   obo_staff: 'Building official staff',
   cenro_officer: 'Environment officer',
+  market_admin: 'Market administrator',
   admin: 'Administrator',
 }
 
@@ -29,7 +31,12 @@ export function roleLabel(user: User): string {
 }
 
 /* Prototype rail (PDF p5/p61): royal column, icon + tiny label, active = white tile. */
-function Rail({ user }: { user: User }) {
+/*
+ * `unreadMessages` is passed down rather than polled here: the bell needs the
+ * same request, and two components each polling would double the traffic for
+ * one answer.
+ */
+function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) {
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
   /*
@@ -75,8 +82,11 @@ function Rail({ user }: { user: User }) {
                     className={`flex h-11 w-11 items-center justify-center rounded-xl transition-colors ${
                       isActive ? 'bg-white shadow-card' : 'group-hover:bg-white/15'
                     }`}
+                    // relative: UnreadBadge pins itself to this box's corner.
+                    style={{ position: 'relative' }}
                   >
                     <item.icon size={22} className={isActive ? 'text-royal' : 'text-white'} />
+                    {item.to?.endsWith('/messages') && <UnreadBadge count={unreadMessages} />}
                   </span>
                   {/* Two lines' worth of box on every item, wrapped or not, so
                       the icons above them stay on one pitch down the rail.
@@ -202,89 +212,102 @@ function LogoutModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
   )
 }
 
-/**
- * How often to ask whether anything new has arrived.
- *
- * The same 30 seconds MessagesPanel polls on, and for the same reason: it is
- * short enough that an applicant refreshing a page has usually already been
- * told, and long enough that a session left open all afternoon is not two
- * requests a minute for nothing. One row of payload each time — see the note in
- * `stores/notifications.ts`.
- */
-const NOTIFICATION_POLL_MS = 30_000
+const UNREAD_POLL_MS = 30_000
 
 /**
- * Notification bell, fixed top-right on the canvas (p5) — now with the count.
+ * How much is waiting, refreshed while the shell is mounted.
  *
- * ── There was no indication at all, and notifications are silent ──────────
+ * Polled rather than pushed because the whole app is: there are no websockets
+ * here and the message transcript already refreshes on a timer. 30s matches it,
+ * so the badge and the conversation never disagree by more than one tick.
  *
- * `NotificationService` writes a row, sends to the log mailer and the SMS log,
- * and tells no browser anything: the plan is polling, not websockets. Nothing
- * polled. So this bell was a plain link, unchanged whether the reader had
- * nothing waiting or eleven things, and the only way to find out was to click
- * it on the off-chance. Every notification the system sent — a form returned,
- * fees adjusted, a permit issued, a permit about to expire — arrived where
- * nobody was looking.
+ * A failed poll keeps the last known counts rather than resetting to zero. The
+ * badge is an invitation to look, and flicking it off because one request lost
+ * the network would hide mail that is still sitting there.
  *
- * The count comes from a shared store rather than local state because the
- * notifications page lowers it too, and it is a route rather than a child of
- * this component.
+ * ── Why the notification count goes into the store rather than staying here ──
  *
- * ── Accessibility, and why the badge is not only a dot ────────────────────
+ * Two branches grew a bell badge independently, and both were right about
+ * something. This poll knows about BOTH counters — messages and notifications —
+ * from one request. The notifications store knows when the count has just
+ * changed for a reason: the notifications page reads a row and calls
+ * `setUnread` with a number fresher than any poll can be.
  *
- * DESIGN.md's Never Color Alone: a red dot alone encodes "you have something"
- * in colour and position and nothing else. The badge carries the NUMBER, so it
- * is legible without colour vision, and the link's accessible name says the
- * same thing in words — a screen reader announces "Notifications, 3 unread"
- * rather than reading a decorative circle. `aria-hidden` on the badge itself
- * stops it being read twice.
- *
- * Nine is the cap. Past that the exact figure is not what anybody is deciding
- * on, and a three-digit badge would burst a 40px control.
+ * Keeping both would have meant two sources of truth for one number, with the
+ * bell contradicting the page for up to thirty seconds after a read. So the
+ * poll WRITES the notification count into the store and the bell READS it from
+ * there: the timer keeps it current, the page corrects it instantly, and there
+ * is one number. Messages have no such store, so they stay local.
  */
-function Bell() {
-  const portal = useAuth((s) => s.portal)
-  const unread = useNotifications((s) => s.unread)
-  const refresh = useNotifications((s) => s.refresh)
+function useUnread() {
+  const [counts, setCounts] = useState({ messages: 0, notifications: 0 })
+  const setUnread = useNotifications((s) => s.setUnread)
 
   useEffect(() => {
-    void refresh()
-    const timer = setInterval(() => void refresh(), NOTIFICATION_POLL_MS)
+    let cancelled = false
 
-    /*
-     * A tab left in the background is not polled by most browsers on the
-     * timer's schedule, and one brought back to the front is exactly when
-     * somebody wants to know. Asking on focus costs one request and closes the
-     * gap between "I came back" and the next tick.
-     */
-    const onFocus = () => void refresh()
-    window.addEventListener('focus', onFocus)
-
-    return () => {
-      clearInterval(timer)
-      window.removeEventListener('focus', onFocus)
+    const poll = () => {
+      unreadApi
+        .summary()
+        .then((next) => {
+          if (cancelled) return
+          setCounts(next)
+          setUnread(next.notifications)
+        })
+        .catch(() => {
+          /* keep the last known counts */
+        })
     }
-  }, [refresh])
 
-  const label = unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'
+    poll()
+    const timer = setInterval(poll, UNREAD_POLL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [setUnread])
 
+  return counts
+}
+
+/**
+ * The count on an icon.
+ *
+ * Never colour alone: the number IS the information, and it is also spelled out
+ * for a screen reader on the link itself — a bare "3" read after a link called
+ * "Messages" sounds like a position in a list.
+ *
+ * Capped at 99+ so a long-neglected inbox cannot widen the rail.
+ */
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-s-red px-1 text-[10px] font-bold leading-none text-white ring-2 ring-canvas"
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  )
+}
+
+/* Notification bell, fixed top-right on the canvas (p5). */
+function Bell({ count }: { count: number }) {
+  const portal = useAuth((s) => s.portal)
   return (
     <NavLink
       to={portalPath(portal, '/notifications')}
-      title={label}
-      aria-label={label}
+      title="Notifications"
+      aria-label={
+        count > 0
+          ? `Notifications, ${count} unread`
+          : 'Notifications'
+      }
       className="fixed right-5 top-4 z-20 flex h-10 w-10 items-center justify-center rounded-full text-royal hover:bg-white/60"
     >
       <span className="relative flex items-center justify-center">
         <BellIcon size={24} />
-        {unread > 0 && (
-          <span
-            aria-hidden="true"
-            className="absolute -right-2 -top-1.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-canvas bg-s-red px-1 text-[10px] font-bold leading-none text-white tnum"
-          >
-            {unread > 9 ? '9+' : unread}
-          </span>
-        )}
+        <UnreadBadge count={count} />
       </span>
     </NavLink>
   )
@@ -327,13 +350,24 @@ function MobileTabBar({ user }: { user: User }) {
 
 export function AppShell() {
   const user = useAuth((s) => s.user)
+  // Hooks run before the early return: a conditional hook changes the order
+  // between renders and React refuses the second one.
+  const counts = useUnread()
+  /*
+   * The bell reads the store, not `counts.notifications`. `useUnread` feeds the
+   * store on every poll, so this is the same number thirty seconds out of date
+   * at worst — but the notifications page writes it directly the moment a row is
+   * read, and only the store sees that. Reading the local copy here would leave
+   * the badge lit on notifications the reader is looking at.
+   */
+  const unreadNotifications = useNotifications((s) => s.unread)
   if (!user) return null
   const isOwner = user.permissions.includes('application.view_own')
 
   return (
     <div className="min-h-dvh bg-canvas">
-      <Rail user={user} />
-      <Bell />
+      <Rail user={user} unreadMessages={counts.messages} />
+      <Bell count={unreadNotifications} />
       {isOwner && <ChatBubble />}
 
       <main className="min-h-dvh lg:pl-20">
