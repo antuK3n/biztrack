@@ -89,14 +89,15 @@ it('caps the opaque fee profile the way it caps the opaque office form', functio
     ])->assertCreated();
 });
 
-it('caps a fee adjustment rather than overflowing the money columns', function () {
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->postJson('/api/v1/applications/1/fee/adjust', [
-            'line_items' => [['label' => 'Absurd', 'amount' => '1e30']],
-            'total_amount' => '1e30',
-        ])
-        ->assertStatus(422);
-});
+/*
+ * "It caps a fee adjustment rather than overflowing the money columns" was
+ * here. Fee adjustment is gone [client, 2026-09-06] — the figure comes from the
+ * revenue code and BPLO cannot move it — and the route was deleted rather than
+ * gated, so there is no longer an input on which `1e30` can be supplied; the
+ * case failed with a 404 against a route that no longer exists. If the
+ * adjustment endpoint returns, this returns with it: an officer-typed money
+ * amount is exactly the shape of input this file exists to distrust.
+ */
 
 it('answers 422, not 500, to hostile query strings on every list', function () {
     /*

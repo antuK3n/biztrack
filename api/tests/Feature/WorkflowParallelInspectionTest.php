@@ -1,47 +1,68 @@
 <?php
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
-use App\Models\ApplicationStatusHistory;
 use App\Models\Barangay;
 use App\Models\Inspection;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Services\WorkflowService;
+use Illuminate\Validation\ValidationException;
 
 /*
- * Inspections are booked per office, as that office approves.
+ * The five other permits run independently, and nothing waits for the slowest.
  *
  * The client's question was "when I approved a sanitary permit, why did it not
- * automatically go to inspection?", and the answer was a single line in
+ * automatically go to inspection?", and the original answer was a single line in
  * WorkflowService::afterReviewProgress: it returned early unless EVERY
- * assignment on the filing was `completed`, so nothing at all happened until the
- * last office had finished reading. That was defensible when SANITARY and FSIC
- * were the only inspected clearances. All six supporting clearances are
- * inspected now, so it meant City Health could not visit a premises it had
- * already cleared on paper because the Market Office had not opened its form —
- * six offices moving at the pace of the slowest.
+ * assignment on the filing was `completed`, so nothing happened until the last
+ * office had finished reading. City Health could not visit a premises it had
+ * already cleared on paper because another office had not opened its form.
  *
- * These cases pin the replacement: each office's visit is booked when that
- * office approves, the filing reads For Inspection from the first booking, and
- * — the part that carries all the risk — nothing issues a permit until every
- * review AND every current visit is done.
+ * The September 2026 flow answers that question properly, by splitting status
+ * into two machines (docs/application-flow-2026-09.md). This file used to pin
+ * "each office's visit is booked when that office approves, and the FILING reads
+ * For Inspection from the first booking". Both halves of that are now wrong:
+ *
+ *  - approving the paperwork books NOTHING. It moves that one permit to
+ *    `for_inspection` and stops; the office picks the date as a separate act.
+ *  - `for_inspection` is not an application status any more. It belongs to one
+ *    permit, on the `application_permit_types` row. An application cannot be
+ *    "For Inspection" as a whole when CHO is inspecting, BFP is still reading
+ *    and CPDO has already issued.
+ *
+ * So what is pinned below is the independence itself, stated against the machine
+ * that now carries it: one office's act moves one permit, each permit is
+ * released by its own office the moment that office passes it, and the
+ * application reaches BPLO's desk only when the last of the five is in.
  */
 
-const PARALLEL_OFFICE_EMAIL = [
-    'BPLO' => 'bplo@biztrack.local',
-    'CHO' => 'sanitary@biztrack.local',
-    'BFP' => 'fire@biztrack.local',
+/** Which office issues each permit, and which account speaks for it. */
+const PARALLEL_OFFICE = [
+    'SANITARY' => ['CHO', 'sanitary@biztrack.local'],
+    'FSIC' => ['BFP', 'fire@biztrack.local'],
+    'ZONING' => ['CPDO', 'zoning@biztrack.local'],
+    'OCCUPANCY' => ['OBO', 'obo@biztrack.local'],
+    'CEC' => ['CENRO', 'cenro@biztrack.local'],
 ];
 
 /**
- * A paid, routed filing carrying exactly these permit types, reviews untouched.
+ * A paid filing on which the applicant has opened exactly these permits, so
+ * exactly those offices are routed. Reviews untouched.
  *
  * Driven through the real endpoints rather than built from factories, because
  * what is under test is the order in which WorkflowService does things — a
  * hand-assembled filing would prove nothing about the path that assembles it.
+ *
+ * Note that the permit SET is not what `$openCodes` controls. Submission
+ * attaches all five required clearances whatever the applicant asked for; what
+ * varies here is which of them have been filed, and therefore which offices
+ * have a queue item at all.
  */
-function parallelFiling(array $permitCodes, string $name): Application
+function parallelFiling(array $openCodes, string $name): Application
 {
     $owner = authAs('owner@biztrack.local');
 
@@ -58,46 +79,65 @@ function parallelFiling(array $permitCodes, string $name): Application
         'business_id' => $businessId,
         'data_privacy_consent' => true,
         'application_type' => 'new',
-        'permit_type_ids' => PermitType::whereIn('code', $permitCodes)->pluck('id')->all(),
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
-    // BPLO accepts the main form first; the bill does not exist before that.
+    // BPLO reads the form before the applicant is asked for money, and
+    // `bploApprovesForm` also puts an officer's name to the RA 11032 category —
+    // without which no office may approve at all.
     bploApprovesForm($appId);
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
 
-    // The office confirms the processing category as the filing lands on its
-    // desk, which is what unlocks Approve. Nothing below is about that gate;
-    // without this every sign-off here would be refused for the wrong reason.
-    classifyAsOfficer(Application::findOrFail($appId));
+    foreach ($openCodes as $code) {
+        authAs('owner@biztrack.local');
+        test()->postJson("/api/v1/applications/{$appId}/clearances/{$code}/apply")->assertOk();
+    }
 
     return Application::findOrFail($appId);
 }
 
-/** One office signs off its own review, as that office. */
-function approveOfficeReview(Application $app, string $departmentCode): void
+/** The office behind $code signs off that permit's paperwork. */
+function approveOfficePaperwork(Application $app, string $code): void
 {
+    [$deptCode, $email] = PARALLEL_OFFICE[$code];
+
     $assignmentId = ApplicationAssignment::where('application_id', $app->id)
-        ->whereHas('department', fn ($d) => $d->where('code', $departmentCode))
+        ->whereHas('department', fn ($d) => $d->where('code', $deptCode))
         ->value('id');
 
-    expect($assignmentId)->not->toBeNull("{$departmentCode} has no assignment on this filing");
+    expect($assignmentId)->not->toBeNull("{$deptCode} has no assignment on this filing");
 
-    test()->withHeaders(authAs(PARALLEL_OFFICE_EMAIL[$departmentCode]))
+    test()->withHeaders(authAs($email))
         ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'Cleared.'])
         ->assertOk();
 }
 
-/** That office conducts and closes its own visit. */
-function conductOfficeVisit(Application $app, string $departmentCode, string $result = 'passed'): void
+/** That office picks a date for its permit's visit. */
+function bookOfficeVisit(Application $app, string $code): int
 {
-    $visit = $app->inspections()->currentPerDepartment()
-        ->whereHas('department', fn ($d) => $d->where('code', $departmentCode))
-        ->firstOrFail();
+    [, $email] = PARALLEL_OFFICE[$code];
 
-    test()->withHeaders(authAs(PARALLEL_OFFICE_EMAIL[$departmentCode]))
-        ->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => $result, 'findings' => 'Seen.'])
+    return test()->withHeaders(authAs($email))
+        ->postJson("/api/v1/applications/{$app->id}/permits/{$code}/inspection", [
+            'scheduled_at' => now()->addDays(2)->toDateTimeString(),
+        ])->assertCreated()->json('data.id');
+}
+
+/** That office records a result against its own visit. */
+function conductOfficeVisit(Application $app, string $code, int $visitId, string $result = 'passed'): void
+{
+    [, $email] = PARALLEL_OFFICE[$code];
+
+    test()->withHeaders(authAs($email))
+        ->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => $result, 'findings' => 'Seen.'])
         ->assertOk();
+}
+
+/** One permit's own status on this filing. */
+function permitStatus(Application $app, string $code): ?ClearanceStatus
+{
+    return app(WorkflowService::class)->pivotFor($app->fresh(), $code)?->status;
 }
 
 /** The offices whose visits are booked on a filing, sorted. */
@@ -107,160 +147,174 @@ function bookedOffices(Application $app): array
         ->pluck('department.code')->sort()->values()->all();
 }
 
-it('books only the approving office’s visit, and moves the filing to for_inspection at once', function () {
-    $app = parallelFiling(['BUSINESS', 'SANITARY', 'FSIC'], 'Sanitary First Diner');
+it('moves only the approving office’s permit, and books no visit at all', function () {
+    $app = parallelFiling(['SANITARY', 'FSIC'], 'Sanitary First Diner');
 
-    approveOfficeReview($app, 'CHO');
+    approveOfficePaperwork($app, 'SANITARY');
 
     /*
-     * ONE visit, City Health's. BFP has not signed off, so booking its visit
-     * here would be the mirror of the old bug — an office sent out to a premises
-     * on the strength of somebody else's reading.
+     * CHO's permit moved and nobody else's did. Under the old machine this
+     * approval would have dragged the whole FILING to For Inspection, which is
+     * the summary that answers a question nobody asked: BFP has not read a page.
      */
+    expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::ForInspection);
+    expect(permitStatus($app, 'FSIC'))->toBe(ClearanceStatus::ForApproval);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+
+    /*
+     * And no visit exists. Accepting the paperwork is not the same act as
+     * choosing when to go out — the old service booked automatically, two
+     * working days ahead, which is a promise made to the applicant by a
+     * scheduler that does not know whether anyone is free.
+     */
+    expect(bookedOffices($app))->toBe([]);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
+});
+
+it('books a visit only for the office that picked a date', function () {
+    $app = parallelFiling(['SANITARY', 'FSIC'], 'Two Office Grill');
+
+    approveOfficePaperwork($app, 'SANITARY');
+    approveOfficePaperwork($app, 'FSIC');
+
+    // Both permits are ready for a date; neither has one.
+    expect(bookedOffices($app))->toBe([]);
+
+    bookOfficeVisit($app, 'SANITARY');
     expect(bookedOffices($app))->toBe(['CHO']);
 
-    // And the client's actual complaint: the filing says so immediately, rather
-    // than sitting in For Approval until the last office finishes.
-    expect($app->fresh()->status->value)->toBe('for_inspection');
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
-});
-
-it('books the second office’s visit on its own approval, without a second for_inspection row', function () {
-    $app = parallelFiling(['BUSINESS', 'SANITARY', 'FSIC'], 'Two Office Grill');
-
-    approveOfficeReview($app, 'CHO');
-    approveOfficeReview($app, 'BFP');
-
+    bookOfficeVisit($app, 'FSIC');
     expect(bookedOffices($app))->toBe(['BFP', 'CHO']);
-    expect($app->fresh()->status->value)->toBe('for_inspection');
 
-    /*
-     * Exactly one arrival at For Inspection, and this is the assertion that
-     * keeps it honest. The filing was already there when BFP approved, so the
-     * booking must not announce a move: a for_inspection → for_inspection row
-     * reads on the applicant's timeline as movement that did not happen, which
-     * is the same reason scheduleReinspection() deliberately does not call
-     * transition() either.
-     */
-    $arrivals = ApplicationStatusHistory::where('application_id', $app->id)
-        ->where('to_status', 'for_inspection')
-        ->count();
-    expect($arrivals)->toBe(1);
-});
-
-it('lets an office that does not inspect simply complete, blocking and triggering nothing', function () {
-    $app = parallelFiling(['BUSINESS', 'SANITARY'], 'Mayor Permit Mart');
-
-    /*
-     * BPLO issues the Mayor's Permit on the strength of the clearances rather
-     * than a visit of its own — `requires_inspection` is false on BUSINESS and
-     * on nothing else. So its approval books no visit, and it must not drag the
-     * filing to For Inspection on the back of an office that has not approved.
-     */
-    approveOfficeReview($app, 'BPLO');
-
-    expect(bookedOffices($app))->toBe([]);
-    expect($app->fresh()->status->value)->toBe('under_review');
+    // Still nothing issued, and the filing has not moved: booking a visit is
+    // not progress on the application, it is progress on one permit.
     expect(Permit::where('application_id', $app->id)->count())->toBe(0);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
-it('refuses to issue while a review is still open, even with every booked visit passed', function () {
+it('releases each permit as its own office passes it, without waiting for the others', function () {
     /*
-     * THE case this change exists to not break, and the one that fails against
-     * an unguarded WorkflowService.
+     * Rule 7, and the client was explicit: "the other 6 permits are
+     * automatically released once they are approved by their respective admins;
+     * no need to wait for each other to be approved."
      *
-     * CHO approves and its visit passes. At that instant every CURRENT
-     * inspection on the filing has passed — there is only one — and BPLO has not
-     * read a page. recordInspection's old test was the visits alone, which was
-     * sound only because reaching `for_inspection` used to imply every review
-     * was done. Booking per office removes that implication, so without the
-     * guard in isFullyCleared() this hands the applicant a Mayor's Permit over
-     * an unread clearance application.
+     * This is the exact case the old `isFullyCleared` gate got wrong in the
+     * other direction — it held every permit until the whole filing was done.
      */
-    $app = parallelFiling(['BUSINESS', 'SANITARY'], 'Half Read Bakery');
+    $app = parallelFiling(['SANITARY', 'FSIC'], 'Fast Office Cafe');
 
-    approveOfficeReview($app, 'CHO');
-    conductOfficeVisit($app, 'CHO');
+    approveOfficePaperwork($app, 'SANITARY');
+    conductOfficeVisit($app, 'SANITARY', bookOfficeVisit($app, 'SANITARY'));
 
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
-    expect($app->fresh()->status->value)->toBe('for_inspection');
-    expect(ApplicationAssignment::where('application_id', $app->id)
-        ->where('status', 'pending')->count())->toBe(1);
+    // CHO's permit is out, on CHO's say-so alone.
+    expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::Approved);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(1);
 
-    // The last review is what completes it — reviews and visits now land in any
-    // order, so the final review has to be able to issue as well.
-    approveOfficeReview($app, 'BPLO');
-
-    expect($app->fresh()->status->value)->toBe('approved');
-    expect(Permit::where('application_id', $app->id)->count())->toBe(2);
+    // BFP is untouched by that, and so is the application.
+    expect(permitStatus($app, 'FSIC'))->toBe(ClearanceStatus::ForApproval);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
-it('holds a filing whose one inspecting office has already passed while another office still reviews', function () {
+it('keeps the application off BPLO’s desk while any required permit is outstanding', function () {
     /*
-     * The same trap one office wider, and the way round it is likelier to be
-     * hit: CHO is fast, BFP is slow. CHO's visit passes while BFP has neither
-     * approved nor been booked, so "every current inspection has passed" is true
-     * again, on a filing two reviews away from being decided.
+     * Every required permit but one is driven all the way to approved. The
+     * filing must NOT reach `for_final_approval`, because BPLO's second act
+     * issues the Mayor's Permit and the remaining office has not been out to the
+     * premises. `ClearanceStatus::isOutstanding()` is the predicate; an
+     * off-by-one there hands out a permit over an uninspected business.
      */
-    $app = parallelFiling(['BUSINESS', 'SANITARY', 'FSIC'], 'Fast Office Cafe');
+    $codes = array_keys(PARALLEL_OFFICE);
+    $app = parallelFiling($codes, 'Nearly There Bakery');
 
-    approveOfficeReview($app, 'CHO');
-    conductOfficeVisit($app, 'CHO');
+    foreach (array_slice($codes, 0, 4) as $code) {
+        approveOfficePaperwork($app, $code);
+        conductOfficeVisit($app, $code, bookOfficeVisit($app, $code));
+    }
 
-    expect($app->fresh()->status->value)->toBe('for_inspection');
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(4);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 
-    approveOfficeReview($app, 'BPLO');
+    // The fifth is what tips it, and only the fifth.
+    $last = end($codes);
+    approveOfficePaperwork($app, $last);
+    conductOfficeVisit($app, $last, bookOfficeVisit($app, $last));
 
-    // Still nothing: BFP's review is open, so its visit does not exist yet and
-    // the filing cannot be complete however the passed ones read.
-    expect($app->fresh()->status->value)->toBe('for_inspection');
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
-
-    approveOfficeReview($app, 'BFP');
-    expect(bookedOffices($app))->toBe(['BFP', 'CHO']);
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
-
-    conductOfficeVisit($app, 'BFP');
-
-    expect($app->fresh()->status->value)->toBe('approved');
-    expect(Permit::where('application_id', $app->id)->count())->toBe(3);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(5);
 });
 
-it('does not rebook an office that already holds a visit, and puts the filing back where it was', function () {
+it('refuses to reverse a permit that has already been issued, and leaves the filing with BPLO', function () {
     /*
-     * A filing goes round the returned/resubmitted loop and the office that
-     * already has an open booking approves a second time.
+     * An issued permit is final. `ClearanceStatus::Approved` lists nothing in
+     * `allowedNext()` and `isTerminal()` returns true for it alone — "the permit
+     * is minted and numbered by then", so walking it back would leave a numbered
+     * legal instrument in the register behind a status saying it was refused.
      *
-     * Two things have to survive that. A second row would leave the office with
-     * two visits, neither aware of the other, and — because a scheduled visit
-     * counts as not-yet-passed — a filing that can never clear. And the return
-     * dropped the filing to `returned` and the resubmission to `under_review`
-     * while CHO's visit was still outstanding, so the approval has to put it
-     * back to For Inspection even though it booked nothing: `canBeReinspected()`
-     * requires that status, so a filing left in `under_review` with an open
-     * visit is one whose office cannot rebook if that visit fails.
+     * ── A note on the walk-back edge, because this case is where you find it ──
+     *
+     * `ApplicationStatus::ForFinalApproval` allows a move BACK to
+     * `AwaitingOtherPermits`, and the comment defending that edge justifies it
+     * with "a re-inspection is opened, an office reverses itself". Neither is
+     * reachable today, and this test is the proof of the second: the filing gets
+     * to `for_final_approval` only when all five permits are Approved, Approved
+     * is terminal, so `refreshReadiness()` can never find one outstanding again.
+     * `scheduleReinspection()` does not move the pivot status either, and
+     * `attachRequiredPermitTypes()` runs once at submission, so the required set
+     * cannot grow underneath a filing in flight.
+     *
+     * The edge is therefore defensive rather than live. That is a reasonable
+     * thing for a legality table to be — it costs nothing and it is the safe
+     * direction to be wrong in — but the reasoning attached to it describes a
+     * transition the other machine forbids. Left as found and reported rather
+     * than "fixed" in either direction: making the permit reversible and making
+     * the edge unreachable-by-construction are both product decisions.
+     *
+     * Driven at the service because no route exposes a per-clearance rejection:
+     * each office returns its own assignment, and ending a permit outright is
+     * not a button the officer screens offer today.
      */
-    $app = parallelFiling(['BUSINESS', 'SANITARY'], 'Returned Loop Store');
+    $codes = array_keys(PARALLEL_OFFICE);
+    $app = parallelFiling($codes, 'Reversal Store');
 
-    approveOfficeReview($app, 'CHO');
-    $firstVisitId = Inspection::where('application_id', $app->id)->value('id');
+    foreach ($codes as $code) {
+        approveOfficePaperwork($app, $code);
+        conductOfficeVisit($app, $code, bookOfficeVisit($app, $code));
+    }
 
-    $choAssignmentId = ApplicationAssignment::where('application_id', $app->id)
-        ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
-        ->value('id');
+    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect(ClearanceStatus::Approved->isTerminal())->toBeTrue();
+    expect(ClearanceStatus::Approved->allowedNext())->toBe([]);
 
-    test()->withHeaders(authAs(PARALLEL_OFFICE_EMAIL['CHO']))
-        ->postJson("/api/v1/assignments/{$choAssignmentId}/return", ['remarks' => 'Lease copy is unreadable.'])
-        ->assertOk();
+    $workflow = app(WorkflowService::class);
+    expect(fn () => $workflow->rejectClearance(
+        $workflow->pivotFor($app->fresh(), 'SANITARY'),
+        'The certificate was issued against the wrong premises.',
+    ))->toThrow(ValidationException::class);
 
-    test()->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson("/api/v1/applications/{$app->id}/resubmit")
-        ->assertOk();
+    // Nothing moved: the permit is still approved, the five issued permits are
+    // still issued, and BPLO still has the filing on its desk.
+    expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::Approved);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(5);
+});
 
-    approveOfficeReview($app, 'CHO');
+it('refuses a second visit to an office that already holds one', function () {
+    /*
+     * A second row would leave the office with two visits, neither aware of the
+     * other, and — because a scheduled visit counts as not-yet-passed — a permit
+     * that can never clear. `currentPerDepartment()` is what distinguishes an
+     * open booking from a failed visit deliberately kept on the record.
+     */
+    $app = parallelFiling(['SANITARY'], 'Double Booking Store');
+
+    approveOfficePaperwork($app, 'SANITARY');
+    $visitId = bookOfficeVisit($app, 'SANITARY');
+
+    test()->withHeaders(authAs(PARALLEL_OFFICE['SANITARY'][1]))
+        ->postJson("/api/v1/applications/{$app->id}/permits/SANITARY/inspection", [
+            'scheduled_at' => now()->addDays(4)->toDateTimeString(),
+        ])->assertStatus(422);
 
     expect(Inspection::where('application_id', $app->id)->count())->toBe(1);
-    expect(Inspection::where('application_id', $app->id)->value('id'))->toBe($firstVisitId);
-    expect($app->fresh()->status->value)->toBe('for_inspection');
+    expect(Inspection::where('application_id', $app->id)->value('id'))->toBe($visitId);
 });

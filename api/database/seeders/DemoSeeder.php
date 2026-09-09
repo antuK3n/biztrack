@@ -105,9 +105,23 @@ class DemoSeeder extends Seeder
          */
         $app1 = $this->application($b1, $owner, ApplicationType::Renewal, ApplicationStatus::Approved, [$businessPt], now()->subDays(20));
         $app1->update(['prior_permit_declared_none' => true]);
+        /*
+         * The chain walks the 6 September flow, the same one $app2 below is
+         * written against. It used to read draft → submitted → pending_payment
+         * → under_review → approved, which names three statuses
+         * `ApplicationStatus` no longer has: `submitted` and `under_review` were
+         * retired with the two-machine split, and a history row is the one place
+         * a dead status survives a refactor unnoticed, because nothing casts it
+         * on the way in. Anything reading this back — the timeline, the
+         * processing-time analytics — was being taught a flow the system cannot
+         * produce.
+         */
         $this->history($app1, [
-            [null, 'draft', $owner], ['draft', 'submitted', $owner], ['submitted', 'pending_payment', null],
-            ['pending_payment', 'under_review', null], ['under_review', 'approved', $bploStaff],
+            [null, 'draft', $owner], ['draft', 'for_approval', $owner],
+            ['for_approval', 'pending_payment', $bploStaff],
+            ['pending_payment', 'awaiting_other_permits', null],
+            ['awaiting_other_permits', 'for_final_approval', null],
+            ['for_final_approval', 'approved', $bploStaff],
         ], now()->subDays(20));
         $this->paidFee($app1, 1150);
         $permit1 = Permit::create([

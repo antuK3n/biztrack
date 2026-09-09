@@ -532,6 +532,11 @@ export function ApplicationDetailPage() {
           * this screen where the applicant has work to do, hence the button:
           * they must apply for each remaining clearance or upload the copy they
           * already hold, and nothing happens until they do.
+          *
+          * Neither this card nor For Final Approval is an error, so neither
+          * takes #bd0000 (DESIGN.md, Red Means Stop) — yellow for work in
+          * progress, orange for a decision pending, matching the cards that
+          * survived.
           */}
         {status === 'awaiting_other_permits' && (
           <StatusCard tone="yellow">
