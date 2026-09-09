@@ -1,6 +1,7 @@
 import type { ComponentType, SVGProps } from 'react'
 import {
   AuditIcon,
+  ClipboardIcon,
   ChartIcon,
   DraftsIcon,
   FolderIcon,
@@ -122,6 +123,7 @@ const NAV_ITEMS: NavItem[] = [
     },
   },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },
+  { label: 'Officer in Charge', icon: ClipboardIcon, to: '/admin/oic', permission: 'oic.assign' },
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the

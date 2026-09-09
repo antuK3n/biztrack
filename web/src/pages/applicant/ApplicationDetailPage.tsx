@@ -432,14 +432,36 @@ export function ApplicationDetailPage() {
       .map((a) => ({ who: a.officer?.name ?? a.department.name, text: a.remarks as string })),
   ]
 
-  /* Officer line under the card (p50). */
-  const assignment = app.assignments.find((a) => a.officer) ?? app.assignments[0]
-  // "Officer - Department" when assigned; just the department name otherwise.
-  const officerLine = assignment
-    ? assignment.officer
-      ? `${assignment.officer.name} - ${assignment.department.name}`
-      : assignment.department.name
-    : null
+  /*
+   * Who is handling this filing — one line per OFFICE, not one for the filing.
+   *
+   * This used to print a single name, picked with
+   * `assignments.find(a => a.officer) ?? assignments[0]`. On a filing carrying
+   * several clearances that is one of six offices chosen by list order, and the
+   * applicant read it as "the officer handling my application" — so a business
+   * whose sanitary review had been taken and whose fire review had not was told
+   * about one and never about the other, with no way to tell which.
+   *
+   * Each office holds its own review and its own officer (client §9), so the
+   * honest rendering is the list. Sorted by office name for a stable order:
+   * assignment ids reorder as offices are routed, and a line that moves between
+   * visits reads as a change when nothing has changed.
+   */
+  const handling = [...app.assignments]
+    .sort((a, b) => a.department.name.localeCompare(b.department.name))
+    .map((a) => ({
+      key: a.id,
+      office: a.department.name,
+      /*
+       * Three states, not two. `officer_withheld` means the name exists and is
+       * not this reader's to see — never true for the applicant, who authors
+       * every sheet on their own filing, but the resource can say it and a
+       * screen that ignored it would print "not yet taken" over a review that
+       * had been.
+       */
+      officer: a.officer?.name ?? null,
+      withheld: a.officer_withheld === true,
+    }))
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -687,16 +709,71 @@ export function ApplicationDetailPage() {
           </StatusCard>
         )}
 
-        {/* ── Officer line (royal italic + avatar + message icons) ─────── */}
-        {officerLine && (
-          <div className="mt-3 flex items-center justify-end gap-3 text-royal">
-            <span className="text-base">
-              {assignment?.officer ? 'Mr/Ms ' : ''}
-              <span className="italic">{officerLine}</span>
-            </span>
-            <AvatarGlyph />
-            <MessageIcon />
-          </div>
+        {/* ── Who is handling it, office by office ─────────────────────── */}
+        {/*
+          * A labelled block, not the old right-aligned italic line.
+          *
+          * That line was built when the screen printed ONE officer, and it read
+          * well as one: "Mr/Ms Liza Reyes - Business Permits and Licensing
+          * Office", tucked under the card. Six of them stacked is a column of
+          * italics with an avatar and a message glyph repeated beside each, and
+          * the one question the applicant actually has — who do I chase about
+          * the fire clearance — has to be answered by scanning it.
+          *
+          * So: a heading that says what the list is, one row per office, the
+          * office on the left and the person on the right. It is also the shape
+          * the client asked for (§4: Office / Officer in Charge), and the shape
+          * the super admin's own register uses, so the two sides of the same
+          * fact read the same way.
+          */}
+        {handling.length > 0 && (
+          <section aria-labelledby="handling-heading" className="mt-6 rounded-xl bg-white px-5 py-4 shadow-card">
+            <h3 id="handling-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+              Officer in charge
+            </h3>
+            <ul className="mt-3 divide-y divide-line">
+              {handling.map((row) => (
+                <li key={row.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+                  <span className="text-sm font-semibold text-ink">{row.office}</span>
+                  {row.officer ? (
+                    <span className="flex items-center gap-2 text-[15px] text-royal">
+                      <AvatarGlyph />
+                      <span className="font-semibold">{row.officer}</span>
+                    </span>
+                  ) : (
+                    /*
+                      * Said plainly rather than left blank. "Not yet taken" is
+                      * not bad news — an office picks a filing up when it
+                      * reaches the top of its queue — and an empty cell reads
+                      * as a name that failed to load.
+                      */
+                    <span className="text-sm italic text-ink-muted">
+                      {row.withheld ? 'Assigned' : 'Not yet taken'}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
+              <span>
+                Each office reviews its own part of your application, so they are taken up
+                separately.
+              </span>
+              {/*
+                * A real way through, not the word "Messages" in a sentence. The
+                * conversation is keyed by FILING and carries an office picker
+                * inside it, so one link is right here — a link per office would
+                * be six links to the same screen.
+                */}
+              <Link
+                to={`/messages?application=${app.id}`}
+                className="inline-flex items-center gap-1.5 font-semibold text-royal hover:underline"
+              >
+                <MessageIcon size={16} />
+                Message an office about this application
+              </Link>
+            </p>
+          </section>
         )}
 
         {/* ── Per-office inspection progress ────────────────────────────

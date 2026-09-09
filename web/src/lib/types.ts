@@ -593,6 +593,20 @@ export interface Assignment {
    * render as a claim about the thing withheld.
    */
   officer_withheld?: boolean
+  /**
+   * May this reader take the case, and may they work it? (client §3/§10)
+   *
+   * Answered by the server rather than worked out in the browser. The queue has
+   * to render a colleague's case read-only and its own as workable, and the two
+   * rows are identical apart from an id comparison — doing that comparison here
+   * would put the OIC rule in two places, one of which no officer is obliged to
+   * obey. `can_act` is true on an UNHELD case too: acting on one claims it.
+   *
+   * Optional so that a payload from before this shipped still type-checks; a
+   * screen must treat `undefined` as "don't offer the button".
+   */
+  can_claim?: boolean
+  can_act?: boolean
   assigned_at: string | null
   completed_at: string | null
   application: {
@@ -1955,13 +1969,63 @@ export interface AdminCaseload {
   open_reviews: number
   open_inspections: number
   total: number
+  /**
+   * Reviews this officer is NAMED on that are already finished.
+   *
+   * Nothing here can move — a completed review keeps the name of the officer
+   * who made it. It is here so this dialog can reconcile itself with the super
+   * admin's OIC register, which lists every assignment a name is on: that
+   * screen says "officer in charge of two filings" where a caseload counting
+   * only open work says "holding nothing", and both are true.
+   *
+   * Optional so a payload from before this shipped still type-checks.
+   */
+  finished_reviews?: number
+  /**
+   * The open work itself, named — one row per filing the officer holds.
+   *
+   * Capped server-side, so `cases.length` can be smaller than `total`; the
+   * dialog says so rather than quietly showing a short list. Optional for the
+   * same reason as `finished_reviews`: an older payload still type-checks.
+   */
+  cases?: CaseloadCase[]
   candidates: { id: number; name: string; email: string; open_total: number }[]
+}
+
+export interface CaseloadCase {
+  /** A review is an office's assignment; an inspection is a site visit. */
+  kind: 'review' | 'inspection'
+  id: number
+  application_id: number | null
+  tracking_id: string | null
+  /** Null when the business has been removed and the filing outlived it. */
+  business: string | null
+  office: { code: string; name: string } | null
+  /**
+   * The office's own permit on the filing. Null on an inspection — a site
+   * visit is about the premises rather than one permit — and null when the
+   * office holds a filing carrying no permit it issues.
+   */
+  permit: string | null
+  status_label: string | null
+  /** Assigned-at for a review, scheduled-at for a visit. */
+  at: string | null
 }
 
 export interface CaseloadMovePayload {
   /** Null releases the caseload to the office queue rather than naming a successor. */
   to_user_id: number | null
-  scope: 'all' | 'reviews' | 'inspections'
+  /**
+   * Two ways to say what moves, and the API requires exactly one.
+   *
+   * `cases` names the rows and is what the dialog sends: the admin ticks the
+   * permits the officer is holding, which is the ordinary act — one filing to a
+   * colleague because it is stuck, the rest staying put. `scope` remains for
+   * "move everything", which should not need forty ids to state, and is what
+   * the Deactivate path uses when it releases a whole caseload.
+   */
+  scope?: 'all' | 'reviews' | 'inspections'
+  cases?: { kind: 'review' | 'inspection'; id: number }[]
   reason: string
 }
 
