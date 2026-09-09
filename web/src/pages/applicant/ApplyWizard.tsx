@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import { checkPin, withinMalabon } from '../../lib/malabonGeo'
+import { psicSection, psicSectionRank } from '../../lib/psic'
+import { geocodeInMalabon } from '../../lib/geocode'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -946,8 +948,33 @@ function LinesStep({
     )
     const promoted = new Set(common.map((c) => c.id))
 
+    /*
+     * Item 6 — the rest is ordered by SECTION so it can carry headings.
+     *
+     * The shortlist answers for eight trades. The other 127 arrived in
+     * reference-table order, which is no order the applicant can use: a single
+     * unbroken scroll where bakeries, clinics and repair shops interleave, and
+     * the only way to find one is to read all of it. Sorting by section is what
+     * makes a heading possible at all — a heading can only be drawn where the
+     * subject actually changes, so the grouping has to exist in the data before
+     * it can exist on the screen.
+     *
+     * Title within section, so the run under each heading is alphabetical and
+     * skimmable rather than arbitrary.
+     *
+     * Only when the box is EMPTY. A query is answered by relevance, and
+     * scattering matches under headings would bury the one the applicant typed
+     * for — which is also why `commonCount` is already 0 while searching.
+     */
+    const rest = listed
+      .filter((c) => !promoted.has(c.id))
+      .sort((a, b) => {
+        const rank = psicSectionRank(psicSection(a.code)) - psicSectionRank(psicSection(b.code))
+        return rank !== 0 ? rank : a.title.localeCompare(b.title)
+      })
+
     return {
-      results: [...common, ...listed.filter((c) => !promoted.has(c.id))],
+      results: [...common, ...rest],
       commonCount: common.length,
       total: listed.length,
     }
@@ -1150,11 +1177,35 @@ function LinesStep({
                           Most common
                         </li>
                       )}
-                      {commonCount > 0 && index === commonCount && (
-                        <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
-                          All other trades ({total - commonCount})
-                        </li>
-                      )}
+                      {/*
+                        * Item 6 — a heading wherever the SECTION changes, so the
+                        * 127 trades past the shortlist are skimmed rather than
+                        * read.
+                        *
+                        * "All other trades (127)" used to stand here alone, and
+                        * naming the size of a list is not the same as making it
+                        * navigable: it told the applicant exactly how much
+                        * scrolling was ahead and nothing about where to stop.
+                        *
+                        * Drawn on CHANGE rather than by slicing the array into
+                        * groups, because the rows are one radiogroup and the
+                        * index each row reports is its position in it. Splitting
+                        * the list into per-section arrays would restart that
+                        * count in every group and break the radio semantics for
+                        * the sake of tidier JSX.
+                        *
+                        * Suppressed while searching: `commonCount` is 0 then,
+                        * and a query is answered by relevance rather than by
+                        * subject.
+                        */}
+                      {commonCount > 0 &&
+                        index >= commonCount &&
+                        (index === commonCount ||
+                          psicSection(results[index - 1].code) !== psicSection(code.code)) && (
+                          <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+                            {psicSection(code.code)}
+                          </li>
+                        )}
                       <li>
                         <button
                           type="button"
@@ -1343,21 +1394,56 @@ function LinesStep({
                     </p>
                   )}
                   {/*
-                    * Products / Services used to sit here, and no longer does.
+                    * Products / Services, back — because the step now REFUSES
+                    * to advance without it.
                     *
-                    * It is the second column of the paper's line-of-business
-                    * table on both BPLO forms and on CENRO's CEC application,
-                    * so it was added to match the paper. In use it read as
-                    * clutter: a third row of chrome under every trade you pick,
-                    * on the step that is already the heaviest in the wizard,
-                    * for an answer no form marks required.
+                    * It was taken out as "a field nobody asked for": a third
+                    * row of chrome under every trade, on the heaviest step in
+                    * the wizard, for an answer no form marked required. That
+                    * reasoning was sound when nothing depended on it. It has
+                    * since been made required per line, on the strength of a
+                    * filing that reached CENRO with the PRODUCTS/SERVICES box
+                    * on its CEC application empty — the PSIC title says which
+                    * category a trade falls in, and an inspector cannot read
+                    * "Retail sale in non-specialized stores" and learn whether
+                    * there is food on the premises.
                     *
-                    * The column, the API validation and the officer's review
-                    * sheet all still handle it — nothing was torn out — so if
-                    * BPLO says the counter needs it, it comes back somewhere
-                    * quieter rather than being rebuilt. Recorded in
-                    * docs/questions-for-malabon.md.
+                    * The two changes met in the merge and the applicant paid
+                    * for it: the gate demanded a value, no control existed to
+                    * supply one, and Next could not be enabled on part 2 by
+                    * anybody. A required field with no input is not a tidier
+                    * form, it is a wall.
+                    *
+                    * Kept deliberately small — one line, under the trade it
+                    * belongs to, no card of its own — which is the "somewhere
+                    * quieter" the removal asked for rather than the full row it
+                    * objected to.
                     */}
+                  <label className="mt-2.5 block">
+                    <span className="text-xs font-medium text-ink-secondary">
+                      Products / Services <span className="text-s-red">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={line.products_services ?? ''}
+                      onChange={(e) =>
+                        onChange(
+                          lines.map((l) =>
+                            l.psic_code_id === line.psic_code_id
+                              ? { ...l, products_services: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      placeholder="What you actually sell — e.g. milk tea, fried snacks"
+                      className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none"
+                    />
+                    {!(line.products_services ?? '').trim() && (
+                      <span className="mt-1 block text-xs font-medium text-s-red">
+                        Required: three offices print this beside your line of business.
+                      </span>
+                    )}
+                  </label>
                 </div>
               )
             })}
@@ -2314,6 +2400,22 @@ export function ApplyWizard() {
    * happened instead of the pin silently not moving.
    */
   const [pinError, setPinError] = useState<string | null>(null)
+  /*
+   * Item 7 — what the address suggested, and whether the applicant has since
+   * overruled it.
+   *
+   * `autoPinned` is the whole of the "still allow the user to manually change
+   * the pin" half of the item. A suggestion may replace an earlier SUGGESTION
+   * as the address is corrected, and must never replace a pin the applicant
+   * placed themselves: somebody who dropped a pin on their actual gate and then
+   * fixed a typo in the street name would otherwise watch it jump back to the
+   * middle of the road. Any click or drag clears the flag, and nothing puts it
+   * back except another lookup.
+   *
+   * Kept as state rather than a ref because the caption under the map reads it.
+   */
+  const [autoPinned, setAutoPinned] = useState<string | null>(null)
+
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   /* Autosave bookkeeping — see the autosave effect below. */
@@ -2787,6 +2889,62 @@ export function ApplyWizard() {
    */
   const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
   const barangayName = selectedBarangay?.name
+
+  /*
+   * ── Item 7 · the address suggests a pin ───────────────────────────────────
+   *
+   * Fires on a PAUSE in typing, not on a keystroke. 800ms is long enough that
+   * "24 Rizal" does not cost a lookup on its way to "24 Rizal Street", which
+   * matters more than usual here: Nominatim is a free service on a roughly
+   * one-request-a-second policy, and the debounce plus the cache in
+   * `geocodeInMalabon` are how we stay inside it.
+   *
+   * Three conditions, and each is load-bearing:
+   *
+   *  - a trade must be chosen, because that is what unlocks the map. Dropping a
+   *    pin onto a locked map would hand the applicant a marker they cannot move
+   *    and no way to understand why.
+   *  - there must be no pin, OR the pin must be one WE suggested. A pin the
+   *    applicant placed is an answer; overwriting it because they corrected a
+   *    typo would be the form arguing with them.
+   *  - the lookup must come back inside Malabon, which `geocodeInMalabon`
+   *    already enforces with the same polygon test the click handler uses.
+   *
+   * Silence on failure is deliberate. OSM's coverage of Malabon's alleys is
+   * thin — the satellite layer exists for that reason — so "no match" is an
+   * ordinary outcome, not an error. The applicant was always going to click the
+   * map; being told a service they never invoked has failed helps nobody.
+   */
+  useEffect(() => {
+    if (form.lines.length === 0) return
+    if (form.latitude !== null && autoPinned === null) return
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void geocodeInMalabon(form.line1, barangayName ?? null, controller.signal).then((hit) => {
+        if (hit === null || controller.signal.aborted) return
+        /*
+         * Re-checked against the barangay, because the suggestion is only as
+         * good as the street name and OSM will happily return the same street
+         * in the wrong barangay. A suggestion that contradicts the dropdown is
+         * dropped in silence rather than shown as a refusal — the applicant has
+         * not done anything yet to be refused.
+         */
+        if (checkPin(hit.latitude, hit.longitude, barangayName ?? null).kind !== 'ok') return
+        setForm((f) => ({ ...f, latitude: hit.latitude, longitude: hit.longitude }))
+        setAutoPinned(hit.label)
+        setPinError(null)
+      })
+    }, 800)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+    // `form.latitude` is read but deliberately not depended on: it is what this
+    // effect WRITES, and listing it would re-run the lookup on its own result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.line1, form.lines.length, barangayName, autoPinned])
 
   /*
    * The first line of business the applicant declared, when they have one. It
@@ -6295,25 +6453,37 @@ export function ApplyWizard() {
                 radiusM={insightsRadiusM}
                 highlightBarangay={barangayName ?? null}
                 /*
-                 * The map is never locked. Pin first or choose the barangay
-                 * first — either order is allowed.
+                 * Locked on the LINE OF BUSINESS, and on nothing else.
                  *
-                 * This step gated the map twice before, first on the line of
-                 * business and then on the barangay, both on the theory that a
-                 * mismatch is best prevented by refusing the click. The client
-                 * ruled otherwise: let the pin land, and resolve the
-                 * disagreement when the barangay is named. A lock spends a
-                 * disabled control on a case the barangay change handler
-                 * already cleans up, and it strands anyone who reaches for the
-                 * map first — which is most people, because the map is the
-                 * thing on the screen that looks clickable.
+                 * Checklist items 4 and 8 both ask for a lock and they do not
+                 * mean the same one, which is why this has moved twice. Item 4
+                 * gates the map on the trade; item 8 governs what the barangay
+                 * does to a pin. Hanging the lock on the barangay satisfied 8
+                 * and quietly dropped 4, and the client asked for 4 back.
                  *
-                 * Two guards remain, and they are the ones that matter: a pin
-                 * outside Malabon is still refused outright in `onPick`, and a
-                 * pin that contradicts an already-chosen barangay is still
-                 * refused there too. Only the empty-barangay case is now let
-                 * through.
+                 * The trade is the honest gate. It is the first question on the
+                 * step, it sits directly above this map, and the zoning verdict
+                 * is given against a trade rather than a coordinate — so a pin
+                 * placed before it is a location for a business nobody has
+                 * described yet. Location Insights keys off the pin AND the
+                 * chosen PSIC group, so it also has nothing to say until this
+                 * is answered.
+                 *
+                 * The barangay is deliberately NOT a gate any more. The client
+                 * was explicit: let the pin land in either order and settle the
+                 * disagreement when the barangay is named. That is the change
+                 * handler's job, and it clears the pin only when the two
+                 * genuinely contradict.
+                 *
+                 * Both guards in `onPick` survive regardless: a pin outside
+                 * Malabon is refused, and so is one that contradicts a barangay
+                 * already chosen.
                  */
+                lockedReason={
+                  form.lines.length === 0
+                    ? 'Choose your line of business above, then click the map to drop a pin.'
+                    : null
+                }
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
@@ -6345,12 +6515,38 @@ export function ApplyWizard() {
                     return
                   }
                   setPinError(null)
+                  /*
+                   * The applicant has now answered for themselves, so the
+                   * address stops suggesting. Cleared for a click AND a drag,
+                   * because both arrive here — see the Marker's dragend.
+                   */
+                  setAutoPinned(null)
                   setForm((f) => ({ ...f, latitude: lat, longitude: lng }))
                 }}
               />
               {form.latitude !== null ? (
                 <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
                   Pinned at {form.latitude}, {form.longitude}
+                  {/*
+                    * Item 7 — a suggested pin says it is a suggestion.
+                    *
+                    * An applicant who did not place this pin needs to know two
+                    * things before they walk past it: that the form guessed
+                    * from their address, and that the guess is theirs to
+                    * overrule. Saying only "Pinned at ..." would let a
+                    * street-centroid guess be mistaken for a confirmed
+                    * location, which on a zoning clearance is the wrong thing
+                    * to be relaxed about.
+                    *
+                    * Disappears the moment they click or drag, because from
+                    * then on the pin is not a guess.
+                    */}
+                  {autoPinned !== null && (
+                    <span className="mt-0.5 block text-ink-muted">
+                      Placed from your address. Drag the pin or click the map if it is not exactly
+                      right.
+                    </span>
+                  )}
                   {/*
                     * Says in words what the ring on the map means.
                     *
@@ -6373,12 +6569,13 @@ export function ApplyWizard() {
                 </p>
               ) : (
                 <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
-                  {/* One state now. This used to fork on whether a barangay had
-                      been chosen, because the map refused clicks until one was
-                      and sending somebody to a dead control is worse than saying
-                      nothing. The map takes a pin at any point in the step, so
-                      there is only one instruction left to give. */}
-                  Required: click the map to drop a pin where your business is.
+                  {/* Two states, because telling somebody to click a map that is
+                      not taking clicks yet sends them to a control that will not
+                      answer. The lock's own sentence says what to do about it;
+                      this one says the pin is required either way. */}
+                  {form.lines.length === 0
+                    ? 'Required: a pin. The map takes one once your line of business is chosen.'
+                    : 'Required: click the map to drop a pin where your business is.'}
                 </p>
               )}
               {pinError && (
