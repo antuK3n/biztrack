@@ -12,10 +12,10 @@ import {
   StatusChip,
   inputCls,
 } from '../components/ui/Proto'
-import type { ChipTone } from '../components/ui/Proto'
 import { toApiError } from '../lib/api'
 import { businessName, formatDate, formatDateTime } from '../lib/format'
 import { applications, documents, requests } from '../lib/resources'
+import { REQUIREMENT_CHIP_TONE } from '../lib/status'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type {
@@ -69,27 +69,6 @@ import type {
  */
 function senderName(request: OfficerRequest): string {
   return request.created_by?.name ?? 'Officer removed from register'
-}
-
-/*
- * Tone only — the WORDS come from the API's `status_label`.
- *
- * This map used to carry both, so the screen had its own private vocabulary:
- * it said "Submitted" and "Fulfilled" while the client's spec says "For Review"
- * and "Approved", and `needs_resubmission` was missing altogether, which in a
- * `Record<RequestStatus, …>` meant an undefined lookup and a chip rendering as
- * blank. One source of truth for the label; the colour is presentation and
- * stays here.
- *
- * Needs Resubmission is orange, the same as Pending, because to a business
- * owner they are the same situation: you owe us a document.
- */
-const STATUS_TONE: Record<RequestStatus, ChipTone> = {
-  pending: 'orange',
-  needs_resubmission: 'orange',
-  submitted: 'tint-purple',
-  fulfilled: 'green',
-  rejected: 'red',
 }
 
 const STATUS_DOT: Record<RequestStatus, string> = {
@@ -170,7 +149,7 @@ function LetterView({
   const [nextStatus, setNextStatus] = useState<RequestStatus | ''>('')
   const [reason, setReason] = useState('')
 
-  const tone = STATUS_TONE[request.status] ?? 'tint-gray'
+  const tone = REQUIREMENT_CHIP_TONE[request.status] ?? 'tint-gray'
   const thread = request.responses ?? []
   /*
    * Taken from the API's own answer, not re-derived from the status string.
@@ -986,7 +965,7 @@ export function RequestsPage() {
                 </thead>
                 <tbody>
                   {list.map((r) => {
-                    const rowTone = STATUS_TONE[r.status] ?? 'tint-gray'
+                    const rowTone = REQUIREMENT_CHIP_TONE[r.status] ?? 'tint-gray'
                     const latest = r.responses?.[r.responses.length - 1]
                     return (
                       <tr key={r.id} className="border-t border-line align-top">
