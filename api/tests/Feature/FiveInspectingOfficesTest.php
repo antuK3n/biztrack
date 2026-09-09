@@ -94,14 +94,27 @@ function filingWithEveryClearance(): Application
     $app = Application::findOrFail($appId);
 
     /*
-     * The applicant starts each other permit, and THAT is what routes its
-     * office. Without this the filing has exactly one assignment — BPLO's,
-     * completed at the form approval — and the loop below has nothing to
-     * iterate.
+     * The applicant starts each other permit and then hands its sheet in, and
+     * the SECOND of those is what routes the office. Apply only opens the form
+     * now — it records that the applicant chose to fill it in and stops — and
+     * `WorkflowService::submitClearanceForm` is what moves the permit to
+     * ForApproval and puts it in front of its office.
+     *
+     * Without both, the filing has exactly one assignment — BPLO's, completed at
+     * the form approval — and the loop below has nothing to iterate. All five
+     * codes here bear a form (PermitType::OFFICE_FORM_CODES), so all five are
+     * held back by Apply alone; none of them route for free.
+     *
+     * Empty sheets, because what is on them is OfficeFormTest's subject. This
+     * file needs only that each office received something to read.
      */
     foreach (OFFICE_INSPECTOR as [$permitCode, $email]) {
         authAs('owner@biztrack.local');
         test()->postJson("/api/v1/applications/{$appId}/clearances/{$permitCode}/apply")->assertOk();
+        test()->putJson("/api/v1/applications/{$appId}/office-forms/{$permitCode}", [
+            'form_data' => [],
+            'submit' => true,
+        ])->assertSuccessful();
     }
 
     /*
