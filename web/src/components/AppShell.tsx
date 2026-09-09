@@ -10,6 +10,7 @@ import { navItemsFor } from '../lib/nav'
 import { unread as unreadApi } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
+import { useNotifications } from '../stores/notifications'
 import { ChatBubble } from './ChatBubble'
 import { BellIcon } from './icons'
 
@@ -223,9 +224,24 @@ const UNREAD_POLL_MS = 30_000
  * A failed poll keeps the last known counts rather than resetting to zero. The
  * badge is an invitation to look, and flicking it off because one request lost
  * the network would hide mail that is still sitting there.
+ *
+ * ── Why the notification count goes into the store rather than staying here ──
+ *
+ * Two branches grew a bell badge independently, and both were right about
+ * something. This poll knows about BOTH counters — messages and notifications —
+ * from one request. The notifications store knows when the count has just
+ * changed for a reason: the notifications page reads a row and calls
+ * `setUnread` with a number fresher than any poll can be.
+ *
+ * Keeping both would have meant two sources of truth for one number, with the
+ * bell contradicting the page for up to thirty seconds after a read. So the
+ * poll WRITES the notification count into the store and the bell READS it from
+ * there: the timer keeps it current, the page corrects it instantly, and there
+ * is one number. Messages have no such store, so they stay local.
  */
 function useUnread() {
   const [counts, setCounts] = useState({ messages: 0, notifications: 0 })
+  const setUnread = useNotifications((s) => s.setUnread)
 
   useEffect(() => {
     let cancelled = false
@@ -234,7 +250,9 @@ function useUnread() {
       unreadApi
         .summary()
         .then((next) => {
-          if (!cancelled) setCounts(next)
+          if (cancelled) return
+          setCounts(next)
+          setUnread(next.notifications)
         })
         .catch(() => {
           /* keep the last known counts */
@@ -247,7 +265,7 @@ function useUnread() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [])
+  }, [setUnread])
 
   return counts
 }
@@ -335,13 +353,21 @@ export function AppShell() {
   // Hooks run before the early return: a conditional hook changes the order
   // between renders and React refuses the second one.
   const counts = useUnread()
+  /*
+   * The bell reads the store, not `counts.notifications`. `useUnread` feeds the
+   * store on every poll, so this is the same number thirty seconds out of date
+   * at worst — but the notifications page writes it directly the moment a row is
+   * read, and only the store sees that. Reading the local copy here would leave
+   * the badge lit on notifications the reader is looking at.
+   */
+  const unreadNotifications = useNotifications((s) => s.unread)
   if (!user) return null
   const isOwner = user.permissions.includes('application.view_own')
 
   return (
     <div className="min-h-dvh bg-canvas">
       <Rail user={user} unreadMessages={counts.messages} />
-      <Bell count={counts.notifications} />
+      <Bell count={unreadNotifications} />
       {isOwner && <ChatBubble />}
 
       <main className="min-h-dvh lg:pl-20">

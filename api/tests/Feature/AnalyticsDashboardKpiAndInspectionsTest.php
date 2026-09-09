@@ -19,7 +19,11 @@ use Carbon\CarbonImmutable;
  *    dropped every inspection row belonging to anyone else — the register
  *    already held hundreds of OBO, CENRO and Market inspections. The tests below
  *    assert the membership rule (who inspects is read from the register) rather
- *    than the six codes, because the six codes are the thing that changed.
+ *    than a fixed list of codes, because the codes are the thing that changed —
+ *    and have since changed again: the client's "6" became 5 when Market
+ *    Clearance and the City Market Office were removed on 6 September 2026.
+ *    Reading the offices out of the register is what let that second change
+ *    land here as one number rather than a rewrite.
  *
  * 2. "Do not put YTD only; it should be the full term." The yearly KPI counted
  *    from 1 January. It now counts the whole register.
@@ -48,10 +52,15 @@ function inspectionPanelCodes(): array
 it('lists every office that inspects, and never BPLO', function () {
     $offices = inspectingOfficeCodes();
 
-    // The client's "all 6 (no BPLO)": six supporting clearances are inspected,
-    // the Mayor's Permit is not. If someone flips a requires_inspection flag,
-    // this is the assertion that tells them the panel followed.
-    expect($offices)->toHaveCount(6);
+    // The client's "all of them (no BPLO)": every supporting clearance is
+    // inspected, the Mayor's Permit is not. If someone flips a
+    // requires_inspection flag, this is the assertion that tells them the panel
+    // followed.
+    //
+    // Six when the client reported it, five now. Market Clearance and the City
+    // Market Office were removed on 6 September 2026, taking one inspecting
+    // office with them — see PermitType::REQUIRED_CLEARANCE_CODES.
+    expect($offices)->toHaveCount(5);
     expect($offices)->not->toContain('BPLO');
 
     expect(inspectionPanelCodes())->toBe($offices);

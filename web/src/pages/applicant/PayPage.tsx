@@ -97,8 +97,44 @@ export function PayPage() {
             </p>
           </div>
         </StatusCard>
-        <div className="mt-7 flex justify-center gap-3">
-          <PillButton onClick={() => navigate(`/applications/${appId}`)}>Back to application</PillButton>
+        {/*
+          * This screen is the exact instant the six LGU clearances unlock —
+          * ClearanceService::isUnlocked turns on the first cleared payment —
+          * and until now it said nothing about them and offered no way there.
+          *
+          * A tester reported the other permits "missing". They are not: they
+          * are one link on the application detail page, below the fold, and
+          * nothing anywhere announces the moment they become available. Telling
+          * someone what just became possible, at the moment it becomes
+          * possible, is cheaper than another place to go looking.
+          *
+          * Leading the button row rather than trailing it, because it is now
+          * the most useful thing on the screen; "Back to application" was only
+          * ever a way out. The sentence above it carries the meaning in text so
+          * the button is not the only thing saying what changed.
+          */}
+        {/*
+          "Apply for the ones your business needs — each adds its own fee" was
+          two wrong claims in one line. Five of the clearances are required, so
+          choosing among them is not on offer; and this payment already covered
+          all of them, so none of them adds a fee. What is released and when
+          also changed: the gate is five approvals, not a zero balance.
+        */}
+        <p className="mt-6 text-center text-sm text-ink-secondary">
+          Your five LGU Clearances are now open, and this payment already covered them. Apply for
+          each one, or hand in a copy if you already hold it — your Business Permit is released
+          once all five are approved.
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
+          <PillButton onClick={() => navigate(`/applications/${appId}/clearances`)}>
+            Apply for LGU Clearances
+          </PillButton>
+          <PillButton
+            className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
+            onClick={() => navigate(`/applications/${appId}`)}
+          >
+            Back to application
+          </PillButton>
           <PillButton
             className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
             onClick={() => navigate('/payments')}

@@ -2,6 +2,7 @@
 
 use App\Models\Barangay;
 use App\Models\ZoningClassification;
+use App\Models\ZoningOverlay;
 use Database\Seeders\ZoningSeeder;
 
 /*
@@ -92,6 +93,17 @@ it('describes the map and never the applicant’s location', function () {
     foreach (['zoning_classification', 'zone', 'conforming', 'is_conforming', 'verdict'] as $forbidden) {
         expect($acacia)->not->toHaveKey($forbidden);
     }
+
+    /*
+     * The overlays bring their own version of the same temptation, and a worse
+     * one: Flood covers all 21 barangays, so a key like `flood_risk` would be
+     * trivially fillable and would read as a finding about the applicant's lot.
+     * `zoning_overlays` says the ordinance designates an overlay over parts of
+     * the barangay, which is the whole of what the ordinance says.
+     */
+    foreach (['overlay', 'flood_risk', 'in_flood_zone', 'flood_susceptibility'] as $forbidden) {
+        expect($acacia)->not->toHaveKey($forbidden);
+    }
 });
 
 it('leaves an admin’s correction alone when the seeder runs again', function () {
@@ -111,6 +123,82 @@ it('leaves an admin’s correction alone when the seeder runs again', function (
 
     expect($acacia->fresh()->zoningClassifications->pluck('code'))->not->toContain('C-2')
         ->and($acacia->fresh()->zoning_map_path)->toBe('/zoning-maps/acacia-2027-revision.png');
+});
+
+it('keeps the three overlay zones out of the base classification legend', function () {
+    /*
+     * The rule the separate table exists to hold. An overlay is not one of the
+     * nineteen classifications CPDO prints on the sheets — Art. V §4 calls it "a
+     * transparent zone overlain on a Base Zone" — so the legend must still count
+     * nineteen after the overlays are seeded, and the overlays must be reachable
+     * only through their own relation.
+     */
+    expect(ZoningClassification::count())->toBe(19)
+        ->and(ZoningClassification::whereIn('code', ['FLD-OZ', 'HTG-OZ', 'ETM-OZ'])->count())->toBe(0);
+
+    expect(ZoningOverlay::orderBy('sort_order')->pluck('code')->all())
+        ->toBe(['FLD-OZ', 'HTG-OZ', 'ETM-OZ']);
+});
+
+it('designates Flood over all 21 barangays, Heritage over five and Eco-Tourism over Dampalit', function () {
+    // City Ordinance No. 24-2018, Annex C's map index, agreeing with Art. IV §5's
+    // right-hand column. Heritage is the one to watch: the text-layer extraction
+    // of the §5 table reads eight barangays because its overlay column is
+    // misaligned, and Annex C is the one we follow.
+    $named = fn (string $code) => ZoningOverlay::where('code', $code)
+        ->firstOrFail()->barangays()->orderBy('name')->pluck('name')->all();
+
+    expect($named('FLD-OZ'))->toHaveCount(21)
+        ->and($named('HTG-OZ'))->toBe(['Baritan', 'Concepcion', 'Hulong Duhat', 'Ibaba', 'San Agustin'])
+        ->and($named('ETM-OZ'))->toBe(['Dampalit']);
+});
+
+it('gives a barangay its base zones and its overlays at the same time', function () {
+    // An overlay does not replace a base zone, it lies over it. Dampalit is the
+    // one barangay carrying two overlays, so it is where a merged list would show.
+    $dampalit = Barangay::where('name', 'Dampalit')->with(['zoningClassifications', 'zoningOverlays'])->firstOrFail();
+
+    expect($dampalit->zoningClassifications->pluck('code')->all())
+        ->toBe(['R-2-BASIC', 'R-2-MAX', 'R-3-BASIC', 'C-1', 'INSTITUTIONAL', 'FISHPOND', 'MANGROVE'])
+        ->and($dampalit->zoningOverlays->pluck('code')->all())->toBe(['FLD-OZ', 'ETM-OZ']);
+});
+
+it('sends overlays as their own key on the reference endpoint', function () {
+    $body = $this->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson('/api/v1/reference/barangays')
+        ->assertOk()
+        ->json('data');
+
+    $baritan = collect($body)->firstWhere('name', 'Baritan');
+
+    // Its own key, not extra entries in zoning_classifications: a consumer that
+    // renders the classification list must not be able to print an overlay in it.
+    expect(collect($baritan['zoning_classifications'])->pluck('code')->all())
+        ->not->toContain('FLD-OZ')
+        ->and(collect($baritan['zoning_overlays'])->pluck('code')->all())
+        ->toBe(['FLD-OZ', 'HTG-OZ']);
+
+    // The description travels with the row so the frontend never keeps its own
+    // copy of what an ordinance says, which an amending ordinance would strand.
+    expect(collect($baritan['zoning_overlays'])->firstWhere('code', 'FLD-OZ')['description'])
+        ->toContain('prone to flooding');
+});
+
+it('leaves an admin’s overlay correction alone when the seeder runs again', function () {
+    /*
+     * Same rule as the classifications: these designations were read out of an
+     * ordinance whose own two articles disagree about the codes, so CPDO will
+     * correct some of them, and a re-seed that reinstated a removed overlay
+     * would undo the correction with nobody watching.
+     */
+    $baritan = Barangay::where('name', 'Baritan')->firstOrFail();
+    $heritage = ZoningOverlay::where('code', 'HTG-OZ')->firstOrFail();
+
+    $baritan->zoningOverlays()->detach($heritage->id);
+
+    $this->seed(ZoningSeeder::class);
+
+    expect($baritan->fresh()->zoningOverlays->pluck('code')->all())->toBe(['FLD-OZ']);
 });
 
 it('ships every map file the rows point at', function () {

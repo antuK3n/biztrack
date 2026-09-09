@@ -20,7 +20,13 @@ import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/
 import { admin, applications, assignments, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { AdminUser, AppDocument, Application, FeeProfile } from '../../lib/types'
+import type {
+  AdminUser,
+  AppDocument,
+  Application,
+  FeeProfile,
+  OfficeFormRequirement,
+} from '../../lib/types'
 
 /*
  * Admin Review sheet (PDF p56, p67–p76): the officer reads the application as
@@ -66,6 +72,23 @@ interface ReviewBusiness {
   citizenship?: string | null
   capital_participation_filipino?: string | null
   has_tax_incentives?: boolean | null
+  /*
+   * The premises and the emergency contact — Section B on the paper.
+   *
+   * `BusinessResource` has sent all seven of these since it was written; this
+   * type simply never declared them, so nothing on the sheet could print them
+   * and the type checker agreed there was nothing to print. Every field is
+   * optional for the same reason as the block above: a business filed before
+   * the wizard asked carries null, and an owned premises carries null for the
+   * whole lessor group by design.
+   */
+  is_rented?: boolean | null
+  lessor_name?: string | null
+  lessor_address?: string | null
+  lessor_contact?: string | null
+  monthly_rental?: string | null
+  emergency_contact_name?: string | null
+  emergency_contact_number?: string | null
   lines?: {
     id: number
     psic_code: { code: string; title: string } | null
@@ -188,6 +211,73 @@ function Field({ label, value, className = '' }: { label: string; value: string;
       <dt className="mb-1.5 block text-[13px] font-semibold text-ink">{label}</dt>
       <dd className={recordValue}>{value || '—'}</dd>
     </dl>
+  )
+}
+
+/**
+ * The zoning sheet's CHECKLIST OF REQUIREMENTS, as the deciding office reads it.
+ *
+ * The applicant sees this list on their own sheet and CPDD is the office that
+ * acts on it — a locational clearance is decided against a title deed, a tax
+ * declaration and a sketch of the site, none of which the form answers carry. A
+ * checklist visible to only one of the two seats would be half a feature, and
+ * the same "two doors, two answers" shape this file has been repaired for
+ * repeatedly, so `ApplicationResource` builds it from the same
+ * `App\Support\ZoningRequirements` the applicant's screen reads.
+ *
+ * It names the files rather than offering them: every one of them is an
+ * ordinary `ApplicationDocument` and is already listed, with its own view and
+ * download controls, under Uploaded Requirements below. A second download path
+ * to the same file is a second thing to keep working.
+ *
+ * Read-only, and not because of a permission — which rows apply is derived from
+ * the filing, and what satisfies each is a file the applicant attached. The
+ * office acts on this by approving or returning the clearance.
+ */
+function RequirementsRead({ code, rows }: { code?: string; rows: OfficeFormRequirement[] }) {
+  const outstanding = rows.filter((r) => !r.satisfied).length
+
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-white px-4 py-3">
+      {/*
+        The two papers that ask for documents call the box different things —
+        CPDD's "CHECKLIST OF REQUIREMENTS" and CENRO's "REQUIREMENTS FOR
+        APPLICATION" — and an officer reading their own form against the screen
+        should see their own heading.
+      */}
+      <p className="text-[11px] font-bold uppercase tracking-wide text-ink-secondary">
+        {code === 'CEC' ? 'Requirements for Application' : 'Checklist of Requirements'}
+      </p>
+      <p className="mt-1 text-xs text-ink-muted">
+        {outstanding === 0
+          ? 'Everything on this list is on the filing.'
+          : `${outstanding} of ${rows.length} not on the filing. The files are under Uploaded Requirements below.`}
+      </p>
+      <ul className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <li key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+            <span
+              aria-hidden
+              className={`shrink-0 font-bold ${row.satisfied ? 'text-s-green' : 'text-ink-muted'}`}
+            >
+              {row.satisfied ? '✓' : '—'}
+            </span>
+            <span className="font-medium text-ink">{row.label}</span>
+            {row.document !== null ? (
+              <span className="break-all text-xs text-ink-secondary">
+                {row.document.filename}
+              </span>
+            ) : row.reference ? (
+              <span className="tnum text-xs text-ink-secondary">{row.reference}</span>
+            ) : (
+              <span className="text-xs text-ink-muted">
+                {row.source === 'sheet' ? 'not submitted yet' : 'not on file'}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 
@@ -799,7 +889,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
-  const decided = rejected || approvedHere || Boolean(data.completed_at)
+  /*
+   * BPLO acts TWICE on one assignment row, and this read the first act as the
+   * end of both.
+   *
+   * The flow gives BPLO the form before payment and the final signature after
+   * every permit is approved. Both go through the same assignment, and
+   * `completeAssignment` stamps `status = completed` and `completed_at` on the
+   * first — so by the time a filing reached For Final Approval, every clause
+   * below was already true. The Mode control was replaced by a static
+   * "Approved" and no Approve button was drawn: the Final Approval tab served
+   * an openable row leading to a screen that could not act on it, and no filing
+   * could ever reach `approved`. The API was willing throughout —
+   * `approveAssignment` maps `for_final_approval` onto `approveOverall`.
+   *
+   * So a filing standing at For Final Approval is never "decided", whatever the
+   * row says. Keyed on the APPLICATION's status rather than the row, because
+   * the row cannot tell BPLO's two acts apart — the same root cause as BPLO's
+   * recorded turnaround covering the whole filing's lifetime. Giving the second
+   * act its own assignment row would fix both at once, and is a larger change
+   * than this screen.
+   */
+  const owesFinalApproval = app.status === 'for_final_approval'
+  const decided = !owesFinalApproval && (rejected || approvedHere || Boolean(data.completed_at))
   // A decided review is a record for good: there is nothing left to change.
   const editing = mode === 'edit' && !decided
 
@@ -1043,11 +1155,71 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   }
 
   /*
-   * ── The For Inspection screen ─────────────────────────────────────────────
+   * ── May THIS office book the first visit on its own clearance? ────────────
    *
-   * A filing waiting on a site visit gets its own, much smaller page, and
-   * returns before any of the review sheet below is built — but only for an
-   * office that has nothing left to review on it.
+   * The step that had no screen. `approveClearance` moves a permit to
+   * `for_inspection` and books nothing — the automatic scheduler was removed on
+   * purpose, because "an automatic date is a promise made to the applicant by a
+   * scheduler that does not know whether anyone is free" — so the office picks
+   * the date in a second, separate act. Until this, no client called
+   * `POST /applications/{id}/permits/{code}/inspection`, and a permit that
+   * reached `for_inspection` stayed there: no visit, so nothing to pass, so the
+   * filing never reached For Final Approval.
+   *
+   * ── The office boundary, taken from the payload rather than guessed ────────
+   *
+   * `data.clearance` is `AssignmentResource::clearanceRow()` — the permit this
+   * office issues on this filing, matched on
+   * `issuing_department_id === assignment.department_id`. That is the SAME
+   * column `InspectionController::schedule` checks the caller against before it
+   * answers 403, so the control is drawn exactly where the request will be
+   * accepted and nowhere else. Null when this office issues no permit here, so
+   * an office reading the filing without owning a clearance gets no control.
+   *
+   * The three other candidates were all worse. `app.permit_types` is the
+   * filing's list, shared by every office — driving off it is how a sanitary
+   * officer was once handed OBO's date inputs over a live Save (SEP-3). Office
+   * forms carry a `department_code`, but only for a permit the applicant APPLIED
+   * for; hand in a copy you already hold and there is no sheet, while the permit
+   * still needs its inspection. And a permit-type lookup by code would be this
+   * rule written down a second time, in the browser, where it can drift.
+   *
+   * ── The other three conditions ────────────────────────────────────────────
+   *
+   *  - `requires_inspection`, or there is no visit to book: a desk-only permit
+   *    is granted by `approveClearance` itself and never sits here. BPLO's
+   *    Business Permit is the one in the register today.
+   *  - `status === 'for_inspection'` — the pivot state
+   *    `scheduleClearanceInspection` demands, and the only one it accepts.
+   *  - this office has NO visit on the filing yet. Not "no OPEN visit": after a
+   *    failure the permit STAYS at `for_inspection` (recordInspection keeps the
+   *    failed row), and the way on from there is Schedule re-inspection on the
+   *    failed card, which the panel already draws. Two controls booking the same
+   *    office's next visit, one of them silently discarding the failure from
+   *    view, is the confusion `reinspect` was separated from `reschedule` to
+   *    avoid.
+   *
+   * A courtesy, not the control: the API is still what decides, and a mismatch
+   * surfaces as the panel's error line rather than as an unauthorised write.
+   */
+  const myClearance = data.clearance
+  const myVisits = (app.inspections ?? []).filter(
+    (visit) => visit.department?.code === data.department.code,
+  )
+  const bookFirstInspection =
+    myClearance &&
+    myClearance.requires_inspection &&
+    myClearance.status === 'for_inspection' &&
+    myVisits.length === 0
+      ? { applicationId: app.id, code: myClearance.code, permit: myClearance.name }
+      : undefined
+
+  /*
+   * ── The "nothing left for this office" screen ─────────────────────────────
+   *
+   * A filing still being worked gets its own, much smaller page, and returns
+   * before any of the review sheet below is built — but only for an office that
+   * has nothing left to do on it.
    *
    * ── The premise this rested on, and why it is gone (INS-1) ────────────────
    *
@@ -1103,15 +1275,44 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * The `app.status` half of the test is read off the status rather than off
    * the presence of inspections: a visit can exist on a filing that has already
    * moved past inspection (a failed one stays on the record for good), and a
-   * filing can sit in `for_inspection` before anything is scheduled.
+   * filing can sit at this stage before anything is scheduled.
    *
    * Every other status falls straight through to the sheet, unchanged.
    *
-   * Safe as an early return: every hook on this component runs above the
-   * `loading` guard, so nothing below here is a hook and no render path can
-   * skip one.
+   * ── Re-keyed for the September flow (8 September 2026) ────────────────────
+   *
+   * This tested `app.status === 'for_inspection'`, and that status no longer
+   * exists on an application — inspection belongs to one permit now. The branch
+   * had therefore stopped firing altogether, silently: every office that had
+   * finished its review was handed the whole application form back, which is
+   * the exact thing the client twice asked to have removed.
+   *
+   * The stage it was describing is now `awaiting_other_permits`, and the shape
+   * is unchanged underneath. `approveClearance` completes an office's
+   * assignment at the moment it accepts the paperwork and leaves the permit at
+   * `for_inspection`, so an office in the old "reviewed, now waiting on the
+   * visit" seat reads exactly as it always did: `!owesReview`, on a filing that
+   * has not finished.
+   *
+   * `for_final_approval` is included, because five offices sitting finished
+   * while BPLO signs off are in the same position — with ONE exception, and it
+   * is load-bearing. BPLO's own assignment was completed by `approveMainForm`
+   * at the very start, so `owesReview` is false for BPLO here too, and BPLO's
+   * Approve at this status is what calls `approveOverall()` and mints the
+   * Mayor's Permit. Hand BPLO the compact box and that button is nowhere in the
+   * product — the INS-1 deadlock above, rebuilt at the other end of the
+   * process. The exception is keyed on the ASSIGNMENT's department, not on the
+   * reader's permissions, because that is what `approveAssignment` itself
+   * branches on.
    */
-  if (app.status === 'for_inspection' && !owesReview) {
+  const bploSignsOffHere =
+    data.department.code === 'BPLO' && app.status === 'for_final_approval'
+  const nothingLeftForThisOffice =
+    (app.status === 'awaiting_other_permits' || app.status === 'for_final_approval') &&
+    !owesReview &&
+    !bploSignsOffHere
+
+  if (nothingLeftForThisOffice) {
     return (
       <div>
         {backLink}
@@ -1177,10 +1378,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
           {/*
            * `reload`, not a local patch of the card. Recording the last
-           * outstanding visit as passed issues the permit and moves
-           * `app.status` off `for_inspection` altogether — at which point this
-           * whole branch stops applying and the officer should be looking at
-           * the approved filing, not at a stale card.
+           * outstanding visit as passed issues this office's permit, and once
+           * the last required permit lands `refreshReadiness` moves the filing
+           * on — at which point this whole branch stops applying and the
+           * officer should be looking at the filing as it now is, not at a
+           * stale card.
            */}
           {/*
            * `filingStatus` is not a formality. The panel needs the FILING's
@@ -1194,6 +1396,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             inspections={app.inspections ?? []}
             filingStatus={app.status}
             onChanged={reload}
+            book={bookFirstInspection}
           />
 
           {/* The rail the client asked to keep: "but the progress thingy is cool". */}
@@ -1818,6 +2021,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * lead with and goes straight to the record it coordinates.
            */}
           {ownOfficeForms.map((form) => {
+            /*
+             * `form_saved` is the server saying whether the applicant has
+             * actually answered anything here.
+             *
+             * This block used to render only sheets that had been SAVED, so a
+             * filing whose applicant had applied but not yet opened the form
+             * showed nothing at all — the CENRO report of 9 September 2026,
+             * "why do I only see the BPLO application form only". Every
+             * form-bearing sheet on the filing now arrives whether or not it
+             * has been filled in, which fixes the absence but creates a new way
+             * to be misread: a sheet carrying only derived answers looks
+             * identical to one the applicant completed. So it says which.
+             */
             const entries = Object.entries(form.form_data ?? {})
             return (
               <section
@@ -1831,6 +2047,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <h2 className="mt-1 text-[15px] font-bold text-ink">
                   {form.permit_type_name ?? form.permit_type_code} — the clearance you are deciding
                 </h2>
+                {form.form_saved === false && (
+                  <p className="mt-3 rounded-md border border-s-orange bg-s-orange-tint px-3 py-2 text-sm leading-relaxed text-ink">
+                    <span className="font-semibold">Not filled in yet.</span> The applicant has
+                    applied for this clearance but has not saved any answers on your form. What is
+                    below is what the system already knows about the filing.
+                  </p>
+                )}
                 {entries.length === 0 ? (
                   <p className="mt-3 text-sm text-ink-secondary">
                     The applicant recorded no answers on your office’s form.
@@ -1848,6 +2071,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   * sheet that ran on down the page, which stopped being true
                   * the moment the disclosure below went in.
                   */}
+                {form.requirements && form.requirements.length > 0 && (
+                  <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
+                )}
                 <p className="mt-3 text-xs text-ink-muted">
                   The applicant’s own filing — address, line of business, uploaded requirements and
                   fee declaration — is folded away below, under{' '}
@@ -2060,49 +2286,14 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   }
                 />
               </div>
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* Item B6. */}
-                <Field
-                  label="Economic Organization"
-                  value={
-                    business.economic_organization
-                      ? business.economic_organization === 'others'
-                        ? `Others — ${business.economic_organization_others || 'unspecified'}`
-                        : humanizeKey(business.economic_organization)
-                      : ''
-                  }
-                />
-                {/*
-                  * Item B8 (new form) / B7 (renewal).
-                  *
-                  * KNOWN LIMIT, and it is worth stating rather than papering
-                  * over: `businesses.has_tax_incentives` is `boolean default
-                  * false` and NOT NULL, so a business registered before the
-                  * wizard asked this question reads "No" here — not because the
-                  * applicant declared no incentives, but because nobody put the
-                  * question. Making the column nullable would not fix it either:
-                  * the rows already on disk are `false`, and every row written
-                  * from now on is a real answer. So there is nothing to migrate,
-                  * only something to know. If an officer is about to act on a
-                  * "No" from an older filing, ask through Messages — the same
-                  * remedy the Amendment From block above prescribes for the same
-                  * class of gap.
-                  *
-                  * The null branch is kept for the case the resource omits the
-                  * field entirely (a business that has been removed from the
-                  * register renders an empty ReviewBusiness).
-                  */}
-                <Field
-                  label="Tax Incentives from a Government Entity"
-                  value={
-                    business.has_tax_incentives == null
-                      ? ''
-                      : business.has_tax_incentives
-                        ? 'Yes — certificate required'
-                        : 'No'
-                  }
-                />
-              </div>
+              {/*
+                * Items B6 and B8 were printed here and have moved to Section B.
+                * They are Business OPERATION questions — what kind of
+                * establishment this is, and whether it holds tax incentives —
+                * and printing them under "Business Information & Registration"
+                * put two of the paper's B items under its A heading on a sheet
+                * whose whole purpose is to be a faithful rendering of it.
+                */}
             </div>
 
             <SubHeading>Main Office Address</SubHeading>
@@ -2116,9 +2307,68 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             </div>
           </section>
 
-          {/* B — Lines of business */}
+          {/*
+            B — Business Operation.
+            ─────────────────────────────────────────────────────────────────
+            It was headed "Line of Business" and held only that table, while
+            items B6 and B8 were printed up in Section A and the premises and
+            emergency-contact answers were printed NOWHERE. So the sheet had an
+            A that carried B's questions, a B that carried one of them, and a
+            handful the applicant typed that no officer could read.
+
+            The paper's B is "Business Operation": what the business does, out
+            of what premises, on what terms, and who to ring. That is the
+            grouping now, and the letter finally means the same thing on both
+            sides of the desk.
+          */}
           <section className="mt-9">
-            <SectionHeading letter="B">Line of Business</SectionHeading>
+            <SectionHeading letter="B">Business Operation</SectionHeading>
+
+            <div className="mb-6 grid gap-4 sm:grid-cols-2">
+              {/* Item B6. */}
+              <Field
+                label="Economic Organization"
+                value={
+                  business.economic_organization
+                    ? business.economic_organization === 'others'
+                      ? `Others — ${business.economic_organization_others || 'unspecified'}`
+                      : humanizeKey(business.economic_organization)
+                    : ''
+                }
+              />
+              {/*
+                * Item B8 (new form) / B7 (renewal).
+                *
+                * KNOWN LIMIT, and it is worth stating rather than papering
+                * over: `businesses.has_tax_incentives` is `boolean default
+                * false` and NOT NULL, so a business registered before the
+                * wizard asked this question reads "No" here — not because the
+                * applicant declared no incentives, but because nobody put the
+                * question. Making the column nullable would not fix it either:
+                * the rows already on disk are `false`, and every row written
+                * from now on is a real answer. So there is nothing to migrate,
+                * only something to know. If an officer is about to act on a
+                * "No" from an older filing, ask through Messages — the same
+                * remedy the Amendment From block prescribes for the same class
+                * of gap.
+                *
+                * The null branch is kept for the case the resource omits the
+                * field entirely (a business that has been removed from the
+                * register renders an empty ReviewBusiness).
+                */}
+              <Field
+                label="Tax Incentives from a Government Entity"
+                value={
+                  business.has_tax_incentives == null
+                    ? ''
+                    : business.has_tax_incentives
+                      ? 'Yes — certificate required'
+                      : 'No'
+                }
+              />
+            </div>
+
+            <SubHeading>Line of Business</SubHeading>
             {business.lines && business.lines.length > 0 ? (
               <div className="space-y-4">
                 {business.lines.map((line, i) => (
@@ -2148,6 +2398,48 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               </div>
             ) : (
               <Field label="Line of Business" value={app.permit_types.map((p) => p.name).join(', ')} />
+            )}
+
+            {/*
+              * The premises, and who to ring — asked of every applicant and
+              * shown to no officer until now.
+              *
+              * `BusinessResource` has emitted all seven of these fields the
+              * whole time; no section printed them. The lessor block is the
+              * costlier omission: whether a business rents, from whom, and for
+              * how much is exactly what an officer checks a lease against, and
+              * the lease is sitting in Section C two headings below. The
+              * emergency contact is the number an inspector rings when nobody
+              * answers at the premises.
+              *
+              * The lessor block is drawn only when the premises are rented,
+              * because four empty fields under "Lessor" read as missing answers
+              * rather than as an owned building. The one-line statement is
+              * printed either way, so the sheet always says which it is.
+              */}
+            <SubHeading>Premises &amp; Contact</SubHeading>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field
+                label="Premises"
+                value={business.is_rented == null ? '' : business.is_rented ? 'Rented' : 'Owned'}
+              />
+              <Field label="Emergency Contact Person" value={business.emergency_contact_name ?? ''} />
+              <Field label="Emergency Contact Number" value={business.emergency_contact_number ?? ''} />
+            </div>
+            {business.is_rented && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                <Field label="Lessor's Name" value={business.lessor_name ?? ''} />
+                <Field
+                  label="Lessor's Address"
+                  value={business.lessor_address ?? ''}
+                  className="sm:col-span-2"
+                />
+                <Field label="Lessor's Contact Number" value={business.lessor_contact ?? ''} />
+                <Field
+                  label="Monthly Rental"
+                  value={business.monthly_rental == null ? '' : formatMoney(business.monthly_rental)}
+                />
+              </div>
             )}
           </section>
 
@@ -2187,15 +2479,31 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * admin, who hold `application.view_any_office`, still get every
            * sheet here, which is the coordination they need.
            */}
+          {/*
+           * ── Section D is DRAWN ONLY WHEN IT HAS SOMETHING IN IT ────────────
+           *
+           * The client, seeing its empty state: "can you remove this part since
+           * this is highly unnecessary."
+           *
+           * They are right, and the reason is structural rather than a matter
+           * of taste. Office separability means a clearance office can never
+           * have anything here — every other office's sheet is withheld from it
+           * by design — so for five of the six seats this section was a
+           * permanent heading over a permanent apology. A section that can only
+           * ever be empty is not information; it is a promise the screen cannot
+           * keep, and it pushed the officer's own work further down the page to
+           * make room for it.
+           *
+           * It still renders, populated, for BPLO and the super admin, who hold
+           * `application.view_any_office` and coordinate across offices. That is
+           * the one seat where "other offices' answers" is a real category with
+           * real contents, and it is why this is a conditional rather than a
+           * deletion.
+           */}
+          {otherOfficeForms.length > 0 && (
           <section className="mt-9">
             <SectionHeading letter="D">Other Offices’ Form Answers</SectionHeading>
-            {otherOfficeForms.length === 0 ? (
-              <p className="rounded-lg border border-line px-4 py-5 text-center text-sm text-ink-muted">
-                {ownOfficeForms.length > 0
-                  ? 'Nothing here. Your office’s form is at the top of this sheet, and the other offices’ forms on this filing are theirs to read.'
-                  : 'No per-office form on this application is yours to read.'}
-              </p>
-            ) : (
+            {(
               otherOfficeForms.map((form, formIndex) => {
                 const entries = Object.entries(form.form_data ?? {})
                 return (
@@ -2220,11 +2528,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         ))}
                       </div>
                     )}
+                    {form.requirements && form.requirements.length > 0 && (
+                      <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
+                    )}
                   </div>
                 )
               })
             )}
           </section>
+          )}
 
           {/* E — Applicant-declared fee inputs (revenue-code profile) */}
           <section className="mt-9">

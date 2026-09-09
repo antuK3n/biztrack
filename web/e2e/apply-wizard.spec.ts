@@ -119,12 +119,17 @@ test('the wizard is the business permit alone, with no clearance step', async ({
   const joined = map.join(' | ').toLowerCase()
 
   /*
-   * Six sections, fixed. Not "six or more": the count is the whole point now.
-   * Under the previous arrangement it started at seven and GREW as office
-   * sheets joined, so an exact count is what distinguishes a wizard that has no
-   * clearance machinery from one whose machinery merely has not fired yet.
+   * Seven sections, fixed. Not "seven or more": the count is the whole point.
+   * Under the previous arrangement the map GREW as office sheets joined it, so
+   * an exact count is what distinguishes a wizard with no clearance machinery
+   * from one whose machinery merely has not fired yet.
+   *
+   * It was six until Business Information was split and Business Operation
+   * added. The number is incidental — what it guards is that nothing can be
+   * appended by applying for something — so it moves when a phase is
+   * deliberately added, and the assertions below are the ones with teeth.
    */
-  expect(map, `the section map is not the six phases: ${joined}`).toHaveLength(6)
+  expect(map, `the section map is not the seven phases: ${joined}`).toHaveLength(7)
 
   // The step itself, gone. This is the rule the client reversed.
   expect(joined, 'the LGU Clearances step is back in the wizard').not.toContain('clearance')
@@ -143,7 +148,6 @@ test('the wizard is the business permit alone, with no clearance step', async ({
     'occupancy permit form',
     'locational clearance form',
     'environmental clearance form',
-    'market clearance form',
   ]) {
     expect(joined, `"${sheet}" is a step of the wizard again`).not.toContain(sheet)
   }
@@ -154,11 +158,20 @@ test('the wizard is the business permit alone, with no clearance step', async ({
   // Consent before collection; the business described before the paperwork
   // that describes it; and Review last, with nothing between it and the tax
   // profile any more.
+  /*
+   * "fees & tax computation", not "tax profile" — the phase was renamed, and
+   * `at()` returns -1 for a label that is not there, which quietly satisfies
+   * every `toBeLessThan` above it. A missing label must fail loudly here, so
+   * each index is asserted present before it is ordered.
+   */
+  for (const label of ['privacy', 'location & zoning', 'business information', 'documentary', 'fees & tax computation', 'review']) {
+    expect(at(label), `"${label}" missing from the step map: ${joined}`).toBeGreaterThanOrEqual(0)
+  }
   expect(at('privacy')).toBeLessThan(at('location & zoning'))
   expect(at('location & zoning')).toBeLessThan(at('business information'))
   expect(at('business information')).toBeLessThan(at('documentary'))
-  expect(at('documentary')).toBeLessThan(at('tax profile'))
-  expect(at('tax profile')).toBeLessThan(at('review'))
+  expect(at('documentary')).toBeLessThan(at('fees & tax computation'))
+  expect(at('fees & tax computation')).toBeLessThan(at('review'))
 
   /*
    * The count is part of the promise, and its history is the fastest way to
@@ -166,7 +179,7 @@ test('the wizard is the business permit alone, with no clearance step', async ({
    * "Part 1 of 7" was the day the clearances were step 6, and "Part 1 of 6" is
    * payment-first.
    */
-  await expect(page.getByText(/part 1 of 6/i).first()).toBeVisible()
+  await expect(page.getByText(/part 1 of 7/i).first()).toBeVisible()
 })
 
 test('line of business is asked once, and the one ask is the searchable picker', async ({
@@ -532,6 +545,108 @@ test('the Revenue Code category shows words and stores the slug the fee engine m
   expect(found.messy).toBe('tailor_dress_shop')
 })
 
+test('a peso amount gains its centavos when committed, and still posts as a number', async ({
+  page,
+}) => {
+  /*
+   * Client checklist item 12: "the auto comma is great, but it should also auto
+   * decimal." Grouping was already there; the centavos were not, so a typed
+   * ₱1,000 and the same figure reloaded from a saved draft — which comes back
+   * from a decimal(15,2) column as 1,000.00 — disagreed on screen.
+   *
+   * Three things have to hold at once, and the padding is only worth having if
+   * all three do:
+   *
+   *   1. committed values pad, and padding twice changes nothing
+   *   2. a value mid-typing is left exactly as typed, so the caret has nothing
+   *      to jump over — "1000.5" stays "1,000.5" until the field is left
+   *   3. the padded string still reaches the API as a number, and an empty
+   *      field is still MISSING rather than a declared zero
+   *
+   * Driven against the module rather than the rendered field, for the reason
+   * given on the Revenue Code test above: this control sits on part 5 of 6
+   * behind a map pin, and the round-trip assertion is the point.
+   */
+  const spec = '/src/pages/applicant/FeeProfileStep.tsx'
+  const found = await page.evaluate(async (path) => {
+    const mod = (await import(/* @vite-ignore */ path)) as {
+      padAmountInput: (raw: string) => string
+      formatAmountInput: (raw: string | number | null | undefined) => string
+      capitalInvestmentMissing: (value: string, applicationType: string) => string[]
+      EMPTY_FEE_PROFILE: Record<string, unknown>
+      buildFeeProfile: (
+        draft: unknown,
+        opts: {
+          applicationType: string
+          permitCodes: string[]
+          lineIds: number[]
+          capitalInvestment?: string
+        },
+      ) => { capitalization?: number }
+    }
+    const { padAmountInput, formatAmountInput, capitalInvestmentMissing, buildFeeProfile } = mod
+
+    const posted = (typed: string) =>
+      buildFeeProfile(mod.EMPTY_FEE_PROFILE, {
+        applicationType: 'new',
+        permitCodes: ['BUSINESS'],
+        lineIds: [],
+        capitalInvestment: padAmountInput(formatAmountInput(typed)),
+      }).capitalization ?? null
+
+    return {
+      whole: padAmountInput('1,000'),
+      oneDecimal: padAmountInput('1,000.5'),
+      trailingPoint: padAmountInput('1,000.'),
+      leadingPoint: padAmountInput('.5'),
+      millions: padAmountInput('1,234,567'),
+      idempotent: padAmountInput(padAmountInput('1,000')),
+      blank: padAmountInput(''),
+      // What the field holds while the applicant is still typing it.
+      typing: ['1', '10', '100', '1000', '1000.', '1000.5'].map((k) => formatAmountInput(k)),
+      postedWhole: posted('1000'),
+      postedFraction: posted('1000.5'),
+      acceptedPadded: capitalInvestmentMissing('1,000.00', 'new'),
+      blankStillMissing: capitalInvestmentMissing(padAmountInput(''), 'new'),
+    }
+  }, spec)
+
+  // 1. Committed: two decimals, separators kept, and stable under a second pass.
+  expect(found.whole).toBe('1,000.00')
+  expect(found.oneDecimal).toBe('1,000.50')
+  expect(found.trailingPoint).toBe('1,000.00')
+  expect(found.leadingPoint).toBe('0.50')
+  expect(found.millions).toBe('1,234,567.00')
+  expect(found.idempotent).toBe('1,000.00')
+
+  /*
+   * 2. An empty box stays empty. "0.00" would put a capital investment on the
+   * filing that the applicant never declared, and the assessment is made on
+   * this figure.
+   */
+  expect(found.blank).toBe('')
+
+  /*
+   * 3. Nothing is appended between keystrokes. Every intermediate value is
+   * exactly the digits typed, grouped — if ".00" appeared at any of these the
+   * caret would be sitting behind it and "1000.5" would come out "1.0005000".
+   */
+  expect(found.typing).toEqual(['1', '10', '100', '1,000', '1,000.', '1,000.5'])
+
+  /*
+   * 4. The round trip. This is the assertion that makes the padding safe to
+   * ship: a display reading ₱1,000.00 that posted NaN, or 100000, would be far
+   * worse than no padding at all.
+   */
+  expect(found.postedWhole).toBe(1000)
+  expect(found.postedFraction).toBe(1000.5)
+
+  // 5. And the validator reads the padded string as an amount, while a blank
+  // one is still reported missing rather than passing as zero.
+  expect(found.acceptedPadded).toEqual([])
+  expect(found.blankStillMissing).toEqual(['Capital Investment'])
+})
+
 test('every line of business is reachable, and the count is stated', async ({ page }) => {
   /*
    * Item 104b — "all lines of business in the choices should appear".
@@ -590,9 +705,13 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
    * honest check is whether the point is anywhere near the city — and the
    * message must not imply more than that was looked at.
    */
-  await page.getByRole('checkbox').first().check()
-  await page.getByRole('button', { name: /next/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+  /*
+   * Through the trade picker, not just past consent — the step is reached the
+   * way an applicant reaches it. The map itself no longer gates on anything, so
+   * this is no longer load-bearing for the click landing; it stays because the
+   * helper is what puts the step on screen.
+   */
+  await goToZoningStep(page)
 
   /*
    * By class, not by its accessible name, because it has none: MapPicker sets
@@ -614,6 +733,14 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   // Element-relative, so this scrolls the map into view first: the line of
   // business picker now sits above it and pushes it below the fold.
   await map.scrollIntoViewIfNeeded()
+  /*
+   * A barangay is selected so that this proves the refusal is about the CITY
+   * border and not about the dropdown being empty. WHICH one does not matter:
+   * the outside-city check runs before the barangay check in the click handler,
+   * so a corner of Caloocan is refused for being outside Malabon whatever is
+   * selected here.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   const box = await map.boundingBox()
   expect(box).not.toBeNull()
   await map.click({ position: { x: 12, y: box!.height - 12 } })
@@ -623,6 +750,256 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   // Never claim a check that was not made.
   await expect(refusal).not.toContainText(/water|river|sea|zoning verdict/i)
   await expect(page.getByText(/pinned at/i)).toBeHidden()
+})
+
+test('a neighbouring city inside the old bounding box is refused', async ({ page }) => {
+  /*
+   * The regression this exists to hold down. The check used to be a rectangle
+   * — 14.645–14.700 N, 120.930–120.985 E — and Caloocan's Monumento at
+   * 14.6540/120.9840 sits inside it, so the form accepted it. A tester found
+   * that by pinning Caloocan and Valenzuela.
+   *
+   * Driven through the page's own module rather than the map, because clicking
+   * a specific lat/lng is not something Playwright can do — pixel-to-coordinate
+   * depends on zoom and viewport, and a test that computed it would be
+   * asserting its own arithmetic. This asserts the predicate the click handler
+   * and the step gate both call.
+   */
+  const verdicts = await page.evaluate(async () => {
+    const geo = await import('/src/lib/malabonGeo.ts')
+    return {
+      // All four corners of the old box, and two real neighbouring cities.
+      monumento: geo.withinMalabon(14.654, 120.984),
+      valenzuela: geo.withinMalabon(14.7, 120.97),
+      boxNE: geo.withinMalabon(14.699, 120.984),
+      boxSW: geo.withinMalabon(14.646, 120.931),
+      // And a real Malabon address east of where the old box stopped.
+      cityHall: geo.withinMalabon(14.6572, 120.9573),
+    }
+  })
+
+  expect(verdicts.monumento).toBe(false)
+  expect(verdicts.valenzuela).toBe(false)
+  expect(verdicts.boxNE).toBe(false)
+  expect(verdicts.boxSW).toBe(false)
+  // The point of the change is not "refuse more" — it is "refuse the right set".
+  expect(verdicts.cityHall).toBe(true)
+})
+
+test('the map takes a pin before any barangay is chosen, and an agreeing barangay keeps it', async ({
+  page,
+}) => {
+  /*
+   * Item 8, third rule in this spot. It gated the map on the LINE OF BUSINESS,
+   * then on the BARANGAY, and now on nothing: the client's instruction is that
+   * the pin may be dropped first and the disagreement settled when the barangay
+   * is named, rather than the click being refused up front.
+   *
+   * Both halves are asserted here because only the pair is the rule. A test that
+   * proved the map accepts an early click would also pass if the barangay
+   * dropdown wiped every pin unconditionally, which is precisely the behaviour
+   * that had to go — clearing on agreement punishes the order the client asked
+   * for.
+   */
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /next/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await expect(map).toBeVisible()
+
+  // No scrim, no inert map, and no sentence telling anyone to go and answer
+  // something else first.
+  await expect(page.getByText(/choose your barangay first/i)).toBeHidden()
+  await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
+
+  /*
+   * The click lands with the dropdown still empty. Centre of the map, which
+   * opens on Malabon City Hall — inside the city, so the only remaining guard
+   * in `onPick` passes and the pin is taken.
+   */
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  const coords = (await page.getByText(/pinned at/i).innerText()).match(
+    /(-?[\d.]+),\s*(-?[\d.]+)/,
+  )
+  expect(coords).not.toBeNull()
+
+  /*
+   * Now name the barangay that pin is already sitting in. It must survive, and
+   * survive UNCHANGED — same coordinates, not a re-placed pin — because the
+   * applicant answered consistently and has nothing to redo.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(page.getByText(/pinned at/i)).toContainText(coords![0])
+  await expect(page.getByRole('alert').filter({ hasText: /but you selected/i })).toBeHidden()
+})
+
+test('changing the barangay clears the pin, so nothing is left pinned outside it', async ({
+  page,
+}) => {
+  /*
+   * Item 8's second half, and the client's stated reason for it: "to avoid
+   * pinning outside the selected barangay". A pin that survives the change is a
+   * pin that was checked against a question since answered differently.
+   *
+   * This is the prevention that replaced the old catch-it-on-the-way-out check,
+   * so it is asserted at the moment of the change rather than at the step gate.
+   */
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  const barangay = page.getByLabel(/barangay name/i)
+  await barangay.selectOption({ label: 'Longos' })
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  const coords = (await page.getByText(/pinned at/i).innerText()).match(
+    /(-?[\d.]+),\s*(-?[\d.]+)/,
+  )
+  expect(coords).not.toBeNull()
+
+  /*
+   * Re-picking the barangay ALREADY chosen is not a change and must not cost a
+   * pin. `selectOption` fires change on an unchanged value, so without the
+   * guard in the handler a clear-on-change quietly becomes a clear-on-anything
+   * — and every renewal, whose barangay is prefilled, would lose its pin the
+   * first time somebody so much as opened the dropdown.
+   */
+  await barangay.selectOption({ label: 'Longos' })
+  await expect(page.getByText(/pinned at/i)).toContainText(coords![0])
+
+  // A real change takes the pin, with no error and no argument — this is not a
+  // refusal, it is the question being asked again.
+  await barangay.selectOption({ label: 'Tugatog' })
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/required: click the map/i)).toBeVisible()
+  await expect(page.getByRole('alert').filter({ hasText: /but you selected/i })).toBeHidden()
+
+  /*
+   * And the map is still open, because a barangay is still chosen. Losing the
+   * pin must not also cost the applicant the ability to place another one — the
+   * point is to make them re-place it, not to lock them out.
+   */
+  await expect(page.getByText(/choose your barangay first/i)).toBeHidden()
+})
+
+test('a pin that contradicts the chosen barangay is refused, and names both', async ({ page }) => {
+  /*
+   * The checklist asked that mismatched barangays not be allowed. The message
+   * has to name the barangay the pin actually landed in, or the applicant is
+   * told they are wrong and left to guess where.
+   *
+   * This is the onPick half of the rule: a barangay is already named, the click
+   * lands somewhere else, and the pin is refused outright rather than stored.
+   * The other half — pin first, then name a barangay it contradicts — is the
+   * dropdown's job and is asserted in the clears-the-pin test below, because
+   * that path never reaches onPick at all.
+   */
+  await goToZoningStep(page)
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  // Tugatog claimed; the centre of the map is Malabon City Hall, in Longos.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Tugatog' })
+  await map.click()
+
+  const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
+  await expect(refusal).toBeVisible()
+  // Names both sides of the disagreement: the one claimed, and the one the pin
+  // is really in. Either could be the mistake, and the applicant picks.
+  await expect(refusal).toContainText(/Longos/)
+  await expect(refusal).toContainText(/Tugatog/)
+  // And no pin was stored to be argued with later.
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  /*
+   * The step will not let go either. Asserted as "Next is unavailable and the
+   * reason is on screen" rather than by clicking it — with every other field
+   * answered, the missing pin is the only thing holding the step.
+   */
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+  const next = page.getByRole('button', { name: /^next$/i })
+  await expect(next).toBeDisabled()
+  const stillNeeded = page.getByText(/still needed on this part/i)
+  await expect(stillNeeded).toBeVisible()
+  await expect(stillNeeded).toContainText(/pin on the map/i)
+
+  // Naming the barangay the pin would actually fall in lets the same click
+  // through, which is what proves the block was the barangay and not a stuck
+  // form. The change also clears the stale refusal.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(refusal).toBeHidden()
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(next).toBeEnabled()
+  await next.click()
+  await page.getByRole('button', { name: /proceed to application/i }).click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test('the map offers satellite imagery as well as streets', async ({ page }) => {
+  /*
+   * Many Malabon alleys are unnamed on OSM, so for a lot of applicants the roof
+   * is the only thing they can recognise. Streets stay the default because it
+   * is the layer that names things.
+   */
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  /*
+   * Leaflet's layers control renders collapsed — the radios exist in the DOM
+   * but are hidden behind a stack icon until the pointer is over it, so
+   * getByRole finds nothing without this. Hovering is what a user does, so
+   * driving it that way also proves the control is actually reachable and not
+   * merely present.
+   */
+  await page.locator('.leaflet-control-layers').hover()
+  await expect(page.locator('.leaflet-control-layers-expanded')).toBeVisible()
+
+  const streets = page.getByRole('radio', { name: /street map/i })
+  const satellite = page.getByRole('radio', { name: /satellite/i })
+  await expect(streets).toBeChecked()
+  await expect(satellite).not.toBeChecked()
+
+  await satellite.check()
+  await expect(satellite).toBeChecked()
+  // Esri tiles, and the attribution that using them is conditional on.
+  await expect(page.locator('img.leaflet-tile[src*="arcgisonline"]').first()).toBeVisible()
+  await expect(page.getByText(/esri/i).first()).toBeVisible()
+})
+
+test('the city border and the barangay the applicant chose are drawn on the map', async ({
+  page,
+}) => {
+  /*
+   * Refusing a pin against a boundary nobody can see is a puzzle, not a
+   * validation. The border is drawn so the rule is visible before it bites,
+   * and the chosen barangay is filled so "inside the highlighted area" — which
+   * the refusal message says — refers to something on screen.
+   */
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  // 21 barangays plus the city outline, all as SVG paths Leaflet renders.
+  const shapes = map.locator('path.leaflet-interactive, svg path')
+  expect(await shapes.count()).toBeGreaterThanOrEqual(22)
+
+  /*
+   * The fill is what distinguishes the chosen barangay from the other twenty,
+   * so it is the thing worth asserting: before a barangay is chosen nothing is
+   * filled, after one is chosen exactly one thing is.
+   */
+  const filled = map.locator('svg path[fill-opacity="0.1"]')
+  await expect(filled).toHaveCount(0)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(filled).toHaveCount(1)
 })
 
 test('the barangay’s zoning map shows what the map draws, and never a verdict', async ({
@@ -657,19 +1034,65 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
    * list ever shows Dampalit's neighbours' zones, the seeder has stopped
    * distinguishing the subject barangay from the washed-out surround.
    */
-  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
-  await expect(card.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+  /*
+   * The two lists are addressed separately, by their own accessible names,
+   * which is the assertion as much as it is the plumbing: a base zone found in
+   * the overlay list, or an overlay in the zone list, fails here. Scoping also
+   * keeps a description that happens to mention fishponds from answering a
+   * question about the Fishpond classification.
+   */
+  /*
+   * Both headings dropped the barangay name when the card was trimmed — it was
+   * already in the card's own heading two lines above, and saying it three
+   * times is what made this read as a document rather than a form field. The
+   * names still distinguish the two lists, which is all these selectors need.
+   */
+  const zoneList = card.getByRole('list', { name: /classifications? on this map/i })
+  const overlayList = card.getByRole('list', { name: /overlays? over this barangay/i })
+
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+
+  /*
+   * Dampalit is the one barangay carrying two overlays — Flood, which the
+   * ordinance puts over all 21, and Eco-Tourism over its fishponds — so it is
+   * where a merged list would be visible.
+   */
+  await expect(overlayList.getByRole('listitem')).toHaveCount(2)
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Eco-Tourism Overlay Zone' })).toBeVisible()
+  // Heritage is not designated over Dampalit, so it must not appear on it.
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Heritage' })).toBeHidden()
+  // And no overlay leaks into the classification list, which is the whole point
+  // of their being separate rows in a separate table.
+  await expect(zoneList.getByRole('listitem').filter({ hasText: /overlay/i })).toBeHidden()
 
   // Switching barangay switches the sheet — the card answers the picker.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
   await expect(img).toHaveAttribute('src', '/zoning-maps/acacia.png')
-  await expect(card.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+  // Acacia carries Flood alone — the overlay block answers the picker too.
+  await expect(overlayList.getByRole('listitem')).toHaveCount(1)
+  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
 
-  // CPDO decides, and the card says so where the applicant reads it.
-  await expect(card).toContainText(/cpdo confirms the classification that applies to your exact/i)
+  /*
+   * CPDO decides, and the card still says so.
+   *
+   * The sentence was cut down — it ran to three lines naming the office in full
+   * and spelling out "the classifications and overlays that apply to your exact
+   * location when it reviews your zoning clearance". What is asserted is the
+   * part that has to survive any rewording: that CPDO is named as the decider.
+   * Matching the old wording verbatim made this a test of the copy rather than
+   * of the promise.
+   */
+  await expect(card).toContainText(/cpdo confirms what applies to your exact location/i)
 
-  // And it never claims to have decided anything itself.
+  // And it never claims to have decided anything itself. The overlays bring one
+  // more thing it must not say: Flood is a designation over an area, so any
+  // wording that turns it into a finding about this applicant's lot is the same
+  // invented verdict in a more frightening register.
   await expect(card).not.toContainText(/conforming|non-conforming|allowed use|your zone is/i)
+  await expect(card).not.toContainText(/your (property|lot|site) (is|may be) (at risk|prone|in a flood)/i)
 })
 
 /**
@@ -681,15 +1104,23 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
  * when somebody registers another shop on the test stack.
  */
 async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
-  const name = type === 'renewal' ? /which permit are you renewing/i : /what are you amending/i
+  // "permits", plural: a renewal now covers every permit the shop holds rather
+  // than one picked from a list, and the dialog's heading says so.
+  const name = type === 'renewal' ? /which permits are you renewing/i : /what are you amending/i
   const modal = page.getByRole('dialog', { name })
   await expect(modal).toBeVisible({ timeout: 30_000 })
 
   await modal.getByLabel(new RegExp(`which business are you ${type === 'renewal' ? 'renewing' : 'amending'}`, 'i')).selectOption({ value: '1' })
 
-  const permits = modal.getByRole('radiogroup', { name: /which permit/i }).getByRole('radio')
+  /*
+   * Checkboxes in a labelled list, not radios in a radiogroup. A renewal covers
+   * every permit the shop holds now, so the control that used to pick one is a
+   * multi-select — and the first one ticked is the primary, which is what the
+   * renewal chain is keyed on.
+   */
+  const permits = modal.locator('ul[aria-label*="Which permits are you"]').getByRole('checkbox')
   await expect(permits.first()).toBeVisible({ timeout: 20_000 })
-  await permits.first().click()
+  await permits.first().check()
 
   // An amendment must also say what it amends before the dialog will close.
   if (type === 'amendment') await modal.getByRole('checkbox').first().check()
@@ -705,22 +1136,17 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
  * Split out of `goToBusinessStep` because the zoning step is a destination in
  * its own right now, not only somewhere to pass through: Business Location
  * Insights renders on it, so tests need to arrive and stop here.
+ *
+ * NEW filings only, and that is the change rather than a narrowing. This took a
+ * `type` and opened `/apply?type=renewal` when it was given one, on the
+ * assumption that a renewal runs the same seven phases with an extra dialog in
+ * front. It does not: section A1 of MCG-BPLO-FO-002 decides how much of the form
+ * a renewal even has, so part 2 of a renewal is Changes Since Last Permit and
+ * Location & Zoning is not in the sequence at all. The line-of-business picker
+ * this waits for is therefore never on screen, and the wait was the failure.
+ * `goToRenewalBusinessStep` below walks the renewal's own running order.
  */
-async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
-  // `beforeEach` already opened a new filing. A renewal has to be opened as
-  // one from the start, because the type decides whether the wizard asks which
-  // permit this filing is against at all.
-  if (type) {
-    await page.goto(`/apply?type=${type}`)
-    /*
-     * Item 110 — a renewal or amendment now meets the identity dialog BEFORE
-     * the wizard, so it has to be answered here or nothing below this line is
-     * reachable. Its own cover is in renewal-modal.spec.ts; this is only
-     * getting past it, on the one seeded business that holds permits.
-     */
-    await answerIdentityDialog(page, type)
-    await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
-  }
+async function goToZoningStep(page: Page) {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
@@ -742,6 +1168,55 @@ async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
 }
 
 /**
+ * Drop a pin on whatever the map is centred on, under a barangay that agrees
+ * with it.
+ *
+ * Item 8 turned this into two steps that have to happen in that order: the map
+ * takes no pin until a barangay is named, and naming a different one clears the
+ * pin. Which barangay the centre falls in is NOT the same on every path — a new
+ * filing opens on Malabon City Hall, which is in Longos; a renewal opens on the
+ * coordinates already held for the business it renews, which for the seeded one
+ * is in Catmon — so the answer is read off the app's own refusal rather than
+ * hardcoded, and stays right if the seeded business is ever re-placed.
+ */
+async function pinAtMapCentre(page: Page) {
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  const barangay = page.getByLabel(/barangay name/i)
+
+  /*
+   * Begin with a barangay that is definitely a CHANGE, so a pin prefilled by a
+   * renewal is cleared and this helper starts from the same state on every
+   * path. Re-picking the value already selected is deliberately not a change
+   * (see the <select>'s onChange), so "the first option, unless that is the one
+   * already chosen" is what actually forces one.
+   */
+  const values = await barangay
+    .locator('option[value]:not([value=""])')
+    .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
+  const current = await barangay.inputValue()
+  await barangay.selectOption(current === values[0] ? values[1] : values[0])
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  await map.click()
+
+  /*
+   * Either the pin landed, or the step refused it and named the barangay it
+   * really fell in — which is the read this helper is after. Waiting on the
+   * pair rather than on one of them keeps the branch below from racing React.
+   */
+  const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
+  await expect(refusal.or(page.getByText(/pinned at/i)).first()).toBeVisible()
+  if (await refusal.isVisible()) {
+    const named = (await refusal.innerText()).match(/pin is in (.+?), but you selected/i)
+    expect(named).not.toBeNull()
+    await barangay.selectOption({ label: named![1].trim() })
+    await map.click()
+  }
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+}
+
+/**
  * Consent, then a complete Location & Zoning step, landing on Business
  * Information (part 3). Everything here is the minimum the step's own gate
  * demands — a trade, a pin inside the city, an address and someone an inspector
@@ -752,17 +1227,18 @@ async function goToZoningStep(page: Page, type?: 'renewal' | 'amendment') {
  * only the second was ever assessed. The question lives on that step alone now,
  * so this step demands place and trade and nothing about money.
  */
-async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
-  await goToZoningStep(page, type)
+async function goToBusinessStep(page: Page) {
+  await goToZoningStep(page)
 
-  // Centre of the map is Malabon City Hall, so this pin is always inside.
-  const map = page.locator('.leaflet-container')
-  await map.scrollIntoViewIfNeeded()
-  await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  /*
+   * Barangay first, then the pin — the order item 8 imposes, and the reason
+   * this is a helper rather than four lines inline. It used to pin first and
+   * then derive the barangay from where the pin landed; the map no longer takes
+   * a click at that point, so the derivation now runs the other way round.
+   */
+  await pinAtMapCentre(page)
 
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 
@@ -774,6 +1250,42 @@ async function goToBusinessStep(page: Page, type?: 'renewal' | 'amendment') {
    * below for why that matters.
    */
   await page.getByRole('button', { name: /proceed to application/i }).click()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+}
+
+/**
+ * Business Information (part 3) on a RENEWAL, which is a different walk.
+ *
+ * A renewal is not the seven fixed phases with a dialog bolted on the front.
+ * Section A1 of MCG-BPLO-FO-002 asks what has changed since the last permit, and
+ * that answer decides which parts of the form exist at all: left unanswered a
+ * renewal is two parts — Data Privacy, then Changes Since Last Permit — and
+ * Business Information is not in the sequence for the wizard to walk to. Ticking
+ * Ownership is what puts it there, at part 3 of 7.
+ *
+ * So this cannot go through `goToZoningStep`, which waits for a line-of-business
+ * picker a renewal never renders. It follows renewal-modal.spec.ts, which is
+ * where this dialog and this running order have their own cover; the point here
+ * is only to arrive at the four TIN boxes with a stored value behind them.
+ */
+async function goToRenewalBusinessStep(page: Page, type: 'renewal' | 'amendment') {
+  // `beforeEach` opened a NEW filing. A renewal has to be opened as one from
+  // the start: the type decides whether the identity dialog is asked at all,
+  // and that dialog's answer is where the prefill under test comes from.
+  await page.goto(`/apply?type=${type}`)
+  await answerIdentityDialog(page, type)
+  await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
+
+  await page.getByRole('checkbox').first().check()
+  await page.getByRole('button', { name: /^next$/i }).click()
+  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  // "Yes, something changed", then the one change that opens Business
+  // Information. The checkbox says so on its own face.
+  await page.getByRole('button', { name: 'Yes', exact: true }).click()
+  await page.getByRole('checkbox', { name: /^Ownership/ }).check()
+
+  await page.getByRole('button', { name: /^next$/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
 
@@ -810,6 +1322,10 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
    * that asserts 500 would keep passing on the day the API changed it and the
    * screen went on saying 500.
    */
+  // Item 8 — the map takes no pin before a barangay is named. Longos, because
+  // that is where the centre this test clicks actually falls.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+
   const answered = page.waitForResponse(
     (r) => r.url().includes('location-insights') && r.status() === 200,
   )
@@ -900,7 +1416,16 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
 
   /* ── and the modal it used to live in no longer carries it ─────────────── */
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  /*
+   * Longos, and not Acacia as this said until the pin gained a barangay.
+   *
+   * These helpers pin the centre of the map, which is Malabon City Hall, which
+   * is in Longos. Naming Acacia there was the exact mismatch the step now
+   * refuses — a pin in one barangay filed under another — so the old value was
+   * not arbitrary test data, it was the bug. Keep this in step with
+   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
@@ -935,6 +1460,10 @@ test('the pin is ringed at the radius the figures were measured over', async ({ 
 
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
+
+  // Item 8 — the map takes no pin before a barangay is named, and the centre of
+  // the map is Malabon City Hall, which is in Longos.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
 
   const answered = page.waitForResponse(
     (r) => r.url().includes('location-insights') && r.status() === 200,
@@ -1003,6 +1532,25 @@ test('moving the pin does not stampede the lookup, and never shows the old point
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
   const box = (await map.boundingBox())!
+
+  // Item 8 — a barangay before any pin. Longos, because the map opens on
+  // Malabon City Hall and every pin below is a short hop from it.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+
+  /*
+   * Zoomed in four levels before the burst, and that is item 8's doing too.
+   *
+   * At the opening zoom a pixel is about 18 m of ground, so the ±40 px offsets
+   * below land up to 700 m from City Hall — comfortably inside the city, which
+   * was all that used to matter, but easily outside LONGOS, and a pin that
+   * contradicts the chosen barangay is now refused rather than moved. Four
+   * levels puts a pixel at roughly 1.1 m, so the same offsets stay within about
+   * 45 m and every click in the burst is a real move of the pin. The offsets
+   * themselves are unchanged, because what they are guarding is a SCREEN
+   * distance: clicks a few pixels apart get folded into a double-click, which
+   * Leaflet answers by zooming instead of pinning.
+   */
+  for (let i = 0; i < 4; i += 1) await page.locator('.leaflet-control-zoom-in').click()
 
   let lookups = 0
   page.on('request', (r) => {
@@ -1075,6 +1623,9 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   await goToZoningStep(page)
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
+  // Item 8 — the barangay comes before the pin now. Longos is where the centre
+  // of the map falls, and it is what the address below is filed under.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await map.click()
   await expect(page.getByText(/pinned at/i)).toBeVisible()
 
@@ -1089,12 +1640,131 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
 
   // And the step still goes on, all the way through the conformity modal.
   await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
+  /*
+   * Longos, and not Acacia as this said until the pin gained a barangay.
+   *
+   * These helpers pin the centre of the map, which is Malabon City Hall, which
+   * is in Longos. Naming Acacia there was the exact mismatch the step now
+   * refuses — a pin in one barangay filed under another — so the old value was
+   * not arbitrary test data, it was the bug. Keep this in step with
+   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
+   */
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
   await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test('the business is reached on a +63 mobile and a grouped landline, never an 09 number', async ({
+  page,
+  context,
+}) => {
+  /*
+   * Item 10 — both contact entries, both formatted.
+   *
+   * The client asked for the mobile to be written +63 and NOT as the
+   * eleven-digit 09XXXXXXXXX form, and for the landline to group its first four
+   * digits as the area code. Both were plain text boxes; the mobile's
+   * placeholder taught exactly the shape that is not wanted. The format is now
+   * a property of the controls, so this drives the controls.
+   *
+   * This is the BUSINESS's number. The account's own field keeps its 09 rule in
+   * AuthController and is a different question about a different person — that
+   * validator is deliberately untouched and this test does not go near it.
+   */
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  await goToBusinessStep(page)
+
+  /* ── the mobile ────────────────────────────────────────────────────────── */
+
+  // Three boxes, each with a name of its own. Unnamed, they are "edit text"
+  // three times over and nothing anywhere says they add up to a number.
+  const first = page.getByLabel(/mobile number after \+63, first three digits/i)
+  const second = page.getByLabel(/mobile number after \+63, second three digits/i)
+  const last = page.getByLabel(/mobile number after \+63, last four digits/i)
+  const mobileBoxes = [first, second, last]
+  for (const box of mobileBoxes) await expect(box).toBeVisible()
+
+  // The prefix is shown by the control, so it is not something to type — which
+  // is what leaves the 09 form nowhere to be entered.
+  await expect(page.getByText('+63', { exact: true })).toBeVisible()
+
+  /*
+   * The 09 form PASTED into the first box is read and re-laid as the ten digits
+   * behind the prefix. This is the case that matters most and the one a naive
+   * split input gets wrong twice over: `maxLength` truncates the paste to
+   * "091", and spilling eleven digits across boxes of 3-3-4 would lay them out
+   * as 091 | 712 | 3456 — a different number, one digit short, that looks like
+   * it worked. A mobile number is copied off a card or a message far more often
+   * than it is retyped, so this is the common path and not the edge.
+   */
+  for (const box of mobileBoxes) await box.fill('')
+  await page.evaluate(() => navigator.clipboard.writeText('0917 123 4567'))
+  await first.click()
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(first).toHaveValue('917')
+  await expect(second).toHaveValue('123')
+  await expect(last).toHaveValue('4567')
+  // The one shape the client says this field must not carry, asserted as absent
+  // rather than merely not asked for.
+  await expect(first).not.toHaveValue(/^0/)
+
+  // Typed the long way round it converges on the same thing, so the two ways in
+  // do not disagree: a leading 0 in the first box is a trunk code, never a digit.
+  for (const box of mobileBoxes) await box.fill('')
+  await first.click()
+  await page.keyboard.type('09171234567')
+  await expect(first).toHaveValue('917')
+  await expect(second).toHaveValue('123')
+  await expect(last).toHaveValue('4567')
+
+  /*
+   * A landline in the mobile box is the mistake this field actually attracts,
+   * since both are "a phone number" to the person filling it in. It says so now
+   * rather than storing it — but only once they have left the group, because
+   * painting the boxes red across the nine invalid lengths on the way to a
+   * valid one teaches an applicant to ignore the colour.
+   */
+  const mobileError = page.getByRole('alert').filter({ hasText: /10 digits after \+63/i })
+  for (const box of mobileBoxes) await box.fill('')
+  await first.fill('812')
+  await second.fill('345')
+  await last.fill('678')
+  await expect(mobileError).toBeHidden()
+  await page.getByLabel(/e-mail address/i).click()
+  await expect(mobileError).toBeVisible()
+  await expect(page.getByText(/still needed on this part/i)).toContainText(/valid Mobile Number/i)
+
+  // Corrected, it stops complaining and stops blocking.
+  for (const box of mobileBoxes) await box.fill('')
+  await first.click()
+  await page.keyboard.type('09171234567')
+  await expect(mobileError).toBeHidden()
+  await expect(page.getByText(/still needed on this part/i)).not.toContainText(/Mobile Number/i)
+
+  /* ── the landline ──────────────────────────────────────────────────────── */
+
+  const area = page.getByLabel(/landline area code/i)
+  const number = page.getByLabel(/landline number/i)
+  await area.fill('02')
+  await number.fill('81234567')
+  await expect(area).toHaveValue('02')
+  await expect(number).toHaveValue('81234567')
+
+  /*
+   * A whole landline arriving at the first box spills across the boundary
+   * instead of being swallowed by maxLength, and its first four digits stay in
+   * the area-code group — which is the grouping the client asked for.
+   */
+  await area.fill('')
+  await number.fill('')
+  await page.evaluate(() => navigator.clipboard.writeText('(02) 8123-4567'))
+  await area.click()
+  await page.keyboard.press('ControlOrMeta+v')
+  await expect(area).toHaveValue('0281')
+  await expect(number).toHaveValue('234567')
 })
 
 test('the type of registration is asked before the number it decides', async ({ page }) => {
@@ -1383,8 +2053,13 @@ test('a TIN already on file reads back into the four boxes', async ({ page }) =>
    * question into the dialog the wizard now opens with, so by the time we are
    * on part 3 the prefill has already run — which is the point of the item and
    * makes this test read the way it always meant to.
+   *
+   * A renewal's own walk, not `goToBusinessStep`. That helper goes through
+   * Location & Zoning, and a renewal has no such part: it asks what has changed
+   * since the last permit instead, and Business Information only joins the
+   * sequence once something is ticked.
    */
-  await goToBusinessStep(page, 'renewal')
+  await goToRenewalBusinessStep(page, 'renewal')
 
   const boxes = tinBoxes(page)
   await expect(boxes[0]).toHaveValue(/^\d{3}$/)

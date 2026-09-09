@@ -1,7 +1,7 @@
 import { CheckIcon, DotIcon, XCircleIcon } from './icons'
 import { StatusBadge } from './ui/StatusBadge'
 import { formatDateTime } from '../lib/format'
-import { TONE_CLASSES, applicationStatusMeta, genericStatusTone } from '../lib/status'
+import { TONE_CLASSES, applicationStatusMeta, genericStatusTone, otherPermitProgress } from '../lib/status'
 import type { Application, ApplicationStatus, Assignment, TimelineEntry } from '../lib/types'
 
 /*
@@ -15,25 +15,44 @@ import type { Application, ApplicationStatus, Assignment, TimelineEntry } from '
  * Two halves, because they answer different questions and one cannot stand in
  * for the other:
  *
- *  - The RAIL is the fixed sequence the LGU describes: Pending Payment → For
- *    Approval → For Inspection → Approved. It says where the filing sits and
- *    what is still ahead of it.
+ *  - The RAIL is the fixed sequence the LGU describes: For Approval → Pending
+ *    Payment → Awaiting Other Permits → For Final Approval → Approved. It says
+ *    where the filing sits and what is still ahead of it.
  *  - The LOG is what actually happened to this filing — every transition, when,
  *    by whom, and the note the officer left. The rail alone would flatten a
  *    filing that was returned twice into one that sailed through.
+ *
+ * ── This rail was rebuilt on 8 September 2026, and why ────────────────────
+ *
+ * It was drawing the OLD machine: Pending Payment → Under Review → For
+ * Inspection → Approved. Every one of those middle names had been deleted from
+ * `ApplicationStatus` by the September flow change, so `applicationStatusMeta`
+ * found no entry and fell back to printing the raw enum value — a sanitary
+ * officer opening any filing read the words "under_review" and "for_inspection"
+ * under two of the four nodes. Worse than ugly: the rail was describing a
+ * process the system no longer runs, and it put payment BEFORE BPLO's reading
+ * of the form when the client's whole correction was that payment comes after.
+ *
+ * `submitted`, `under_review` and `for_inspection` are gone as APPLICATION
+ * statuses (see the note on the PHP enum). Under review and under inspection
+ * are now facts about ONE permit — `ClearanceStatus` on the
+ * `application_permit_types` row — and five of them run at once. A single node
+ * saying "For Inspection" across the whole filing cannot be true when CHO is
+ * inspecting, BFP is still reading and CPDO has already issued. That stage of
+ * the rail is therefore `awaiting_other_permits`, one node, with the per-permit
+ * tally written underneath it.
  *
  * The rail is drawn from this filing's own facts, never from the shape of a
  * typical one. Three ways a real filing departs from the straight line, all
  * handled here rather than papered over:
  *
- *  1. INSPECTION IS OFTEN SKIPPED. WorkflowService::afterReviewProgress sends
- *     the last office approval straight to approveAndIssue() when no chosen
- *     permit type has `requires_inspection`. Drawing a greyed-out For Inspection
- *     step on those filings would promise a stage that will never arrive, so the
- *     step is not drawn at all — the client's words were "for those permits that
- *     actually has inspection".
+ *  1. THE OTHER PERMITS ARE THE LONG STAGE. `WorkflowService::refreshReadiness`
+ *     holds the filing at Awaiting Other Permits until every REQUIRED permit
+ *     reads Approved, and walks it back if one stops being approved. So the
+ *     node carries the count and names what is outstanding — the one thing that
+ *     turns "it is stuck" into someone to ring.
  *  2. RETURNED IS A LOOP, NOT A STAGE. It goes back to the applicant from For
- *     Approval and comes back into For Approval. As a fifth box in the line it
+ *     Approval and comes back into For Approval. As a sixth box in the line it
  *     would read as progress, which is the opposite of what it is, so it is an
  *     annotation on the For Approval step.
  *  3. REJECTED ENDS THE LINE. The remaining steps are not "not yet" — they will
@@ -56,55 +75,88 @@ interface RailStep {
   state: StepState
   /** Shown under the label — the loop and stop-reason annotations. */
   note?: string
+  /**
+   * Two kinds of note now share the slot and they must not look alike. The
+   * return note is a flag — something went wrong and the filing went backwards —
+   * and keeps the orange it has always had. The per-permit tally is bookkeeping
+   * about a filing that is behaving normally; printing "All 5 other permits
+   * approved" in warning orange would make good news read as a problem.
+   */
+  noteTone?: 'warning' | 'muted'
 }
 
 /**
- * The sequence, for this filing.
+ * The sequence. Fixed, with no conditional nodes any more.
  *
- * For Inspection appears only when an inspection is genuinely coming. The
- * permit-type flag is the same one `afterReviewProgress` branches on, so the
- * rail and the state machine cannot disagree about it. The two fallbacks matter
- * for old filings: a permit type's flag can be turned off after a filing has
- * already been routed for inspection, and the filing's own inspections — or its
- * own status — are then the better evidence than today's configuration.
+ * The old rail dropped its For Inspection node when nothing on the filing
+ * required a visit. That branch is gone with the status: inspection is a
+ * per-permit stage now and every one of the five required clearances is
+ * inspected, so there is nothing left for the rail to omit. Whether a
+ * particular permit is at its inspection shows on that permit, not here.
  */
-function railFor(app: Application): ApplicationStatus[] {
-  const inspects =
-    app.permit_types.some((pt) => pt.requires_inspection) ||
-    (app.inspections?.length ?? 0) > 0 ||
-    app.status === 'for_inspection'
-
-  return [
-    'pending_payment',
-    'under_review',
-    ...(inspects ? (['for_inspection'] as ApplicationStatus[]) : []),
-    'approved',
-  ]
-}
+const RAIL: ApplicationStatus[] = [
+  'for_approval',
+  'pending_payment',
+  'awaiting_other_permits',
+  'for_final_approval',
+  'approved',
+]
 
 /**
- * Which rail step the filing is standing on.
+ * Which rail step the filing is standing on, or -1 for one that has not
+ * started.
  *
- * `draft` and `submitted` collapse onto Pending Payment: submission assesses the
- * fee and moves straight on, so they are moments inside that step rather than
- * stages of their own. `returned` collapses onto For Approval because that is
- * where it will resume. `issued` is the web's own name for an approved filing
- * whose permits are out — the same end of the same rail.
+ * `returned` collapses onto For Approval because that is where it resumes —
+ * `ApplicationStatus::allowedNext()` lets Returned go forward only to
+ * ForApproval. `issued` is the web's own name for an approved filing whose
+ * permits are out, the same end of the same rail.
+ *
+ * `draft` is deliberately ABSENT, which lands it on -1 and paints every node
+ * "Not started". That is the honest reading: a draft has not entered the
+ * process, and the old map's answer — collapse it onto the first node and light
+ * that node up as the current stage — claimed BPLO was reading a form nobody
+ * had submitted. Officers never see a draft on this screen; the applicant one
+ * day might.
  */
 function positionOf(status: ApplicationStatus, rail: ApplicationStatus[]): number {
   const target: Partial<Record<ApplicationStatus, ApplicationStatus>> = {
-    draft: 'pending_payment',
-    submitted: 'pending_payment',
+    for_approval: 'for_approval',
+    returned: 'for_approval',
     pending_payment: 'pending_payment',
-    under_review: 'under_review',
-    returned: 'under_review',
-    for_inspection: 'for_inspection',
+    awaiting_other_permits: 'awaiting_other_permits',
+    for_final_approval: 'for_final_approval',
     approved: 'approved',
     issued: 'approved',
   }
   const mapped = target[status]
 
   return mapped ? rail.indexOf(mapped) : -1
+}
+
+/**
+ * What the SECOND state machine is doing, in one line under its own node.
+ *
+ * The rail has one node for a stage in which five permits are each moving
+ * independently, so without this the longest part of the process reads as a
+ * single undifferentiated box.
+ *
+ * The counting rule is `otherPermitProgress`, shared with the applicant's own
+ * status card, and it mirrors `WorkflowService::refreshReadiness` — see the
+ * note there for what is counted and why.
+ *
+ * Status is deliberately readable across offices (progress is shared, prose is
+ * not — see `ApplicationVisibility`), so a sanitary officer seeing "waiting on
+ * FSIC" here is the coordination that scoping was written to keep.
+ */
+function otherPermitsNote(app: Application, state: StepState): string | undefined {
+  if (state === 'upcoming') return undefined
+
+  const { total, approved, outstanding } = otherPermitProgress(app.permit_types)
+  if (total === 0) return undefined
+
+  return outstanding.length === 0
+    ? `All ${total} other permits approved`
+    : `${approved} of ${total} other permits approved · waiting on ${outstanding.join(', ')}`
 }
 
 /**
@@ -121,12 +173,12 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
   const ending = [...history].reverse().find((h) => h.to_status === status)
   const from = ending?.from_status ? positionOf(ending.from_status, rail) : -1
 
-  return from >= 0 ? from : rail.indexOf('under_review')
+  return from >= 0 ? from : rail.indexOf('for_approval')
 }
 
 /** The rail as nodes, with the returns and the terminal stop written onto it. */
 function buildSteps(app: Application): { steps: RailStep[]; terminal: ApplicationStatus | null } {
-  const rail = railFor(app)
+  const rail = RAIL
   const history = app.status_history ?? []
   const status = app.status
   const isTerminal = status === 'rejected' || status === 'cancelled'
@@ -151,11 +203,21 @@ function buildSteps(app: Application): { steps: RailStep[]; terminal: Applicatio
     // A terminal filing's remaining steps are not pending, they are cancelled
     // futures. Showing them as "Not started" would read as "still coming".
     .slice(0, isTerminal ? here + 1 : undefined)
-    .map((s, i) => ({
-      status: s,
-      state: isTerminal || i < here ? 'done' : i === here ? 'current' : 'upcoming',
-      note: s === 'under_review' ? returnNote : undefined,
-    }))
+    .map((s, i) => {
+      const state: StepState = isTerminal || i < here ? 'done' : i === here ? 'current' : 'upcoming'
+
+      return {
+        status: s,
+        state,
+        note:
+          s === 'for_approval'
+            ? returnNote
+            : s === 'awaiting_other_permits'
+              ? otherPermitsNote(app, state)
+              : undefined,
+        noteTone: (s === 'for_approval' ? 'warning' : 'muted') as RailStep['noteTone'],
+      }
+    })
 
   return { steps, terminal: isTerminal ? status : null }
 }
@@ -209,7 +271,15 @@ function StepNode({ step, first, last }: { step: RailStep; first: boolean; last:
       <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
         {STATE_CAPTION[state]}
       </p>
-      {step.note && <p className="mt-1 max-w-[22ch] text-[11px] leading-snug text-s-orange-ink">{step.note}</p>}
+      {step.note && (
+        <p
+          className={`mt-1 max-w-[22ch] text-[11px] leading-snug ${
+            step.noteTone === 'muted' ? 'text-ink-secondary' : 'text-s-orange-ink'
+          }`}
+        >
+          {step.note}
+        </p>
+      )}
     </li>
   )
 }
@@ -296,8 +366,23 @@ function OfficeProgress({ assignments, ended }: { assignments: Assignment[]; end
                 {a.department?.name ?? 'Office removed'}
               </p>
               <p className="truncate text-xs text-ink-muted">
-                {/* The officer is nullable: unclaimed, or a deleted account. */}
-                {a.officer?.name ?? 'Not yet assigned to an officer'}
+                {/*
+                 * Three states, not two, and the middle one is why this line
+                 * changed. `officer` is null both when nobody has claimed the
+                 * review AND when this reader may not be told who — office
+                 * separability withholds another office's officer by design.
+                 * Printing "Not yet assigned" on both made a completed review
+                 * read as unstaffed: a CENRO session saw it under BPLO, whose
+                 * review had been signed off.
+                 *
+                 * `officer_withheld` is the server saying which. A withheld
+                 * value gets a sentence about the withholding; only a genuine
+                 * null gets the staffing claim.
+                 */}
+                {a.officer?.name ??
+                  (a.officer_withheld
+                    ? 'Signed off by this office'
+                    : 'Not yet assigned to an officer')}
               </p>
               {a.remarks && <p className="mt-1 text-xs leading-snug text-ink-secondary">“{a.remarks}”</p>}
             </div>
@@ -366,12 +451,12 @@ function HistoryLog({ history }: { history: TimelineEntry[] }) {
 
 export function ApplicationProgress({ app }: { app: Application }) {
   const history = app.status_history ?? []
-  const rail = railFor(app)
+  const rail = RAIL
   const { steps, terminal } = buildSteps(app)
   const meta = applicationStatusMeta(app.status)
-  const inspects = rail.includes('for_inspection')
+  const notStarted = !terminal && positionOf(app.status, rail) < 0
   const stoppedStage = terminal
-    ? applicationStatusMeta(rail[stoppedAt(history, terminal, rail)] ?? 'under_review').label
+    ? applicationStatusMeta(rail[stoppedAt(history, terminal, rail)] ?? 'for_approval').label
     : ''
 
   return (
@@ -387,14 +472,14 @@ export function ApplicationProgress({ app }: { app: Application }) {
           <p className="text-xs text-ink-muted">
             {terminal
               ? `This filing ended during ${stoppedStage}. Nothing further will happen to it.`
-              : inspects
-                ? 'Pending Payment → For Approval → For Inspection → Approved'
-                : /*
-                   * Said out loud rather than left as an absence. An admin who
-                   * knows the four-stage process needs to be told this filing has
-                   * three, or they will read the missing step as a bug.
+              : notStarted
+                ? /*
+                   * A draft, or a status this build has no node for. Said out
+                   * loud rather than left as five grey circles an admin has to
+                   * interpret.
                    */
-                  'No permit type on this filing requires an inspection, so it goes from For Approval straight to Approved.'}
+                  'This filing has not entered the process yet.'
+                : 'For Approval → Pending Payment → Awaiting Other Permits → For Final Approval → Approved'}
           </p>
         </div>
         <StatusBadge tone={meta.tone} label={meta.label} icon={meta.icon} />

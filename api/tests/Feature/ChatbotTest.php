@@ -133,7 +133,6 @@ it('scopes the requirements answer to the permit type that was named', function 
     expect($body)->toContain('Sanitary Permit / Health Certificate')
         ->toContain('Sanitary Requirements')
         // The whole point of the bug: no rundown of the other permits.
-        ->not->toContain('Market Clearance')
         ->not->toContain('Occupancy Permit')
         ->not->toContain('Barangay Business Clearance');
 });
@@ -149,7 +148,7 @@ it('scopes requirements for Taglish and abbreviated permit names', function () {
 
     expect(ask('CENRO requirements'))
         ->toContain('City Environmental Certificate')
-        ->not->toContain('Market Clearance');
+        ->not->toContain('Fire Safety Requirements');
 });
 
 it('answers zoning questions with the planning office, not a permit rundown', function () {
@@ -166,7 +165,7 @@ it('still lists every checklist when the question really is that broad', functio
         ->toContain('Sanitary Permit / Health Certificate')
         ->toContain('Fire Safety Inspection Certificate')
         ->toContain('Occupancy Permit')
-        ->toContain('Market Clearance');
+        ->toContain('Zoning / Locational Clearance');
 });
 
 it('scopes fees to the named permit and separates late-payment penalties', function () {
@@ -187,7 +186,7 @@ it('never quotes a peso figure for a permit fee', function () {
         'magkano ang sanitary permit',
         'how much is the fire safety fee',
         "how much is the mayor's permit",
-        'how much is the market clearance',
+        'how much is the zoning clearance',
         'Magkano ang bayad?',
     ];
 
@@ -209,7 +208,15 @@ it('names what actually drives a permit fee', function () {
         ->toContain('gross sales')
         ->toContain('Tax Order of Payment');
 
-    expect(ask('how much is the market clearance'))->toContain('stalls');
+    /*
+     * Was "how much is the market clearance" → "stalls". The Market Clearance
+     * was removed on 6 September 2026, but the stall-count driver did not go
+     * with it: five revenue-code rules still price a BUSINESS permit per stall
+     * for the operator who RUNS a market. The occupancy fee is the equivalent
+     * check on a permit that still exists — a named permit whose driver is a
+     * measurement rather than gross sales.
+     */
+    expect(ask('how much is the occupancy permit'))->toContain('floor area');
 });
 
 it('reads "how much to pay" as a fee question, not a how-to-pay question', function () {
@@ -225,9 +232,11 @@ it('answers payment method questions with the accepted methods', function () {
 });
 
 it('scopes the offices answer to the named permit', function () {
-    $body = ask('who handles the market clearance?');
+    // Was the Market Clearance / City Market Administrator pair, removed on
+    // 6 September 2026. Any permit with its own office proves the same rule.
+    $body = ask('who handles the zoning clearance?');
 
-    expect($body)->toContain('Office of the City Market Administrator')
+    expect($body)->toContain('City Planning and Development Office')
         ->not->toContain('Bureau of Fire Protection');
 });
 
