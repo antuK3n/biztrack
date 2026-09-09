@@ -531,6 +531,63 @@ schema.
 
 ---
 
+## A25. When a manufacturer's rate depends on what they make, is that rate INSTEAD OF the general one, or ON TOP OF it?
+
+Sec. 3A.03 I(b) sets four rates for Manufacturers/Producers in General according to what is
+handled, and a fifth for a manufacturer producing several kinds of goods:
+
+| What is manufactured | Rate |
+|---|---|
+| Flammable, combustible or explosive substances | ₱8,800 |
+| Chemicals, or other non-flammable substances | ₱6,600 |
+| Assorted non-perishable dry goods or merchandise | ₱5,500 |
+| Consumable, perishable or refrigerated goods | ₱4,400 |
+| Multiple products manufactured/produced | ₱6,050 |
+
+The same shape appears for Importers and Exporters, and the four goods rates additionally
+distinguish whether the factory and office are within Malabon or outside it. Thirty-two rules in our
+fee table are written against those distinctions.
+
+**Why it matters.** We read the schedule as a list of alternatives — an applicant is described by
+exactly one row and pays that row. If that is right, a flammables manufacturer inside the city pays
+₱8,800 and nothing else. If instead the ₱6,050 multiple-products line is a base that the goods rate
+is added to, the same business pays ₱14,850. Nothing in the text we hold settles it, and the two
+readings differ by ₱8,800 on one permit.
+
+**What we need from you.** One assessed Tax Order of Payment for a manufacturer, showing the
+mayor's-permit lines as the counter prints them. A single example decides it.
+
+**What it is costing while it is open.** Neither input those rules need is asked of the applicant
+anywhere in the system: not the goods class, and not whether the factory and office are within
+Malabon. Both are validated by the API and printed on the officer's review screen, but no screen
+collects either, so all thirty-two rules fail to match and have never once fired. Zero of 1,702
+stored fee profiles carry either key.
+
+It stayed invisible because these filings do not fall to the "all other businesses" catch-all. They
+match `permit.manufacturer_multiple_products`, which is gated on the category alone, so all 348
+manufacturer lines on record have been billed ₱6,050 — the multiple-products rate — whatever they
+actually make. Against the schedule that is:
+
+| What they make | Should pay | Billed | Difference |
+|---|---|---|---|
+| Flammables | ₱8,800 | ₱6,050 | ₱2,750 too little |
+| Chemicals | ₱6,600 | ₱6,050 | ₱550 too little |
+| Dry goods | ₱5,500 | ₱6,050 | ₱550 too much |
+| Perishables | ₱4,400 | ₱6,050 | ₱1,650 too much |
+
+So the city under-collects most on exactly the businesses it most wants to regulate, and over-charges
+those handling perishable food. Every assessment looks ordinary on the page, which is why it has
+never been reported.
+
+**Why the collection is not simply switched on.** Because the precedence question above has to be
+answered first. Adding the two fields without a precedence rule makes the calculator apply BOTH the
+goods rate and the general rate: verified against filing BIZ-2026-00468, whose total moves from
+₱10,801 to ₱20,481. That would convert a ₱2,750 shortfall into an ₱8,800 overcharge, which is the
+worse of the two errors and lands on the applicant rather than the city. The fields are built and
+held (`scratchpad/goods-class-wip.patch`) pending your answer.
+
+---
+
 # B. For MISD — systems, data, hosting, accounts
 
 ## B1. Is eBPLS (or any business permit system) live in Malabon today, and is BizTrack meant to replace it, sit beside it, or feed it?
