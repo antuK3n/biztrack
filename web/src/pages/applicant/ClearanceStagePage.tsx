@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
@@ -7,6 +7,7 @@ import { PillButton, ProtoModal } from '../../components/ui/Proto'
 import { businessName, formatBytes, pesoToNumber } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, clearances, officeForms } from '../../lib/resources'
+import { clearanceStarted } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import {
   OfficeFormSheet,
@@ -17,7 +18,12 @@ import {
   type OfficeFormData,
 } from './OfficeFormStep'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
-import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
+import type {
+  Application,
+  Clearance,
+  ClearanceMeta,
+  OfficeFormRequirement,
+} from '../../lib/types'
 
 /*
  * ── LGU Clearances · the stage that opens once the first payment clears ────
@@ -136,7 +142,43 @@ import type { Application, Clearance, ClearanceMeta } from '../../lib/types'
  * conditional permit is ever added here, do not derive its audience from fee
  * categories.
  */
+/**
+ * How long after the last keystroke an office sheet is written.
+ *
+ * The same 1200ms `ApplyWizard` uses, deliberately duplicated rather than
+ * imported: importing it would drag the wizard's whole module into this route
+ * for one number. If one of them is ever retuned, retune both — two screens in
+ * one product that save at visibly different speeds feel like two products.
+ */
+const AUTOSAVE_DELAY_MS = 1200
+
 const APPLICABILITY: Record<string, string> = {}
+
+/**
+ * The stored value → the words the paper prints.
+ *
+ * MCG-CENRO-FO-001 boxes these as TYPE OF BUSINESS and BPLO stores the same
+ * four choices as `registration_type`, so the CEC sheet reads BPLO's answer
+ * rather than asking again. Mapped rather than de-underscored generically: the
+ * paper's wording is the LGU's, and "Sole Proprietorship" is not what
+ * `sole_proprietorship` humanises to on its own.
+ *
+ * An unrecognised value falls through to blank, not to a guess — a business
+ * whose registration type predates this list is one CENRO should be handed an
+ * empty box for, not a plausible wrong one.
+ */
+const REGISTRATION_TYPE_LABELS: Record<string, string> = {
+  sole_proprietorship: 'Sole Proprietorship',
+  partnership: 'Partnership',
+  corporation: 'Corporation',
+  cooperative: 'Cooperative',
+}
+
+/** The paper's SEX box, from the owner's stored gender. */
+const SEX_LABELS: Record<string, string> = {
+  male: 'Male',
+  female: 'Female',
+}
 /**
  * What this clearance costs. The number, and as little around it as possible.
  *
@@ -299,9 +341,52 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
 
   /* The office form sheet on screen, when this component owns the sheets. */
   const [formCode, setFormCode] = useState<OfficeFormCode | null>(null)
+  /**
+   * The sheet awaiting a "yes, send it" — the client's asked-for last look.
+   *
+   * Submitting is one-way now: the office has the form and the applicant cannot
+   * change it. That is a bigger press than any other on this screen, and it was
+   * the same size as saving a draft. So it is confirmed, on the same pattern as
+   * the two destructive dialogs already here.
+   */
+  const [submitPrompt, setSubmitPrompt] = useState<OfficeFormCode | null>(null)
+  /**
+   * What the server already holds for each sheet, as JSON.
+   *
+   * The autosave below compares against this rather than tracking a `dirty`
+   * flag, for the reason the wizard's autosave gives: a flag has to be cleared
+   * by hand in every path that saves, and the one path somebody forgets is a
+   * form that says "saved" over answers that are not. A snapshot cannot lie —
+   * either what is on screen matches what was written or it does not.
+   *
+   * Seeded when a sheet loads from the API, so opening a saved form and
+   * changing nothing writes nothing.
+   */
+  const savedSheets = useRef<Record<string, string>>({})
+  /** True between an autosave firing and the server answering. */
+  const [autosaving, setAutosaving] = useState(false)
   const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
   const [formSaving, setFormSaving] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  /*
+   * The zoning sheet's checklist of requirements, kept beside the answers
+   * rather than inside them.
+   *
+   * `officeData` is opaque JSON the applicant types and autosave writes back
+   * verbatim; the checklist is server-owned — which rows apply comes from
+   * `is_rented`, and whether each is satisfied comes from what is on disk. Put
+   * in the same bag, an autosave would post the checklist back as if it were an
+   * answer, and the next `derive` would have to strip it out again.
+   *
+   * Keyed by permit code even though only ZONING has one, so that the day CHO
+   * or BFP sends its checklist there is nothing to restructure.
+   */
+  const [requirements, setRequirements] = useState<
+    Record<string, OfficeFormRequirement[] | undefined>
+  >({})
+  /** The checklist slot with an upload in flight, so one row can say "Uploading". */
+  const [reqBusy, setReqBusy] = useState<string | null>(null)
+  const [reqError, setReqError] = useState<string | null>(null)
 
   /*
    * `publish` is gone: it was `setRows` plus a call up to the wizard's
@@ -337,12 +422,29 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       .list(applicationId)
       .then((forms) => {
         if (!active || forms.length === 0) return
+        setRequirements((prev) => {
+          const next = { ...prev }
+          for (const f of forms) {
+            // `null` on the four sheets with no checklist; only a real list is
+            // recorded, so an absent key stays "this office has no checklist".
+            if (f.requirements) next[f.permit_type_code] = f.requirements
+          }
+          return next
+        })
         setOfficeData((prev) => {
           const next = { ...prev }
           for (const f of forms) {
             // Never clobber an edit made in this session that has not saved yet.
             if (!(f.permit_type_code in next) && hasOfficeForm(f.permit_type_code)) {
               next[f.permit_type_code] = f.form_data
+              /*
+               * Seed the autosave's baseline with what the server just gave us.
+               * Without this, opening a saved sheet and touching nothing would
+               * look like an edit to the effect below and write the same answers
+               * straight back — a pointless round trip on every sheet opened,
+               * and one that would mark a submitted form dirty.
+               */
+              savedSheets.current[f.permit_type_code] = JSON.stringify(f.form_data)
             }
           }
           return next
@@ -435,7 +537,32 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       const ok = await runAction(code, '', () => clearances.removeHeld(applicationId, code))
       if (!ok) return
     }
-    if (row.state === 'available' || row.state === 'submitted') {
+    /*
+     * ── THE BUG THIS GUARD CAUSED, because it is worth not repeating ─────────
+     *
+     * It read `row.state === 'available' || row.state === 'submitted'`, and the
+     * server stopped sending either name. `submit()` attaches all five required
+     * clearances at `not_started`, so every un-applied clearance arrives here as
+     * `not_started`, matched nothing, and the POST was skipped — while the code
+     * below went on to open the office form regardless.
+     *
+     * The applicant therefore got the CEC sheet, filled it in, pressed Save and
+     * was told "This form can no longer be edited", which was true and
+     * unhelpful: `OfficeFormController::ownerMayEdit` looks for an assignment on
+     * the issuing office, and applying is what creates one. Four of the five
+     * clearances were unreachable this way. (SANITARY on the register's filing 5
+     * had been applied for before the attach-at-submit change, which is why one
+     * card worked and the rest did not.)
+     *
+     * `clearanceStarted` is the predicate, so the question asked here is the one
+     * that matters — has this clearance been started — rather than a list of
+     * status names that can go stale again.
+     *
+     * `removingCopy` is the other way in: swapping a held copy back to an
+     * application. The old union spelled that `submitted`; it is a held document
+     * on the row, which the line above already read.
+     */
+    if (!clearanceStarted(row.state) || removingCopy) {
       const ok = await runAction(
         code,
         /*
@@ -446,8 +573,14 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
          * about.
          */
         removingCopy
-          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. This office’s fee has been added to your balance due.`
-          : `Applied for your ${row.permit_type.name}. Its fee has been added to your balance due.`,
+          /*
+           * Both sentences used to end "...has been added to your balance
+           * due", which `apply()` has not done since the bill moved to
+           * submission. What actually happens next is the form opening, so
+           * that is what the live region announces.
+           */
+          ? `Applied for your ${row.permit_type.name}, and deleted the copy you had uploaded. Its form is open below — fill it in and press Save. Your fees do not change.`
+          : `Applied for your ${row.permit_type.name}. Its form is open below — fill it in and press Save. Your fees do not change.`,
         () => clearances.apply(applicationId, code),
       )
       if (!ok) return
@@ -502,16 +635,19 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
    * balance simply falls, and if it falls below what has been paid the filing
    * is in credit with nothing on any screen offering it back. Listed as an open
    * question in docs/clearances-after-payment.md; it needs BPLO, not a guess.
+   *
+   * ── The handler is GONE, and the reasoning above is kept on purpose ────────
+   *
+   * `onUnapply` called `clearances.unapply`, which `ClearanceService::unapply`
+   * now refuses for any permit with `isRequiredClearance()` — and every
+   * clearance on this grid is required since 6 September 2026. There is no
+   * caller left (see the note where the Withdraw control used to render), so
+   * the function went with the button rather than sitting here waiting for one.
+   *
+   * Everything above still describes what withdrawing MEANS, and it is the
+   * spec to build against if an optional clearance is ever added back. The
+   * unmodelled refund question is unanswered either way.
    */
-  async function onUnapply(row: Clearance) {
-    await runAction(
-      row.permit_type.code,
-      `Withdrew your application for the ${row.permit_type.name}. Its fee is off your balance due${
-        row.has_office_form ? ', and its form section is off this application' : ''
-      }.`,
-      () => clearances.unapply(applicationId, row.permit_type.code),
-    )
-  }
 
   /** Take the uploaded copy back off. Its own labelled control — never Submit. */
   async function onRemoveHeld(row: Clearance) {
@@ -563,15 +699,30 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   async function onSubmitHeld(row: Clearance, file: File) {
     setHeldPrompt(null)
     const code = row.permit_type.code
-    const switching = row.state === 'applied'
-    let withdrawn = false
+    /*
+     * ── The withdraw-first dance is gone, and had to go ──────────────────────
+     *
+     * This called `clearances.unapply` before uploading, because a clearance
+     * used to be "held" precisely by NOT being in `application_permit_types` —
+     * the two records were contradictory and one had to be removed.
+     *
+     * That inverted on 6 September 2026. Every required clearance is on the
+     * pivot from submission whichever way it will be satisfied, and the pivot's
+     * `mode` is what tells apply from upload, so `storeHeld` swaps the mode in
+     * place. It refuses only on TIMING — once the office has moved the permit
+     * past `for_approval` you cannot change the evidence underneath it.
+     *
+     * Worse than redundant: `ClearanceService::unapply` now throws for any
+     * required clearance, and all five are required. So the moment the state
+     * check above was corrected, this line would have turned every
+     * apply-to-upload swap into a 422 — and the applicant would have been told
+     * their clearance "is required and cannot be withdrawn" while trying to
+     * hand in the very certificate that satisfies it.
+     */
+    const switching = clearanceStarted(row.state) && row.held_document === null
     setBusyCode(code)
     setActionError(null)
     try {
-      if (switching) {
-        await clearances.unapply(applicationId, code)
-        withdrawn = true
-      }
       const result = await clearances.submitHeld(applicationId, code, file)
       setRows(result.data)
       // The ledger moves on every mutation, not just the row that was pressed:
@@ -580,33 +731,43 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       setMeta(result.meta)
       setNote(
         switching
-          ? `Withdrew your application for the ${row.permit_type.name} and filed your own copy instead. Nothing was added to your fees.`
+          ? `Filed your own ${row.permit_type.name} instead of the application you had started. Nothing was added to your fees.`
           : `Your ${row.permit_type.name} copy is on file. Nothing was added to your fees.`,
       )
     } catch (err) {
-      // Upload failures arrive without a usable message twice over; translate.
-      // A failure AFTER the withdrawal has to say so: the card behind this
-      // dialog has just changed state, and an error that only talks about the
-      // file would leave the applicant unable to explain what they are looking
-      // at. The row is re-read for the same reason.
-      setActionError(
-        withdrawn
-          ? `${uploadErrorMessage(err)} Your application for the ${row.permit_type.name} was withdrawn first, so nothing is on this filing for it now — press Apply to ask for it again, or Submit to try the file again.`
-          : uploadErrorMessage(err),
-      )
-      if (withdrawn) await load()
+      /*
+       * Upload failures arrive without a usable message twice over; translate.
+       *
+       * There is nothing left to explain about a half-finished withdrawal:
+       * `storeHeld` swaps the mode inside one transaction, so a failure leaves
+       * the filing exactly as it was and the file is the only thing that went
+       * wrong. The longer sentence that used to be printed here described a
+       * two-step this no longer performs.
+       */
+      setActionError(uploadErrorMessage(err))
     } finally {
       setBusyCode((c) => (c === code ? null : c))
     }
   }
 
-  /** Save the open office sheet and go back to the cards. */
+  /** Hand the open sheet to its office. Only ever called on a complete one. */
   async function saveForm() {
     if (!formCode) return
     setFormSaving(true)
     setFormError(null)
     try {
-      await officeForms.save(applicationId, formCode, officeData[formCode] ?? {})
+      /*
+       * `submit: true`, unconditionally.
+       *
+       * This used to decide between saving and submitting by re-reading
+       * `formMissing`, because one button did both jobs. Autosave took the
+       * saving job away: every keystroke is written a beat later, so by the
+       * time anybody presses this the answers are already on the server and the
+       * only thing left to do is hand them over. The button is shut while
+       * anything is missing, so a call reaching here is a complete sheet.
+       */
+      await officeForms.save(applicationId, formCode, officeData[formCode] ?? {}, true)
+      savedSheets.current[formCode] = JSON.stringify(officeData[formCode] ?? {})
       setFormCode(null)
       // The sheet being complete is part of the row, so re-read it.
       await load()
@@ -616,6 +777,112 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       setFormSaving(false)
     }
   }
+
+  /**
+   * Put a file into one slot of the open sheet's checklist, or take it back off.
+   *
+   * Both directions through one function because both do the same three things
+   * — call, replace the whole checklist with what came back, report the failure
+   * on the row — and the server answers both with the full list precisely so the
+   * screen never has to merge a row into its own copy.
+   *
+   * The browser-side file check runs first (`fileRejection`), for the reason
+   * `uploads.ts` gives: the API's refusal of an empty PDF is "Upload a PDF, JPG,
+   * or PNG file", which is true of the file and useless to the person holding it.
+   */
+  async function changeRequirement(code: string, documentCode: string, file: File | null) {
+    setReqBusy(documentCode)
+    setReqError(null)
+    try {
+      if (file !== null) {
+        const rejection = fileRejection(file)
+        if (rejection) {
+          setReqError(rejection)
+          return
+        }
+      }
+      const result =
+        file !== null
+          ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
+          : await officeForms.removeRequirement(applicationId, code, documentCode)
+      setRequirements((prev) => ({ ...prev, [code]: result.requirements }))
+    } catch (err) {
+      setReqError(file !== null ? uploadErrorMessage(err) : toApiError(err).message)
+    } finally {
+      setReqBusy((c) => (c === documentCode ? null : c))
+    }
+  }
+
+  /**
+   * Fetch Section X of the CPDD paper, blank, for the applicant to notarise.
+   *
+   * The failure lands on the checklist rather than on the sheet's own error
+   * line: it is that panel's button, and a "this form was not saved" banner
+   * appearing because a PDF would not download would send the applicant
+   * looking for typing they had not lost.
+   */
+  async function downloadDeclaration(code: string) {
+    setReqError(null)
+    try {
+      await officeForms.declaration(
+        applicationId,
+        code,
+        'locational-clearance-declaration.pdf',
+      )
+    } catch (err) {
+      setReqError(toApiError(err).message)
+    }
+  }
+
+  /*
+   * ── Autosave, so nothing is lost by leaving the page ──────────────────────
+   *
+   * The client asked for the same behaviour the BPLO wizard has, and the reason
+   * is the same: this sheet held the applicant's typing in the tab and nowhere
+   * else, so a reload, a stray back-button or a closed lid took it. The wizard
+   * solved that years-of-drafts ago and this screen never inherited it.
+   *
+   * `submit: false` on every write, and that is what makes autosaving safe at
+   * all. Saving used to BE submitting; if it still were, a debounce would hand a
+   * half-typed form to an office a second after the applicant paused. Since the
+   * two acts were split, an autosave is exactly what it sounds like.
+   *
+   * ── Why it sits ABOVE the loading guards ─────────────────────────────────
+   *
+   * Hooks must run in the same order on every render, and the early returns for
+   * `loading` and `loadError` are below. Put after them, this effect is skipped
+   * on the first render and React tears the hook order apart on the second.
+   * So the guards it needs are INSIDE it — `rows` may be null, and a locked
+   * sheet must not be written because `ownerMayEdit` refuses it and the
+   * applicant would meet a save error on a screen they cannot type into.
+   *
+   * The same 1200ms the wizard uses. Not tuned separately: two screens in one
+   * product that save at visibly different speeds feel like two products.
+   */
+  useEffect(() => {
+    if (!formCode) return
+    const row = rows?.find((r) => r.permit_type.code === formCode)
+    const locked =
+      row !== undefined && row.state !== 'not_started' && row.state !== 'returned'
+    if (locked) return
+
+    const payload = JSON.stringify(officeData[formCode] ?? {})
+    if (savedSheets.current[formCode] === payload) return
+
+    const timer = setTimeout(() => {
+      setAutosaving(true)
+      setFormError(null)
+      officeForms
+        .save(applicationId, formCode, officeData[formCode] ?? {}, false)
+        .then(() => {
+          savedSheets.current[formCode] = payload
+        })
+        .catch((err) => setFormError(toApiError(err).message))
+        .finally(() => setAutosaving(false))
+    }, AUTOSAVE_DELAY_MS)
+
+    return () => clearTimeout(timer)
+  }, [applicationId, formCode, officeData, rows])
 
   if (loading) {
     return (
@@ -630,6 +897,31 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
   }
 
   const formMissing = formCode ? officeFormMissing(formCode, officeData[formCode] ?? {}) : []
+
+  /*
+   * Is the sheet on screen a record rather than a form?
+   *
+   * Once a clearance is submitted the applicant may not change it — the client's
+   * rule, and `OfficeFormController::ownerMayEdit` enforces it, refusing any
+   * write past NotStarted or Returned. This is the screen agreeing with the
+   * server rather than deciding for it: a sheet that took edits and then lost
+   * them to a 422 would be the worst of both.
+   *
+   * `returned` is deliberately editable. An office sending a sheet back is
+   * asking for exactly that.
+   *
+   * Declared above the autosave rather than beside the render it also feeds,
+   * because the effect below must not fire on a locked sheet and a `const` is
+   * in the temporal dead zone until its own line.
+   */
+  const openRow = formCode ? rows?.find((r) => r.permit_type.code === formCode) : undefined
+  const formLocked =
+    openRow !== undefined && openRow.state !== 'not_started' && openRow.state !== 'returned'
+
+  /** True while anything the applicant typed is not yet on the server. */
+  const formDirty =
+    formCode !== null &&
+    savedSheets.current[formCode] !== JSON.stringify(officeData[formCode] ?? {})
 
   /*
    * Every permit is on the grid, and every one of them is required.
@@ -668,31 +960,108 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           data={officeData[formCode] ?? {}}
           business={business}
           onChange={(data) => setOfficeData((d) => ({ ...d, [formCode]: data }))}
+          readOnly={formLocked}
+          requirements={requirements[formCode]}
+          requirementBusy={reqBusy}
+          requirementError={reqError}
+          onRequirementChange={(documentCode, file) =>
+            void changeRequirement(formCode, documentCode, file)
+          }
+          onDeclarationTemplate={() => void downloadDeclaration(formCode)}
         />
         <div className="mt-8 flex flex-col gap-2">
-          <div className="flex items-center gap-4">
-            <PillButton
-              onClick={() => void saveForm()}
-              disabled={formSaving || formMissing.length > 0}
-              className="min-w-28"
-            >
-              {formSaving ? 'Saving…' : 'Save & back to clearances'}
-            </PillButton>
-            <button
-              type="button"
-              onClick={() => {
-                setFormCode(null)
-                setFormError(null)
-              }}
-              className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
-            >
-              Back without saving
-            </button>
-          </div>
-          {formMissing.length > 0 && (
-            <p className="max-w-md text-xs text-ink-muted">
-              Still needed on this form: {formMissing.join(', ')}
-            </p>
+          {formLocked ? (
+            /*
+             * A submitted sheet has one control and it is the way out. No Save,
+             * because there is nothing to save; no "Back without saving",
+             * because nothing has been typed.
+             */
+            <div>
+              <PillButton onClick={() => setFormCode(null)} className="min-w-28">
+                Back to clearances
+              </PillButton>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-4">
+                {/*
+                  ── One button, and it only ever submits ────────────────────
+                  *
+                  * It used to be two jobs wearing one label: "Save and come back
+                  * later" while anything was missing, "Submit to this office"
+                  * when nothing was. The client's question was the right one —
+                  * "Where is the submit button?" — because on an incomplete
+                  * sheet there wasn't one, and the applicant had no way to see
+                  * what they were working towards.
+                  *
+                  * Autosave took the saving job away, so this does the one thing
+                  * its label says. Shut while anything is missing, with the list
+                  * printed underneath, and shut while an autosave is in flight —
+                  * submitting a sheet whose last keystroke has not landed would
+                  * hand the office a form one field out of date.
+                  *
+                  * `aria-disabled`, not `disabled`: a control removed from the
+                  * tab order takes the sentence explaining itself with it, which
+                  * is the pattern the officer's Approve already follows. The
+                  * press is guarded instead.
+                  */}
+                <PillButton
+                  onClick={() => {
+                    if (formSaving || autosaving || formMissing.length > 0) return
+                    setSubmitPrompt(formCode)
+                  }}
+                  aria-disabled={formSaving || autosaving || formMissing.length > 0}
+                  aria-describedby="office-form-state"
+                  className={`min-w-28 ${
+                    formSaving || autosaving || formMissing.length > 0
+                      ? 'cursor-not-allowed opacity-60'
+                      : ''
+                  }`}
+                >
+                  {formSaving ? 'Submitting…' : 'Submit to this office'}
+                </PillButton>
+                {/*
+                  "Back without saving" is gone — the client called it
+                  unnecessary and autosave made it untrue, since leaving now
+                  loses nothing. What replaced it is navigation rather than a
+                  decision about saving. It could not simply be deleted: this
+                  sheet REPLACES the clearance cards, and the only other mention
+                  of the way out is a line of prose at the top, so an applicant
+                  on an incomplete sheet with a shut Submit would have no
+                  control to leave by.
+                */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormCode(null)
+                    setFormError(null)
+                  }}
+                  className="text-sm font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+                >
+                  Back to clearances
+                </button>
+              </div>
+              <p id="office-form-state" className="max-w-md text-xs text-ink-muted">
+                {/*
+                  The saved indicator, in the same three states the wizard's
+                  header uses. It is what makes autosave trustworthy: an
+                  applicant who is never told their typing was kept has no
+                  reason to believe it, and will keep looking for a Save button.
+                */}
+                {autosaving
+                  ? 'Saving your answers…'
+                  : formDirty
+                    ? 'Your answers are being saved automatically.'
+                    : 'Your answers are saved automatically. You can leave and come back.'}
+                {formMissing.length > 0 && (
+                  <>
+                    {' '}
+                    This office will not receive the form until you fill in:{' '}
+                    <span className="font-semibold text-ink">{formMissing.join(', ')}</span>.
+                  </>
+                )}
+              </p>
+            </>
           )}
         </div>
       </div>
@@ -877,11 +1246,19 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         that visibly changes is also what makes the press checkable — the
         applicant can watch the number they were quoted appear.
       */}
+      {/*
+        The sentence said "Apply adds that office's fee to your balance due",
+        which stopped being true when the bill moved to submission. Both routes
+        cost nothing now — the difference between them is what the office reads,
+        a form you fill in or a certificate you already hold — so that is what
+        the line says.
+      */}
       <p className="mb-5 max-w-3xl text-sm text-ink-secondary">
-        Choose the ones your business needs.{' '}
-        <span className="font-semibold text-ink">Apply</span> adds that office&rsquo;s fee to your
-        balance due; <span className="font-semibold text-ink">Submit</span> a copy of one you
-        already hold costs nothing.
+        Every one of these is required, and all five were covered by the payment you have already
+        made. <span className="font-semibold text-ink">Apply</span> opens that office&rsquo;s own
+        form for you to fill in;{' '}
+        <span className="font-semibold text-ink">Upload an existing copy</span> hands them a
+        certificate you already hold. Neither costs anything further.
       </p>
 
       {/*
@@ -898,7 +1275,46 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         {visibleRows.map((row) => {
           const code = row.permit_type.code
           const busy = busyCode === code
-          const applied = row.state === 'applied' || row.state === 'issued'
+          /*
+           * "Applied ✓" on the button, from the clearance's own status.
+           *
+           * This read `state === 'applied' || state === 'issued'`, two names the
+           * server no longer sends, so the button said "Apply" forever — on a
+           * card whose clearance was already with its office, next to an Apply
+           * that would re-open the form and do nothing else.
+           */
+          /*
+           * "Applied" means the applicant chose this route, not that the office
+           * has it.
+           *
+           * It read `clearanceStarted(row.state)`, which worked while Apply
+           * moved the permit straight to For Approval. Submitting is its own act
+           * now, so a clearance applied for and not yet filled in stays
+           * `not_started` — and keying off the state would have put the button
+           * back to "Apply" on a card the applicant had already opened, hiding
+           * the one thing they still have to do.
+           *
+           * `mode` is the honest signal: it is set the moment Apply is pressed
+           * and says which of the two routes was taken.
+           */
+          const applied = row.mode === 'apply' || clearanceStarted(row.state)
+          /*
+           * Has this clearance gone to its office?
+           *
+           * The line the client drew: "We do not promote any editing of forms
+           * once submitted." Past `not_started` the office has it — except
+           * `returned`, which is the office handing it back and asking for
+           * changes, so that one is the applicant's again.
+           *
+           * Two controls turn off here, and the second is the one that was
+           * actually broken. Apply becomes a read-only View. And SUBMIT — the
+           * upload-a-copy route — stops being offered at all: it was gated only
+           * on the stage being unlocked, so on a permit the office had already
+           * accepted it stayed live, took a file, and was refused by the server
+           * afterwards ("the office has already started on your …"). Offering a
+           * control the server will refuse is CLR-4, by name, on this screen.
+           */
+          const handedIn = clearanceStarted(row.state) && row.state !== 'returned'
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
@@ -952,25 +1368,32 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
               )}
 
               {/*
-                What this one costs — see feeAmount() for the two traps in it.
+                ── The price came off these cards, for the second time ─────────
 
-                The amount came off these cards once, on the client's
-                instruction: the grid had grown a status chip, a fee, a tinted
-                panel and three controls per card, and had stopped being
-                scannable. The argument for removing it was that nothing was
-                lost, because every clearance's fee landed on the one Tax Order
-                of Payment at Review & Submit — a later screen where the money
-                was actually agreed to.
+                It was here because Apply used to be the moment of commitment:
+                `ClearanceService::apply` re-ran `FeeCalculator::assess`, each
+                press moved `balance_due`, and there was nowhere downstream to
+                read the price before agreeing to it.
 
-                That later screen no longer exists. The Tax Order of Payment has
-                been raised and paid before this stage opens, so Apply IS the
-                moment of commitment and there is nowhere downstream to read the
-                price. It is back as one quiet line, in the same weight as the
-                form note beside it, not as the panel that was thrown out.
+                None of that is true under the client's verified flow.
+                `assessFees()` runs ONCE, at submission, over the business
+                permit and all five clearances; `apply()` no longer touches the
+                assessment at all. The register's filing 5 says it plainly —
+                total assessed ₱9,373.25, total paid ₱9,373.25, balance ₱0.00 —
+                so the number on the card was quoting a charge that is never
+                coming.
+
+                Worse than redundant, it read as a threat: an applicant who has
+                already paid in full, looking at "Fee ₱735.00" above an Apply
+                button, has every reason to believe pressing it costs them
+                another ₱735. The client: "Would displaying the fee still matter
+                because we have already paid it for that beforehand, right? If
+                not, kindly remove it."
+
+                The breakdown itself is not lost — the Tax Order of Payment is
+                where a per-permit figure belongs, and it is reachable from the
+                filing. What is gone is the claim that this button spends money.
               */}
-              <p className="tnum mt-2 text-xs font-semibold text-ink-secondary">
-                {feeAmount(row.fee_preview)}
-              </p>
 
               {/*
                 One line, and only for the cards it is true of: pressing Apply
@@ -982,9 +1405,38 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                 is no "above" now — the sheet opens over this grid — so it says
                 what actually happens.
               */}
-              {row.has_office_form && (
+              {/*
+                ── The outstanding form, said out loud ─────────────────────────
+                *
+                * `office_form_complete` has been on this payload since the
+                * stage was built and nothing on the screen read it. What that
+                * cost, reported 9 September 2026: an applicant pressed Apply,
+                * the sheet opened, they left without saving, and the card went
+                * on reading "Applied ✓" — a finished-looking state over an
+                * unfinished one. Their CENRO officer opened the filing and
+                * found the clearance applied for with no answers on it, which
+                * is the state this card was quietly manufacturing.
+                *
+                * Two of the five clearances on the register's filing 5 were in
+                * exactly that state (ZONING and CEC) against one that was
+                * complete (SANITARY), so it is the common case rather than an
+                * edge.
+                *
+                * Only ever shown on a clearance the applicant has STARTED —
+                * before that, "your form is not filled in" would be telling
+                * somebody off for not having done something they have not been
+                * asked to do yet.
+                */}
+              {row.has_office_form && applied && !row.office_form_complete && (
+                <p className="mt-1 text-xs font-semibold text-s-orange-ink">
+                  Your form is not filled in yet. Open it and press Save.
+                </p>
+              )}
+              {row.has_office_form && (!applied || row.office_form_complete) && (
                 <p className="mt-1 text-xs text-ink-muted">
-                  Applying opens this office&rsquo;s own form.
+                  {row.office_form_complete
+                    ? 'Your form is saved. Press below to read or change it.'
+                    : 'Applying opens this office’s own form.'}
                 </p>
               )}
 
@@ -1082,45 +1534,50 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
               )}
 
               {/*
-                CLR-1 — the way back out of Apply, in the shape the client kept.
+                ── CLR-1's Withdraw control, and why it is no longer drawn ──────
 
-                Deliberately the same treatment as "Remove" above: one word, one
-                line, pushed to the end with ml-auto, underlined text rather than
-                a button face. That is the control the client left standing when
-                everything else came off this card, so it is the one shape on
-                this grid known not to be furniture. The version they threw out
-                was a bordered secondary button reading "Don't apply for the
-                ‹clearance›" inside a tinted panel; nothing of that is back.
+                It sat here, gated on `row.state === 'applied'`, as the way back
+                out of Apply — the one control the client left standing when
+                everything else came off this card.
 
-                `row.state === 'applied'` and not `applied`, which also covers
-                `issued`. A clearance that has already been issued cannot be
-                withdrawn — the API refuses it (ClearanceController:95-99) — and
-                offering a control the server will refuse is CLR-4 on a
-                different screen.
+                There is nothing left for it to do. `ClearanceService::unapply`
+                throws for any permit with `isRequiredClearance()`, and since
+                6 September 2026 all five clearances on this grid are required:
+                the application cannot be approved without them, and detaching
+                one would leave a paid filing that can never complete. Market
+                Clearance was the only optional one and it was removed with the
+                same change.
+
+                So the control could only ever produce "‹clearance› is required
+                on every application and cannot be withdrawn" — offering a
+                control the server will refuse, which is CLR-4 by name. It had
+                stopped rendering by accident already (`applied` is not a state
+                the server sends any more), and rendering it again while
+                correcting that would have turned a silent absence into a live
+                dead end.
+
+                If a genuinely optional clearance is ever added, bring this back
+                gated on that permit's own optionality — not on its state.
               */}
-              {row.state === 'applied' && unlocked && (
-                <p className="mt-2 flex text-xs text-ink-muted">
-                  <button
-                    type="button"
-                    onClick={() => void onUnapply(row)}
-                    disabled={busy}
-                    /*
-                      Named for its clearance, like every other control here.
-                      Six cards share this grid, so a bare "Withdraw" is six
-                      identical controls to anyone moving through them by name.
-                      The visible word stays one word: printing the full
-                      clearance name on the control is what made the old card
-                      unreadable.
-                    */
-                    aria-label={`Withdraw your application for the ${row.permit_type.name}`}
-                    className="ml-auto shrink-0 font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-60"
-                  >
-                    {busy ? 'Withdrawing…' : 'Withdraw'}
-                  </button>
-                </p>
-              )}
 
-              <div className="mt-5 flex flex-1 items-end gap-2.5">
+              {/*
+                ── `mt-auto`, not `flex-1`, and the difference is the whole bug ─
+
+                The row carried BOTH `flex-1` and `items-stretch`. `flex-1` made
+                it absorb whatever vertical space the card had left over, and
+                `items-stretch` then made the buttons fill that — so a card with
+                less text above it (Fire Safety, Occupancy: one short line)
+                handed its buttons far more height than a card with three lines
+                of warning above them. Five cards, five button heights, which is
+                what the client saw.
+
+                `mt-auto` pushes the row to the bottom of the card WITHOUT
+                growing it, so every card's buttons sit on the same baseline and
+                are sized by their own content. `items-stretch` stays, and now
+                does only the job it was added for: making the two buttons in one
+                row match EACH OTHER when one label wraps.
+              */}
+              <div className="mt-auto flex items-stretch gap-2.5 pt-5">
                 {/*
                   Both buttons stay in the tab order when the stage is shut.
                   `disabled` drops a control out of the tab order and most
@@ -1129,6 +1586,24 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   aria-disabled says so instead, and the locked reason above is
                   what it points at.
                 */}
+                {/*
+                  ── Not offered once the office has it ──────────────────────
+                  *
+                  * This button was gated on `unlocked` alone — nothing about
+                  * whether the clearance had been handed in. So on a permit the
+                  * office had already accepted it stayed live, opened the
+                  * upload box, took the applicant's file, and only THEN was
+                  * refused by `storeHeld`: "the office has already started on
+                  * your …, so it can't be swapped."
+                  *
+                  * Removed rather than disabled. There is nothing conditional
+                  * about it — a submitted clearance can never take a swap — and
+                  * a permanently dead button in the layout is furniture, which
+                  * is precisely what this card has twice been stripped of.
+                  * `View form` beside it is the control that still means
+                  * something here.
+                  */}
+                {!handedIn && (
                 <button
                   type="button"
                   disabled={busy}
@@ -1144,8 +1619,8 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                    */
                   aria-label={
                     held
-                      ? `Replace the ${row.permit_type.name} copy you submitted`
-                      : `Submit a copy of the ${row.permit_type.name}`
+                      ? `Replace the ${row.permit_type.name} copy you uploaded`
+                      : `Upload an existing copy of the ${row.permit_type.name}`
                   }
                   /*
                    * SUBMIT always opens the upload box. It used to toggle: a
@@ -1172,8 +1647,25 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                     press still opens the upload box, and removing is the named
                     control above.
                   */}
-                  {held ? 'Submitted ✓' : 'Submit'}
+                  {/*
+                    "Submit" said nothing about what it did, and sat beside a
+                    sheet whose own button also says Submit — one meaning "hand
+                    the office my answers", this one meaning "hand them a
+                    certificate I already hold". The client: "instead of
+                    'Submit' why not 'Upload an existing copy' to avoid
+                    confusion?"
+
+                    Shortened to two words after that. "Upload an existing copy"
+                    wrapped to two lines in a half-card button and left the pair
+                    uneven — these two sit side by side and have to read as one
+                    choice, which they cannot do at different heights. "Upload"
+                    and "copy" are the two words carrying the meaning; the full
+                    phrase survives in the accessible name below, where length
+                    costs nothing.
+                  */}
+                  {held ? 'Copy uploaded' : 'Upload a copy'}
                 </button>
+                )}
                 <button
                   type="button"
                   disabled={busy}
@@ -1181,9 +1673,11 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   aria-describedby={buttonDescribedBy}
                   /* Named for its clearance — see the Submit button above. */
                   aria-label={
-                    applied
-                      ? `Applied for the ${row.permit_type.name} — open its form`
-                      : `Apply for the ${row.permit_type.name}`
+                    handedIn
+                      ? `View the ${row.permit_type.name} form you submitted`
+                      : applied
+                        ? `Finish the ${row.permit_type.name} form — you applied but have not submitted it`
+                        : `Apply for the ${row.permit_type.name}`
                   }
                   /*
                    * APPLY always opens this office's form. It used to toggle,
@@ -1201,7 +1695,31 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                       : 'cursor-not-allowed border-2 border-input-border bg-input text-ink-muted'
                   }`}
                 >
-                  {busy ? 'Working…' : applied ? 'Applied ✓' : 'Apply'}
+                  {/*
+                   * "Applied ✓" is a label for a finished thing, and on a
+                   * clearance whose form has never been saved it was the wrong
+                   * one: the applicant HAS applied, but the office has nothing
+                   * to read. The tick claimed the opposite.
+                   *
+                   * So the label follows the work rather than the transaction.
+                   * The button's behaviour is unchanged — it has always
+                   * reopened the sheet, and its `aria-label` has always said so
+                   * — this is the visible half catching up with it.
+                   */}
+                  {/*
+                   * Three states, and the third is the client's asked-for
+                   * "button which will allow them to see what they have
+                   * submitted". "Applied ✓" was a label where a control was
+                   * needed: it read as a finished status on a card whose form
+                   * might be empty, and said nothing about being pressable.
+                   */}
+                  {busy
+                    ? 'Working…'
+                    : handedIn
+                      ? 'View form'
+                      : applied
+                        ? 'Finish form'
+                        : 'Apply'}
                 </button>
               </div>
             </li>
@@ -1217,24 +1735,18 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         this stage is now required of every applicant, so there is nothing left
         to reveal.
       */}
-      {/* ── SUBMISSION · a clearance already held ─────────────────────────── */}
+      {/* ── UPLOAD AN EXISTING COPY · a clearance already held ───────────── */}
       {heldPrompt && (
         <ProtoModal
-          title="SUBMISSION"
+          title="UPLOAD AN EXISTING COPY"
           cancelLabel="Cancel"
           /*
-            CLR-1 — the switch is named on the button that performs it.
-
-            On an applied clearance this confirm does two things, and the second
-            one is the one the applicant came here for. "Submit" alone would
-            withdraw an application for a clearance without ever saying the word
-            on the control that did it — the same unnamed second meaning that
-            makes Apply-over-a-copy a defect (CLR-3). It also makes the server's
-            refusal true: `storeHeld` tells the applicant to withdraw the
-            request first, and this is now a thing on screen called Withdraw,
-            here and on the card.
+            Named for the act, like the button that opens it. The title read
+            "SUBMISSION" and the confirm read "Submit", which on this screen is
+            now the word for handing an office your ANSWERS — the sheet's own
+            button. Two different acts cannot share a verb on one page.
           */
-          confirmLabel={heldPrompt.state === 'applied' ? 'Withdraw & submit' : 'Submit'}
+          confirmLabel="Upload this copy"
           confirmDisabled={!heldPromptFile}
           onCancel={() => {
             setHeldPrompt(null)
@@ -1267,18 +1779,26 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             here would make a free, reversible change look like the deletion
             happening in the OTHER dialog, which really is one.
           */}
-          {heldPrompt.state === 'applied' && (
+          {clearanceStarted(heldPrompt.state) && heldPrompt.held_document === null && (
             <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
               <p className="text-sm font-semibold text-blue-900">
                 You applied for this one. Submitting your own copy replaces that.
               </p>
+              {/*
+                Rewritten with the swap. The old copy promised a withdrawal —
+                the permit type coming off the filing and its fee off the
+                balance — which is what the two-step used to do and what
+                `unapply` now refuses outright for a required clearance. The
+                permit stays on the filing; `storeHeld` changes its `mode` from
+                apply to upload, and the one bill raised at submission covered
+                it either way.
+              */}
               <p className="mt-1 text-xs leading-relaxed text-blue-800">
-                Your application to{' '}
-                {heldPrompt.permit_type.department?.name ?? 'the issuing office'} is withdrawn, its
-                fee comes off your balance due
-                {heldPrompt.has_office_form ? ', and its form section leaves this application' : ''}
-                . Nothing you have typed into that form is deleted — press Apply again and it is
-                still there.
+                {heldPrompt.permit_type.department?.name ?? 'The issuing office'} will read your
+                copy instead of the application you started
+                {heldPrompt.has_office_form ? ', so its form section closes' : ''}. Nothing you have
+                typed into that form is deleted — press Apply again and it is still there. Your fees
+                do not change.
               </p>
             </div>
           )}
@@ -1372,7 +1892,60 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           </p>
           <p className="mt-3 text-center text-sm text-ink-secondary">
             A clearance is either one you already hold or one you are asking this office to issue,
-            never both — and applying adds this office’s fee to your balance due.
+            never both. Your fees do not change either way — they were settled when you paid.
+          </p>
+        </ProtoModal>
+      )}
+
+      {submitPrompt && (
+        /*
+          ── The last look before a one-way press ─────────────────────────────
+
+          The client asked for it by name: "before submitting each form, please
+          create a modal that will ask them if they are already finished
+          reviewing before submitting."
+
+          It earns its place on the same test the two dialogs above pass —
+          something happens here that cannot be undone from this screen. Once
+          submitted the sheet is the office's and the applicant cannot change
+          it; getting it back means messaging the office and asking them to
+          return it. Until today that press was the same size as saving a draft.
+
+          Blue, not red. Nothing is destroyed and nothing is wrong — this is the
+          applicant doing the thing they came to do, and dressing it as a
+          warning would say otherwise. What the dialog adds is the one fact the
+          button cannot: that this is the last moment to change anything.
+        */
+        <ProtoModal
+          title="SUBMIT THIS FORM"
+          cancelLabel="Keep checking"
+          confirmLabel="Yes, submit it"
+          onCancel={() => setSubmitPrompt(null)}
+          onConfirm={() => {
+            setSubmitPrompt(null)
+            void saveForm()
+          }}
+        >
+          <p className="text-center text-base text-ink">
+            Have you finished reviewing your{' '}
+            <span className="font-bold">
+              {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
+                'application form'}
+            </span>
+            ?
+          </p>
+          <p className="mt-3 text-center text-sm text-ink-secondary">
+            Once you submit it,{' '}
+            <span className="font-semibold text-ink">
+              {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
+                ?.name ?? 'the issuing office'}
+            </span>{' '}
+            receives it and you will not be able to change your answers. You can still read them
+            back at any time.
+          </p>
+          <p className="mt-3 text-center text-sm text-ink-secondary">
+            If you spot a mistake after submitting, message the office from this clearance&rsquo;s
+            card and they can send the form back to you.
           </p>
         </ProtoModal>
       )}
@@ -1426,6 +1999,20 @@ export function ClearanceStagePage() {
    */
   const b = application.business ?? null
   const line = b?.lines?.[0]
+  const profile = application.fee_profile ?? null
+  const owner = b?.owner ?? null
+  /*
+   * The paper prints one box per question; the register can hold several lines
+   * of business on one filing. Joined rather than truncated to the first, so a
+   * business declaring three trades hands CENRO all three — losing two of them
+   * silently is how a sheet comes back for correction.
+   */
+  const joinLines = (pick: (l: NonNullable<typeof line>) => string | null | undefined): string =>
+    (b?.lines ?? [])
+      .map((l) => (pick(l) ?? '').trim())
+      .filter(Boolean)
+      .join('; ')
+
   const carriedOver: CarriedOverBusiness = {
     name: businessName(b),
     tradeName: b?.trade_name ?? '',
@@ -1434,6 +2021,45 @@ export function ClearanceStagePage() {
         .filter(Boolean)
         .join(', ') || '—',
     lineOfBusiness: line?.line_of_business?.trim() || line?.psic_code?.title || '—',
+    // MCG-CENRO-FO-001's Ownership and Documentation block. See the type.
+    registrationType: REGISTRATION_TYPE_LABELS[b?.registration_type ?? ''] ?? '',
+    ownerName:
+      [owner?.surname, owner?.given_name, owner?.middle_name, owner?.suffix]
+        .map((part) => (part ?? '').trim())
+        .filter(Boolean)
+        .join(', ') || '',
+    ownerSex: SEX_LABELS[owner?.gender ?? ''] ?? '',
+    productsServices: joinLines((l) => l.products_services),
+    landline: b?.address?.telephone ?? '',
+    mobile: b?.address?.mobile_number ?? '',
+    businessAreaSqm: profile?.floor_area_sqm != null ? String(profile.floor_area_sqm) : '',
+    maleEmployees: profile?.male_employees != null ? String(profile.male_employees) : '',
+    femaleEmployees: profile?.female_employees != null ? String(profile.female_employees) : '',
+    // MCG-CPDD-FO-003's numbered items. See the type.
+    proprietorName:
+      (b?.president_officer_name ?? '').trim() ||
+      [owner?.given_name, owner?.middle_name, owner?.surname, owner?.suffix]
+        .map((part) => (part ?? '').trim())
+        .filter(Boolean)
+        .join(' '),
+    proprietorContact: b?.address?.mobile_number ?? b?.address?.telephone ?? '',
+    proprietorEmail: b?.address?.email ?? '',
+    /*
+     * The paper's items VIII.C and VIII.D — the lessor's name and address — are
+     * NOT built here. They are derived server-side into the sheet's `form_data`
+     * (`OfficeFormAnswers::derive`), because the officer's review screen renders
+     * `form_data` and nothing else: a lessor that exists only on the applicant's
+     * side is a lease contract CPDD cannot check the sheet against.
+     */
+    /*
+     * Item V, "Activity (please specify)". The PSIC title says what CATEGORY
+     * the trade is; the products say what it actually does. CPDD is judging a
+     * USE, so both together are the answer, and joining beats picking.
+     */
+    activity:
+      [line?.line_of_business?.trim() || line?.psic_code?.title, joinLines((l) => l.products_services)]
+        .filter(Boolean)
+        .join(' — '),
   }
 
   return (

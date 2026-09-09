@@ -42,7 +42,7 @@ import { OFFICES, sessionFor } from './helpers'
 test.use({ storageState: sessionFor('owner') })
 
 /*
- * Longer than the 30s default, because a stage here is seven offices.
+ * Longer than the 30s default, because a stage here is six offices.
  *
  * Most of these tests open a browser context per office, load its queue, search
  * it and read a screen — seven times over against a dev server that compiles on
@@ -93,7 +93,7 @@ function recall(): Narrative {
   return JSON.parse(fs.readFileSync(NARRATIVE_FILE, 'utf8')) as Narrative
 }
 
-/** Every permit code on the filing — BPLO's plus the six clearances. */
+/** Every permit code on the filing — BPLO's plus the five required clearances. */
 const FILED_CODES = OFFICES.map((o) => o.permit)
 /** The offices whose permit type on this filing carries `requires_inspection`. */
 const INSPECTING = OFFICES.filter((o) => o.inspects)
@@ -202,7 +202,7 @@ function assignmentOf(
  */
 async function openFromQueue(
   page: Page,
-  tab: 'For Approval' | 'For Inspection',
+  tab: 'For Approval' | 'For Inspection' | 'Final Approval',
   { trackingId, businessName }: Narrative,
 ): Promise<string> {
   await page.goto('/staff/queue')
@@ -261,7 +261,7 @@ async function openFromQueue(
  * Keyed on the banner rather than on the button's `aria-disabled`, because the
  * banner is what the officer is actually told and it is the same condition. And
  * it does nothing at all once the category is claimed: the category belongs to
- * the FILING, so only the first of the seven offices ever finds work here.
+ * the FILING, so only the first of the six offices ever finds work here.
  */
 async function claimProcessingCategory(page: Page) {
   const banner = page.locator('#approve-blocked-why')
@@ -350,7 +350,7 @@ async function approveOwnReview(page: Page) {
  * 1. The owner files.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('an owner files a business permit with all six clearances behind it', async ({ page }) => {
+test('an owner files a business permit, and it goes to BPLO to be read', async ({ page }) => {
   // Nothing from an earlier run may be inherited: every stage below asserts
   // counts, and a stale filing would be indistinguishable from this one.
   fs.rmSync(NARRATIVE_FILE, { force: true })
@@ -511,22 +511,21 @@ test('an owner files a business permit with all six clearances behind it', async
    * Walked to Review & Submit, then submitted through the API rather than by
    * pressing the button.
    *
-   * The wizard's own button is "Submit & Pay" now — it raises the Tax Order of
-   * Payment and settles it in one press, which is what the client asked for.
-   * That is deliberately NOT used here, because this file's whole narrative is
-   * the unpaid middle: tests 2 through 5 assert that an unpaid filing shows as
-   * awaiting payment, is routed to nobody, tells the applicant no office is
-   * reviewing it, and only enters the queues when the payment clears. Paying at
-   * submit would delete the state those four tests are about.
+   * The button read "Submit & Pay" and charged the applicant in the same press.
+   * It does not any more, and that is the client's correction rather than a
+   * tidy-up: "submission and payment of BP Appl. Form are two different
+   * process. After submission, the business owner will wait for the approval of
+   * BPLO then the payment will go AFTER." So the label is "Submit", and the
+   * stage this narrative walks through next is BPLO reading the form.
    *
-   * So the wizard is still driven to the last step — reaching it is what proves
-   * the filing is complete — and the transition it now performs in one press is
-   * split back apart here so the middle can be observed. The button's combined
-   * behaviour has its own test; see "Submit & Pay settles the bill in one
-   * press" in clearances.spec.ts.
+   * The API is still used rather than the button, for the older reason: the
+   * confirmation dialog is a screen of its own with its own test, and driving
+   * it here would make a change to that dialog fail a test about the lifecycle.
+   * The wizard is driven to the last step regardless, because reaching Review &
+   * Submit is what proves the filing is complete.
    */
   await map.getByRole('button', { name: /review & submit/i }).click()
-  await expect(page.getByRole('button', { name: /^submit & pay$/i })).toBeEnabled()
+  await expect(page.getByRole('button', { name: /^submit$/i })).toBeEnabled()
   await page.evaluate(async (id) => {
     const token = localStorage.getItem('biztrack.token.public')
     const res = await fetch(`/api/v1/applications/${id}/submit`, {
@@ -548,26 +547,43 @@ test('an owner files a business permit with all six clearances behind it', async
   remember({ appId, trackingId, businessName })
 
   expect(trackingId, 'a submitted filing always carries a tracking ID').toMatch(/^BIZ-/)
-  // Payment is what is left to do, and it is what opens the clearance stage
-  // (docs/clearances-after-payment.md).
-  expect(filed.status).toBe('pending_payment')
+  /*
+   * BPLO reading the form is what is left to do — NOT payment.
+   *
+   * This asserted `pending_payment`, which was true while submission raised the
+   * bill directly. `WorkflowService::submit()` now ends on
+   * `ForApproval` and routes to BPLO alone; the bill is raised by
+   * `approveMainForm()`, which is a stage of its own further down this file.
+   */
+  expect(filed.status).toBe('for_approval')
 
   /*
-   * The mayor's permit, alone. This asserted all seven codes while the
-   * clearances were chosen in the wizard; they cannot be on the filing at this
-   * point any more, because the stage that attaches them does not open until
-   * the payment below has cleared. The full set is asserted in test 4, after
-   * the applies that really put them there.
+   * Every permit the filing will need, from the moment it is filed.
+   *
+   * This asserted `['BUSINESS']` on the reasoning that clearances arrive only
+   * when applied for. Half right: applying is still what STARTS one, but
+   * `submit()` calls `attachRequiredPermitTypes()`, so all five required
+   * clearances are on the pivot from the start at `not_started` — which is what
+   * lets `assessFees()` price the whole filing in one go and the applicant pay
+   * once. What the applies further down change is each row's STATUS, not
+   * whether the row exists.
    */
   const codes = filed.permit_types.map((pt) => pt.code).sort()
-  expect(codes, 'a clearance reached the filing before it was paid for').toEqual(['BUSINESS'])
+  expect(codes, 'the filing was not attached to every permit it needs').toEqual(
+    [...FILED_CODES].sort(),
+  )
+  for (const pt of filed.permit_types) {
+    expect(pt.status, `${pt.code} was started before the applicant applied for it`).toBe(
+      'not_started',
+    )
+  }
 })
 
 /* ──────────────────────────────────────────────────────────────────────────
- * 2. The owner's Track page, awaiting payment.
+ * 2. The owner's Track page, awaiting BPLO.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('the filing shows on Track as awaiting payment', async ({ page }) => {
+test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', async ({ page }) => {
   const narrative = recall()
   const { trackingId, businessName } = narrative
 
@@ -583,63 +599,83 @@ test('the filing shows on Track as awaiting payment', async ({ page }) => {
   })
 
   /*
-   * The one control on the collapsed row, and the whole point of the stage:
-   * money is owed. The green "Paid" block is the same slot, so asserting Pay
-   * Online is present is not the same as asserting Paid is absent — both are
-   * made, because the row rendering both would be the failure nobody looks for.
+   * ── Nothing is owed YET, and the row has to say which of the three ────────
+   *
+   * That block used to be a two-way switch: Pay Online when
+   * `status === 'pending_payment'`, a green "Paid" otherwise. With the bill
+   * moved behind BPLO's approval there is now a stage on the near side of it,
+   * and the else-branch was answering "Paid" for a filing that had never been
+   * charged a peso — the strongest colour on the screen making a false claim
+   * about money.
+   *
+   * All three are asserted, not just the one that should be there. A row
+   * drawing two of them is the failure nobody looks for, and "Paid is absent"
+   * is a different statement from "Not billed yet is present".
    */
-  await expect(row.getByRole('link', { name: 'Pay Online' })).toBeVisible()
-  await expect(row.getByText('Paid', { exact: true })).toHaveCount(0)
+  await expect(
+    row.getByText('Not billed yet', { exact: true }),
+    'a filing BPLO has not approved should say the bill has not been raised',
+  ).toBeVisible()
+  await expect(
+    row.getByRole('link', { name: 'Pay Online' }),
+    'the applicant was offered a payment before BPLO approved the form',
+  ).toHaveCount(0)
+  await expect(
+    row.getByText('Paid', { exact: true }),
+    'an unbilled filing was shown as paid',
+  ).toHaveCount(0)
 })
 
 /* ──────────────────────────────────────────────────────────────────────────
  * 3. The gap between Submit and Pay.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('before payment the filing is routed to nobody, and no office queue holds it', async ({
+test('a newly filed application is BPLO’s alone, and no other office can reach it', async ({
   browser,
 }) => {
   const narrative = recall()
   const { appId, trackingId } = narrative
 
   /*
-   * Assignments are created by `WorkflowService::routeToDepartments`, whose
-   * only caller is `onPaymentCompleted`. So between Submit and Pay the filing
-   * is routed to nobody at all, and this test states what that costs each seat
-   * rather than assuming it is invisible.
+   * ── What this test used to claim, and why it had to change ────────────────
    *
-   * BPLO first, because BPLO is the seat that CAN see the stage: it holds
-   * `application.view_any_office`, so `ApplicationVisibility` does not narrow
-   * it to filings it has an assignment on, and the queue gives it a Pending
-   * Payment tab fed from `/applications` rather than `/assignments`.
+   * It asserted that between Submit and Pay the filing is "routed to nobody",
+   * because assignments were created by `routeToDepartments` and its only
+   * caller was `onPaymentCompleted`. Every word of that is now false.
+   * `WorkflowService::submit()` ends with `routeTo($app, bplo)`, so a filed
+   * application has exactly one assignment from the moment it is filed — and it
+   * must, because BPLO reading the form is the next thing that happens to it
+   * and an officer cannot open a review sheet that has no assignment behind it.
+   *
+   * What SURVIVES is the half that was always the point: the other five offices
+   * have nothing to do with this filing yet and must not be able to see it.
+   * That boundary has not moved; only the number of offices inside it has, from
+   * zero to one.
+   *
+   * BPLO first, and it is now an openable row rather than an explanatory dead
+   * end.
    */
   await asOffice(browser, 'bplo', async (page) => {
-    await page.goto('/staff/queue')
-    await expect(
-      page.getByRole('heading', { name: 'Application Verification', level: 1 }),
-    ).toBeVisible({ timeout: 30_000 })
-
-    await page.getByRole('button', { name: 'Pending Payment' }).click()
-    await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
-    await expect(page.getByText(trackingId).first()).toBeVisible({ timeout: 20_000 })
+    await openFromQueue(page, 'For Approval', narrative)
 
     /*
-     * And it says why there is nothing to press. A row an officer cannot open
-     * has to explain itself or it reads as a broken link — there is no
-     * assignment, so there is no review sheet, so there is no
-     * `/staff/queue/:id` to point at.
+     * The sheet, with a live decision behind Edit. This is the assertion the
+     * old version could not make: there was no assignment, so there was nothing
+     * to open, so the row had to apologise for itself instead.
      */
-    await expect(page.locator('a[href^="/staff/queue/"]')).toHaveCount(0)
-    await expect(page.getByText(/Waiting on the applicant’s payment/).first()).toBeVisible()
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(
+      page.getByRole('button', { name: 'Approve', exact: true }),
+      'BPLO was routed the filing at submission but has no Approve on it',
+    ).toBeVisible()
   })
 
   /*
-   * Every other office: the filing does not exist yet, in either tab, and the
-   * Pending Payment tab is not offered at all.
+   * Every other office: the filing does not exist for them, in any tab.
    *
-   * The hidden tab is the product being honest rather than a gap: an office
-   * reviewer's boundary IS the assignment row, so a Pending Payment tab in
-   * these six seats could only ever be empty, and an empty queue is a claim.
+   * The Pending Payment tab is still not offered to them, and still for the
+   * same reason — an office reviewer's boundary IS the assignment row, so the
+   * tab could only ever be empty in these seats, and an empty queue is a claim.
    */
   for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
     await asOffice(browser, office.account, async (page) => {
@@ -658,12 +694,12 @@ test('before payment the filing is routed to nobody, and no office queue holds i
         await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
         await expect(
           page.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId }),
-          `${office.code} has an unpaid filing in its ${tab} tab, but nothing was routed to it`,
+          `${office.code} has a filing in its ${tab} tab that has only been routed to BPLO`,
         ).toHaveCount(0, { timeout: 20_000 })
       }
 
-      // Nothing is routed, so nothing is readable — the API says the same thing
-      // the queue does, which is what stops a deep link being the way round it.
+      // Nothing is routed here, so nothing is readable — the API says the same
+      // thing the queue does, which is what stops a deep link going round it.
       const status = await page.evaluate(async (id) => {
         const token = localStorage.getItem('biztrack.token.staff')
         const res = await fetch(`/api/v1/applications/${id}`, {
@@ -673,52 +709,39 @@ test('before payment the filing is routed to nobody, and no office queue holds i
       }, appId)
       expect(
         [403, 404],
-        `${office.code} can open an unpaid filing it was never routed`,
+        `${office.code} can open a filing it was never routed`,
       ).toContain(status)
     })
   }
 })
 
-test('an unpaid filing does not tell the applicant an office is reviewing it', async ({ page }) => {
+test('the applicant’s row says which permit is moving and which have not started', async ({
+  page,
+}) => {
   const narrative = recall()
   const { trackingId, businessName } = narrative
 
   /*
-   * ── DEFECT. This test is expected to FAIL, and must not be weakened. ──────
+   * ── A DEFECT TEST, RETIRED. Read this before restoring the old assertion. ──
    *
-   * Nothing has been routed anywhere: `routeToDepartments` has not run, the
-   * filing has no assignment, and the previous test proved six of the seven
-   * offices cannot so much as open it. The applicant's own screen says the
-   * opposite.
+   * This was one of this file's standing bug reports, written to FAIL: an
+   * unpaid filing was routed to nobody, and the applicant's expanded row said
+   * "For Approval" anyway, because `permitChip()` and `fallbackChip()` both fell
+   * through to a hardcoded `{ tone: 'orange', label: 'For Approval' }`. The cost
+   * named at the time was real — an applicant who reads "For Approval" has no
+   * reason to pay, and nobody could move the filing but them.
    *
-   * Expanding the row on Permit Tracking draws one chip per permit type, and
-   * for `pending_payment` both `permitChip()` and `fallbackChip()` fall through
-   * their branches to the same default:
+   * The September flow resolved it, and not by touching that chip. Submission
+   * now goes to `for_approval` and routes to BPLO, so at this point in the
+   * narrative an office genuinely IS reading the form: the sentence the screen
+   * was printing became true. The unpaid-and-unrouted state the defect lived in
+   * no longer exists, because a filing is not billed until BPLO has approved it.
    *
-   *     return { tone: 'orange', label: 'For Approval' }
-   *
-   * The defect is SMALLER than it was, and no less wrong. It used to be shown
-   * seven times over, because the wizard attached all six clearances before
-   * submission; an unpaid filing now carries the mayor's permit alone, so there
-   * is one chip and one lie on it. The clearances get their chips when they are
-   * applied for, which is after payment, so they can never be in this state.
-   *
-   * "For Approval" is not a spare word. It is `ApplicationStatus::UnderReview`'s
-   * own label — the exact string the LGU uses for a filing the offices are
-   * reading — and `status.ts` is held character-for-character in step with the
-   * PHP enum by `StatusLabelParityTest` precisely so that one state never
-   * answers to two names. Here one NAME is answering for two states: the
-   * applicant is shown, seven times over, that their filing is with the
-   * offices, while the same row carries an orange Pay Online button saying it
-   * has not started.
-   *
-   * The cost is not cosmetic. An applicant who reads "For Approval" has no
-   * reason to pay, and an unpaid filing is routed to nobody for as long as they
-   * wait — the one state in this product where the applicant is the only person
-   * who can move it and the screen tells them somebody else already is.
-   *
-   * The assertion is on the label, not on the tone, because the label is what a
-   * screen reader reads out and what the client will read on the demo.
+   * So the test is turned the right way up rather than deleted. What it guards
+   * now is that the row is EXACT — each permit reporting its own pivot status —
+   * which is the property that made the old lie a lie. If a future change
+   * flattens these chips back to one hardcoded label, the Not Started
+   * assertions below go red, which is the same defect arriving by a new door.
    */
   await page.goto('/applications')
   await page.getByLabel(/Search your applications/).fill(trackingId)
@@ -727,24 +750,78 @@ test('an unpaid filing does not tell the applicant an office is reviewing it', a
   await row.getByRole('button', { expanded: false }).first().click()
 
   /*
-   * One chip, for the mayor's permit. This read `FILED_CODES.length` — all
-   * seven — which was right while the wizard attached the six clearances before
-   * submission and is now wrong: nothing but the business permit can be on an
-   * unpaid filing.
-   *
-   * Corrected rather than relaxed, and the distinction matters on a test whose
-   * whole point is to keep failing. Left at seven it went red on THIS line, on
-   * a setup fact nobody is arguing about, and the defect below — the one the
-   * comment above is about — was never reached. A test that fails for the wrong
-   * reason is a test that stops reporting the right one.
+   * One chip per permit type, all six of them: `submit()` attaches every
+   * required clearance, so they are on the row from the start. This read 1 while
+   * the clearances were thought to arrive only on payment.
    */
   const chips = await row.locator('ul > li').allInnerTexts()
-  expect(chips.length, 'the expanded row should draw one chip per permit type').toBe(1)
-  for (const chip of chips) {
+  expect(chips.length, 'the expanded row should draw one chip per permit type').toBe(
+    FILED_CODES.length,
+  )
+
+  /*
+   * Exactly one is moving. The Business Permit is with BPLO; the five
+   * clearances have not been applied for and say so. A row where every chip
+   * reads the same thing is the old defect, whichever label it has settled on.
+   */
+  const moving = chips.filter((c) => c.includes('For Approval'))
+  expect(
+    moving.length,
+    'the row does not name exactly one permit as being read by an office',
+  ).toBe(1)
+  expect(
+    chips.filter((c) => c.includes('Not Yet Submitted')).length,
+    'the clearances have not been submitted, so each must say Not Yet Submitted',
+  ).toBe(FILED_CODES.length - 1)
+})
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 3b. BPLO reads the form, and only then is there a bill.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+test('BPLO approving the form is what raises the bill', async ({ page, browser }) => {
+  const narrative = recall()
+  const { appId } = narrative
+
+  /*
+   * The stage that did not exist before September, and the client's own words
+   * for why it does: "submission and payment of BP Appl. Form are two different
+   * process. After submission, the business owner will wait for the approval of
+   * BPLO then the payment will go AFTER."
+   *
+   * It is asserted as a MOVE — the filing is at `for_approval` before and
+   * `pending_payment` after — because the failure this guards against is the one
+   * that was live in the product: the wizard called `pay()` straight after
+   * `submit()`, the money went through at `for_approval`, and
+   * `onPaymentCompleted` ignored it because it returns early on any status but
+   * `pending_payment`. Charged, recorded, and the filing did not move. See
+   * `ApplicationStatus::isBillable()`.
+   */
+  const before = await filing(page, 'public', appId)
+  expect(before.status, 'the narrative is not where this stage expects it').toBe('for_approval')
+
+  await asOffice(browser, 'bplo', async (officePage) => {
+    await openFromQueue(officePage, 'For Approval', narrative)
+    await approveOwnReview(officePage)
+  })
+
+  const billed = await filing(page, 'public', appId)
+  expect(billed.status, 'BPLO approved the form and no bill was raised').toBe('pending_payment')
+  expect(assignmentOf(billed, 'BPLO'), 'BPLO’s own review did not complete').toBe('completed')
+
+  /*
+   * Nothing else moved. BPLO's approval says the form is fit to be paid for; it
+   * does not start a clearance, book a visit or issue anything.
+   */
+  expect(billed.inspections, 'a visit was booked before the filing was even paid for').toHaveLength(
+    0,
+  )
+  expect(billed.permits, 'a permit was issued on BPLO’s reading of the form').toHaveLength(0)
+  for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
     expect(
-      chip,
-      'an unpaid filing is routed to no office, so no row may say "For Approval"',
-    ).not.toContain('For Approval')
+      assignmentOf(billed, office.code),
+      `${office.code} was routed the filing before the applicant applied to it`,
+    ).toBeUndefined()
   }
 })
 
@@ -752,7 +829,7 @@ test('an unpaid filing does not tell the applicant an office is reviewing it', a
  * 4. Payment routes it.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('paying moves the filing into review and into every routed office’s queue', async ({
+test('paying opens the clearance stage, and applying routes each office', async ({
   page,
   browser,
 }) => {
@@ -770,24 +847,23 @@ test('paying moves the filing into review and into every routed office’s queue
   await expect(page.getByText('Paid', { exact: true })).toBeVisible({ timeout: 30_000 })
 
   const justPaid = await filing(page, 'public', appId)
-  expect(justPaid.status, 'payment did not move the filing out of pending_payment').toBe(
-    'under_review',
+  expect(justPaid.status, 'payment did not open the clearance stage').toBe(
+    'awaiting_other_permits',
   )
 
   /*
-   * ── And NOW the six clearances, which is the reordering ──────────────────
+   * ── And NOW the five clearances ──────────────────────────────────────────
    *
-   * These applies used to run in test 1, before submission, because the six
-   * were chosen inside the wizard. They run here because that is the first
-   * moment an applicant can reach them: the clearance stage is locked until the
-   * first payment clears (docs/clearances-after-payment.md), so this loop is
-   * the narrative's version of the applicant opening the stage that has just
-   * unlocked and pressing Apply six times.
+   * The clearance stage is locked until the payment clears
+   * (`ClearanceService::isUnlocked` is `status->isPaid()`), so this loop is the
+   * narrative's version of the applicant opening the stage that has just
+   * unlocked and pressing Apply on each one.
    *
    * Through the endpoint the card presses, not by attaching permit types on an
-   * update. Those look equivalent and are not: `ClearanceService::apply` re-runs
-   * `FeeCalculator::assess`, which is what makes each clearance's fee accrue
-   * onto the balance the permit is withheld against.
+   * update. The rows already exist — `submit()` attached them — so what this
+   * changes is each one's STATUS, from `not_started` to `for_approval`, and
+   * `startClearance` routes the office in the same transaction. That routing is
+   * the thing being measured below.
    */
   await page.evaluate(async (id) => {
     const token = localStorage.getItem('biztrack.token.public')
@@ -827,87 +903,74 @@ test('paying moves the filing into review and into every routed office’s queue
     }
   }, appId)
 
-  /* ── And the bill those six just raised ────────────────────────────────── */
-
-  /*
-   * The second of the two moments money changes hands
-   * (docs/clearances-after-payment.md, "one ledger, two moments"): the business
-   * permit is paid to submit, and every clearance applied for afterwards
-   * re-assesses onto the same FeeAssessment, so a balance appears behind a
-   * filing that is already under review.
-   *
-   * This is a step of the narrative and not bookkeeping. Rule 6 of that doc —
-   * "the permit is not released while a balance is outstanding" — is enforced by
-   * WorkflowService::isFullyCleared, which answers false on an unsettled filing
-   * whatever the offices have done. Leave it unpaid and every office signs off,
-   * every visit passes, and the filing sits in `for_inspection` with no permits
-   * and nothing left in the product that will ever look at it again except
-   * another payment. That is the gate working; a narrative that never pays is
-   * simply not the journey an applicant takes.
-   *
-   * Through the same screen as the first payment, because it IS the same screen:
-   * `/pay` re-reads the assessment, so the Tax Order of Payment now shows the
-   * clearance lines, and PaymentController::pay charges the BALANCE rather than
-   * the total precisely so that pressing it twice does not bill the mayor's
-   * permit again.
-   */
-  await page.goto(`/applications/${appId}/pay`)
-  await expect(page.getByRole('heading', { name: 'Tax Order of Payment' })).toBeVisible({
-    timeout: 30_000,
-  })
-  await page.getByRole('button', { name: 'Pay Online' }).click()
-  await expect(
-    page.getByText('Paid', { exact: true }),
-    'the clearances’ balance could not be settled, so no permit can ever be released',
-  ).toBeVisible({ timeout: 30_000 })
+  /* ── One payment, and there is no second one ───────────────────────────── */
 
   const paid = await filing(page, 'public', appId)
 
   /*
-   * Settling a balance is not a decision about the filing. It was already under
-   * review when the six were applied for, and paying for them leaves it there —
-   * `onPaymentCompleted` only routes and transitions on the FIRST payment.
+   * ── There USED to be a second payment here, and there must not be ─────────
+   *
+   * The old flow had "one ledger, two moments": the business permit was paid to
+   * submit, then every clearance applied for afterwards re-assessed onto the
+   * same FeeAssessment and raised a balance the permit was withheld against.
+   * This test paid twice, through the same screen, because that was the journey.
+   *
+   * The client's verified procedure replaced it. `assessFees()` is called ONCE
+   * now, at submission, over the business permit and all five clearances, and
+   * `ClearanceService::apply` no longer touches the assessment at all — so the
+   * single payment above covers everything and a second press would have
+   * nothing to charge for. Applying is a decision about evidence, not about
+   * money.
+   *
+   * Asserted rather than merely dropped: applying for five clearances must
+   * leave the filing exactly where the payment left it. If a future change puts
+   * a balance back, this is where it shows up.
    */
-  expect(paid.status, 'settling the clearance balance moved the filing').toBe('under_review')
+  expect(paid.status, 'applying for the clearances moved the filing').toBe(
+    'awaiting_other_permits',
+  )
 
-  // Every clearance applied for is on the filing, alongside the mayor's permit.
+  // Every permit is on the filing — the mayor's, and the five clearances.
   expect(
     paid.permit_types.map((pt) => pt.code).sort(),
-    'the filing did not carry the mayor’s permit and all six clearances',
+    'the filing did not carry the mayor’s permit and all five clearances',
   ).toEqual([...FILED_CODES].sort())
 
   /*
-   * One assignment per office that issues a permit type on the filing, and
-   * every one of them still pending. This is the state the whole of test 5
-   * measures movement against, so it is pinned before anybody acts.
+   * ── Who is routed, and who is not ─────────────────────────────────────────
    *
-   * Note what routes them. It was the payment alone — `onPaymentCompleted` ran
-   * `routeToDepartments` over whatever the wizard had attached. Each clearance
-   * now routes to its own office when it is APPLIED FOR (rule 7 of the doc), so
-   * this set is the product of the loop above rather than of the click before
-   * it. Asserted after both, because the narrative needs the same end state
-   * either way.
+   * Every office, and BPLO's is the odd one out in a way worth pinning. The
+   * five clearance offices were routed by `startClearance` in the loop above and
+   * their reviews are open; BPLO was routed at SUBMISSION and its review is
+   * already `completed`, closed by `approveMainForm` two stages back. So a loop
+   * asserting `pending` across all six — which is what this used to be, when
+   * payment routed everybody at once — would now fail on BPLO for a correct
+   * reason.
    */
   expect(
     paid.assignments.map((a) => a.department.code).sort(),
     'the filing was not routed to every office on it',
   ).toEqual([...OFFICES.map((o) => o.code)].sort())
-  for (const office of OFFICES) {
+  expect(
+    assignmentOf(paid, 'BPLO'),
+    'BPLO’s form review reopened when the clearances were applied for',
+  ).toBe('completed')
+  for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
     expect(assignmentOf(paid, office.code), `${office.code}'s review is not open`).toBe('pending')
   }
 
   // Nothing is booked yet: a visit follows an office's approval, not a payment.
   expect(paid.inspections, 'a visit was booked before any office had read the filing').toHaveLength(0)
 
-  /* ── And each office can now find it, in its own queue ─────────────────── */
+  /* ── And each clearance office can now find it, in its own queue ───────── */
 
-  for (const office of OFFICES) {
+  for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
     await asOffice(browser, office.account, async (officePage) => {
       await openFromQueue(officePage, 'For Approval', narrative)
       /*
        * The row opens on the review sheet with a live decision behind Edit.
-       * Presence, not a press: this test is about routing, and test 5 is about
-       * what happens when one of these is pressed.
+       * Presence, not a press: this test is about routing, and the stage below
+       * is about what happens when one of these is pressed.
        */
       await officePage.getByRole('button', { name: 'Edit', exact: true }).click()
       await expect(
@@ -994,7 +1057,7 @@ test('a queue search says how many filings actually matched it', async ({ browse
    * queue's rather than the page's. It is neither now — it is the tab's.
    *
    * `track-search.spec.ts` cannot see it: its stub returns
-   * `application_status_counts: { returned: 1, under_review: 2 }`, which sums to
+   * `application_status_counts: { returned: 1, for_approval: 2 }`, which sums to
    * exactly the three rows the stub also returns, so the wrong number and the
    * right number are the same number in the fixture.
    */
@@ -1045,44 +1108,82 @@ test('one office’s approval closes its own review and moves nobody else’s', 
   const { appId, trackingId, businessName } = narrative
 
   /*
-   * BPLO goes first, on purpose.
+   * ── The first CLEARANCE office goes, not BPLO ─────────────────────────────
    *
-   * Its permit type is the only one on the filing with `requires_inspection`
-   * false, so its approval books no visit and `afterReviewProgress` leaves the
-   * filing exactly where it was. That makes "the application itself has NOT
-   * advanced" a clean, unambiguous assertion — the filing is still
-   * `under_review` and the only thing in the register that changed is one
-   * assignment row.
+   * BPLO used to go first here, because its permit type was the only one with
+   * `requires_inspection` false, so its approval booked no visit and left the
+   * filing exactly where it was — a clean "nothing advanced" assertion.
    *
-   * It is also the seat of the client's report 1: BPLO approved and the row
-   * disappeared from both queue tabs, because For Approval had dropped it (its
-   * assignment was complete) and For Inspection did not want it (the filing was
-   * still under review). That is asserted below, from BPLO's own session.
+   * BPLO cannot go first any more: its approval is `approveMainForm`, it
+   * happened three stages back, and it is what raised the bill. Asking it to
+   * approve again would find no Approve button and report a missing control
+   * that is correctly missing.
+   *
+   * The claim survives the change of actor, and reads better for it. One
+   * clearance office accepting its paperwork moves its OWN permit to
+   * `for_inspection` and books its OWN visit; `refreshReadiness` holds the
+   * filing at `awaiting_other_permits` until every required permit is approved,
+   * so the application itself does not move at all — which is the isolation
+   * this stage exists to prove, now with a visit in the picture rather than in
+   * spite of one.
    */
-  await asOffice(browser, 'bplo', async (officePage) => {
+  const first = INSPECTING[0]
+
+  await asOffice(browser, first.account, async (officePage) => {
     await openFromQueue(officePage, 'For Approval', narrative)
     await approveOwnReview(officePage)
   })
 
-  const afterBplo = await filing(page, 'public', appId)
+  const afterFirst = await filing(page, 'public', appId)
 
-  expect(assignmentOf(afterBplo, 'BPLO'), 'BPLO’s own review did not complete').toBe('completed')
-  for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
+  expect(
+    assignmentOf(afterFirst, first.code),
+    `${first.code}'s own review did not complete`,
+  ).toBe('completed')
+  expect(
+    assignmentOf(afterFirst, 'BPLO'),
+    'BPLO’s completed form review was reopened by another office’s approval',
+  ).toBe('completed')
+  for (const office of OFFICES.filter(
+    (o) => o.account !== 'bplo' && o.account !== first.account,
+  )) {
     expect(
-      assignmentOf(afterBplo, office.code),
-      `BPLO approving moved ${office.code}'s review, which is not BPLO's to move`,
+      assignmentOf(afterFirst, office.code),
+      `${first.code} approving moved ${office.code}'s review, which is not theirs to move`,
     ).toBe('pending')
   }
 
   /*
-   * The filing itself has not moved, and neither has anything downstream of it.
-   * All three are asserted rather than just the status: a permit minted early
-   * would be a status that never changed and a certificate that exists anyway,
-   * which is the shape of the duplicate-issuance bug test 7 guards.
+   * The second machine moved, and only on the one row. This is the assertion
+   * the old version could not make at all: there were no per-permit statuses.
    */
-  expect(afterBplo.status, 'one office’s approval advanced the whole filing').toBe('under_review')
-  expect(afterBplo.inspections, 'BPLO does not inspect, so it must book no visit').toHaveLength(0)
-  expect(afterBplo.permits, 'a permit was issued on one office’s approval').toHaveLength(0)
+  const pivot = (code: string) => afterFirst.permit_types.find((pt) => pt.code === code)?.status
+  expect(pivot(first.permit), `${first.code}'s permit did not reach its inspection`).toBe(
+    'for_inspection',
+  )
+  for (const office of INSPECTING.filter((o) => o.account !== first.account)) {
+    expect(
+      pivot(office.permit),
+      `${first.code} approving moved ${office.code}'s permit`,
+    ).toBe('for_approval')
+  }
+
+  /*
+   * The filing itself has not moved, and neither has anything else downstream.
+   * The visit count is asserted exactly: a booking loop that ran over the
+   * FILING rather than over the approving office would show up here as five.
+   */
+  expect(afterFirst.status, 'one office’s approval advanced the whole filing').toBe(
+    'awaiting_other_permits',
+  )
+  expect(
+    afterFirst.inspections.map((i) => i.department?.code),
+    'approving one office’s review booked more than that office’s visit',
+  ).toEqual([first.code])
+  expect(
+    afterFirst.permits,
+    'a permit was issued on an office’s reading of the paperwork, before any visit',
+  ).toHaveLength(0)
 
   /* ── The applicant is told the same thing ──────────────────────────────── */
 
@@ -1099,30 +1200,37 @@ test('one office’s approval closes its own review and moves nobody else’s', 
    * For Approval on Tuesday".
    */
   await expect(
-    page.getByText('For Approval', { exact: true }).first(),
-    'the applicant’s status card should still read For Approval',
+    page.getByText('Awaiting Other Permits', { exact: true }).first(),
+    'the applicant’s status card should still read Awaiting Other Permits',
   ).toBeVisible()
 
   /*
    * "Approved" may not be anywhere at all yet, history included — one office of
-   * seven has signed off, so no reading of this filing has ever been approved
-   * and the timeline must not claim one. This is the strong form of the
-   * assertion and it is available here precisely because the history is short.
+   * six has accepted paperwork, no visit has happened, and nothing has been
+   * granted. This is the strong form of the assertion and it is available here
+   * precisely because the history is still short.
    */
   await expect(
     page.getByText('Approved', { exact: true }),
-    'one office signing off told the applicant the filing was approved',
+    'one office accepting paperwork told the applicant something was approved',
   ).toHaveCount(0)
 
-  /* ── BPLO's row is still findable, one tab across (INS-2) ──────────────── */
+  /* ── The approving office's row moves ONE TAB, it does not vanish (INS-2) ─ */
 
-  await asOffice(browser, 'bplo', async (officePage) => {
+  await asOffice(browser, first.account, async (officePage) => {
     /*
-     * "I approved it as BPLO and it is not in For Inspection", verbatim. The
-     * rule the tabs answer to now is THIS OFFICE'S outstanding work, not the
-     * filing's global status: BPLO's review is closed and the filing is not
-     * finished, which is what For Inspection means from this seat even though
-     * BPLO never inspects anything.
+     * The client's report 1 — "I approved it and it is not in For Inspection" —
+     * re-aimed at the machine that answers it now. A row's tab is decided by
+     * THIS OFFICE's own outstanding work, and the two halves changed together:
+     * For Approval filters on an OPEN assignment, which this office no longer
+     * has, and For Inspection filters on this office's own
+     * `clearance_status = for_inspection`, which is exactly where
+     * `approveClearance` just put its permit.
+     *
+     * BPLO used to be the seat for this assertion and cannot be: its Business
+     * Permit pivot is never `for_inspection`, so after `approveMainForm` it has
+     * no row in either tab — correctly, because it has nothing to do until
+     * every clearance is in and the filing reaches Final Approval.
      */
     await openFromQueue(officePage, 'For Inspection', narrative)
 
@@ -1131,13 +1239,15 @@ test('one office’s approval closes its own review and moves nobody else’s', 
     await officePage.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
     await expect(
       officePage.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId }),
-      'a completed review is still being offered to BPLO as outstanding work',
+      `a completed review is still being offered to ${first.code} as outstanding work`,
     ).toHaveCount(0, { timeout: 20_000 })
   })
 
-  /* ── And every other office still has its own Approve (INS-1) ──────────── */
+  /* ── And every office that still owes one keeps its Approve (INS-1) ────── */
 
-  for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
+  for (const office of OFFICES.filter(
+    (o) => o.account !== 'bplo' && o.account !== first.account,
+  )) {
     await asOffice(browser, office.account, async (officePage) => {
       await openFromQueue(officePage, 'For Approval', narrative)
       await officePage.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -1153,7 +1263,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
   }
 })
 
-test('the first inspecting office books its own visit and nobody else’s', async ({
+test('a second office’s visit is booked beside the first, not instead of it', async ({
   page,
   browser,
 }) => {
@@ -1161,64 +1271,75 @@ test('the first inspecting office books its own visit and nobody else’s', asyn
   const { appId } = narrative
 
   /*
-   * The second half of the isolation claim, and the harder half.
+   * ── What this stage used to be, and what it is now ────────────────────────
    *
-   * Since 5da4daa the first inspecting office's approval flips the WHOLE filing
-   * to `for_inspection` while the other five assignments are still pending —
-   * deliberately, so City Health need not wait for the Building Official to open
-   * its form. That is exactly the condition under which the review screen used
-   * to branch on the filing's status and hand five offices a page with no
-   * controls on it (INS-1): a deadlock no action in the product could clear.
+   * It approved as the FIRST inspecting office and asserted that the filing
+   * flipped to `for_inspection` while five assignments stayed pending — the
+   * condition under which the review screen used to branch on the filing's
+   * status and hand five offices a page with no controls (INS-1), a deadlock no
+   * action in the product could clear.
    *
-   * So this approves as one inspecting office and then goes looking, from five
-   * separate sessions, for the button that used to vanish.
+   * Both halves of that have moved. The first office's approval is now the
+   * stage above, and no office approval moves the FILING at all: it moves one
+   * pivot row. So this takes the second office, where the interesting question
+   * is accumulation rather than transition — two offices at their visits at
+   * once is the ordinary shape of this stage, and a booking that overwrote
+   * rather than appended would look identical from a single seat.
+   *
+   * The INS-1 guard is kept and is still the point of the loop at the foot.
    */
   const first = INSPECTING[0]
+  const second = INSPECTING[1]
 
-  await asOffice(browser, first.account, async (officePage) => {
+  await asOffice(browser, second.account, async (officePage) => {
     await openFromQueue(officePage, 'For Approval', narrative)
     await approveOwnReview(officePage)
   })
 
   const after = await filing(page, 'public', appId)
 
-  expect(after.status, 'an inspecting office’s approval should open the inspection stage').toBe(
-    'for_inspection',
+  // Two offices are done reading; the application has still not moved.
+  expect(after.status, 'a second office’s approval advanced the whole filing').toBe(
+    'awaiting_other_permits',
   )
-  expect(assignmentOf(after, first.code), `${first.code}'s own review did not complete`).toBe(
+  expect(assignmentOf(after, second.code), `${second.code}'s own review did not complete`).toBe(
     'completed',
   )
 
   /*
-   * One visit, and it belongs to the office that approved. A booking loop that
-   * ran over the filing rather than over the office would show up here as six.
+   * TWO visits, one per approving office. `scheduleInspectionFor` books against
+   * the office, so a loop that ran over the filing would show five here and a
+   * booking that replaced rather than appended would show one.
    */
   expect(
-    after.inspections.map((i) => i.department?.code),
-    'approving one office’s review booked more than that office’s visit',
-  ).toEqual([first.code])
+    after.inspections.map((i) => i.department?.code).sort(),
+    'the booked visits are not exactly the two offices that have approved',
+  ).toEqual([first.code, second.code].sort())
 
-  // Still nothing issued: the filing is one office of seven through its reviews.
-  expect(after.permits, 'permits were issued before six offices had read the filing').toHaveLength(0)
+  // Still nothing issued: a permit is granted by a PASSING VISIT, not by an
+  // office accepting the paperwork.
+  expect(after.permits, 'a permit was issued before any visit had happened').toHaveLength(0)
 
-  /* ── The five offices that still owe a review can still reach it ───────── */
+  /* ── The offices that still owe a review can still reach it ────────────── */
 
-  const owing = OFFICES.filter((o) => o.account !== 'bplo' && o.account !== first.account)
+  const owing = OFFICES.filter(
+    (o) => o.account !== 'bplo' && o.account !== first.account && o.account !== second.account,
+  )
   for (const office of owing) {
     await asOffice(browser, office.account, async (officePage) => {
       /*
        * For Approval, not For Inspection, and that is the assertion rather than
-       * a navigation detail. The filing's status now says `for_inspection`; this
-       * office's assignment does not, and the tab that holds the row has to be
-       * the one matching the office's own outstanding work — otherwise the
-       * paperwork is filed under a heading about site visits and searching For
-       * Approval for it answers "Nothing matches", which is the client's report 4.
+       * a navigation detail. Two other offices are at their site visits; this
+       * office's own permit is still paperwork, and the tab that holds the row
+       * has to be the one matching THIS office's outstanding work — otherwise
+       * the paperwork is filed under a heading about site visits and searching
+       * For Approval for it answers "Nothing matches", the client's report 4.
        */
       await openFromQueue(officePage, 'For Approval', narrative)
       await officePage.getByRole('button', { name: 'Edit', exact: true }).click()
       await expect(
         officePage.getByRole('button', { name: 'Approve', exact: true }),
-        `${office.code} has no Approve on a for_inspection filing it still owes a review on`,
+        `${office.code} has no Approve on a filing it still owes a review on`,
       ).toBeVisible()
     })
   }
@@ -1226,7 +1347,7 @@ test('the first inspecting office books its own visit and nobody else’s', asyn
 
 test('approving is confirmed on screen whichever way the filing then moves', async ({ browser }) => {
   const narrative = recall()
-  const second = INSPECTING[1]
+  const third = INSPECTING[2]
 
   /*
    * ── The regression guard for a defect this test reported, now fixed ───────
@@ -1236,27 +1357,29 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
    * feedback that the decision landed, and it is the only thing on the screen
    * that says so.
    *
-   * It used to appear when BPLO approved and not when any of the six clearance
+   * It used to appear when BPLO approved and not when any of the clearance
    * offices did, and the difference had nothing to do with the offices. The
    * modal was the last thing in the review SHEET's own JSX; approving calls
    * `reload()`, and the reloaded filing sent the sheet down its early return —
-   * `if (app.status === 'for_inspection' && !owesReview)` — which draws the
-   * compact inspection box and returns before the modal is ever reached. A
-   * clearance office's approval is exactly what makes both halves of that
-   * condition true, so its own confirmation was unmounted by its own success,
-   * and the officer with the most consequential approval in the flow was the
-   * one told nothing.
+   * the compact decision box — which returns before the modal is ever reached.
+   * A clearance office's approval is exactly what makes that branch apply to
+   * it, so its own confirmation was unmounted by its own success, and the
+   * officer with the most consequential approval in the flow was the one told
+   * nothing.
    *
-   * The fix was not to teach that branch to draw the dialog too. `ReviewPage`
-   * now owns `showVerification` and renders the modal as a SIBLING of the whole
-   * sheet, so no `return` inside `ReviewSheet` — including the next one somebody
-   * adds — can take it down. This test is what stops it moving back inside.
+   * The condition on that early return has since been re-keyed for the
+   * September flow — `awaiting_other_permits`/`for_final_approval` rather than
+   * the deleted `for_inspection` — which is exactly why this test still earns
+   * its place: the branch moved, and the modal must not have moved back inside
+   * it. `ReviewPage` owns `showVerification` and renders the modal as a SIBLING
+   * of the whole sheet, so no `return` inside `ReviewSheet` — including the
+   * next one somebody adds — can take it down.
    *
-   * Asserted on the second inspecting office rather than the first, so that the
-   * approval is a real step of the narrative: this office's review is now in,
-   * and the stage below expects it.
+   * Asserted on the third inspecting office, so that the approval is a real
+   * step of the narrative: this office's review is now in, and the stage below
+   * expects it.
    */
-  await asOffice(browser, second.account, async (page) => {
+  await asOffice(browser, third.account, async (page) => {
     await openFromQueue(page, 'For Approval', narrative)
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
 
@@ -1267,11 +1390,11 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
       ),
       page.getByRole('button', { name: 'Approve', exact: true }).click(),
     ])
-    expect(response.status(), `${second.code}'s approval was refused`).toBe(200)
+    expect(response.status(), `${third.code}'s approval was refused`).toBe(200)
 
     await expect(
       page.getByRole('dialog', { name: 'VERIFICATION' }),
-      `${second.code} approved and was given no confirmation that anything happened`,
+      `${third.code} approved and was given no confirmation that anything happened`,
     ).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: 'Tracking Page' }).click()
   })
@@ -1281,7 +1404,7 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
  * 6. Everyone approves.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('once every office has approved, a visit is booked for each one that inspects', async ({
+test('once every office has accepted its paperwork, a visit is booked for each', async ({
   page,
   browser,
 }) => {
@@ -1289,13 +1412,19 @@ test('once every office has approved, a visit is booked for each one that inspec
   const { appId } = narrative
 
   /*
-   * The four still outstanding. BPLO and the first two inspecting offices have
-   * already approved in the stages above — the second of them inside the
-   * defect test, whose approval landed whether or not it was confirmed on
-   * screen — and asking a completed assignment to approve again would find no
-   * Approve button and report a missing control that is correctly missing.
+   * The two still outstanding. BPLO approved the FORM before payment, and the
+   * first three inspecting offices have accepted their paperwork in the stages
+   * above — the third inside the confirmation test, whose approval landed
+   * whether or not it was confirmed on screen. Asking a completed assignment to
+   * approve again would find no Approve button and report a missing control
+   * that is correctly missing.
    */
-  const done = new Set<string>(['bplo', INSPECTING[0].account, INSPECTING[1].account])
+  const done = new Set<string>([
+    'bplo',
+    INSPECTING[0].account,
+    INSPECTING[1].account,
+    INSPECTING[2].account,
+  ])
   const remaining = OFFICES.filter((o) => !done.has(o.account))
   for (const office of remaining) {
     await asOffice(browser, office.account, async (officePage) => {
@@ -1315,9 +1444,9 @@ test('once every office has approved, a visit is booked for each one that inspec
   /*
    * A visit for each office whose permit type on this filing carries
    * `requires_inspection`, and NOT for BPLO. BPLO issues the Mayor's Permit on
-   * the strength of the six clearances; a visit of its own would be one nobody
-   * performs, and `isFullyCleared` would then wait on it forever — the filing
-   * could never be issued by any action the product offers.
+   * the strength of the five clearances; a visit of its own would be one nobody
+   * performs, and the filing would wait on it forever — it could never be
+   * issued by any action the product offers.
    *
    * Driven off `OFFICES`, so a permit type that starts or stops requiring an
    * inspection fails here rather than silently changing what "all visits
@@ -1332,8 +1461,15 @@ test('once every office has approved, a visit is booked for each one that inspec
     'BPLO does not inspect, so a visit booked for it would stall issuance forever',
   ).not.toContain('BPLO')
 
-  expect(all.status, 'every review in, so the filing belongs at the inspection stage').toBe(
-    'for_inspection',
+  /*
+   * Every office has read its paperwork and the application STILL has not
+   * moved, because `refreshReadiness` gates on permits being APPROVED and every
+   * one of them is only at its inspection. This asserted `for_inspection` — a
+   * filing-wide status that no longer exists, and could not: five permits at
+   * five different points is precisely what the split was for.
+   */
+  expect(all.status, 'accepting paperwork moved the filing past the clearance stage').toBe(
+    'awaiting_other_permits',
   )
   expect(all.permits, 'permits were issued before a single visit had happened').toHaveLength(0)
 })
@@ -1342,7 +1478,7 @@ test('once every office has approved, a visit is booked for each one that inspec
  * 7. The visits pass, and the permits are issued.
  * ────────────────────────────────────────────────────────────────────────── */
 
-test('every visit passing issues exactly one permit per requested permit type', async ({
+test('every visit passing issues its clearance, and BPLO’s sign-off issues the permit', async ({
   page,
   browser,
 }) => {
@@ -1352,10 +1488,12 @@ test('every visit passing issues exactly one permit per requested permit type', 
   for (const office of INSPECTING) {
     await asOffice(browser, office.account, async (officePage) => {
       /*
-       * This office's review is closed and the filing is `for_inspection`, so
+       * This office's review is closed and the filing is still being worked, so
        * the review sheet is gone and ReviewPage opens on the compact decision
        * box — the shape the client asked for by name ("it should just be like
-       * the other ones where its just a box").
+       * the other ones where its just a box"). That branch used to key on the
+       * filing reading `for_inspection`; it keys on this office having nothing
+       * left to do, which is the same seat by a more honest test.
        */
       await openFromQueue(officePage, 'For Inspection', narrative)
       await expect(officePage.locator('section[aria-label="Application status"]')).toBeVisible({
@@ -1386,27 +1524,82 @@ test('every visit passing issues exactly one permit per requested permit type', 
     })
   }
 
+  const cleared = await filing(page, 'public', appId)
+
+  /*
+   * ── Every clearance is in, and the filing is NOT approved ─────────────────
+   *
+   * This asserted `approved` here, because the last passing visit used to run
+   * `approveAndIssue` and mint the whole set in one go. It does not: a passing
+   * visit calls `grantClearance`, which issues THAT office's permit and then
+   * asks `refreshReadiness` whether every required permit is now approved. It
+   * is, so the filing moves to `for_final_approval` — and stops, because
+   * granting the Mayor's Permit is BPLO's own act and nobody else's.
+   */
+  expect(
+    cleared.status,
+    'every clearance approved, so the filing belongs with BPLO for final approval',
+  ).toBe('for_final_approval')
+
+  /*
+   * Five permits, one per clearance, and NOT the Mayor's Permit. Asserting the
+   * absence is the load-bearing half: a business permit issued here would be
+   * one the LGU never signed, and it would look exactly like success.
+   */
+  expect(
+    cleared.permits.map((p) => p.permit_type?.code ?? '(untyped)').sort(),
+    'the issued permits are not one per clearance',
+  ).toEqual(INSPECTING.map((o) => o.permit).sort())
+  expect(
+    cleared.permits.map((p) => p.permit_type?.code),
+    'the Mayor’s Permit was issued before BPLO approved the application',
+  ).not.toContain('BUSINESS')
+
+  // Every visit conducted and passed, with nothing left open behind them — an
+  // outstanding visit beside an issued permit is a certificate granted over an
+  // inspection nobody performed.
+  expect(cleared.inspections).toHaveLength(INSPECTING.length)
+  for (const visit of cleared.inspections) {
+    expect(visit.conducted_at, `${visit.department?.code}'s visit was never conducted`).not.toBeNull()
+    expect(visit.result, `${visit.department?.code}'s visit did not pass`).toBe('passed')
+  }
+
+  /* ── BPLO's second act, which is the one that grants the permit ────────── */
+
+  /*
+   * The stage that did not exist before September. BPLO approved the FORM
+   * before payment; this approves the APPLICATION, on the strength of five
+   * clearances it can see are in, and `approveOverall` is the only place the
+   * Mayor's Permit is ever minted.
+   *
+   * Reached through the Final Approval tab rather than For Approval, because
+   * BPLO's assignment has been `completed` since it read the form and nothing
+   * reopens it — its final approval is work with no open work item behind it,
+   * which is why that tab carries no assignment-status filter.
+   */
+  await asOffice(browser, 'bplo', async (officePage) => {
+    await openFromQueue(officePage, 'Final Approval', narrative)
+    await approveOwnReview(officePage)
+  })
+
   const issued = await filing(page, 'public', appId)
 
-  expect(issued.status, 'every review in and every visit passed, so the filing is approved').toBe(
-    'approved',
-  )
+  expect(issued.status, 'BPLO’s final approval did not decide the application').toBe('approved')
 
   /*
    * ── The count, not the existence ──────────────────────────────────────────
    *
-   * `approveAndIssue` mints one Permit row per permit type on the filing and is
-   * reachable from two directions — the last office's review
-   * (`afterReviewProgress`) and the last passing visit (`recordInspection`) —
-   * with `isFullyCleared` as the only thing standing between the two and a
-   * second full set. A duplicate run writes REAL, numbered certificates and then
-   * hides itself, because `transition()` no-ops on Approved → Approved and the
-   * status never changes twice.
+   * A permit is minted per type and `issuePermitFor` is reachable more than
+   * once — a re-inspection conducted after a grant would run it again — with
+   * `firstOrCreate` on (application, permit type) as the only thing standing
+   * between that and a second, numbered, legally real duplicate. A duplicate
+   * hides itself: `transition()` no-ops on Approved → Approved, so the status
+   * never changes twice and nothing on screen reports it.
    *
-   * So "permits exist" is the assertion that would have passed while that bug
-   * was live. This asserts the exact total, and then that no permit type
-   * appears twice — the second check is not redundant with the first, because
-   * seven permits could still be six types with one doubled.
+   * So "permits exist" is the assertion that would pass while that bug was
+   * live. This asserts the exact total, then that no permit type appears twice
+   * — not redundant with the first, because six permits could be five types
+   * with one doubled — and then that no NUMBER repeats.
    */
   expect(
     issued.permits,
@@ -1420,15 +1613,6 @@ test('every visit passing issues exactly one permit per requested permit type', 
 
   const numbers = issued.permits.map((p) => p.permit_number)
   expect(new Set(numbers).size, 'two permits were issued under one number').toBe(numbers.length)
-
-  // Every visit conducted and passed, with nothing left open behind the
-  // approval — an outstanding visit on an approved filing is a permit issued
-  // over an inspection nobody performed.
-  expect(issued.inspections).toHaveLength(INSPECTING.length)
-  for (const visit of issued.inspections) {
-    expect(visit.conducted_at, `${visit.department?.code}'s visit was never conducted`).not.toBeNull()
-    expect(visit.result, `${visit.department?.code}'s visit did not pass`).toBe('passed')
-  }
 })
 
 /* ──────────────────────────────────────────────────────────────────────────

@@ -43,7 +43,7 @@ enum ClearanceStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::NotStarted => 'Not Started',
+            self::NotStarted => 'Not Yet Submitted',
             self::ForApproval => 'For Approval',
             self::ForInspection => 'For Inspection',
             self::Approved => 'Approved',

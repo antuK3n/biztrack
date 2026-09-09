@@ -12,7 +12,7 @@ import {
 } from '../../components/ui/Proto'
 import { businessName, formatDate } from '../../lib/format'
 import { applications, reference } from '../../lib/resources'
-import { applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
+import { applicationStatusMeta, clearanceStatusMeta, isPaidStatus } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import type {
   Application,
@@ -291,7 +291,7 @@ function permitChip(
   if (own) return own
 
   // No pivot row: the permit is not on this filing. Nothing to report.
-  if (!permitStatus) return { tone: 'gray', label: 'Not Started' }
+  if (!permitStatus) return { tone: 'gray', label: 'Not Yet Submitted' }
 
   if (permitStatus === 'for_inspection' && office) {
     if (office.inspection === 'failed') return { tone: 'red', label: 'Inspection Failed' }
@@ -397,6 +397,27 @@ function ApplicationRow({
   const [open, setOpen] = useState(false)
   const pending = app.status === 'pending_payment'
   const rejected = app.status === 'rejected'
+  /*
+   * ── The payment block has three states now, not two ───────────────────────
+   *
+   * It was `pending ? "Pay Online" : "Paid"`, and that was sound while
+   * submission led straight to `pending_payment`: a filing was either being
+   * billed or past it, with nothing in between. The September flow put
+   * `for_approval` in that gap — BPLO reads the form BEFORE there is a bill —
+   * so the else-branch started printing a green "Paid" on filings where not a
+   * peso had been charged. A false claim about money, on the applicant's main
+   * screen, in the strongest colour the palette has.
+   *
+   * `draft`, `for_approval` and `returned` are all before the bill and say so.
+   *
+   * A terminal filing gets NO block, and that is deliberate rather than a
+   * fourth label. Status alone cannot say whether a rejected filing had already
+   * paid — the list payload carries no payment — so any wording here would be a
+   * guess dressed as a fact. The row already carries its rejection note, which
+   * is what that filing is actually about.
+   */
+  const ended = app.status === 'rejected' || app.status === 'cancelled'
+  const settled = isPaidStatus(app.status)
   const payBlockCls =
     'flex w-28 shrink-0 items-center justify-center self-stretch px-3 text-center text-base font-semibold leading-tight text-white'
 
@@ -501,8 +522,10 @@ function ApplicationRow({
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
             Pay Online
           </Link>
-        ) : (
+        ) : settled ? (
           <span className={`${payBlockCls} bg-s-green`}>Paid</span>
+        ) : ended ? null : (
+          <span className={`${payBlockCls} bg-shell-deep !text-ink-secondary`}>Not billed yet</span>
         )}
       </div>
 

@@ -35,6 +35,7 @@ import type {
   MessageTranscriptMeta,
   Notification,
   OfficeForm,
+  OfficeFormRequirement,
   OfficerRequest,
   PageMeta,
   PageParams,
@@ -436,12 +437,77 @@ export const officeForms = {
   /** All saved per-office form payloads for an application. */
   list: (applicationId: number) =>
     unwrap<OfficeForm[]>(api.get(`/applications/${applicationId}/office-forms`)),
-  /** Upsert one office form's opaque JSON (draft/returned only, owner). */
-  save: (applicationId: number, permitTypeCode: string, formData: Record<string, unknown>) =>
+  /**
+   * Upsert one office form's opaque JSON.
+   *
+   * `submit` is what separates saving from handing in. Saving a sheet stores
+   * the answers and nothing else; a sheet is submitted to its office — the
+   * permit moves to For Approval and the office is routed — only when the
+   * caller says every required answer is there.
+   *
+   * The caller decides because the caller is the only one who can:
+   * `officeFormMissing` is the rule, it lives in the browser beside the sheet
+   * it describes, and there is no PHP copy of it to re-check against. That is a
+   * weak guarantee on purpose — an applicant who forces `submit` on a
+   * half-filled sheet gets it returned by the office, which is the same outcome
+   * as filling it in badly, and is a far smaller cost than a form that cannot
+   * be saved at all.
+   */
+  save: (
+    applicationId: number,
+    permitTypeCode: string,
+    formData: Record<string, unknown>,
+    submit = false,
+  ) =>
     unwrap<OfficeForm>(
       api.put(`/applications/${applicationId}/office-forms/${permitTypeCode}`, {
         form_data: formData,
+        submit,
       }),
+    ),
+  /**
+   * Put one file into one slot of the zoning sheet's checklist.
+   *
+   * A `FormData` post rather than the JSON every other call here makes, for the
+   * same reason `documents.upload` does: the file has to leave the browser as a
+   * multipart part. The response carries the whole checklist back rather than
+   * the one row, so the panel never has to merge server state into its own.
+   */
+  uploadRequirement: (
+    applicationId: number,
+    permitTypeCode: string,
+    documentCode: string,
+    file: File,
+  ) => {
+    const body = new FormData()
+    body.append('file', file)
+
+    return unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
+      api.post(
+        `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
+        body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      ),
+    )
+  },
+  /**
+   * Section X of the CPDD paper, blank, for the applicant to take to a notary.
+   *
+   * A bearer-fetched blob rather than a plain link, like every other PDF here:
+   * the endpoint is authenticated, so an <a href> would download the login
+   * page's 401 envelope instead of the form.
+   */
+  declaration: (applicationId: number, permitTypeCode: string, filename: string) =>
+    downloadBlob(
+      `/applications/${applicationId}/office-forms/${permitTypeCode}/declaration`,
+      filename,
+    ),
+  /** Take one checklist file back off, deleting the stored copy with it. */
+  removeRequirement: (applicationId: number, permitTypeCode: string, documentCode: string) =>
+    unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
+      api.delete(
+        `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
+      ),
     ),
 }
 

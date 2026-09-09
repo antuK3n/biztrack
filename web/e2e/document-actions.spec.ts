@@ -67,10 +67,13 @@ test.use({ storageState: sessionFor('bplo') })
  * `.first()` — the document rows carry the type name in their accessible name,
  * and two uploads of one type would make a name-matched locator ambiguous.
  *
- * `for_inspection` is excluded rather than filtered out afterwards: that
- * status renders the compact decision box with no form and no document list on
- * it at all (see inspection-review.spec.ts), so a hit there has no View button
- * to press.
+ * The later stages are excluded rather than filtered out afterwards: an office
+ * with nothing left to do gets the compact decision box, with no form and no
+ * document list on it at all (see inspection-review.spec.ts), so a hit there
+ * has no View button to press. That used to mean excluding `for_inspection`;
+ * the status is gone and the two stages that replaced it are
+ * `awaiting_other_permits` and `for_final_approval`, so asking for
+ * `for_approval,returned` excludes both by naming what it wants instead.
  *
  * Memoised across the file's tests. The scan is ~20 round trips and the answer
  * is a number that cannot go stale inside one run.
@@ -88,7 +91,7 @@ async function openSheetWithReadableDocument(page: Page): Promise<number | null>
       const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
 
       const list = await fetch(
-        '/api/v1/assignments?application_status=under_review,returned&per_page=30',
+        '/api/v1/assignments?application_status=for_approval,returned&per_page=30',
         { headers },
       )
       const rows = (await list.json()).data as { id: number }[]

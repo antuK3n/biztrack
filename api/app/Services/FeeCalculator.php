@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Application;
 use App\Models\FeeRule;
-use Illuminate\Support\Collection;
 
 class FeeCalculator
 {
@@ -249,7 +248,7 @@ class FeeCalculator
      * Rows are min-inclusive / max-exclusive; a row carries either a fixed
      * `amount` or a `rate` applied to the whole basis value (retailer 3%).
      *
-     * @param list<array{min: float|int, max: float|int|null, amount?: float|int, rate?: float}> $rows
+     * @param  list<array{min: float|int, max: float|int|null, amount?: float|int, rate?: float}>  $rows
      */
     private function bracket(array $rows, float $value): ?float
     {

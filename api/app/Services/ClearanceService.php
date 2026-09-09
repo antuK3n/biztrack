@@ -105,7 +105,33 @@ class ClearanceService
          */
         $baseline = $this->assessableTotal($application, $application->permitTypes);
 
-        $rows = $types->map(fn (PermitType $type) => $this->row($application, $type, $baseline))->all();
+        /*
+         * ── A renewal shows the permits it is FOR, not all of them ───────────
+         *
+         * This mapped every clearance the register knows about, which was right
+         * while every filing carried every clearance: rule 1 of
+         * docs/application-flow-2026-09.md makes all five mandatory on a NEW
+         * application, so "all of them" and "this filing's" named the same set.
+         *
+         * A renewal broke that on 9 September 2026. The applicant ticks which
+         * permits they are renewing and may tick any subset — the six expire on
+         * six different dates — so a renewal of the Sanitary Permit alone would
+         * otherwise open this stage showing five cards, four of them for
+         * clearances the filing does not carry, is not billed for and cannot
+         * grant. Pressing Apply on one of those is an applicant adding a permit
+         * to a filing that was already priced and paid.
+         *
+         * So the stage renders the filing's own set. On a new application that
+         * is still all five and nothing changes; `attachRequiredPermitTypes`
+         * has already attached them by the time this stage is reachable, since
+         * it is gated on payment.
+         */
+        $carried = $application->permitTypes->pluck('id')->flip();
+        $rows = $types
+            ->filter(fn (PermitType $type) => $carried->has($type->id))
+            ->map(fn (PermitType $type) => $this->row($application, $type, $baseline))
+            ->values()
+            ->all();
 
         return ['rows' => $rows, 'meta' => $this->meta($application)];
     }
@@ -166,6 +192,21 @@ class ClearanceService
                 ] : null,
             ],
             'state' => $this->state($application, $type, $held !== null),
+            /*
+             * Which route the applicant took: `apply` (fill in the office's
+             * form) or `upload` (hand in a copy they already hold). Null until
+             * they choose.
+             *
+             * On the payload since 9 September 2026, because the STATE stopped
+             * being able to answer it. Apply used to move the permit to
+             * ForApproval immediately, so `state` doubled as "has this been
+             * started"; now that submitting is a separate act, a permit the
+             * applicant has applied for but not yet filled in sits at
+             * `not_started` — indistinguishable, without this, from one they
+             * have never touched. The card has to tell those apart to say
+             * "Finish form".
+             */
+            'mode' => $this->pivotRow($application, $type)?->mode,
             'has_office_form' => $type->hasOfficeForm(),
             /*
              * "Saved at all", not "every field answered". The FSIC sheet's every

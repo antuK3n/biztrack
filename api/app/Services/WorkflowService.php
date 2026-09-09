@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\AssignmentStatus;
 use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
+use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
@@ -15,13 +17,16 @@ use App\Models\ApplicationPermitType;
 use App\Models\ApplicationStatusHistory;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
+use App\Models\OfficerRequest;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\DenrRequirements;
 use App\Support\Numbering;
 use App\Support\Ra11032;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -159,11 +164,94 @@ class WorkflowService
      * paid is not one they can be held to.
      *
      * `syncWithoutDetaching` rather than `sync`: the applicant may have opted
-     * into Market Clearance during the wizard, and a plain sync would drop it
-     * on the floor along with anything a renewal carried over.
+     * into an optional clearance during the wizard, and a plain sync would drop
+     * it on the floor.
+     *
+     * ── A RENEWAL IS NOT EXPANDED ────────────────────────────────────────────
+     *
+     * This ran over every filing, and on a renewal it was simply wrong. The
+     * applicant ticks which permits they are renewing — that is the whole point
+     * of the entry dialog, and the client's rule (9 September 2026) is that they
+     * may tick any subset, freely, because the six permits expire on six
+     * different dates. A shop whose Sanitary Permit runs out in September and
+     * whose FSIC runs until November renews the one, not both.
+     *
+     * What this did to that shop, measured before it was changed:
+     *
+     *     BEFORE submit: BUSINESS,SANITARY
+     *     AFTER submit:  BUSINESS,SANITARY,FSIC,OCCUPANCY,CEC,ZONING
+     *
+     * Four permits they did not ask for, on one Tax Order of Payment they did
+     * not expect, each gating the final approval of a filing that was only ever
+     * about the sanitary permit. The applicant is billed for four renewals they
+     * did not want and cannot proceed without completing four office forms for
+     * clearances that are still valid.
+     *
+     * So the expansion is for NEW filings only, where it is right: a business
+     * being registered for the first time needs all five, and rule 1 of
+     * docs/application-flow-2026-09.md says so. A renewal keeps exactly the set
+     * the applicant chose — including, per the same client decision, one that
+     * does not carry the Mayor's Permit at all. Every reader of the business
+     * permit's pivot row is already null-guarded for that case
+     * (`approveMainForm`, `approveAndIssue`), because the row has always been
+     * able to be absent on a draft.
+     *
+     * An amendment is left on the NEW path deliberately: it is a different
+     * filing type with its own unresolved shape, the client has said they will
+     * deal with it separately, and changing its permit set on the way past would
+     * be a decision nobody made.
      */
     public function attachRequiredPermitTypes(Application $app): void
     {
+        if ($app->application_type === ApplicationType::Renewal) {
+            /*
+             * Not "nothing", but "nothing the applicant did not ask for".
+             *
+             * The permit types of the TICKED PRIOR PERMITS are attached here,
+             * as a guarantee rather than an expansion: ticking a permit in the
+             * entry dialog is the applicant saying they are renewing it, and a
+             * filing that named the permit but never carried its type would be
+             * renewing nothing — no office form, no assignment, no fee, no
+             * certificate at the end. The wizard sends the same set in
+             * `permit_type_ids`; this makes the two agree even when the wizard
+             * is not the caller, which is the same reason every other gate in
+             * this flow is duplicated on the server.
+             *
+             * `syncWithoutDetaching`, so anything else already on the filing is
+             * left alone, and the union is what the applicant gets.
+             */
+            $chosen = $app->priorPermits()
+                ->pluck('permits.permit_type_id')
+                ->unique()
+                ->filter()
+                ->all();
+
+            if ($chosen !== []) {
+                $app->permitTypes()->syncWithoutDetaching(
+                    collect($chosen)
+                        ->mapWithKeys(fn ($id) => [$id => ['status' => ClearanceStatus::NotStarted->value]])
+                        ->all()
+                );
+            }
+
+            /*
+             * The rows the applicant chose still need a starting status: a
+             * draft whose pivot was written before this column existed, or by
+             * `ApplicationController::store`'s plain `sync`, would otherwise
+             * submit with a null there and every reader of `isOutstanding()`
+             * would have to guess.
+             */
+            $app->permitTypes()
+                ->wherePivotNull('status')
+                ->pluck('permit_types.id')
+                ->each(fn ($id) => $app->permitTypes()->updateExistingPivot(
+                    $id,
+                    ['status' => ClearanceStatus::NotStarted->value],
+                ));
+
+            return;
+        }
+
         $codes = array_merge(
             [PermitType::OUTCOME_CODE],
             PermitType::REQUIRED_CLEARANCE_CODES,
@@ -408,13 +496,52 @@ class WorkflowService
                 $row = $this->pivotFor($app, $type->code);
             }
 
-            $row->update(['mode' => $mode, 'submitted_at' => now(), 'rejection_reason' => null]);
+            $row->update(['mode' => $mode, 'rejection_reason' => null]);
+
+            /*
+             * ── Applying is not submitting, when there is a form to fill ──────
+             *
+             * This moved the permit straight to ForApproval and routed the
+             * office, on the press of Apply — and wrote the history note
+             * "Applicant completed the office form" while doing it. The
+             * applicant had completed nothing: Apply's whole job is to OPEN the
+             * form.
+             *
+             * What that cost, twice, from both ends of the same filing. The
+             * applicant's Track page showed "For Approval" on two clearances
+             * they had not filled in ("I still haven't submitted any
+             * applications yet the status says it is For Approval"), and CENRO
+             * opened a queue row with no answers on it at all ("I still can't
+             * view the application fields"). One wrong claim, read from two
+             * seats.
+             *
+             * The rule now, settled with the client on 9 September 2026: you
+             * submit a clearance by giving the office something to read.
+             *
+             *  - MODE_UPLOAD submits immediately. The file IS the answer, and
+             *    it is already on the filing by the time this runs.
+             *  - MODE_APPLY on a permit with NO office form submits immediately
+             *    too — there is nothing further for the applicant to give, so
+             *    holding it back would strand it.
+             *  - MODE_APPLY on a form-bearing permit records the choice and
+             *    stops. `submitClearanceForm()` below finishes the job when the
+             *    applicant saves the sheet.
+             *
+             * `submitted_at` moves with the submission rather than with the
+             * choice, for the same reason: it is the date the office received
+             * something.
+             */
+            if ($mode === ApplicationPermitType::MODE_APPLY && $type->hasOfficeForm()) {
+                return $row->fresh();
+            }
+
+            $row->update(['submitted_at' => now()]);
             $this->transitionClearance(
                 $row,
                 ClearanceStatus::ForApproval,
                 $mode === ApplicationPermitType::MODE_UPLOAD
                     ? 'Applicant handed in a permit they already hold.'
-                    : 'Applicant completed the office form.',
+                    : 'Applicant applied for this permit.',
             );
 
             if ($type->issuing_department_id !== null) {
@@ -424,6 +551,153 @@ class WorkflowService
             $this->refreshReadiness($app);
 
             return $row->fresh();
+        });
+    }
+
+    /**
+     * A CEC has just been issued — open the DENR permits it leaves outstanding.
+     *
+     * ── What this is ──────────────────────────────────────────────────────────
+     *
+     * MCG-CENRO-FO-001's footnote: "The following required DENR permit/s must be
+     * submitted/complied to this office within six (6) months upon issuance of
+     * the CEC, on or before ______, otherwise the CEC issued will be
+     * automatically revoked."
+     *
+     * The applicant has been SHOWN that list since the form was rebuilt; until
+     * now there was nowhere to hand the documents in. `officer_requests` — Other
+     * Requirements — is exactly that bin: one office asking one applicant for
+     * one document, with a due date, an upload, a status and a review. It has
+     * all of it already; nothing pointed at it.
+     *
+     * Raised by the system rather than by an officer (client's choice of five
+     * options, 9 September 2026), so the six-month clock starts on the day the
+     * certificate is minted rather than on the day somebody remembers, and
+     * `requested_by_user_id` is null — see the migration that allowed it.
+     *
+     * ── Three properties worth keeping ───────────────────────────────────────
+     *
+     * ONLY FOR CEC. Every other clearance issues a certificate that is the end
+     * of its own story; this is the one whose issuance creates new obligations.
+     *
+     * IDEMPOTENT. `grantClearance` is reachable more than once — a re-inspection
+     * conducted after a grant runs it again — so this keys on the title it
+     * writes. A second pass finds the rows and adds nothing.
+     *
+     * SILENT WHEN THE TABLE CANNOT PLACE THE BUSINESS. `outstandingFor` returns
+     * nothing for a trade CENRO's table does not list, and raising no
+     * requirement is the right answer there: the office decides what that
+     * business owes, and inventing due-dated obligations from a row we could not
+     * match would be worse than leaving them to it.
+     */
+    private function raiseDenrRequirements(Application $app, PermitType $type): void
+    {
+        if ($type->code !== 'CEC' || $type->issuing_department_id === null) {
+            return;
+        }
+
+        $app->loadMissing('business.lines.psicCode');
+
+        $categories = array_values(array_filter(array_map(
+            fn (array $line) => (string) ($line['category'] ?? ''),
+            (array) ($app->fee_profile['lines'] ?? []),
+        )));
+        $psicCodes = $app->business?->lines
+            ->map(fn ($line) => (string) ($line->psicCode->code ?? ''))
+            ->filter()
+            ->values()
+            ->all() ?? [];
+
+        $outstanding = DenrRequirements::outstandingFor($categories, $psicCodes);
+        if ($outstanding === []) {
+            return;
+        }
+
+        /*
+         * Six months from ISSUANCE, which is now — this runs inside the same
+         * transaction that mints the certificate. The paper leaves a blank for
+         * the date because a counter clerk has to work it out; here it is the
+         * one thing the system can supply that the paper cannot.
+         */
+        $due = now()->addMonths(6);
+
+        foreach ($outstanding as $code => $meaning) {
+            OfficerRequest::firstOrCreate(
+                [
+                    'application_id' => $app->id,
+                    'title' => "DENR {$code} — {$meaning}",
+                ],
+                [
+                    'requested_by_user_id' => null,
+                    'department_id' => $type->issuing_department_id,
+                    'request_type' => 'document',
+                    'status' => OfficerRequestStatus::Pending,
+                    'due_date' => $due,
+                    'description' => "Your City Environmental Certificate has been issued. This {$code} "
+                        .'is issued by the DENR, not by the City. Upload it here once you have it. '
+                        .'CENRO requires it within six months of your CEC being issued; a CEC whose '
+                        .'DENR permits are not complied with by then can be revoked.',
+                ],
+            );
+        }
+
+        $this->notify->applicationStatus(
+            $app,
+            $app->status,
+            'Your City Environmental Certificate has been issued. '
+            .count($outstanding).' DENR document(s) are now due under Other Requirements by '
+            .$due->toFormattedDateString().'.',
+        );
+    }
+
+    /**
+     * The applicant saved an office form — hand the permit to its office.
+     *
+     * The other half of `startClearance()`, and the moment a form-bearing
+     * clearance actually becomes the office's work. See the long note there for
+     * why it is not the press of Apply.
+     *
+     * Idempotent by design, because saving a form is something an applicant
+     * does repeatedly: it acts ONLY on a permit still sitting at NotStarted or
+     * Returned, which are the two states that mean "this is yours to finish".
+     * A permit already ForApproval is being re-saved before the office has
+     * opened it — nothing to do. One past that has been accepted, and
+     * `OfficeFormController::ownerMayEdit` will not have let the save through
+     * in the first place.
+     *
+     * `Returned` is the case worth naming: an office sent the sheet back, the
+     * applicant fixed it, and saving is what returns it to the reading queue.
+     * `ClearanceStatus::Returned->allowedNext()` lists ForApproval for exactly
+     * this, and the office is re-routed because `returnClearance` may have
+     * closed the assignment behind it.
+     */
+    public function submitClearanceForm(Application $app, PermitType $type): void
+    {
+        $row = $this->pivotFor($app, $type->code);
+        if ($row === null) {
+            return;
+        }
+
+        $resubmitting = $row->status === ClearanceStatus::Returned;
+        if (! in_array($row->status, [ClearanceStatus::NotStarted, ClearanceStatus::Returned], true)) {
+            return;
+        }
+
+        DB::transaction(function () use ($app, $type, $row, $resubmitting) {
+            $row->update(['submitted_at' => now(), 'rejection_reason' => null]);
+            $this->transitionClearance(
+                $row,
+                ClearanceStatus::ForApproval,
+                $resubmitting
+                    ? 'Applicant resubmitted the office form.'
+                    : 'Applicant completed the office form.',
+            );
+
+            if ($type->issuing_department_id !== null) {
+                $this->routeTo($app, $type->issuing_department_id);
+            }
+
+            $this->refreshReadiness($app);
         });
     }
 
@@ -748,14 +1022,30 @@ class WorkflowService
             $this->completeAssignment($app, $this->bploDepartmentId(), $remarks);
 
             $row = $this->pivotFor($app, PermitType::OUTCOME_CODE);
+            $issuedBusinessPermit = false;
             if ($row !== null && $row->status !== ClearanceStatus::Approved) {
                 $row->update(['decided_at' => now()]);
                 $row->forceFill(['status' => ClearanceStatus::Approved])->save();
                 $this->issuePermitFor($app, $row->permitType);
+                $issuedBusinessPermit = true;
             }
 
             $app->update(['decided_at' => now()]);
-            $this->transition($app, ApplicationStatus::Approved, 'All requirements met. Business permit issued.');
+            /*
+             * "Business permit issued" is not true of every approval any more.
+             * A renewal may carry any subset of the permits — a shop whose
+             * Sanitary Permit expires in September renews that alone — and such
+             * a filing has no business-permit row to issue. The history note is
+             * read by the applicant on their own timeline, so it says what
+             * actually happened rather than what usually does.
+             */
+            $this->transition(
+                $app,
+                ApplicationStatus::Approved,
+                $issuedBusinessPermit
+                    ? 'All requirements met. Business permit issued.'
+                    : 'All requirements met. Every permit on this application has been issued.',
+            );
             $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
         });
@@ -859,6 +1149,7 @@ class WorkflowService
         $row->update(['decided_at' => now()]);
         $this->transitionClearance($row, ClearanceStatus::Approved, $note);
         $this->issuePermitFor($app, $row->permitType);
+        $this->raiseDenrRequirements($app, $row->permitType);
 
         $this->notify->applicationStatus(
             $app,
@@ -882,18 +1173,86 @@ class WorkflowService
     {
         $validityDays = (int) ($type->validity_days ?: 365);
 
-        return Permit::firstOrCreate(
+        /*
+         * ── A renewal continues the term; it does not restart it ─────────────
+         *
+         * This dated every permit `now() → now() + validity_days`, and on a
+         * renewal that threw away cover the applicant had already paid for. A
+         * shop renewing its sanitary permit on 8 September, sixty days before
+         * the old one lapsed on 7 November, got a certificate running from the
+         * 8th — and lost those sixty days. Renewing early was penalised, which
+         * is the opposite of what an LGU wants from a renewal season.
+         *
+         * So a renewal issued while its predecessor is still valid begins the
+         * day after that predecessor ends. A renewal of something already
+         * lapsed begins today, because there is no unexpired term to continue
+         * and back-dating one would invent cover for a period the business
+         * traded without a permit.
+         *
+         * Client's decision, 9 September 2026, over the calendar-year
+         * alternative (1 Jan – 31 Dec, the Mayor's Permit convention). That one
+         * was not chosen and is not implemented — it would have changed NEW
+         * applications too, and the fee period with them.
+         */
+        $prior = $this->priorPermitFor($app, $type);
+        $priorEnds = $prior?->valid_until ? Carbon::parse($prior->valid_until)->startOfDay() : null;
+        $continues = $priorEnds !== null && $priorEnds->greaterThanOrEqualTo(now()->startOfDay());
+
+        $validFrom = $continues ? $priorEnds->copy()->addDay() : now()->startOfDay();
+
+        $permit = Permit::firstOrCreate(
             ['application_id' => $app->id, 'permit_type_id' => $type->id],
             [
                 'permit_number' => Numbering::permitNumber($type->permit_number_prefix),
                 'business_id' => $app->business_id,
                 'status' => PermitStatus::Active,
-                'valid_from' => now()->toDateString(),
-                'valid_until' => now()->addDays($validityDays)->toDateString(),
+                'valid_from' => $validFrom->toDateString(),
+                'valid_until' => $validFrom->copy()->addDays($validityDays)->toDateString(),
                 'issued_at' => now(),
                 'issued_by_user_id' => Auth::id(),
             ],
         );
+
+        /*
+         * ── And the permit it replaces stops being one the business holds ────
+         *
+         * Two live certificates of the same type is not a state anybody can act
+         * on: the applicant's profile listed both, the renewal picker offered
+         * both, and an inspector verifying the business could have been handed
+         * either. `Superseded` rather than `Expired` — see the note on the enum
+         * for why the true expiry date has to survive.
+         *
+         * Only when the predecessor is still live. A renewal of a permit that
+         * already expired, or was revoked, leaves that status alone: those say
+         * something the renewal does not undo.
+         */
+        if ($prior !== null && $prior->status?->isLive()) {
+            $prior->update(['status' => PermitStatus::Superseded]);
+            Audit::log('permit.superseded', $prior);
+        }
+
+        return $permit;
+    }
+
+    /**
+     * The permit this filing is renewing FOR THIS PERMIT TYPE, if any.
+     *
+     * Reads the chain the permit itself records where it can — `Permit::booted`
+     * writes `prior_permit_id` at creation and is type-matched — and falls back
+     * to the filing's ticked set for the moment before the row exists, which is
+     * when the dates above are being computed.
+     */
+    private function priorPermitFor(Application $app, PermitType $type): ?Permit
+    {
+        if ($app->application_type !== ApplicationType::Renewal) {
+            return null;
+        }
+
+        return $app->priorPermits()
+            ->where('permits.business_id', $app->business_id)
+            ->where('permits.permit_type_id', $type->id)
+            ->orderByDesc('permits.valid_until')
+            ->first();
     }
 
     /**

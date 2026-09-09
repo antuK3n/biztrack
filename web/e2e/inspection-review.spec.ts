@@ -36,14 +36,15 @@ test.use({ storageState: sessionFor('zoning') })
  *   "In reviewing the inspections (admin side), I can still see the application
  *    details. Please remove this."
  *
- * All of it came from one fact that is easy to reintroduce. A filing only
- * reaches `for_inspection` once every review assignment has completed
- * (WorkflowService::afterReviewProgress), so `completed_at` is always set by
- * then and ReviewPage's `decided` is always true — which used to mean a static
- * green "Approved", no controls at all, and the whole 1,200-line BPLO sheet
- * rendered flat. Anyone reasoning about `decided` again without knowing about
- * this status will land back there, so these assertions are deliberately
- * literal about what must and must not be on the page.
+ * All of it came from one fact that is easy to reintroduce. An office's
+ * assignment is completed the moment it accepts the paperwork
+ * (WorkflowService::approveClearance), while its permit goes on to a site
+ * visit — so `completed_at` is set and ReviewPage's `decided` is true for the
+ * whole of the stage in which that office still has a visit to record. That
+ * used to mean a static green "Approved", no controls at all, and the whole
+ * 1,200-line BPLO sheet rendered flat. Anyone reasoning about `decided` again
+ * without knowing this will land back there, so these assertions are
+ * deliberately literal about what must and must not be on the page.
  *
  * ── Read-only on purpose ────────────────────────────────────────────────────
  *
@@ -51,9 +52,10 @@ test.use({ storageState: sessionFor('zoning') })
  * visit issues the permits and moves the filing to `approved`, so the spec
  * would pass once and then find nothing to open. The button's WIRING is
  * asserted — it exists, it is reachable, it names its own inspection — and the
- * fact that pressing it moves a filing from `for_inspection` to `approved` with
- * permits issued was verified by hand against live data. If this is ever made
- * to press the button, give it a filing it creates itself.
+ * fact that pressing it issues this office's permit — and, once it is the
+ * last one outstanding, moves the filing on — was verified by hand against
+ * live data. If this is ever made to press the button, give it a filing it
+ * creates itself.
  *
  * The same rule covers "Schedule re-inspection" and "Reschedule this
  * inspection", both of which write: their presence and their per-visit
@@ -118,13 +120,14 @@ function filedSheet(page: Page) {
  * Two separate things make anything else wrong here, and both of them present
  * as a blank page rather than as an error, so they are worth naming.
  *
- * The first is churn. Which application sits in `for_inspection` changes every
- * time anybody works the queue — the two this was written against were both
- * approved within the hour — and re-running the analytics history seeder
+ * The first is churn. Which application sits at `awaiting_other_permits` with
+ * a visit booked for this office changes every time anybody works the queue —
+ * the two this was written against were both approved within the hour — and
+ * re-running the analytics history seeder
  * renumbers rows outright. An id written down here is stale by definition.
  *
  * The second is the office boundary, and it is what broke this suite. Picking
- * off `GET /applications?status=for_inspection` and following
+ * off `GET /applications?status=awaiting_other_permits` and following
  * `assignments[0]` looks safe because that list is already narrowed by
  * ApplicationVisibility — but the row it hands back first is BPLO's, since
  * BPLO is routed every filing it coordinates. `GET /assignments/{id}` is
@@ -163,7 +166,7 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
     /*
      * `status=completed` is load-bearing, not tidiness.
      *
-     * `for_inspection` no longer implies this office has finished its review:
+     * `awaiting_other_permits` does not imply this office has finished its review:
      * since commit 5da4daa the FIRST inspecting office's approval flips the
      * whole filing while every other office's assignment is still `pending`.
      * The compact box is shown only to an office whose own review is done, so
@@ -177,7 +180,7 @@ async function openForInspectionFiling(page: Page): Promise<number | null> {
      * approval, so an office that has not approved has nothing to inspect.
      */
     const list = await fetch(
-      '/api/v1/assignments?application_status=for_inspection&status=completed&per_page=20',
+      '/api/v1/assignments?application_status=awaiting_other_permits&status=completed&per_page=20',
       { headers },
     )
     const rows = (await list.json()).data as {
@@ -256,7 +259,7 @@ async function openOwedReviewFiling(page: Page): Promise<number | null> {
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
 
     const list = await fetch(
-      '/api/v1/assignments?application_status=for_inspection&status=pending,in_progress,returned&per_page=20',
+      '/api/v1/assignments?application_status=awaiting_other_permits&status=pending,in_progress,returned&per_page=20',
       { headers },
     )
     const rows = (await list.json()).data as { id: number }[]
@@ -303,7 +306,7 @@ test('an office that has FINISHED its review opens on the decision box, not the 
   page,
 }) => {
   const assignmentId = await openForInspectionFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')
+  test.skip(assignmentId === null, 'no filing with a scheduled visit for this office on this stack')
 
   const statusPanel = page.locator('section[aria-label="Application status"]')
   await expect(statusPanel).toBeVisible()
@@ -339,16 +342,16 @@ test('an office that has FINISHED its review opens on the decision box, not the 
   await expect(page.getByText('Application progress')).toBeVisible()
 })
 
-test('an office that still OWES a review can reach its decision on a For Inspection filing', async ({
+test('an office that still OWES a review can reach its decision while the other permits are being worked', async ({
   page,
 }) => {
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   /*
-   * The review sheet, not the compact box. The filing's status says
-   * `for_inspection`; this office's assignment does not, and the assignment is
-   * what this screen answers to.
+   * The review sheet, not the compact box. The filing's status is a stage at
+   * which the compact box CAN apply; this office's assignment still owes a
+   * decision, and the assignment is what this screen answers to.
    *
    * PRESENT, not visible — and that difference is the whole of the third
    * position on this sheet, so it is worth being exact about what is and is
@@ -401,7 +404,7 @@ test('the application as filed starts collapsed and opens on one click', async (
    * screenshot and CPDO here.
    */
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   /* 1. By default it is collapsed. On the page, off the screen. */
   await expect(filedSheet(page)).toHaveCount(1)
@@ -476,7 +479,7 @@ test('collapsing the sheet does not fold away the work the officer came to do', 
    * Every assertion here is a VISIBLE query, taken with the sheet still shut.
    */
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   await expect(page.getByRole('button', { name: SHOW_SHEET })).toHaveAttribute(
     'aria-expanded',
@@ -546,7 +549,7 @@ function categorySelect(page: Page) {
 
 test('a reviewing office can set the RA 11032 category from Edit mode', async ({ page }) => {
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   /*
    * View mode first, and the assertion is that there is nothing to TYPE INTO
@@ -639,7 +642,7 @@ test('Save category is never `disabled` — it says what is missing instead', as
    * is what makes this repeatable rather than passing once.
    */
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
   const select = categorySelect(page)
@@ -718,7 +721,7 @@ test('the Edit-mode banner names the category as one of the fields it turns on',
    * otherwise never learn they are allowed to change a statutory deadline.
    */
   const assignmentId = await openOwedReviewFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with an open review for this office')
+  test.skip(assignmentId === null, 'no filing with an open review for this office')
 
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
   /*
@@ -732,7 +735,7 @@ test('the Edit-mode banner names the category as one of the fields it turns on',
 
 test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
   const assignmentId = await openForInspectionFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')
+  test.skip(assignmentId === null, 'no filing with a scheduled visit for this office on this stack')
 
   const approve = page.getByRole('button', { name: /^Approve the .+ inspection$/ })
   const reject = page.getByRole('button', { name: /^Reject the .+ inspection with remarks$/ })
@@ -792,7 +795,7 @@ test('every outstanding visit carries its own named Approve and Reject', async (
 
 test('rejecting a visit asks for remarks and will not proceed without them', async ({ page }) => {
   const assignmentId = await openForInspectionFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')
+  test.skip(assignmentId === null, 'no filing with a scheduled visit for this office on this stack')
 
   const reject = page.getByRole('button', { name: /^Reject the .+ inspection with remarks$/ })
   test.skip((await reject.count()) === 0, 'every visit on this filing has already been conducted')
@@ -832,7 +835,7 @@ test('an outstanding visit can still be moved to another date', async ({ page })
    * on one filing.
    */
   const assignmentId = await openForInspectionFiling(page)
-  test.skip(assignmentId === null, 'no for_inspection filing with a scheduled visit on this stack')
+  test.skip(assignmentId === null, 'no filing with a scheduled visit for this office on this stack')
 
   const approve = page.getByRole('button', { name: /^Approve the .+ inspection$/ })
   const approveCount = await approve.count()
@@ -900,7 +903,7 @@ test('an old inspection deep link opens the filing it named', async ({ page }) =
     const token = localStorage.getItem('biztrack.token.staff')
     const headers = { Authorization: `Bearer ${token}`, Accept: 'application/json' }
 
-    const list = await fetch('/api/v1/assignments?application_status=for_inspection&per_page=20', {
+    const list = await fetch('/api/v1/assignments?application_status=awaiting_other_permits&per_page=20', {
       headers,
     })
     const rows = (await list.json()).data as {
@@ -940,14 +943,14 @@ test('an old inspection deep link opens the filing it named', async ({ page }) =
   await expect(page.locator('section[aria-label="Application status"]')).toBeVisible()
 })
 
-test('a filing that is not for inspection still opens on the full review sheet', async ({
+test('a filing this office still owes a review on opens on the full review sheet', async ({
   page,
 }) => {
   /*
-   * The other half of the change: only `for_inspection` gets the box. If this
-   * fails, the compact screen has swallowed a status that needs the form —
-   * which is a far worse regression than the one being fixed, because an
-   * officer under review would lose every field they are meant to read.
+   * The other half of the change: only an office with nothing left to do gets
+   * the box. If this fails, the compact screen has swallowed a filing that
+   * needs the form — a far worse regression than the one being fixed, because
+   * an officer still owing a review would lose every field they must read.
    */
   await page.goto('/staff/queue')
   // This office's own queue, for the same reason as above: an assignment on
@@ -958,13 +961,13 @@ test('a filing that is not for inspection still opens on the full review sheet',
     // Open review only: a completed assignment renders the sheet as a closed
     // record with no Mode pills, and the Edit-mode assertions below need them.
     const list = await fetch(
-      '/api/v1/assignments?application_status=under_review&status=pending,in_progress,returned&per_page=3',
+      '/api/v1/assignments?application_status=awaiting_other_permits&status=pending,in_progress,returned&per_page=3',
       { headers },
     )
     const rows = (await list.json()).data as { id: number }[]
     return rows[0]?.id ?? null
   })
-  test.skip(assignmentId === null, 'no open under_review review on this office’s queue')
+  test.skip(assignmentId === null, 'no open review on this office’s queue')
 
   await page.goto(`/staff/queue/${assignmentId}`)
   await page.waitForLoadState('networkidle')
@@ -979,7 +982,7 @@ test('a filing that is not for inspection still opens on the full review sheet',
    * differently from an open review at arm's length. Gating it would also mean
    * the page changed shape underneath an officer at the moment they approved,
    * which is the worst possible moment for it to move. So this asserts the
-   * collapsed state here too rather than treating `under_review` as an
+   * collapsed state here too rather than treating an open review as an
    * exception — if a future change makes the collapse conditional, this goes
    * red on purpose.
    */
