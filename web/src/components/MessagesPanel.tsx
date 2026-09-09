@@ -121,9 +121,25 @@ function AttachmentChip({
   )
 }
 
-/** What to call the other party in the thread, from the viewer's seat. */
-function roleLabel(sender: Message['sender']): string {
-  return sender.is_officer ? 'Officer' : 'Applicant'
+/**
+ * What to call whoever wrote this turn: "BPLO Officer", or "Applicant".
+ *
+ * The office comes from the message's own thread, which is the office that
+ * turn was written FOR — not the sender's employer, though on a reply they are
+ * the same, because an officer may only post into their own office's
+ * conversation (MessageController::readsThread).
+ *
+ * This is where the officer's name belongs, and now the only place it appears.
+ * The inbox names conversations after the OFFICE — a person's name there drifts
+ * with whoever replied last — so "who am I actually dealing with" is answered
+ * by the turn in front of you: "Juan Dela Cruz · BPLO Officer".
+ */
+function senderRole(message: Message): string {
+  if (!message.sender.is_officer) return 'Applicant'
+  // Code first: "BPLO Officer" fits a line that "Business Permits and Licensing
+  // Office Officer" does not, and it is what the office calls itself.
+  const office = message.department?.code ?? message.department?.name
+  return office ? `${office} Officer` : 'Officer'
 }
 
 function Bubble({
@@ -146,7 +162,7 @@ function Bubble({
             <p className="min-w-0 truncate text-xs font-bold text-royal">
               {message.sender.name}
               <span className="ml-1 font-normal italic text-ink-muted">
-                · {roleLabel(message.sender)}
+                · {senderRole(message)}
               </span>
             </p>
           </div>
@@ -181,19 +197,30 @@ function Bubble({
  * real buttons, each carrying how much has been said to that office — an
  * applicant deciding who to chase wants to see which office they have already
  * written to twice.
+ *
+ * And when that one office is the READER'S own, even the sentence goes. An
+ * office seat may only ever read its own conversation, so "Conversation with
+ * Business Permits and Licensing Office" on BPLO's screen is the app telling
+ * BPLO who BPLO is — it appeared directly under a card that had just said the
+ * same thing.
  */
 function OfficePicker({
   offices,
   activeId,
+  readerOffice,
   onPick,
 }: {
   offices: MessageOffice[]
   activeId: number | null
+  /** The reader's own office, when they have one. Null for an applicant. */
+  readerOffice: string | null
   onPick: (departmentId: number) => void
 }) {
   if (offices.length === 0) return null
 
   if (offices.length === 1) {
+    if (offices[0].name === readerOffice) return null
+
     return (
       <p className="mb-3 text-xs font-semibold text-royal">
         Conversation with <span className="font-bold">{offices[0].name}</span>
@@ -251,13 +278,27 @@ function OfficePicker({
  * The in-page panel wraps it in its card; the dedicated Messages page drops it
  * straight into the right-hand pane.
  */
+/**
+ * Which conversation a transcript is showing.
+ *
+ * A filing's conversation is picked out by its application and then by office;
+ * a general enquiry has no filing at all, only the person whose it is, and is
+ * always with BPLO. Stating the two as separate shapes keeps the impossible
+ * combination — an application id AND a general enquiry — unrepresentable,
+ * rather than passing a nullable id and hoping every branch checks it.
+ */
+export type MessageTarget =
+  | { kind: 'application'; applicationId: number }
+  /** `userId` omitted means "mine"; an officer names the person. */
+  | { kind: 'general'; userId?: number | null }
+
 export function MessageThreadView({
-  applicationId,
+  target,
   className = '',
   scrollClassName = 'max-h-96',
   onSent,
 }: {
-  applicationId: number
+  target: MessageTarget
   className?: string
   scrollClassName?: string
   onSent?: () => void
@@ -286,7 +327,15 @@ export function MessageThreadView({
   const { data, loading, error, reload, setData } = useAsync<{
     data: Message[]
     meta: MessageTranscriptMeta
-  }>(() => messagesApi.listWithMeta(applicationId, officeId), [applicationId, officeId])
+  }>(
+    () =>
+      target.kind === 'general'
+        ? messagesApi.generalWithMeta(target.userId)
+        : messagesApi.listWithMeta(target.applicationId, officeId),
+    // The key parts of the target, not the object: a fresh literal on every
+    // render would re-fetch the transcript forever.
+    [target.kind, target.kind === 'general' ? target.userId : target.applicationId, officeId],
+  )
 
   const [body, setBody] = useState('')
   const [attachment, setAttachment] = useState<File | null>(null)
@@ -333,7 +382,10 @@ export function MessageThreadView({
     setSending(true)
     setSendError(null)
     try {
-      const sent = await messagesApi.send(applicationId, text, attachment, officeId)
+      const sent =
+        target.kind === 'general'
+          ? await messagesApi.sendGeneral(text, attachment, target.userId)
+          : await messagesApi.send(target.applicationId, text, attachment, officeId)
       /*
        * Append rather than refetch, so the message appears instantly — but only
        * onto a transcript that has loaded. With nothing to append to (the first
@@ -355,7 +407,12 @@ export function MessageThreadView({
 
   return (
     <div className={`flex min-h-0 flex-col ${className}`}>
-      <OfficePicker offices={offices} activeId={officeId} onPick={setOfficeId} />
+      <OfficePicker
+        offices={offices}
+        activeId={officeId}
+        readerOffice={user?.department?.name ?? null}
+        onPick={setOfficeId}
+      />
 
       <div className={`flex-1 space-y-4 overflow-y-auto pr-1 ${scrollClassName}`}>
         {loading ? (
@@ -466,7 +523,7 @@ export function MessagesPanel({ applicationId }: { applicationId: number }) {
       </div>
 
       <div className="rounded-2xl bg-canvas/60 p-4 shadow-card sm:p-5">
-        <MessageThreadView applicationId={applicationId} />
+        <MessageThreadView target={{ kind: 'application', applicationId }} />
       </div>
     </section>
   )

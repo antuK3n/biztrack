@@ -505,6 +505,30 @@ still named `ban`, because renaming it is migration risk across every reference 
 can see; only the value an owner reads has changed. If you confirm BAN is your term, the fix is the
 label on screen, and the migration that made this change is deliberately reversible.
 
+## A24. How is a business landline written on the form — where does the area code stop?
+
+Checklist item 10 asked the address section to collect a landline as well as a mobile, and to
+format both: the mobile "+63, not 09XXXXXXXXX", the landline grouping "its first four digits (area
+code)". The mobile is unambiguous and is built. The landline is not.
+
+**Why it matters.** A Philippine area code is two to four digits — `02` for Metro Manila, `032` for
+Cebu — and the subscriber number is seven or eight. So "the first four digits are the area code" is
+true of no Malabon number we have seen: a City Hall landline is written `(02) 8XXX-XXXX`, where the
+area code is two digits and the `8` is the first digit of the number, not of the code.
+
+**What we need from you.** One line from a permit or a BPLO letterhead showing how the office
+itself writes a landline. If it is `(02) 8XXX-XXXX`, the two boxes are right and only their widths
+are wrong.
+
+**What we assumed meanwhile.** Two boxes: an area code of up to four digits, then the number. Four
+because it is the widest an area code gets, and a box sized to hold the longest rather than to
+demand it — `02` is a perfectly good answer in the first box. Reading a number back OUT of the
+database is positional, first four digits into the first box, because nothing in a stored
+`0281234567` says where the code ends; a legacy row holding only a local number will therefore read
+back visibly shifted rather than silently re-grouped into a different number. `business_addresses.
+telephone` is a plain string and takes any of this, so an answer changes the control and not the
+schema.
+
 ---
 
 # B. For MISD — systems, data, hosting, accounts

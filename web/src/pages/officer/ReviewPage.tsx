@@ -889,7 +889,29 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
   const rejected = app.status === 'rejected'
   const approvedHere = ['approved', 'completed'].includes(data.status.toLowerCase())
-  const decided = rejected || approvedHere || Boolean(data.completed_at)
+  /*
+   * BPLO acts TWICE on one assignment row, and this read the first act as the
+   * end of both.
+   *
+   * The flow gives BPLO the form before payment and the final signature after
+   * every permit is approved. Both go through the same assignment, and
+   * `completeAssignment` stamps `status = completed` and `completed_at` on the
+   * first — so by the time a filing reached For Final Approval, every clause
+   * below was already true. The Mode control was replaced by a static
+   * "Approved" and no Approve button was drawn: the Final Approval tab served
+   * an openable row leading to a screen that could not act on it, and no filing
+   * could ever reach `approved`. The API was willing throughout —
+   * `approveAssignment` maps `for_final_approval` onto `approveOverall`.
+   *
+   * So a filing standing at For Final Approval is never "decided", whatever the
+   * row says. Keyed on the APPLICATION's status rather than the row, because
+   * the row cannot tell BPLO's two acts apart — the same root cause as BPLO's
+   * recorded turnaround covering the whole filing's lifetime. Giving the second
+   * act its own assignment row would fix both at once, and is a larger change
+   * than this screen.
+   */
+  const owesFinalApproval = app.status === 'for_final_approval'
+  const decided = !owesFinalApproval && (rejected || approvedHere || Boolean(data.completed_at))
   // A decided review is a record for good: there is nothing left to change.
   const editing = mode === 'edit' && !decided
 
@@ -1133,6 +1155,66 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   }
 
   /*
+   * ── May THIS office book the first visit on its own clearance? ────────────
+   *
+   * The step that had no screen. `approveClearance` moves a permit to
+   * `for_inspection` and books nothing — the automatic scheduler was removed on
+   * purpose, because "an automatic date is a promise made to the applicant by a
+   * scheduler that does not know whether anyone is free" — so the office picks
+   * the date in a second, separate act. Until this, no client called
+   * `POST /applications/{id}/permits/{code}/inspection`, and a permit that
+   * reached `for_inspection` stayed there: no visit, so nothing to pass, so the
+   * filing never reached For Final Approval.
+   *
+   * ── The office boundary, taken from the payload rather than guessed ────────
+   *
+   * `data.clearance` is `AssignmentResource::clearanceRow()` — the permit this
+   * office issues on this filing, matched on
+   * `issuing_department_id === assignment.department_id`. That is the SAME
+   * column `InspectionController::schedule` checks the caller against before it
+   * answers 403, so the control is drawn exactly where the request will be
+   * accepted and nowhere else. Null when this office issues no permit here, so
+   * an office reading the filing without owning a clearance gets no control.
+   *
+   * The three other candidates were all worse. `app.permit_types` is the
+   * filing's list, shared by every office — driving off it is how a sanitary
+   * officer was once handed OBO's date inputs over a live Save (SEP-3). Office
+   * forms carry a `department_code`, but only for a permit the applicant APPLIED
+   * for; hand in a copy you already hold and there is no sheet, while the permit
+   * still needs its inspection. And a permit-type lookup by code would be this
+   * rule written down a second time, in the browser, where it can drift.
+   *
+   * ── The other three conditions ────────────────────────────────────────────
+   *
+   *  - `requires_inspection`, or there is no visit to book: a desk-only permit
+   *    is granted by `approveClearance` itself and never sits here. BPLO's
+   *    Business Permit is the one in the register today.
+   *  - `status === 'for_inspection'` — the pivot state
+   *    `scheduleClearanceInspection` demands, and the only one it accepts.
+   *  - this office has NO visit on the filing yet. Not "no OPEN visit": after a
+   *    failure the permit STAYS at `for_inspection` (recordInspection keeps the
+   *    failed row), and the way on from there is Schedule re-inspection on the
+   *    failed card, which the panel already draws. Two controls booking the same
+   *    office's next visit, one of them silently discarding the failure from
+   *    view, is the confusion `reinspect` was separated from `reschedule` to
+   *    avoid.
+   *
+   * A courtesy, not the control: the API is still what decides, and a mismatch
+   * surfaces as the panel's error line rather than as an unauthorised write.
+   */
+  const myClearance = data.clearance
+  const myVisits = (app.inspections ?? []).filter(
+    (visit) => visit.department?.code === data.department.code,
+  )
+  const bookFirstInspection =
+    myClearance &&
+    myClearance.requires_inspection &&
+    myClearance.status === 'for_inspection' &&
+    myVisits.length === 0
+      ? { applicationId: app.id, code: myClearance.code, permit: myClearance.name }
+      : undefined
+
+  /*
    * ── The "nothing left for this office" screen ─────────────────────────────
    *
    * A filing still being worked gets its own, much smaller page, and returns
@@ -1314,6 +1396,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             inspections={app.inspections ?? []}
             filingStatus={app.status}
             onChanged={reload}
+            book={bookFirstInspection}
           />
 
           {/* The rail the client asked to keep: "but the progress thingy is cool". */}

@@ -12,6 +12,8 @@ import {
 import { Alert } from '../../components/ui/Alert'
 import { DocumentActions } from '../../components/DocumentActions'
 import { TinInput } from '../../components/TinInput'
+import { LandlineInput, MobileNumberInput } from '../../components/ContactNumberInput'
+import { MOBILE_ERROR, canonicalMobile, mobileValid } from '../../lib/phone'
 import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldLabel,
@@ -56,6 +58,7 @@ import {
   capitalInvestmentMissing,
   feeProfileToDraft,
   formatAmountInput,
+  padAmountInput,
   type FeeProfileDraft,
 } from './FeeProfileStep'
 import type {
@@ -3243,6 +3246,17 @@ export function ApplyWizard() {
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
           }
+          /*
+           * Item 10 — the mobile is checked on the same terms as the landline
+           * beside it: optional, so never listed for being blank, listed only
+           * when what is in it is not a number that can be rung. `mobileValid`
+           * and not `phoneValid`, because this field means one specific thing —
+           * ten digits after +63 starting with 9 — where phoneValid is the loose
+           * "mobile or landline" rule the other four contact fields share.
+           */
+          if (form.mobile_number.trim() && !mobileValid(form.mobile_number)) {
+            missing.push('A valid Mobile Number')
+          }
           if (form.website.trim() && !websiteValid(form.website)) {
             missing.push('A valid Website Address')
           }
@@ -3380,10 +3394,21 @@ export function ApplyWizard() {
           }
           /*
            * The pin and the barangay are checked against each other HERE as
-           * well as in the click handler, because the click handler only ever
-           * sees one order of events: an applicant can drop a valid pin in
-           * Acacia and then change the dropdown to Tonsuya, and nothing re-runs
-           * onPick — the pin did not move.
+           * well as in the click handler — a safety net now rather than the
+           * main defence, and it is worth saying which changed.
+           *
+           * This used to be the only thing catching "drop a valid pin in
+           * Acacia, then change the dropdown to Tonsuya": the pin did not move,
+           * so nothing re-ran onPick, and the disagreement was caught on the
+           * way out of the step. Item 8 replaced that with prevention — the map
+           * takes no pin until a barangay is named, and changing the barangay
+           * clears the pin (see the <select>'s onChange) — so an applicant can
+           * no longer reach this check by that route at all.
+           *
+           * It stays because a pin can still arrive without passing through
+           * onPick: a renewal prefills one, and a reopened draft restores one.
+           * Deleting it would leave those two paths unchecked, which is exactly
+           * the hole it was written to close.
            *
            * ── Why this is gated on `touched.barangay_id` ────────────────────
            *
@@ -3749,6 +3774,21 @@ export function ApplyWizard() {
      * rule to keep in step with the first.
      */
     telephone: form.telephone.trim() && !phoneValid(form.telephone) ? PHONE_ERROR : '',
+    /*
+     * Item 10 — wired, where it was not. The mobile field has existed since the
+     * business gained its own contact details, but nothing here ever produced
+     * an error for it, so `fieldErrors.mobile_number` was undefined and the
+     * input rendered no message, no aria-invalid and no description: a field
+     * that could be filled in wrongly and never said so.
+     *
+     * Silent until the applicant leaves the group, for TIN's reason — the boxes
+     * pass through nine invalid lengths on the way to a valid one, and painting
+     * them red for all nine teaches the applicant to ignore the colour.
+     */
+    mobile_number:
+      touched.mobile_number && form.mobile_number.trim() && !mobileValid(form.mobile_number)
+        ? MOBILE_ERROR
+        : '',
     website:
       form.website.trim() && !websiteValid(form.website)
         ? 'Enter your website as it is typed into a browser, like malabon.gov.ph or https://malabon.gov.ph.'
@@ -3872,9 +3912,24 @@ export function ApplyWizard() {
          */
         telephone: form.telephone.trim() || undefined,
         website: form.website.trim() || undefined,
-        // BPLO items A7 and A8 — the business's own, prefilled from the account
-        // but stored here, so editing one never edits a profile.
-        mobile_number: form.mobile_number.trim() || undefined,
+        /*
+         * BPLO items A7 and A8 — the business's own, prefilled from the account
+         * but stored here, so editing one never edits a profile.
+         *
+         * Canonicalised to +63 on the way out, and this is the single choke
+         * point for it (item 10). The control emits +63 for anything the
+         * applicant types, but a renewal that never touches the field carries
+         * the 09 form it was prefilled with straight from `users.mobile_number`
+         * — so normalising only in the control would store two spellings of the
+         * same number depending on whether anyone looked at the box.
+         *
+         * `business_addresses.mobile_number` is `nullable|string|max:40`
+         * (BusinessController), which is a different rule from the profile
+         * field's `regex:/^09\d{9}$/` in AuthController. They are different
+         * facts — who owns the account, versus how the city rings the business
+         * — and the profile's rule is deliberately not touched here.
+         */
+        mobile_number: canonicalMobile(form.mobile_number) || undefined,
         email: form.email.trim() || undefined,
       },
       /*
@@ -5529,19 +5584,27 @@ export function ApplyWizard() {
               */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block">
-                <FieldLabel>Telephone (Landline)</FieldLabel>
-                <input
-                  inputMode="tel"
+                {/*
+                  * Item 10 — the area code is its own group, not a convention
+                  * the applicant has to remember. A single box with "Area code
+                  * and number" under it asked for a shape and then accepted any
+                  * shape at all, so `02 8123 4567`, `0281234567` and
+                  * `(02)8123-4567` all went into the same column and nothing
+                  * downstream could tell where the area code stopped.
+                  *
+                  * No <label>/<FieldLabel> here: the control is two boxes with
+                  * their own accessible names inside a fieldset, and its legend
+                  * is the question. A label wrapping both would make the first
+                  * box answer to two names at once.
+                  */}
+                <LandlineInput
+                  legend="Telephone (Landline)"
                   value={form.telephone}
-                  onChange={(e) => update('telephone', e.target.value)}
+                  onChange={(v) => update('telephone', v)}
                   onBlur={() => touch('telephone')}
-                  placeholder="Area code and number"
-                  className={inputCls}
-                  aria-invalid={Boolean(fieldErrors.telephone)}
-                  aria-describedby={fieldErrors.telephone ? 'telephone-error' : undefined}
+                  error={fieldErrors.telephone || undefined}
+                  errorId="telephone-error"
                 />
-                </label>
                 {fieldErrors.telephone && (
                   <p id="telephone-error" role="alert" className="mt-1 text-xs font-medium text-s-red">
                     {fieldErrors.telephone}
@@ -5584,20 +5647,42 @@ export function ApplyWizard() {
             */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block">
-                  <FieldLabel>Mobile Number</FieldLabel>
-                  <input
-                    inputMode="tel"
-                    value={form.mobile_number}
-                    onChange={(e) => update('mobile_number', e.target.value)}
-                    onBlur={() => touch('mobile_number')}
-                    placeholder="09XX XXX XXXX"
-                    className={inputCls}
-                  />
-                </label>
-                <p className="mt-1 text-xs text-ink-secondary">
+                {/*
+                  * Item 10 — +63 and ten digits, and the 09 form does not
+                  * appear here at all.
+                  *
+                  * It was a plain text box whose placeholder read "09XX XXX
+                  * XXXX", which taught the one shape the client says this field
+                  * must not use. The prefix is now part of the control rather
+                  * than something to type, so the question cannot be answered
+                  * in the wrong notation; a prefilled 09 number from the
+                  * account still reads back correctly, as its ten digits.
+                  *
+                  * This is the BUSINESS's number. The account's own field keeps
+                  * its 09 rule in AuthController and is untouched — see
+                  * businessPayload for why the two are validated apart.
+                  */}
+                <MobileNumberInput
+                  legend="Mobile Number"
+                  value={form.mobile_number}
+                  onChange={(v) => update('mobile_number', v)}
+                  onBlur={() => touch('mobile_number')}
+                  error={fieldErrors.mobile_number || undefined}
+                  hintId="mobile-number-hint"
+                  errorId="mobile-number-error"
+                />
+                <p id="mobile-number-hint" className="mt-1 text-xs text-ink-secondary">
                   The number the city should ring about this business.
                 </p>
+                {fieldErrors.mobile_number && (
+                  <p
+                    id="mobile-number-error"
+                    role="alert"
+                    className="mt-1 text-xs font-medium text-s-red"
+                  >
+                    {fieldErrors.mobile_number}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block">
@@ -6010,7 +6095,26 @@ export function ApplyWizard() {
                 inputMode="decimal"
                 value={form.capital_investment}
                 onChange={(e) => update('capital_investment', formatAmountInput(e.target.value))}
-                onBlur={() => touch('capital_investment')}
+                /*
+                 * Padded to centavos on blur, not on change.
+                 *
+                 * `formatAmountInput` groups thousands as you type, so "1000"
+                 * showed as "1,000" and stayed there — a peso amount printed
+                 * without its centavos. Padding on every keystroke instead
+                 * would fight the caret: typing "1000.5" would become
+                 * "1,000.50" mid-entry and put the cursor behind the digit
+                 * still being typed.
+                 *
+                 * `padAmountInput` leaves a digit-free string alone, so a blank
+                 * field stays blank rather than becoming "0.00" — a
+                 * capitalization of zero is a declaration nobody made, and on a
+                 * new filing this field is required precisely so it cannot be
+                 * skipped silently.
+                 */
+                onBlur={() => {
+                  update('capital_investment', padAmountInput(form.capital_investment))
+                  touch('capital_investment')
+                }}
                 placeholder="e.g. 250,000.00"
                 className={inputCls}
               />
@@ -6191,21 +6295,25 @@ export function ApplyWizard() {
                 radiusM={insightsRadiusM}
                 highlightBarangay={barangayName ?? null}
                 /*
-                 * The map does not open for business until a trade is chosen.
+                 * The map is never locked. Pin first or choose the barangay
+                 * first — either order is allowed.
                  *
-                 * The zoning verdict is given against a line of business, not a
-                 * coordinate — the sentence directly above the picker says so —
-                 * so a pin dropped first is an answer to half a question. It
-                 * also lets Location Insights compare like with like from the
-                 * very first lookup, instead of counting every business near the
-                 * pin and then silently changing its mind once a PSIC group
-                 * exists.
+                 * This step gated the map twice before, first on the line of
+                 * business and then on the barangay, both on the theory that a
+                 * mismatch is best prevented by refusing the click. The client
+                 * ruled otherwise: let the pin land, and resolve the
+                 * disagreement when the barangay is named. A lock spends a
+                 * disabled control on a case the barangay change handler
+                 * already cleans up, and it strands anyone who reaches for the
+                 * map first — which is most people, because the map is the
+                 * thing on the screen that looks clickable.
+                 *
+                 * Two guards remain, and they are the ones that matter: a pin
+                 * outside Malabon is still refused outright in `onPick`, and a
+                 * pin that contradicts an already-chosen barangay is still
+                 * refused there too. Only the empty-barangay case is now let
+                 * through.
                  */
-                lockedReason={
-                  form.lines.length === 0
-                    ? 'Choose your line of business above, then click the map to drop a pin.'
-                    : null
-                }
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
@@ -6265,6 +6373,11 @@ export function ApplyWizard() {
                 </p>
               ) : (
                 <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
+                  {/* One state now. This used to fork on whether a barangay had
+                      been chosen, because the map refused clicks until one was
+                      and sending somebody to a dead control is worse than saying
+                      nothing. The map takes a pin at any point in the step, so
+                      there is only one instruction left to give. */}
                   Required: click the map to drop a pin where your business is.
                 </p>
               )}
@@ -6377,7 +6490,66 @@ export function ApplyWizard() {
                    * anything else before pressing Next.
                    */
                   onChange={(e) => {
-                    update('barangay_id', e.target.value)
+                    const next = e.target.value
+                    /*
+                     * ── Item 8 — a new barangay drops a CONTRADICTING pin ───
+                     *
+                     * The client asked for the pin to disappear when the
+                     * barangay changes, "to avoid pinning outside the selected
+                     * barangay". A pin that survives the change is a pin that
+                     * was checked against a question which has since been
+                     * answered differently, and leaving it there is how a
+                     * mismatch gets created after the click handler has stopped
+                     * looking.
+                     *
+                     * So the pin is re-checked against the barangay just named,
+                     * and dropped only if it disagrees. Clearing unconditionally
+                     * — which this did while the map was locked until a barangay
+                     * was chosen — costs the pin of anyone who worked the other
+                     * way round: drop the pin, then name the barangay it is
+                     * already sitting in, and watch it vanish for agreeing.
+                     * That order is now the common one, because the map no
+                     * longer waits for the dropdown.
+                     *
+                     * ── Why this lives in the CHANGE HANDLER, not an effect ──
+                     *
+                     * Because an effect watching `form.barangay_id` cannot tell
+                     * a person from a prefill. A renewal and a reopened draft
+                     * both arrive with a barangay AND coordinates, written in by
+                     * a single `setForm` some time after mount — so to an effect
+                     * that is a change, and it would wipe a pin the applicant
+                     * never placed the instant the form hydrated. That would
+                     * break every renewal, which is a bug this repo has already
+                     * shipped once.
+                     *
+                     * `touched.barangay_id` is the same distinction one step
+                     * removed. It is set HERE, on change rather than on blur,
+                     * precisely so the mismatch gate can tell an answer the
+                     * applicant gave from a value we handed them (see the long
+                     * note in `missingFor`). Keying the clear off that flag from
+                     * an effect would buy nothing: the flag only ever flips in
+                     * this handler, so anything reading it is this handler with
+                     * a render in between — the same decision, made later and
+                     * harder to follow.
+                     *
+                     * Guarded on the value actually differing, so re-picking the
+                     * barangay already selected is not a change and costs nobody
+                     * their pin.
+                     */
+                    if (next !== form.barangay_id) {
+                      const nextName =
+                        barangays.find((b) => String(b.id) === next)?.name ?? null
+                      setForm((f) => {
+                        const keepsPin =
+                          f.latitude === null ||
+                          f.longitude === null ||
+                          checkPin(f.latitude, f.longitude, nextName).kind === 'ok'
+                        return keepsPin
+                          ? { ...f, barangay_id: next }
+                          : { ...f, barangay_id: next, latitude: null, longitude: null }
+                      })
+                      setPinError(null)
+                    }
                     touch('barangay_id')
                   }}
                   onBlur={() => touch('barangay_id')}

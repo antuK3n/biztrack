@@ -66,13 +66,46 @@ function TrashIcon({ size = 24, ...props }: SVGProps<SVGSVGElement> & { size?: n
 export function DraftsPage() {
   const { data, loading, error, reload } = useAsync(() => applications.list({ status: 'draft' }), [])
   const [filter, setFilter] = useState<Filter>('all')
+  const [sort, setSort] = useState<'recent' | 'oldest'>('recent')
 
   const drafts = data ?? []
-  const visible = filter === 'all' ? drafts : drafts.filter((d) => d.application_type === filter)
+  const byType = filter === 'all' ? drafts : drafts.filter((d) => d.application_type === filter)
+  /*
+   * Ordered by when the draft was started, which is the only date the API gives
+   * for one — there is no `updated_at` on an application, which is also why the
+   * card says "Started" rather than "Edited". Copied rather than sorted in
+   * place: `data` is the hook's array and sorting it would reorder the source
+   * of a memo-free render.
+   */
+  const visible = [...byType].sort((a, b) => {
+    const diff = Date.parse(a.created_at) - Date.parse(b.created_at)
+    return sort === 'recent' ? -diff : diff
+  })
 
   return (
     <div>
-      <PageTitle right={<SortFilter />}>Application Drafts</PageTitle>
+      <PageTitle
+        right={
+          /*
+            Sort only. The Filter half was drawn here too and did nothing, with
+            the working filter — the pills below — sitting directly under it:
+            two controls for one job, one of them inert. The pills stay because
+            four named types are faster to hit than a menu.
+          */
+          <SortFilter
+            sort={{
+              value: sort,
+              options: [
+                { value: 'recent', label: 'Newest first' },
+                { value: 'oldest', label: 'Oldest first' },
+              ],
+              onChange: (v) => setSort(v as 'recent' | 'oldest'),
+            }}
+          />
+        }
+      >
+        Application Drafts
+      </PageTitle>
 
       <div className="mb-5 flex items-center justify-between gap-4">
         <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
