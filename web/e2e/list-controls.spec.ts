@@ -458,3 +458,172 @@ test.describe('Other Requirements list controls', () => {
     await expect(page.locator('tbody tr')).toHaveCount(3)
   })
 })
+
+/* ── The owner's home page ────────────────────────────────────────────────── */
+
+/*
+ * The "Other Requirements" panel on the business owner's dashboard printed
+ * every waiting requirement with `tone="orange"` hard-coded, so a REJECTED
+ * document — the one thing on that panel that carries a refusal and a reason —
+ * wore the same amber as an ordinary Pending. The requirements page one click
+ * away has always drawn it red.
+ *
+ * Two screens disagreeing about what a status looks like is worse than either
+ * choice on its own: the owner learns the colour on one page and is then told
+ * something different by the other. Colour is not the only carrier here — the
+ * word "Rejected" is on the chip — but it is the part a reader takes in first,
+ * and amber for a refusal reads as "waiting", which is precisely wrong.
+ *
+ * The tokens are read off the document rather than typed as hex, so this
+ * follows a re-theme instead of going red on one.
+ */
+test.describe('the owner’s home page names a refusal as a refusal', () => {
+  test.use({ storageState: sessionFor('owner') })
+
+  const OWNER_REQUIREMENTS = [
+    requirement(60011, 'Health cards', 'rejected', 'Rejected'),
+    requirement(60012, 'Sanitary permit', 'pending', 'Pending'),
+  ]
+
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/v1/requests*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: OWNER_REQUIREMENTS,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 100,
+            total: OWNER_REQUIREMENTS.length,
+            office_statuses: [],
+            statuses: STATUSES,
+          },
+        }),
+      })
+    })
+
+    await page.goto('/dashboard')
+    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 2 })).toBeVisible()
+  })
+
+  test('a rejected requirement is red on the dashboard, not orange', async ({ page }) => {
+    const token = (name: string) =>
+      page.evaluate(
+        (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
+        name,
+      )
+    const hexToRgb = (hex: string) => {
+      const n = parseInt(hex.replace('#', ''), 16)
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+    }
+    const red = hexToRgb(await token('--color-s-red'))
+    const orange = hexToRgb(await token('--color-s-orange'))
+    expect(red, 'the theme gives red and orange the same value').not.toBe(orange)
+
+    const card = page.locator('li').filter({ hasText: 'Health cards' }).first()
+    const chip = card.getByText('Rejected', { exact: true })
+    await expect(chip).toBeVisible()
+
+    const background = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(background, 'a refusal is drawn in the waiting colour').toBe(red)
+  })
+
+  test('and a pending one stays orange, so the two are told apart', async ({ page }) => {
+    const orange = await page.evaluate(() => {
+      const hex = getComputedStyle(document.documentElement)
+        .getPropertyValue('--color-s-orange')
+        .trim()
+      const n = parseInt(hex.replace('#', ''), 16)
+      return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`
+    })
+
+    const card = page.locator('li').filter({ hasText: 'Sanitary permit' }).first()
+    const chip = card.getByText('Pending', { exact: true })
+
+    const background = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
+    expect(background, 'Pending lost its own colour to the fix').toBe(orange)
+  })
+})
+
+/* ── The owner reads seven offices in one list ────────────────────────────── */
+
+/*
+ * The other half of office separability, and the half the applicant sees.
+ *
+ * The boundary itself is proved server-side (OtherRequirementsWorkflowTest:
+ * seven offices raise on one shared filing and each reads only its own). What
+ * that cannot prove is that the owner is TOLD which office is asking. Their
+ * table has an "Office" column where an officer's has "Submitted", and it is
+ * the only thing on the row that answers "who wants this from me" — a business
+ * owner with a sanitary certificate and a fire clearance outstanding cannot act
+ * on either if both say only "Health Certificate".
+ *
+ * Stubbed: the point is the column, not the register, and seven live offices
+ * raising requirements is what the API suite already does.
+ */
+const OWNER_OFFICES = [
+  { code: 'BPLO', name: 'Business Permits and Licensing Office' },
+  { code: 'CHO', name: 'City Health Office' },
+  { code: 'BFP', name: 'Bureau of Fire Protection' },
+  { code: 'OBO', name: 'Office of the Building Official' },
+  { code: 'CENRO', name: 'City Environment and Natural Resources Office' },
+  { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
+  { code: 'CPDO', name: 'City Planning and Development Office (Zoning)' },
+]
+
+test.describe('the owner is told which office is asking', () => {
+  test.use({ storageState: sessionFor('owner') })
+
+  test.beforeEach(async ({ page }) => {
+    const rows = OWNER_OFFICES.map((office, i) => {
+      const row = requirement(70000 + i, `Document for ${office.code}`, 'pending', 'Pending')
+      return { ...row, from_office: { id: i + 1, code: office.code, name: office.name } }
+    })
+
+    await page.route('**/api/v1/requests*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: rows,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 50,
+            total: rows.length,
+            office_statuses: [],
+            statuses: STATUSES,
+          },
+        }),
+      })
+    })
+
+    await page.goto('/requests')
+    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 1 })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+
+  test('every row names the office that raised it', async ({ page }) => {
+    // The owner's column header is "Office"; an officer's is "Submitted",
+    // because an office reading its own queue is always the answer.
+    await expect(page.getByRole('columnheader', { name: 'Office' })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: 'Submitted' })).toHaveCount(0)
+
+    for (const office of OWNER_OFFICES) {
+      const row = page.locator('tbody tr').filter({ hasText: `Document for ${office.code}` })
+      await expect(row, `no row for ${office.code}`).toHaveCount(1)
+      await expect(row, `the ${office.code} row does not say who is asking`).toContainText(office.name)
+    }
+  })
+
+  test('and the offices are told apart, not collapsed into one', async ({ page }) => {
+    const named = await page.locator('tbody tr').evaluateAll((rows) => rows.map((r) => r.textContent ?? ''))
+    const distinct = new Set(
+      OWNER_OFFICES.filter((o) => named.some((text) => text.includes(o.name))).map((o) => o.code),
+    )
+    expect(distinct.size, 'the Office column does not distinguish the seven').toBe(OWNER_OFFICES.length)
+  })
+})

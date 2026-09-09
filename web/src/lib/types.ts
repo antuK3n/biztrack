@@ -214,9 +214,12 @@ export interface Business {
   emergency_contact_name?: string | null
   emergency_contact_number?: string | null
   /**
-   * Access status. Optional because the owner `/businesses` list resource
-   * (BusinessResource) does not currently expose `status` — only `ban` and
-   * `is_active`. When the backend adds it, the blacklist modal (p006) reads it.
+   * Access status. `BusinessResource` emits it (`status ?? 'active'`), and the
+   * owner dashboard reads it to raise AccountRestrictedModal — so the pop-up an
+   * owner sees is driven by this field, not by a placeholder.
+   *
+   * Still optional: other endpoints emit a business without one, and a
+   * `Business` assembled in a form has none until the register answers.
    */
   status?: BusinessStatus
   /** BPLO item B6. Null on every business filed before the wizard asked it. */
