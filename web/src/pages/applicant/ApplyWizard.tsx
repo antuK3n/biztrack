@@ -1343,21 +1343,56 @@ function LinesStep({
                     </p>
                   )}
                   {/*
-                    * Products / Services used to sit here, and no longer does.
+                    * Products / Services, back — because the step now REFUSES
+                    * to advance without it.
                     *
-                    * It is the second column of the paper's line-of-business
-                    * table on both BPLO forms and on CENRO's CEC application,
-                    * so it was added to match the paper. In use it read as
-                    * clutter: a third row of chrome under every trade you pick,
-                    * on the step that is already the heaviest in the wizard,
-                    * for an answer no form marks required.
+                    * It was taken out as "a field nobody asked for": a third
+                    * row of chrome under every trade, on the heaviest step in
+                    * the wizard, for an answer no form marked required. That
+                    * reasoning was sound when nothing depended on it. It has
+                    * since been made required per line, on the strength of a
+                    * filing that reached CENRO with the PRODUCTS/SERVICES box
+                    * on its CEC application empty — the PSIC title says which
+                    * category a trade falls in, and an inspector cannot read
+                    * "Retail sale in non-specialized stores" and learn whether
+                    * there is food on the premises.
                     *
-                    * The column, the API validation and the officer's review
-                    * sheet all still handle it — nothing was torn out — so if
-                    * BPLO says the counter needs it, it comes back somewhere
-                    * quieter rather than being rebuilt. Recorded in
-                    * docs/questions-for-malabon.md.
+                    * The two changes met in the merge and the applicant paid
+                    * for it: the gate demanded a value, no control existed to
+                    * supply one, and Next could not be enabled on part 2 by
+                    * anybody. A required field with no input is not a tidier
+                    * form, it is a wall.
+                    *
+                    * Kept deliberately small — one line, under the trade it
+                    * belongs to, no card of its own — which is the "somewhere
+                    * quieter" the removal asked for rather than the full row it
+                    * objected to.
                     */}
+                  <label className="mt-2.5 block">
+                    <span className="text-xs font-medium text-ink-secondary">
+                      Products / Services <span className="text-s-red">*</span>
+                    </span>
+                    <input
+                      type="text"
+                      value={line.products_services ?? ''}
+                      onChange={(e) =>
+                        onChange(
+                          lines.map((l) =>
+                            l.psic_code_id === line.psic_code_id
+                              ? { ...l, products_services: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      placeholder="What you actually sell — e.g. milk tea, fried snacks"
+                      className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none"
+                    />
+                    {!(line.products_services ?? '').trim() && (
+                      <span className="mt-1 block text-xs font-medium text-s-red">
+                        Required: three offices print this beside your line of business.
+                      </span>
+                    )}
+                  </label>
                 </div>
               )
             })}
@@ -6295,25 +6330,37 @@ export function ApplyWizard() {
                 radiusM={insightsRadiusM}
                 highlightBarangay={barangayName ?? null}
                 /*
-                 * The map is never locked. Pin first or choose the barangay
-                 * first — either order is allowed.
+                 * Locked on the LINE OF BUSINESS, and on nothing else.
                  *
-                 * This step gated the map twice before, first on the line of
-                 * business and then on the barangay, both on the theory that a
-                 * mismatch is best prevented by refusing the click. The client
-                 * ruled otherwise: let the pin land, and resolve the
-                 * disagreement when the barangay is named. A lock spends a
-                 * disabled control on a case the barangay change handler
-                 * already cleans up, and it strands anyone who reaches for the
-                 * map first — which is most people, because the map is the
-                 * thing on the screen that looks clickable.
+                 * Checklist items 4 and 8 both ask for a lock and they do not
+                 * mean the same one, which is why this has moved twice. Item 4
+                 * gates the map on the trade; item 8 governs what the barangay
+                 * does to a pin. Hanging the lock on the barangay satisfied 8
+                 * and quietly dropped 4, and the client asked for 4 back.
                  *
-                 * Two guards remain, and they are the ones that matter: a pin
-                 * outside Malabon is still refused outright in `onPick`, and a
-                 * pin that contradicts an already-chosen barangay is still
-                 * refused there too. Only the empty-barangay case is now let
-                 * through.
+                 * The trade is the honest gate. It is the first question on the
+                 * step, it sits directly above this map, and the zoning verdict
+                 * is given against a trade rather than a coordinate — so a pin
+                 * placed before it is a location for a business nobody has
+                 * described yet. Location Insights keys off the pin AND the
+                 * chosen PSIC group, so it also has nothing to say until this
+                 * is answered.
+                 *
+                 * The barangay is deliberately NOT a gate any more. The client
+                 * was explicit: let the pin land in either order and settle the
+                 * disagreement when the barangay is named. That is the change
+                 * handler's job, and it clears the pin only when the two
+                 * genuinely contradict.
+                 *
+                 * Both guards in `onPick` survive regardless: a pin outside
+                 * Malabon is refused, and so is one that contradicts a barangay
+                 * already chosen.
                  */
+                lockedReason={
+                  form.lines.length === 0
+                    ? 'Choose your line of business above, then click the map to drop a pin.'
+                    : null
+                }
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
@@ -6373,12 +6420,13 @@ export function ApplyWizard() {
                 </p>
               ) : (
                 <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
-                  {/* One state now. This used to fork on whether a barangay had
-                      been chosen, because the map refused clicks until one was
-                      and sending somebody to a dead control is worse than saying
-                      nothing. The map takes a pin at any point in the step, so
-                      there is only one instruction left to give. */}
-                  Required: click the map to drop a pin where your business is.
+                  {/* Two states, because telling somebody to click a map that is
+                      not taking clicks yet sends them to a control that will not
+                      answer. The lock's own sentence says what to do about it;
+                      this one says the pin is required either way. */}
+                  {form.lines.length === 0
+                    ? 'Required: a pin. The map takes one once your line of business is chosen.'
+                    : 'Required: click the map to drop a pin where your business is.'}
                 </p>
               )}
               {pinError && (

@@ -786,20 +786,21 @@ test('a neighbouring city inside the old bounding box is refused', async ({ page
   expect(verdicts.cityHall).toBe(true)
 })
 
-test('the map takes a pin before any barangay is chosen, and an agreeing barangay keeps it', async ({
+test('the map is locked until a line of business is chosen, then takes a pin before any barangay', async ({
   page,
 }) => {
   /*
-   * Item 8, third rule in this spot. It gated the map on the LINE OF BUSINESS,
-   * then on the BARANGAY, and now on nothing: the client's instruction is that
-   * the pin may be dropped first and the disagreement settled when the barangay
-   * is named, rather than the click being refused up front.
+   * Two checklist items in one test, because they are two DIFFERENT gates and
+   * conflating them is how each one keeps getting dropped in turn.
    *
-   * Both halves are asserted here because only the pair is the rule. A test that
-   * proved the map accepts an early click would also pass if the barangay
-   * dropdown wiped every pin unconditionally, which is precisely the behaviour
-   * that had to go — clearing on agreement punishes the order the client asked
-   * for.
+   * Item 4 locks the map until a LINE OF BUSINESS is chosen — the zoning verdict
+   * is given against a trade, so a pin placed before it locates a business
+   * nobody has described. Item 8 governs what the BARANGAY does to a pin, and
+   * the client was explicit that the barangay is NOT a gate: the pin may be
+   * dropped first and the disagreement settled when the barangay is named.
+   *
+   * The lock has moved from the trade to the barangay and back once already.
+   * Asserting both here means neither can be satisfied at the other's expense.
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
@@ -809,16 +810,35 @@ test('the map takes a pin before any barangay is chosen, and an agreeing baranga
   await map.scrollIntoViewIfNeeded()
   await expect(map).toBeVisible()
 
-  // No scrim, no inert map, and no sentence telling anyone to go and answer
-  // something else first.
+  /*
+   * Item 4. The map is still SHOWN — hiding it until the trade is chosen would
+   * make the step look empty — but it is inert and says so twice: in the scrim,
+   * and in the map's own accessible name, so it reaches somebody who never sees
+   * an overlay.
+   */
+  await expect(page.getByText(/choose your line of business above/i)).toBeVisible()
+  await expect(page.getByLabel(/not yet clickable/i)).toBeVisible()
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  // And the barangay is NOT what holds it. The old sentence must not reappear.
   await expect(page.getByText(/choose your barangay first/i)).toBeHidden()
+
+  // Choose the trade. Same click below, different outcome — which is what
+  // proves the lock was the cause and not some unrelated dead click.
+  const search = page.getByLabel(/search for the one line of business/i)
+  await search.click()
+  await search.fill('sari-sari')
+  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+  await page.locator('#psic-results button').first().click()
   await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
 
   /*
-   * The click lands with the dropdown still empty. Centre of the map, which
-   * opens on Malabon City Hall — inside the city, so the only remaining guard
-   * in `onPick` passes and the pin is taken.
+   * Item 8. The click now lands with the barangay dropdown still empty. Centre
+   * of the map, which opens on Malabon City Hall — inside the city, so the only
+   * remaining guard in `onPick` passes and the pin is taken.
    */
+  await map.scrollIntoViewIfNeeded()
   await map.click()
   await expect(page.getByText(/pinned at/i)).toBeVisible()
   const coords = (await page.getByText(/pinned at/i).innerText()).match(
@@ -1165,6 +1185,17 @@ async function goToZoningStep(page: Page) {
   // Matched on the element, not on a role: the rows carry `role="radio"` now
   // that a filing declares one trade, so `getByRole('button')` finds nothing.
   await page.locator('#psic-results button').first().click()
+
+  /*
+   * Products / Services, required per line since 9 September — CENRO prints it
+   * beside the trade on the CEC application and had been receiving it blank.
+   *
+   * It lives in the helper rather than in each test because it is a
+   * precondition of reaching the map at all, not a subject of any test here:
+   * the step will not advance without it, so a test that omitted it would fail
+   * on a missing answer while appearing to fail on the pin.
+   */
+  await page.getByLabel(/products \/ services/i).fill('milk tea, fried snacks')
 }
 
 /**
