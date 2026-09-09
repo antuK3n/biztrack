@@ -353,7 +353,38 @@ export function MapPicker({
             pathOptions={RADIUS_RING}
           />
         )}
-        {hasPin && <Marker position={[latitude as number, longitude as number]} icon={pinIcon} />}
+        {/*
+          * Draggable, and the drag ends in the SAME handler a click does.
+          *
+          * Item 7 asks for the pin to be adjustable "similar to how ride
+          * hailing apps work", and dragging is the gesture that phrase means.
+          * Clicking elsewhere already moved the pin, but on a phone that is a
+          * different intention to express: a click is "put it there", a drag is
+          * "not quite, a bit further down this alley", which is exactly the
+          * correction an auto-placed pin invites.
+          *
+          * `onPick` rather than a second setter, so a dragged pin is checked
+          * against the city outline and the chosen barangay like any other. A
+          * drag that ends somewhere the map would have refused a click is
+          * refused too — and because the parent never stores it, Leaflet leaves
+          * the marker where the refused drag dropped it, so `position` is
+          * re-asserted from the props on the next render and the pin springs
+          * back to where it legitimately is.
+          */}
+        {hasPin && (
+          <Marker
+            position={[latitude as number, longitude as number]}
+            icon={pinIcon}
+            draggable={!locked}
+            eventHandlers={{
+              dragend: (e) => {
+                const { lat, lng } = (e.target as { getLatLng: () => { lat: number; lng: number } })
+                  .getLatLng()
+                onPick(Number(lat.toFixed(6)), Number(lng.toFixed(6)))
+              },
+            }}
+          />
+        )}
       </MapContainer>
       {/*
         * The locked state: the map is visible but not clickable, and says so.

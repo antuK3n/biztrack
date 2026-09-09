@@ -18,6 +18,27 @@ import { sessionFor } from './helpers'
 test.use({ storageState: sessionFor('owner') })
 
 test.beforeEach(async ({ page }) => {
+  /*
+   * The address geocoder is cut off at the socket for the whole suite.
+   *
+   * Item 7 has the zoning step ask Nominatim for a pin 800ms after the
+   * applicant stops typing a street name, and these tests type street names.
+   * Left alone that is a public, rate-limited, third-party service being called
+   * dozens of times per run, from a suite that has nothing to say about it — a
+   * slow dependency, an inconsiderate one, and a source of failures that would
+   * belong to OSM's uptime rather than to this application.
+   *
+   * Aborting is the honest stub rather than a canned 200: `geocodeInMalabon`
+   * already treats an aborted request as "no suggestion", which is the same
+   * path a real miss takes, and misses are the ordinary case in Malabon. So
+   * every test below drives the map exactly as an applicant does when the
+   * lookup finds nothing — by clicking it.
+   *
+   * The suggestion path itself is covered separately, with a routed response,
+   * so blocking here hides nothing.
+   */
+  await page.route('**://nominatim.openstreetmap.org/**', (route) => route.abort())
+
   await page.goto('/apply')
   await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
 })
@@ -960,6 +981,59 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await next.click()
   await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+})
+
+test('the address suggests a pin, and placing one by hand overrules it', async ({ page }) => {
+  /*
+   * Item 7 — "automatic pinning of maps upon entering the house number and
+   * street address, but still allow the user to manually change the pin for
+   * more accuracy if he/she wishes to (similar to how ride hailing apps work)".
+   *
+   * Both halves, because the second is what makes the first safe to ship. A
+   * suggestion that could not be overruled would be worse than no suggestion:
+   * OSM's coverage of Malabon below the main roads is thin enough that a lookup
+   * often returns the middle of a street, and the applicant is the only one who
+   * knows which gate along it is theirs.
+   *
+   * The service is stubbed rather than called. What is under test is what this
+   * application does with an answer — not whether OSM has one today, which is
+   * not a fact any test of ours should depend on.
+   */
+  await page.unroute('**://nominatim.openstreetmap.org/**')
+  await page.route('**://nominatim.openstreetmap.org/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      // Malabon City Hall — the same point the map opens on, so it is certain
+      // to survive `withinMalabon` and to be visibly inside the city outline.
+      body: JSON.stringify([
+        { lat: '14.6572', lon: '120.9573', display_name: 'Rizal Street, Malabon, Metro Manila' },
+      ]),
+    }),
+  )
+
+  await goToZoningStep(page)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  // Nothing is pinned until the address says something worth looking up.
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+
+  // The debounce is 800ms; the assertion's own timeout covers it rather than a
+  // hard wait, so a slower machine does not make this flake.
+  await expect(page.getByText(/pinned at/i)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(/placed from your address/i)).toBeVisible()
+
+  /*
+   * And the applicant overrules it. The caption must go with the click: from
+   * that moment the pin is an answer rather than a guess, and a screen still
+   * calling it "placed from your address" would be describing the wrong thing.
+   */
+  await map.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/placed from your address/i)).toBeHidden()
 })
 
 test('the map offers satellite imagery as well as streets', async ({ page }) => {

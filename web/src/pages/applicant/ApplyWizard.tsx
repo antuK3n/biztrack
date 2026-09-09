@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import { checkPin, withinMalabon } from '../../lib/malabonGeo'
 import { psicSection, psicSectionRank } from '../../lib/psic'
+import { geocodeInMalabon } from '../../lib/geocode'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -2399,6 +2400,22 @@ export function ApplyWizard() {
    * happened instead of the pin silently not moving.
    */
   const [pinError, setPinError] = useState<string | null>(null)
+  /*
+   * Item 7 — what the address suggested, and whether the applicant has since
+   * overruled it.
+   *
+   * `autoPinned` is the whole of the "still allow the user to manually change
+   * the pin" half of the item. A suggestion may replace an earlier SUGGESTION
+   * as the address is corrected, and must never replace a pin the applicant
+   * placed themselves: somebody who dropped a pin on their actual gate and then
+   * fixed a typo in the street name would otherwise watch it jump back to the
+   * middle of the road. Any click or drag clears the flag, and nothing puts it
+   * back except another lookup.
+   *
+   * Kept as state rather than a ref because the caption under the map reads it.
+   */
+  const [autoPinned, setAutoPinned] = useState<string | null>(null)
+
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   /* Autosave bookkeeping — see the autosave effect below. */
@@ -2872,6 +2889,62 @@ export function ApplyWizard() {
    */
   const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
   const barangayName = selectedBarangay?.name
+
+  /*
+   * ── Item 7 · the address suggests a pin ───────────────────────────────────
+   *
+   * Fires on a PAUSE in typing, not on a keystroke. 800ms is long enough that
+   * "24 Rizal" does not cost a lookup on its way to "24 Rizal Street", which
+   * matters more than usual here: Nominatim is a free service on a roughly
+   * one-request-a-second policy, and the debounce plus the cache in
+   * `geocodeInMalabon` are how we stay inside it.
+   *
+   * Three conditions, and each is load-bearing:
+   *
+   *  - a trade must be chosen, because that is what unlocks the map. Dropping a
+   *    pin onto a locked map would hand the applicant a marker they cannot move
+   *    and no way to understand why.
+   *  - there must be no pin, OR the pin must be one WE suggested. A pin the
+   *    applicant placed is an answer; overwriting it because they corrected a
+   *    typo would be the form arguing with them.
+   *  - the lookup must come back inside Malabon, which `geocodeInMalabon`
+   *    already enforces with the same polygon test the click handler uses.
+   *
+   * Silence on failure is deliberate. OSM's coverage of Malabon's alleys is
+   * thin — the satellite layer exists for that reason — so "no match" is an
+   * ordinary outcome, not an error. The applicant was always going to click the
+   * map; being told a service they never invoked has failed helps nobody.
+   */
+  useEffect(() => {
+    if (form.lines.length === 0) return
+    if (form.latitude !== null && autoPinned === null) return
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      void geocodeInMalabon(form.line1, barangayName ?? null, controller.signal).then((hit) => {
+        if (hit === null || controller.signal.aborted) return
+        /*
+         * Re-checked against the barangay, because the suggestion is only as
+         * good as the street name and OSM will happily return the same street
+         * in the wrong barangay. A suggestion that contradicts the dropdown is
+         * dropped in silence rather than shown as a refusal — the applicant has
+         * not done anything yet to be refused.
+         */
+        if (checkPin(hit.latitude, hit.longitude, barangayName ?? null).kind !== 'ok') return
+        setForm((f) => ({ ...f, latitude: hit.latitude, longitude: hit.longitude }))
+        setAutoPinned(hit.label)
+        setPinError(null)
+      })
+    }, 800)
+
+    return () => {
+      clearTimeout(timer)
+      controller.abort()
+    }
+    // `form.latitude` is read but deliberately not depended on: it is what this
+    // effect WRITES, and listing it would re-run the lookup on its own result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.line1, form.lines.length, barangayName, autoPinned])
 
   /*
    * The first line of business the applicant declared, when they have one. It
@@ -6442,12 +6515,38 @@ export function ApplyWizard() {
                     return
                   }
                   setPinError(null)
+                  /*
+                   * The applicant has now answered for themselves, so the
+                   * address stops suggesting. Cleared for a click AND a drag,
+                   * because both arrive here — see the Marker's dragend.
+                   */
+                  setAutoPinned(null)
                   setForm((f) => ({ ...f, latitude: lat, longitude: lng }))
                 }}
               />
               {form.latitude !== null ? (
                 <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
                   Pinned at {form.latitude}, {form.longitude}
+                  {/*
+                    * Item 7 — a suggested pin says it is a suggestion.
+                    *
+                    * An applicant who did not place this pin needs to know two
+                    * things before they walk past it: that the form guessed
+                    * from their address, and that the guess is theirs to
+                    * overrule. Saying only "Pinned at ..." would let a
+                    * street-centroid guess be mistaken for a confirmed
+                    * location, which on a zoning clearance is the wrong thing
+                    * to be relaxed about.
+                    *
+                    * Disappears the moment they click or drag, because from
+                    * then on the pin is not a guess.
+                    */}
+                  {autoPinned !== null && (
+                    <span className="mt-0.5 block text-ink-muted">
+                      Placed from your address. Drag the pin or click the map if it is not exactly
+                      right.
+                    </span>
+                  )}
                   {/*
                     * Says in words what the ring on the map means.
                     *
