@@ -11,7 +11,8 @@ import {
   UploadIcon,
   XCircleIcon,
 } from '../components/icons'
-import type { ApplicationStatus } from './types'
+import type { ChipTone } from '../components/ui/Proto'
+import type { ApplicationStatus, RequestStatus } from './types'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 
@@ -111,4 +112,28 @@ export function genericStatusTone(status: string): StatusTone {
   if (/(return|pending|await|schedul|conditional)/.test(s)) return 'attention'
   if (/(review|progress|assigned|inspect)/.test(s)) return 'progress'
   return 'neutral'
+}
+
+/*
+ * Other Requirements — chip tone by status.
+ *
+ * Tone only; the WORDS come from the API's `status_label`. It lives here rather
+ * than on the requirements page because two screens print these chips — the
+ * page itself and the "Other Requirements" panel on the owner's home — and the
+ * home page had its own hard-coded `orange` for every row, so a REFUSED
+ * document wore the same amber as an ordinary Pending on one screen and red on
+ * the other. A reader learns the colour on one page and is then contradicted by
+ * the next one they open.
+ *
+ * Needs Resubmission is orange, the same as Pending, because to a business
+ * owner those two are one situation: you owe us a document. Rejected is not —
+ * it carries a refusal and a reason, and amber for a refusal reads as
+ * "waiting", which is the opposite of what happened.
+ */
+export const REQUIREMENT_CHIP_TONE: Record<RequestStatus, ChipTone> = {
+  pending: 'orange',
+  needs_resubmission: 'orange',
+  submitted: 'tint-purple',
+  fulfilled: 'green',
+  rejected: 'red',
 }
