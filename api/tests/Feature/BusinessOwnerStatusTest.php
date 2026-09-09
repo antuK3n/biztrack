@@ -49,6 +49,21 @@ function ownedBusinessWithDraft(string $registrationNumber): array
         'business_id' => $businessId,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        /*
+         * RA 10173 consent, ticked while the draft is still fileable.
+         *
+         * Two gates run at submit and consent is the FIRST of them, so a draft
+         * without it is refused for a reason that has nothing to do with the
+         * owner's status. That matters more here than anywhere else in this
+         * suite: the tests below prove that a SUSPENSION stops the filing, and
+         * a fixture missing the tick would have them pass on
+         * `data_privacy_consent` while the block itself went unexercised — a
+         * green test asserting the wrong refusal.
+         *
+         * Ticked at create rather than at submit because the draft is meant to
+         * be complete; the only thing wrong with it is the business's standing.
+         */
+        'data_privacy_consent' => true,
     ])->assertCreated()->json('data.id');
 
     return [$businessId, $appId];

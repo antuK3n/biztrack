@@ -236,7 +236,7 @@ test.describe('the dashboard answers to the register', () => {
      * unambiguous arithmetic claim: Rejected +1, Pending −1, and the panel's
      * total untouched because the filing was already counted in it.
      *
-     * Found rather than written down. Which application sits in `under_review`
+     * Found rather than written down. Which application sits in `for_approval`
      * changes every time anybody works the queue and a reseed renumbers the
      * table outright, so an id in this file is stale by definition — the same
      * reasoning as openForInspectionFiling in inspection-review.spec.ts.
@@ -251,7 +251,7 @@ test.describe('the dashboard answers to the register', () => {
      *    screen is fitted on renewal outcomes, so rejecting a renewal could
      *    legitimately move the dataset being held fixed as the control.
      *
-     * Every live status is searched rather than `under_review` alone, and that is
+     * Every live status is searched rather than one status alone, and that is
      * about the test not running out of register. This is a one-way action —
      * `rejectApplication` is terminal — so each run spends a filing, and a pool
      * of three would leave the fourth run SKIPPING, which is the failure mode
@@ -264,7 +264,7 @@ test.describe('the dashboard answers to the register', () => {
      * If this ever does skip, the fix is to restart e2e-stack.sh: it re-copies
      * the register into the slot and the pool comes back.
      */
-    const LIVE = 'submitted,pending_payment,under_review,returned,for_inspection'
+    const LIVE = 'for_approval,pending_payment,awaiting_other_permits,for_final_approval,returned'
     const dashboard = await api(page, '/api/v1/analytics/dashboard')
     const monthStart = String(
       ((dashboard.body?.data ?? {}) as { month_start?: string }).month_start ?? '',
@@ -420,7 +420,7 @@ async function findUncategorisedReview(
 
   const list = await api(
     page,
-    '/api/v1/assignments?application_status=under_review&status=pending,in_progress,returned&per_page=50',
+    '/api/v1/assignments?application_status=for_approval,returned,awaiting_other_permits&status=pending,in_progress,returned&per_page=50',
   )
   const rows = (list.body?.data ?? []) as { id: number; application: { id: number } | null }[]
 
@@ -453,12 +453,24 @@ async function findUncategorisedReview(
  * `GET /applications` is scoped by ApplicationVisibility, and BPLO's scope is
  * the register, so this reaches the filings its own queue no longer holds.
  *
- * A filing NOT in `under_review` is preferred, and that is fixture care rather
+ * A filing that no office still owes a review on is preferred, and that is fixture care rather
  * than fussiness. Rejecting is terminal, so this test spends an uncategorised
  * filing every run — and uncategorised filings are exactly what the two tests
  * above need. Taking one an office still owes a review on would starve the
  * review-sheet test first; taking one already past review starves nothing.
  */
+/**
+ * The stages at which some office still owes a decision on the paperwork.
+ *
+ * Two, not one, since the September flow split BPLO's reading of the form from
+ * the other offices' work: `for_approval` is BPLO's own review, and every OTHER
+ * office's assignment is opened by `startClearance()` while the filing sits at
+ * `awaiting_other_permits`. `returned` belongs here too — it is on its way back
+ * into `for_approval`. This used to be the single status `under_review`, which
+ * no longer exists.
+ */
+const REVIEWABLE = ['for_approval', 'returned', 'awaiting_other_permits']
+
 async function findUncategorisedFiling(
   page: Page,
 ): Promise<{ applicationId: number; trackingId: string; status: string } | null> {
@@ -466,7 +478,7 @@ async function findUncategorisedFiling(
 
   const list = await api(
     page,
-    '/api/v1/applications?status=submitted,pending_payment,under_review,returned,for_inspection&per_page=100',
+    '/api/v1/applications?status=for_approval,pending_payment,awaiting_other_permits,for_final_approval,returned&per_page=100',
   )
   const rows = (list.body?.data ?? []) as { id: number }[]
   const uncategorised: { applicationId: number; trackingId: string; status: string }[] = []
@@ -485,7 +497,7 @@ async function findUncategorisedFiling(
   }
 
   return (
-    uncategorised.find((app) => app.status !== 'under_review') ?? uncategorised[0] ?? null
+    uncategorised.find((app) => !REVIEWABLE.includes(app.status)) ?? uncategorised[0] ?? null
   )
 }
 
@@ -495,6 +507,11 @@ test.describe('an uncategorised filing cannot be approved', () => {
   test('the review sheet shuts Approve and says what to do about it', async ({ page }) => {
     const target = await findUncategorisedReview(page)
     test.skip(target === null, 'every filing on this office’s queue already has a category')
+
+    // Read before the click, so the assertion at the end is "unchanged" rather
+    // than a status name that goes stale the next time the flow moves.
+    const opening = await api(page, `/api/v1/applications/${target!.applicationId}`)
+    const statusBefore = (opening.body?.data as { status?: string })?.status
 
     await page.goto(`/staff/queue/${target!.assignmentId}`)
     // The sheet opens in View, where there is no Approve to shut. The rule is a
@@ -551,10 +568,19 @@ test.describe('an uncategorised filing cannot be approved', () => {
       page.getByText(/Choose this application’s processing category under For Office Use Only/i),
     ).toBeVisible()
 
-    // Still under review. A shut button that submitted anyway would be the
-    // worst of both worlds.
+    /*
+     * The filing has not moved. A shut button that submitted anyway would be
+     * the worst of both worlds.
+     *
+     * Compared against the status read a moment before the click, not against a
+     * literal. This asserted `under_review`, and when that status was deleted
+     * the assertion could only ever fail — but the more durable point is that
+     * an office still owing a review can now be at either of two stages
+     * (REVIEWABLE above), so no single name is the right answer here. What is
+     * under test is that nothing changed.
+     */
     const after = await api(page, `/api/v1/applications/${target!.applicationId}`)
-    expect((after.body?.data as { status?: string })?.status).toBe('under_review')
+    expect((after.body?.data as { status?: string })?.status).toBe(statusBefore)
   })
 
   test('the API refuses a direct approval with a 422 keyed on complexity', async ({ page }) => {

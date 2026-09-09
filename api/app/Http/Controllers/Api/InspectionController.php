@@ -7,7 +7,10 @@ use App\Enums\InspectionStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\InspectionResource;
+use App\Models\Application;
+use App\Models\ApplicationPermitType;
 use App\Models\Inspection;
+use App\Models\PermitType;
 use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -124,6 +127,52 @@ class InspectionController extends Controller
         return response()->json([
             'data' => new InspectionResource($inspection->fresh()->load($this->eager)),
         ]);
+    }
+
+    /**
+     * The office books its FIRST visit on one permit, choosing the date.
+     *
+     * New on 6 September 2026, and it exists because the automatic scheduler
+     * went. Visits used to be booked by `WorkflowService::scheduleInspectionFor`
+     * two working days out the instant an office approved its review — a
+     * promise made to the applicant by a scheduler that did not know whether
+     * anyone was free. The client's verified procedure is "Select Inspection
+     * Date and Approve Inspection": the office says when.
+     *
+     * Addressed by permit type rather than by inspection id, because there is no
+     * inspection yet — that is the point of the endpoint. The office is
+     * identified from the permit's issuing department and checked against the
+     * caller's, so an officer cannot book a visit in another office's name.
+     *
+     * `reschedule` moves a booking that already exists; `reinspect` books a
+     * second one after a failure. This is the only one that opens the first.
+     */
+    public function schedule(Request $request, Application $application, string $code): JsonResponse
+    {
+        $data = $request->validate([
+            'scheduled_at' => ['required', 'date'],
+        ], [
+            'scheduled_at.required' => 'Choose the date of the inspection.',
+        ]);
+
+        $type = PermitType::where('code', strtoupper($code))->firstOrFail();
+
+        $user = $request->user();
+        abort_unless(
+            $user->hasRole('admin') || $user->department_id === $type->issuing_department_id,
+            403,
+            'This permit is issued by another office.'
+        );
+
+        $row = ApplicationPermitType::where('application_id', $application->id)
+            ->where('permit_type_id', $type->id)
+            ->firstOrFail();
+
+        $visit = $this->workflow->scheduleClearanceInspection($row, $data['scheduled_at']);
+
+        return response()->json([
+            'data' => new InspectionResource($visit->load($this->eager)),
+        ], 201);
     }
 
     public function reschedule(Request $request, Inspection $inspection): JsonResponse

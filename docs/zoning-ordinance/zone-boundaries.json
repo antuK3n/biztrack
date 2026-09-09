@@ -1,0 +1,808 @@
+[
+  {
+    "zone": "RESIDENTIAL -1 ZONE (R-1)",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by University Hills Subdivision (except areas occupied by Institutional Zone and Parks and Recreation) Area occupied by Victoria’s Place Subdivision(except areas occupied by Institutional Zone and Parks and Recreation)"
+  },
+  {
+    "zone": "BASIC R-2 ZONE",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Araneta University Village (except areas occupied by Institutional Zone and Parks and Recreation) Araneta occupied by Victoneta North Village (except areas occupied by Institutional Zone and Parks and Recreation)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Baritan",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area bounded by Baritan and Bayan-Bayanan Boundary; Muzon River; Creek along MRH and CMPI Compound; commercial strip (C-2) along Gov. Pascual Ave. and Arellano University Compound; One lot commercial strip (C-1) along Gen. Luna Street.(except areas occupied by institutional zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Bayan-Bayanan",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Rodriguez St. and Hulong Duhat -Bayan-Bayanan Boundary, South by Baritan-Bayan-Bayanan Boundary; East by Muzon River and West by one lot deep strip along Gen. Luna St."
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Teacher’s Village: Area occupied by Teacher’s Village bounded on the north by Sanciangco St., East by Unican Property, South by Major Commercial Zone (C-2) along Gov. Pascual Ave., and West by Sanciangco St. Area Bounded on the North by Major Commercial Zone (C-2)/ one block deep along Gov. Pascual Ave., South by Industrial Area, East by Industrial Area and West by Industrial Area, Sanciangco Street and Creek (except areas occupied by CMP projects which are classified as Socialized Housing Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Concepcion",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Areas bounded on the north by Commercial Zone along Gov. Pascual Ave., South by Jacinto Street and Concepcion/Ibaba Boundary, East by Malabon river, South by Jacinto St. and Jacinto Ext. and West by Commercial Zone along Gen. Luna St. except areas occupied by Institutional Zones."
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Flores",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by one (1) lot deep commercial along Pantihan 5; one (1) deep strip commercial along Naval St., by one (1) lot strip commercial along A. Bonifacio St. and Malabon-Navotas River"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Hulong Duhat",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area bound on the North by Don Basilio Bautista Blvd. and Dampalit River, South by Rodriguez St. and Barangay Flores/Bayan Bayanan Boundary, East by Dampalit-Muzon River and West by Commercial Zone along Don Basilio Bautista, Blvd., M. Blas St. and Gen. Luna Areas bounded on the north by Dampalit river South by M. Blas Street, East by Commercial Zone along Don Basilio Bautista Blvd., West by Batasan River"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Ibaba",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Jacinto Ext. St. and Brgy. Concepcion-Ibaba boundary, East by Tullahan River, South by Camus Ext. St. and Brgy. Ibaba-San Agustin boundary, West by one (1) lot deep along C-1 along Gen. Luna West by Commercial Zone along Gen. Luna (except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Salmon Street, South by Barakuda Street /Commercial Zone along Lapu-Lapu- Ave. East by Commercial Zone along Dagat-Dagatan Ave. /Salinas and Aruwana Streets and West by Commercial Zone along Pampano Street (except areas occupied by Institutional Zone) Areas bounded on the North by Commercial Zone along C-4 Road, South by Barakuda Street /Commercial Zone along Lapu-Lapu- Ave., East by Commercial Zone along Pampano Street and West by Martiniko Street/ Malabon-Navotas boundary (except areas occupied by Institutional Zone) Areas bounded on the North by Commercial Zone along Lapu-lapu St. South by Langaray Street (Malabon-Caloocan boundary), East by Pla-Pla St., Alley 3, Alley 4 and West by Commercial Zone along Pampano Street Areas bounded on the North by Commercial Zones along Lapu-Lapu Avenue and Pampano Street, East by Commercial Zone along Pampano St., Langaray St., Labahita St., Tanigue St. (Malabon-Caloocan boundary), South by Tanigue St. and Dalagang Bukid St. (Malabon-Navotas boundary) and West by Dalagang Bukid and Commercial Zone along Lapu-Lapu Ave. (except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Maysilo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by C. Tongko St., East by Maysilo-Tinajeros River, South by Tinajeros and Tullahan River and West by Commercial Zone along M.H. Del Pilar St. (except areas occupied by Institutional Zone) Areas bounded on the north by Industrial Zone within San Vicente Village , East by Commercial Zone along M.H. Del Pilar St. South by Tinajeros-Tullahan River and Commercial Zone along M.H. Del Pilar St., West bi Industrial Zone. Area bounded on the North by Panghulo-Santulan Boundary, East by Industrial Zone, South by Tullahan River and West by Muzon River, Panghulo-Maysilo Boundary"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Muzon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Lot aligned with the Kagitingan St. at the start of Damzon St. and fishponds, East by Muzon River, South by Tullahan and Muzon River, West by Fishponds and Kagitingan St. (Except areas occupied by existing fishponds and Institutional Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Niugan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Niugan Creek and Commercial Zone, East by one lot deep commercial strip along Sanciangco St., South by Niugan-Tonsuya boundary and West by Tullahan River (except areas occupied by Institutional Zone – Niugan Elem. School and Church)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Panghulo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Industrial Zone, East by North by Tahimik St.; South by One lot deep strip along Rodriguez St.; East by Narra St. West by Commercial Zone along Panghulo St. Areas bounded on the North by Obando-Malabon Boundary, Industrial Zone, East by Commercial Zone along M.H. Del Pilar St.,, South by Maysilo-Panghulo boundary and West by Muzon River (except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded by Juliana St.; Tullahan Rive; Magsaysay St. Lots 8,7,6,2 and 1, Blk. 2 Pcs-13-003195; Road lot 3 and Del Monte Avenue. Areas bounded by Victoria’s Place Subdivision and Chico St. Areas bounded by Orange Road; Durian Road; Victoria’s Place Subdivision and Malabon-Caloocan Boundary Areas bounded by Circumferential Road; Strip of one lot deep along Victoneta Avenue; Service Road of NLEX; Malabon-Caloocan Boundary."
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "San Agustin",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Camus St., Brgy. San Agustin-Ibaba boundary, East by Industrial Zone, Institutional Zone, Matadero St., Tullahan River, South by Commercial Zone along Rizal Ave. and West by Commercial Zone along Gen. Luna St.(except areas occupied by Institutional Zone)."
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Santulan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Obando-Malabon boundary, East by Santulan –Valenzuela River, South by Rodriguez St., West by one lot deep commercial strip along M.H. del Pilar St."
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Tinajeros",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Industrial zone, East by Goldendale Avenue, South by Nickel St., Crispin St. ,Institutional Zone, Cobalt St., Sanchez St., Mesina St., Villaroa, West by Commercial Zone along M.H. Del Pilar St. Area bounded on the North by Tullahan River, East by PNR Railroad Track, South by Industrial Zone and West by Industrial Zone, Tullahan River"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Tonsuya",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Industrial Area, East by Catmon Creek, Catmon-Tonsuya boundary, Industrial Zone, South by Letre Creek, P. Aquino St. (Letre Road), Cemetery Zone, Villanueva St. and West by Commercial Zone along Sanciangco St. (except areas occupied by CMPs (Socialized Housing Zone) and Institutional Zone) Area bounded on the North by Niugan-Tonsuya Boundary, East & South by one lot deep strip of commercial zone, west by Tonsuya River (except areas occupied by Institutional Zone) Area bounded on the North by Catmon-Tonsuya Boundary, East & South by CMPs and Industrial Zone West by Creek"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Basilio St., Elias St., Isagani, Consuelo St., on the South by Malabon-Caloocan Boundary, East by Industrial Zone, Sisa St. And West by Commercial Zone along M.H. Del Pilar St. Areas bounded on the North by Commercial Zone along Gov. Pascual Ave., East by Commercial Zone along M.H. Del Pilar St., South by Malabon-Caloocan boundary, Cemetery Zone, Lascano St., West by Asogue St., Tonsuya-Catmon-Tugatog boundary (except areas occupied by Institutional Zone and Cemetery Zone)"
+  },
+  {
+    "zone": "MAXIMUM R-2 ZONE",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded by commercial strip along Rizal Avenue; Tullahan River; Commercial Zone along C-4 Road and Tañong Urban Bliss (except areas occupied by Institutional Zone) Area occupied by Tañong Urban Bliss, except area occupied by Institutional Zone- Tañong Elem. School and National High School"
+  },
+  {
+    "zone": "BASIC R-3 ZONE",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area at Damzon Rd. and Don B. Bautista Blvd. herein bounded on the north by commercial areas along Don B. Bautista Blvd, East by aquamarines at Muzon river, South by Sto. Rosario academy and Muzon boundary, and West by Dampalit river. Area at Road 1, 2, 3, et al, and Paez Ville herein bounded on the north by aquamarine and industrial areas, East by commercial areas along Don B. Bautista Blvd., South by Dampalit river, and West by Kaylanan river."
+  },
+  {
+    "zone": "MAXIMUM R-3 ZONE",
+    "barangay": "Acacia",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Basilio St., Elias St., Isagani St., Roque St., Lot 3-B: Psd-35046, Consuelo St., and Maria Clara St. (except areas occupied by Institutional Zone = Lots 8,6,9,7 block 12: psd-3315; Lot 2-pcs-5181;lot 2 and lot 3 ,blk. 12 psd-3315)"
+  },
+  {
+    "zone": "SOCIALIZED HOUSING ZONE",
+    "barangay": "Baritan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "The area occupied by Medium Rise Housing (MRH) TCT N-37320, TCT N-37321 (road lot) and TCT N-37322 (PHINMA project)"
+  },
+  {
+    "zone": "SOCIALIZED HOUSING ZONE",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Gulayan CMPs: Area bounded on the north by Tinajeros river, East by Institutional areas-Justice cpd., South by institutional area-barangay hall etc., and West by blocks deep of commercial area from Tinajeros river. Area bounded on the north by one block deep of Gov. Pascual Ave., wherein Hernandez St. and Valdez St. as access, East by Industrial area., South by Tonsuya boundary Catmon river., and West by Catmon river Sitio 6 Northside: Area bounded on the north by commercial area-Unican, East by Bustamante St. and commercial area from M.H. del Pilar, South by commercial area from Gov. Pascual Ave., and West by commercial area-Unican"
+  },
+  {
+    "zone": "SOCIALIZED HOUSING ZONE",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Marangal Village (CMP) located at Rosal Street"
+  },
+  {
+    "zone": "SOCIALIZED HOUSING ZONE",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Rivera Riverside HOA 1 and 2"
+  },
+  {
+    "zone": "GENERAL COMMERCIAL ZONE",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Tullahan River, South by Niugan River, Governor Pascual Avenue, East by Bustamante Road, M.H. Del Pilar Street, West by Tullahan River (Except areas occupied by Teacher’s Village, CMP Projects, Retarding Ponds, Institutional Zone (Justice Compound and donated lots (LOT 1, M-24788 & Lot 1, M-24793 with area of 1,475 sq.m. & 15,250 sq.m. respectively)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Baritan",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Bonifacio St., East by end of one lot deep along Gen. Luna St., Alley between Guerrero and Bernardo St., South by Bernardo St. and Marcelo St. and West by Malabon-Navotas River"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Bayan-Bayanan",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "One lot deep along Gen. Luna Street from Rodriguez to Bayan-Bayanan-Baritan boundary(except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Concepcion",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Areas bounded on the North by Marcelo St., East by end of one lot deep along Gen. Luna St., South by Jacinto St. and West by Tullahan River (except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "One lot deep along Don Basilio Bautista Blvd. from Dampalit Bridge to Pinagkabalian Bridge"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Flores",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "One lot deep along Gen. Luna St., Naval Street both sides, Bonifacio St. and Pantihan 5"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Hulong Duhat",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "One lot deep along Don Basilio Bautista Blvd. (from M. Blas to Dampalit Bridge), Gen. Luna St. (from Don Basilio Bautista to Esguerra St.), one lot deep both sides of Rodriguez St. (from Gen. Luna St. to Don Basilio Bautista), one lot deep along Naval St. (from Pantihan 5 to Women’s Club; one lot deep along Women’s Club (from Don Basilio Bautista to Tanza Bridge / left side going to Tanza bridge). Area bounded on the North by Women’s Club or Rodriguez St., East by Flores St., South by Esguerra St. and West by Naval street."
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Ibaba",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Jacinto Street; East by end of one lot deep along General Luna Street; South by P. Camus St.; West by Malabon Navotas River"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep along Dalagang Bukid (Malabon Side) One lot deep both sides of Pampano Street from Caloocan Boundary to Salmon Street (except areas occupied by Institutional) One lot deep along Langaray St. (Malabon - Caloocan Boundary) from Caloocan Boundary to Labahita Street One lot deep along Maya-Maya Ave. (from Dagat-Dagatan Ave. to Pampano St.)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Maysilo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep along M.H. Del Pilar Street from Tinajeros Bridge to Santulan/Maysilo Boundary(except areas occupied by Institutional)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Niugan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep along Sanciangco Street"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Panghulo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Rodriguez St.; Narra St., M.H. del Pilar St. and Panghulo Road One lot deep strip along Panghulo Road, both sides from Rodriguez St. to Industrial Zone (Ashlar) One lot deep along Panghulo Road (Left Side from Panghulo-Maysilo Boundary to Rodriguez St., except areas occupied by Panghulo Elementary School)"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "San Agustin",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area bounded on the North by P. Camus Street and Camus Ext.; East by Gen. Luna Street; South by Sacristia Street; West by Malabon-Navotas River (except areas occupied by Institutional ) One lot deep strip at East portion of Gen. Luna Street from P. Camus Street to alley going to Pascual Street Area bounded on the North by Alley (Gen. Luna St. to S. Pascual St.); East by S. Pascual Street; South by Rizal Avenue Extension; West by Gen. Luna Street One lot deep strip along Rizal Avenue Extension from S. Pascual Street to Tullahan River One lot deep on property owned by San Bartolome Church"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Santulan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Luis S.; M.H. Del Pilar St., Rodriguez St. and Narra St. One lot deep commercial strip both sides of M.H. del Pilar St. from Luis St. to Malabon-Valenzuela Boundary One lot deep commercial strip (right side from Aurora St. to Javier St. Area bounded on the North by Luis St.; South by Rodriguez St.; East by M.H. Del Pilar St., West by Narra St."
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Tinajeros",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep along Rivera St. from Crispin Street to Sanchez Street One block area bounded on the North by Crispin St.; East by B. Rivera St.; South by Celia St.; West by Maria Clara St.(Crispin Ext.) One block area bounded on the North by Crispin, Mercury and Nickel Streets; East by Sisa and Nickel Streets; South by Celia Street; West by B. Rivera St."
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Tonsuya",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep strip both sides of Sanciangco Street from J.P. Rizal Ave. to Aquino St. One lot deep strip along South side of Sanciangco St. from M. Aquino to the boundary of Industrial Zone"
+  },
+  {
+    "zone": "COMMERCIAL -1 ZONE (C-1)",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep along M.H. Del Pilar Street from Caloocan Boundary to Commercial Zone along Gov. Pascual Avenue"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Acacia",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Gov. Pascual Ave.; East by PNR, South by Basilio Street, lot 4-A (LRC) Psd-323565 and West by Maria Clara Street."
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Baritan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One block deep along Gov. Pascual Avenue from Gen. Luna St. to Tullahan River (except areas occupied by Institutional)"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Gov. Pascual Avenue, South by Hernandez Street and Industrial Zone, East by CMP, Lot boundary of Lucas Compound and West by Sanciangco Street. One lot deep from Gov. Pascual From Lucas Compound up to Tugatog Boundary except areas occupied by CMP Projects"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Concepcion",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One block deep along Gov. Pascual Avenue from Gen. Luna St. to Tullahan River"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Hulong Duhat",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Heritage Overlay Zone"
+    ],
+    "location": "Area occupied by existing Hulong Duhat Market Talabahan Area bounded on the North by line of M. Blas St., East by Malabon Elem. School, South by Hulong Duhat Market, West by Batasan River"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One block deep strip commercial on both sides of Lapu-Lapu Avenue from Dagat-Dagatan Ave. to Malabon-Navotas Boundary"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One lot deep strip both sides along Victoneta Ave. from Orange Road to NLEX except areas occupied by Industrial Zone and Institutional"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One block deep strip North side of C-4 Road from Malabon-Navotas River to Tullahan River Area bounded by Rizal Ave.; Tullahan River; Maximum R-2 Zone; Leoño St.(except areas occupied by Institutional Zone) Area bounded by Rizal Ave.; Leoño St.; Estrella St. and F. Sevilla Blvd. (except areas occupied by Institutional Zone- Tañong Integrated School) Area bounded by Estrella St.; Leoño St.; Santos Compound; and Malabon-Navotas River (except areas occupied by Institutional Zone)"
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "One block deep commercial strip along Gov. Pascual Ave from Catmon-Tugatog Boundary to M. H. del Pilar St."
+  },
+  {
+    "zone": "COMMERCIAL -2 ZONE (C-2)",
+    "barangay": "Panghulo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Rodriguez St., M.H. Del Pilar St., Narra St. and Rodriguez St. (Panghulo Market)"
+  },
+  {
+    "zone": "COMMERCIAL -3 ZONE (C-3)",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas bounded by Tullahan River, Juliana St. (from Tullahan to Caloocan Boundary); Malabon-Caloocan Boundary; Santol St. (from Malabon-Caloocan Boundary to Lanzones St.); Lanzones St. (from Santol St. to Mangustan St.); Mangustan St. (from Lanzones St. to University Avenue); University Avenue (from Mangustan St. to Banana Road); Banana Road (from University Ave. to Tullahan River) *Except areas occupied by Parks and Recreation and Institutional Zone. Area bounded by Tullahan river; North Luzon Expressway (NLEX); Lot 8-B –LRC Psd-324406; Lot 7 – LRC Pcs-22576; Lot 6-C road LRC-Psd-335180; Lot 34-A-2 LRC- Psd -306716; Lot 35-C (road) Psd-13-010320; Lot 38-C-1 – Psd -007501-020444-D; lot 38-B-1 – Psd-007501-020444-D"
+  },
+  {
+    "zone": "COMMERCIAL -3 ZONE (C-3)",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Malabon Central Market"
+  },
+  {
+    "zone": "CENTRAL BUSINESS DISTRICT (CBD)",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by P. Aquino Ave. / Letre Road; East by Dagat-dagatan Ave.; South by C-4 Road; West by Borromeo Street (except areas occupied by Institutional and CMP Projects) Area bounded on the North by P. Aquino/Letre Road; East by Land Mark; South by C-4 Road; West by Dagat-Dagatan Ave. Area bounded on the North by P. Aquino; East by Borromeo St.; South by C-4 Road; West by Tullahan River Area bounded on the North by C-4 Road; East by Dagat-Dagatan Ave.; South by Salmon Street and Maya-Maya Street; and West by Pampano St., Block 45-Salmon Street Area bounded on the North by C-4 Road; East by Pampano Street; South by Salmon St.; West by Institutional (Longos Elem. School) and one block strip from Alupihang Dagat Street."
+  },
+  {
+    "zone": "CENTRAL BUSINESS DISTRICT (CBD)",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Tullahan river; North Luzon Expressway (NLEX); Lot 8-B –LRC Psd-324406; Lot 7 – LRC Pcs-22576; Lot 6-C road LRC-Psd-335180; Lot 34-A-2 LRC- Psd -306716; Lot 35-C (road) Psd-13-010320; Lot 38-C-1 – Psd -007501-020444-D; lot 38-B-1 – Psd-007501-020444-D"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by one lot deep strip of Residential Zone along Hernandez Street; CMP Projects; Niugan River; and Sanciangco Street Area bounded by Commercial strip along Gov. Pascual; Tugatog-Catmon Boundary; Tonsuya-Catmon Boundary; CMP Projects Area covered by Galatian Golden Development Corp. (formerly Unican Compound) and Uni-top Corp. Compound. Area bounded by Uni-top Corp.; Bustamante St.; Kaingin St.; and Commercial -2 Zone"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Merville Subdivision; South by One lot deep strip of Commercial Zone along Don Basilio Bautista Blvd.; East by Pinagkabalian River; and West by Residential Zone. Area bounded on the North by one lot deep strip of Commercial Zone along Don Basilio Baustista Blvd.; South by Fishpond; East by Muzon River; and West by Residential Area"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Maysilo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Santulan-Maysilo Boundary; South by Tongco St.; East by Tullahan River; and West by one lot deep strip Commercial Zone along M.H. del Pilar St. Area bounded on the North by Residential Zone; South by Residential Zone coinciding San Vicente Village; East by one lot deep strip Commercial Zone along M.H. Del Pilar St.; and West by Residential Zone"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Panghulo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Malabon-Obando Boundary; Panghulo Road; Kingsborough Subdivision; Nicavi Property (LRC psd lot 14365) Area bounded by Panghulo-Santulan Boundary; one lot deep along M.H. Del Pilar St.; Matahimik St.; One lot Deep strip along Panghulo Road; Seibo College Compound; and Panghulo Road"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "San Agustin",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Barangay Ibaba- San Agustin Boundary; South by CMP, Luna II; East by Tullahan River; and West by Residential Zone"
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Santulan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "The area bounded on the North by Malabon-Obando Boundary; South by Matahimik St.; East by one lot deep strip Commercial Zone along M.H. del Pilar St.; West by Panghulo-Santulan Boundary The area bounded on the North by Rodriguez St.; South by Santulan-Maysilo Boundary; East by Tullahan River; and west by one lot deep commercial strip along M.H. Del Pilar St."
+  },
+  {
+    "zone": "INDUSTRIAL - 1 ZONE (I-1)",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Santos Compound"
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Acacia",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Basilio Street, Lot 3-B-1(LRA) Psd-374259, Lot 3-B-2-A Psd-00-061667, lot 3-B-2-C Psd-00-061667, lot 3-B-2-B Psd-00-061667; South by Liwayway Street, lot 1919-A Pdd-56650, lot 17-Aand 17-B Psd-007502-031792-D; East by PNR Railroad Track; and West by Maria Clara Street, (except areas occupied by Institutional – lot 17-A Psd-007502-031792-D, Lot 18, 19 and 20 Psd-4988- Church in Malabon Incorporated)"
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Commercial Area along Gov. Pascual Ave.; South by Tonsuya Boundary; East by Tonsuya Boundary; and West by CMP Projects"
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "The area bounded by PNR; Tullahan River; Banana Road (from Tullahan to University Ave.);University Ave. (from Banana Road to Mangustan St. ); Mangustan Road (from University Ave. to Lanzones St.); Lanzones St. (from Mangustan to Santol St.); Santol St. (from Lanzones St. to Caloocan Boundary); Malabon-Caloocan Boundary; UE Subdivision; Hwachong Temple of Buddha Incorporated; Duhat Street. The area bounded on the North by Victoneta Avenue; South by Malabon-Caloocan Boundary; East by Circumferential Road (opposite gate 5 of AUV); and West by Victoria’s Place Subdivision The area bounded by Reparo Road; Lot 8-A LRC Psd-324406; Lot 34-B, LRC Psd-1234001; Lot 35-A, 35-B and 35-C (road)- Psd-13-010320; Lot 38-C-2-F, Psd-349693 (road); Lot 38-C-2-E-2 –Psd-349693; lot 38-C-2-C-2 and Lot 38-C-2_c-3LRA Psd -351944; Lot 38-B-2, Psd-007501-020444-D"
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Tinajeros",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the North by Residential Subdivision; South by Creek, Residential Zone, Sanchez Street; East by Golden Dale St.; and West by Tullahan River The area bounded by Commercial Strip along Gov. Pascual Ave., Sisa Extension, Industrial Zone and PNR Rail Road Track Area bounded on the North by Sanchez St., Mesina St.; South by Crispin St., Commercial Zone; East by one lot deep strip of Commercial Zone along B. Rivera St.; and West by Villarosa St. and Commercial Zone"
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Tonsuya",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded on the north by Catmon-Tonsuya Boundary; South by P. Aquino/Letre Road; East by Tugatog-Tonsuya Boundary; and West by CMP Projects Area bounded on the North by Sanciangco St.; South by CMP; East by Catmon-Tonsuya Boundary; and West by Sanciangco St."
+  },
+  {
+    "zone": "INDUSTRIAL-2 ZONE (I-2)",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area bounded by Liwayway St; A. Bonifacio St.; Lot no.1-22 block 26 psd 5254; Nirvana St.; Lot 1-7 blk. 25 pcs 140; Lot 1-4 psd 00-034824; lot 11-B-2 psd -00-048915; Lot 11D; Lingkod ng Nayon St. Area bounded by Lot 18 blk. 35 psd 4988; PNR Rail Road; Caloocan-Malabon Boundary; A. Bonifacio St. Area bounded by Tugatog Creek; Residential Zone; Caloocan-Malabon Boundary and Tonsuya-Tugatog Boundary"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Acacia",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Acacia Elementary School at Maria Clara St. Area occupied by Acacia Brgy. Hall at Maria St. Area occupied by Health Center at Maria Clara St. Area occupied by Higher Ground Baptist Academy Foundation, In. at Basilio Cor. J.P. Rizal St. Area occupied by Church in Malabon Incorporated Area occupied by Mormons Church at Gov. Pascual Ave."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Baritan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Amang Rodriguez Elementary School and Barangay Hall located at Sta. Rita Street, Sto. Rosario Village Area occupied by Jose Rizal High School-Arellano University located at Gov. Pascual Ave. Area occupied by City of Malabon Polytechnic University (CMPI)"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Bayan-Bayanan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by the Barangay Hall"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Catmon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Justice Compound located at Sanciangco St. and Gozon donated property Area occupied by Catmon Integrated School at Hernandez St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Concepcion",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Concepcion Elementary School at Burgos St. Area occupied by Malabon National High School-Concepcion Voc-Tech Annex at Burgos St. Area occupied by Immaculate Concepcion Parochial School and Immaculate Concepcion Church at Gen. Luna St. Area occupied by Concepcion Plaza with Brgy. Hall at Gen. Luna St. Area occupied by Baptist School at Gov. Pascual Ave. Area Occupied by La Cabesera De Montessori at Gen. Luna Area occupied by Aglipay Church at C. Arellano St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Dampalit Elementary School Area occupied by Dampalit Elem School I Area occupied by the Barangay Hall Area occupied by Covered Court Area occupied by Academia De Sto. Rosario at Damzon Road Area occupied by Sto. Rosario Parish Church at Don Basilio Bautista Blvd."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Flores",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Barangay Hall Area occupied by Church at Flores St. Angel Bernadette learning Center at Naval St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Hulong Duhat",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Malabon Elementary School at Naval St. Area occupied by Malabon National High School at Don Basilio Bautista Blvd. and Naval St. Area occupied by the Library and health Center at M. Blas St. Area occupied by Brgy. Hall at M. Blas St. Area occupied by Church at Grevacio St. Area occupied by Covered Court at Cherry Gail St. Gabriel Subd. Area occupied by Labagalas Child Development Center at Gabriel Subd. Area occupied by United Methodist Parish School at M. Blas St. Area occupied by Iglesia ni Cristo at Naval St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Ibaba",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Col. Ramon Camus Elem. School at C. Arellano St. Area occupied by Col. Ramon Camus Integrated School at C. Arellano St. Area occupied by Brgy. Hall and Health Center Area occupied by St. Michael Learning Center , Inc. at C. Arellano St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Longos",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Imelda Elementary School at Maya-Maya St. Area occupied by Ninoy Aquino Elementary School Area occupied by Longos National High School at Maya-Maya St. Area occupied by Dept. of Educ. District Office Area occupied by Longos Elem. School at C-4 Road Area occupied by the old PBM located at Maya-Maya St. cor. Dagat-Dagatan Ave. Area occupied by City of Malabon University (CMU) at Pampano St. cor. Maya-Maya St. Area occupied by Barangay Hall, Health Centers and Covered Court Area occupied by Phil. Malabon Cultural Institute at Azucena St. Area occupied by Paper & Pen Academy Inc. at Lapu-Lapu St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Maysilo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Maysilo Elem. School Area occupied by Brgy. Hall and Health Center Area occupied by immaculate Heart of Mary School at M.H. Del Pilar St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Muzon",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Muzon Elem. School Area occupied by Brgy. Hall"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Niugan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Niugan Elem. School Area occupied by Brgy, Hall Area occupied by The Potter and Clay Christian School at Sanciangco St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Panghulo",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Panghulo Elem. School Area occupied by Panghulo Elem. School I Area occupied by Panghulo Nat’l. High School Area occupied by Brgy. Hall at Pangjulo Road Area occupied by Seibo College Foundation Inc. at Panghulo Road"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Potrero",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Bagong Lote Elementary School Area occupied by Potrero Elementary School Area occupied by Potrero Elementary School I Area occupied by Potrero Nat’l. High School Area occupied by Barangay Hall at Pinagtipunan Circle Area occupied by Health Center at Durian St. Area occupied by De la Salle Araneta University Area occupied by Salvador Araneta Memorial Institute Area occupied by Infant Jesus Learning Academy of Malabon"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "San Agustin",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Brgy. Hall and Health Center Area occupied by De la Paz Elem School Area occupied by St. James Academy at J.P. Rizal Ave. cor. Gen. Luna and Sacrista St. Area occupied by San Bartolome Church Area occupied by Iglesia ni Cristo at Gen. Luna St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Santulan",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Santulan Elem. School Area occupied by Santulan Brgy. Hall, Covered Court Area occupied by Probex School Inc. at M.H. Del Pilar St."
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Tañong",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Tañong Elem. School I Area occupied by Tañong Integrated School Area occupied by Tañong Nat’l. High school Area occupied by Tañong Barangay Hall Area occupied by Health Center, Senior Citizen, ECCD, Chapel and covered Court Area occupied by St. Therese of the Child Jesus Academy Area occupied by Malabon City Hall, Malabon Hospital and parking spaces, City Hall Annex Building"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Tinajeros",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Tinajeros Elem. School Area occupied by Tinajeros Nat’l. High School Area occupied by Tinajeros National High School-Acacia Annex Area occupied by Brgy. Hall and Covered Court"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Tonsuya",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Tonsuya Elementary School Area occupied by Tonsuya Brgy. Hall, Covered Court Area occupied by Tonsuya Parish Church Area occupied by Mormon’s Church"
+  },
+  {
+    "zone": "INSTITUTIONAL ZONE",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Epifanio De Los Santos Elem. School Area occupied by Tugatog Nat’l. High School Area occupied by St. Fourier School Area occupied by Brgy. Hall, Senior Citizen’s Bldg.,"
+  },
+  {
+    "zone": "FISHPOND ZONE",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone",
+      "Eco-Tourism overlay Zone"
+    ],
+    "location": "Area occupied by existing fishpond."
+  },
+  {
+    "zone": "MANGROVE ZONE",
+    "barangay": "Dampalit",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Areas along easement of Malabon-Navotas River, Chungkang River, Batasan River, Muzon River"
+  },
+  {
+    "zone": "CEMETERY ZONE",
+    "barangay": "San Agustin",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by San Bartolome Cemetery at J.P. Rizal Ave"
+  },
+  {
+    "zone": "CEMETERY ZONE",
+    "barangay": "Tonsuya",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Lourdes Cemetery at P. Aquino/Letre Road Area occupied by Everlasting Cemetery at P. Aquino/Letre Road"
+  },
+  {
+    "zone": "CEMETERY ZONE",
+    "barangay": "Tugatog",
+    "overlays": [
+      "Flood Overlay Zone"
+    ],
+    "location": "Area occupied by Tugatog Cemetery at Lazcano St."
+  },
+  {
+    "zone": "PARKS AND RECREATION ZONE",
+    "barangay": null,
+    "overlays": [],
+    "location": "All area occupied by existing parks & recreation, prior to adoption of the Ordinance",
+    "overlays_note": "OVERLAY ZONES cell is not an overlay name; it reads: \"Follow Base Zone to where the parks & recreation are located\""
+  },
+  {
+    "zone": "UTILITIES, TRANSPORTATION AND SERVICE ZONE",
+    "barangay": null,
+    "overlays": [],
+    "location": "All areas occupied by existing utilities, transportation and service zone , prior to adoption of this Ordinance",
+    "overlays_note": "OVERLAY ZONES cell is not an overlay name; it reads: \"Follow Base Zone to where the area is located\""
+  }
+]

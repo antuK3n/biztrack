@@ -4,7 +4,9 @@ namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
 use App\Support\ApplicationVisibility;
+use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
+use App\Support\SheetRequirements;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Arr;
@@ -23,6 +25,12 @@ class ApplicationResource extends JsonResource
             'title' => $this->title,
             'payment_mode' => $this->payment_mode,
             /*
+             * So a reopened draft can put the tick back. Without it the wizard
+             * had no way to know the applicant had already agreed, and asked
+             * again every single time — see the note in ApplicationController.
+             */
+            'data_privacy_consent' => (bool) $this->data_privacy_consent,
+            /*
              * The paper form's "Amendment from:" block (checklist items 82/84).
              *
              * Null on a new or renewal filing rather than an object of falses,
@@ -31,12 +39,23 @@ class ApplicationResource extends JsonResource
              * no" — and neither has to special-case the type to tell them
              * apart.
              */
-            'amendments' => $this->application_type === ApplicationType::Amendment ? [
+            'amendments' => in_array(
+                $this->application_type,
+                [ApplicationType::Amendment, ApplicationType::Renewal],
+                true
+            ) ? [
                 'has_amendments' => (bool) $this->has_amendments,
                 'ownership' => (bool) $this->amendment_ownership,
                 'location' => (bool) $this->amendment_location,
                 'nature' => (bool) $this->amendment_nature,
                 'other' => $this->amendment_other,
+                /*
+                 * Section A3. Null unless A1 was Yes, which is the same "never
+                 * asked" vs "asked and answered no" distinction the block above
+                 * draws for the type as a whole.
+                 */
+                'from_registration_type' => $this->amendment_from_registration_type,
+                'to_registration_type' => $this->amendment_to_registration_type,
                 // Rendered as-is by the officer sheet; built here so the label
                 // wording for "Nature of Business" has exactly one home.
                 'summary' => $this->resource->amendmentKinds(),
@@ -54,28 +73,105 @@ class ApplicationResource extends JsonResource
             'ra11032' => $this->ra11032(),
             'rejection_reason' => $this->rejection_reason,
             /*
-             * `requires_inspection` is here because the progression rail on the
-             * review sheet must not draw a stage this filing will never enter.
+             * Each requested permit, carrying ITS OWN status.
              *
-             * WorkflowService::afterReviewProgress() checks exactly this flag
-             * across exactly these rows: if no chosen permit type requires an
-             * inspection, the last office approval goes straight to
-             * approveAndIssue(). Without the flag the browser had no way to know
-             * that, so the honest options were to always show an inspection step
-             * (a lie on roughly half the filings) or never show one (a lie on
-             * the rest). The client's own wording is "for those permits that
-             * actually has inspection" — this is what makes that answerable.
+             * This is the second state machine reaching the browser
+             * (docs/application-flow-2026-09.md). The application's `status`
+             * above says where the filing is; these say where each permit is,
+             * and the two move independently — a filing reading
+             * `awaiting_other_permits` can have one permit issued, one being
+             * inspected and three not started.
+             *
+             * `requires_inspection` stays because the progression rail must not
+             * draw a stage a permit will never enter: an office whose permit
+             * type is desk-only goes straight from For Approval to Approved, and
+             * without the flag the browser's honest options were to always show
+             * an inspection step or never show one.
+             *
+             * `is_required` is what the applicant's stage needs to tell a permit
+             * they must obtain from one they merely may. Market Clearance is the
+             * only false one today, and rendering it identically to the five
+             * mandatory ones is how a stall owner would think they were finished
+             * — or a shop owner think they were not.
              */
             'permit_types' => $this->relationLoaded('permitTypes')
-                ? $this->permitTypes->map(fn ($pt) => [
-                    'id' => $pt->id,
-                    'code' => $pt->code,
-                    'name' => $pt->name,
-                    'requires_inspection' => (bool) $pt->requires_inspection,
-                ])->values()
+                ? $this->permitTypes->map(function ($pt) use ($request) {
+                    /*
+                     * SEP-5. Progress is shared across the filing; the words an
+                     * office wrote are not.
+                     *
+                     * The same split `readsInspectionDetail` settled for site
+                     * visits (INS-8), and it is drawn here for the same reason.
+                     * Every office on the filing has a genuine need to know
+                     * that the fire permit exists, that it reached inspection
+                     * and that it passed — BPLO's final approval is gated on
+                     * all five being approved, so an office cannot tell whether
+                     * the filing is moving without seeing the others' state.
+                     * Withholding status would replace a privacy defect with a
+                     * coordination one.
+                     *
+                     * `remarks` and `rejection_reason` are the other thing
+                     * entirely: free prose one office wrote about someone
+                     * else's premises. The client's instruction is exact — "the
+                     * City Health Office admin must NOT see any application
+                     * fields regarding Fire Safety Inspection Certificate
+                     * application" — and this is where that lands on a payload
+                     * every office reads.
+                     *
+                     * `mode` stays shared: apply-or-upload is the shape of the
+                     * evidence, not its content, and BPLO's coordination view
+                     * would be incoherent without it.
+                     */
+                    $readsWords = ApplicationVisibility::readsOfficeSheet(
+                        $request->user(),
+                        $pt->issuing_department_id,
+                    );
+
+                    return [
+                        'id' => $pt->id,
+                        'code' => $pt->code,
+                        'name' => $pt->name,
+                        'requires_inspection' => (bool) $pt->requires_inspection,
+                        'is_required' => $pt->isRequiredClearance(),
+                        'status' => $pt->pivot?->status?->value,
+                        'status_label' => $pt->pivot?->status?->label(),
+                        'mode' => $pt->pivot?->mode,
+                        'remarks' => $readsWords ? $pt->pivot?->remarks : null,
+                        'rejection_reason' => $readsWords ? $pt->pivot?->rejection_reason : null,
+                        'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
+                    ];
+                })->values()
                 : [],
+            /*
+             * SEP-8. A shared requirement is everyone's; a permit copy is one
+             * office's.
+             *
+             * Most attachments carry no `permit_type_id` and are exactly what
+             * `readsOfficeSheet` calls the applicant's own particulars — the
+             * barangay clearance, the lease, the valid ID. Every office on the
+             * filing needs those, and this filter must never touch them.
+             *
+             * The ones that DO carry a permit type are the copies an applicant
+             * hands in instead of applying (HeldPermits). Under this flow that
+             * is half the process — for each of the five permits the applicant
+             * either fills the office's form or uploads the permit they already
+             * hold — so a held Fire Safety Inspection Certificate is BFP's
+             * evidence as squarely as the FSIC questionnaire is, and the
+             * sanitary officer has no more business reading one than the other.
+             *
+             * Documents were scoped at the FILING level and no finer, which was
+             * right while every attachment really was shared. It stopped being
+             * enough the moment half the evidence on a filing became
+             * office-specific.
+             */
             'documents' => $this->relationLoaded('documents')
-                ? DocumentResource::collection($this->documents)
+                ? DocumentResource::collection(
+                    $this->documents->filter(fn ($doc) => $doc->permit_type_id === null
+                        || ApplicationVisibility::readsOfficeSheet(
+                            $request->user(),
+                            $doc->permitType?->issuing_department_id,
+                        ))->values()
+                )
                 : [],
             'fee_profile' => $this->fee_profile,
             /*
@@ -107,18 +203,74 @@ class ApplicationResource extends JsonResource
              * office on the filing because every office needs them to do its
              * job. Do not extend this filter over them.
              */
-            'office_forms' => $this->relationLoaded('officeForms')
-                ? $this->officeForms
-                    ->filter(fn ($form) => ApplicationVisibility::readsOfficeSheet(
-                        $request->user(),
-                        $form->permitType?->issuing_department_id,
+            /*
+             * ── Every form-bearing sheet on the filing, saved or not ─────────
+             *
+             * This mapped the SAVED `officeForms` rows and nothing else, and the
+             * client found what that costs on 9 September 2026: a CENRO session
+             * opened a filing it had been routed — its permit applied for, at
+             * `for_approval`, its assignment open — and saw the BPLO form and
+             * nothing of its own, because the applicant had not yet opened the
+             * CEC sheet. No row, no entry, and an office left to infer from an
+             * absence whether it was looking at a gap in the paperwork or a bug.
+             *
+             * `OfficeFormController::index` never behaved that way: it
+             * synthesises an entry for every form-bearing permit type on the
+             * application, derived answers filled in, precisely "so the wizard
+             * can render the derived answers on a form the applicant has not
+             * opened yet". So `/office-forms` showed the sheet and
+             * `/assignments/{id}` did not — the same filing, two doors, two
+             * answers, which is the shape this file has been repaired for four
+             * times over (SEP-1, SEP-6, INS-8, and the leak that started it).
+             *
+             * Both doors now build the list the same way and derive through the
+             * same `OfficeFormAnswers`. `form_saved` is what an officer needs on
+             * top: a sheet of derived-only answers looks identical whether the
+             * applicant filled it in or never touched it, and the screen has to
+             * be able to say which.
+             *
+             * The office boundary is unchanged and still applied per sheet: the
+             * applicant sees all, BPLO and the super admin see all, and every
+             * other reviewer sees only what its own department issues.
+             */
+            'office_forms' => $this->relationLoaded('officeForms') && $this->relationLoaded('permitTypes')
+                ? $this->permitTypes
+                    ->filter(fn ($type) => in_array(
+                        $type->code,
+                        OfficeFormAnswers::FORM_PERMIT_CODES,
+                        true,
                     ))
-                    ->map(fn ($form) => [
-                        'permit_type_code' => $form->permitType?->code,
-                        'permit_type_name' => $form->permitType?->name,
-                        'department_code' => $form->permitType?->department?->code,
-                        'form_data' => $form->form_data,
-                    ])->values()
+                    ->filter(fn ($type) => ApplicationVisibility::readsOfficeSheet(
+                        $request->user(),
+                        $type->issuing_department_id,
+                    ))
+                    ->map(function ($type) {
+                        $stored = $this->officeForms
+                            ->first(fn ($form) => $form->permit_type_id === $type->id);
+
+                        return [
+                            'permit_type_code' => $type->code,
+                            'permit_type_name' => $type->name,
+                            'department_code' => $type->department?->code,
+                            'form_saved' => $stored !== null,
+                            'form_data' => OfficeFormAnswers::derive(
+                                $this->resource,
+                                $type->code,
+                                $stored->form_data ?? [],
+                            ),
+                            /*
+                             * What this office's paper asks the applicant to
+                             * bring, and it is on THIS door for the same reason
+                             * `form_data` had to be: CPDD is deciding a
+                             * locational clearance against a title deed, a tax
+                             * declaration and a sketch of the site, and CENRO a
+                             * renewal against last year's certificate. A list
+                             * the applicant can see and the reviewing office
+                             * cannot is half a feature. Both doors, one builder.
+                             */
+                            'requirements' => SheetRequirements::for($this->resource, $type->code),
+                        ];
+                    })->values()
                 : [],
             'fee_assessment' => $this->relationLoaded('feeAssessment') && $this->feeAssessment ? [
                 'line_items' => $this->feeLineItems($request),
@@ -133,8 +285,31 @@ class ApplicationResource extends JsonResource
             'inspections' => $this->relationLoaded('inspections')
                 ? InspectionResource::collection($this->inspections)
                 : [],
+            /*
+             * SEP-6, and the fourth time this exact door has been left open.
+             *
+             * `ApplicationVisibility::readsPermitOf` exists precisely so that a
+             * sanitary account cannot read a BFP-issued certificate, and it was
+             * wired into `PermitController` alone. The officer's review sheet
+             * does not call that controller — it reads permits out of
+             * `GET /assignments/{id}` and `GET /applications/{id}`, both of
+             * which resolve this resource, which had no filter. Same user, same
+             * certificate, two endpoints, two answers: 403 on
+             * `/permits/{id}`, and the whole certificate here.
+             *
+             * That is the identical shape as the office-form leak (SEP-1), the
+             * permit-list leak the predicate was written for, and the
+             * inspection leak (INS-8). Filtering, rather than 403-ing the whole
+             * filing, because every office on it is legitimately reading the
+             * filing — it is one embedded collection that is not theirs.
+             */
             'permits' => $this->relationLoaded('permits')
-                ? PermitResource::collection($this->permits)
+                ? PermitResource::collection(
+                    $this->permits->filter(fn ($permit) => ApplicationVisibility::readsPermitOf(
+                        $request->user(),
+                        $permit->permitType?->issuing_department_id,
+                    ))->values()
+                )
                 : [],
             /*
              * What actually happened to this filing, oldest first (the relation

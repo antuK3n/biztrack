@@ -1,0 +1,536 @@
+[
+  {
+    "n": 1,
+    "term": "“Accessoria” or row house",
+    "definition": "a house of not more than two (2) stories, composed of a row of dwelling units entirely separate from one another by party wall or walls and with as independent for each dwelling unit.",
+    "is_business_type": false
+  },
+  {
+    "n": 2,
+    "term": "Alterations, structural",
+    "definition": "any change in the supporting members of a building such as bearing walls, columns, beams or girders.",
+    "is_business_type": false
+  },
+  {
+    "n": 3,
+    "term": "Alley, lane or callejon",
+    "definition": "a public space or thoroughfare affording generally a secondary means of access to abutting property.",
+    "is_business_type": false
+  },
+  {
+    "n": 4,
+    "term": "Animal stockyard",
+    "definition": "usually an open-faced yards without buildings where livestock are quartered, fed and cured to recuperate in weight before slaughter. Usually adjacent to the slaughter.",
+    "is_business_type": true
+  },
+  {
+    "n": 5,
+    "term": "Bar",
+    "definition": "any place where intoxicating and fermented liquors or malt drinks are sold or disposed of for a price, hired hostesses occasionally dancing to music.",
+    "is_business_type": true
+  },
+  {
+    "n": 6,
+    "term": "Barangay",
+    "definition": "he basic political unit in the Philippines composed of all persons who have been residents of the barrio, district or barangay for at least six months, citizens of the Philippines and duly registers in the list of barangay members kept by the barrio, district or barangay secretary.",
+    "is_business_type": false
+  },
+  {
+    "n": 7,
+    "term": "Block",
+    "definition": "the combine area of one or more lots forming a street block bounded by more than two (2) streets.",
+    "is_business_type": false
+  },
+  {
+    "n": 8,
+    "term": "Botanical garden",
+    "definition": "a park opened to the public where specimen trees, plants and shrubs of native or imported varieties are grown, exhibited and maintained with their scientific and local names in well landscaped gardens for the education, enjoyment and relaxation of the public. Sometimes combined with the zoological garden to give the natural setting needed for confined birds, reptiles and animals.",
+    "is_business_type": true
+  },
+  {
+    "n": 9,
+    "term": "Boundary line",
+    "definition": "the abstract line formed by the technical description of bearings and distance given on the certificate of title of the property or as defined herein.",
+    "is_business_type": false
+  },
+  {
+    "n": 10,
+    "term": "Buffer strip",
+    "definition": "a strip established to separate and protect one type of land use from another, for example, as a screen to objectible noise, smoke, or visual aspects of an industrial zone adjacent to a residential zone.",
+    "is_business_type": false
+  },
+  {
+    "n": 11,
+    "term": "Building",
+    "definition": "any structure having a roof supported by columns or walls. A main building is one in which the principal use of the lot upon which it is situated is conducted. Every dwelling in a residential district is a main building. Accessory building is a subordinate building, the use of which is incidental and accessory to the principal use on the same lot. The term building includes the term structure.",
+    "is_business_type": false
+  },
+  {
+    "n": 12,
+    "term": "Building accessory",
+    "definition": "a building subordinate to the main building or the same lot, the use of which is either (1) necessary to the enjoyment or operation of a lawful principal use, transitional use or conditional use, or (2) appropriate, incidental and subordinate to any such as servant’s quarter, garage, pump house, laundry, etc.",
+    "is_business_type": false
+  },
+  {
+    "n": 13,
+    "term": "Buildable area",
+    "definition": "the remaining space in a lot after deducting the required minimum open spaces.",
+    "is_business_type": false
+  },
+  {
+    "n": 14,
+    "term": "Building are",
+    "definition": "the combined (roofed) covered area of a building measured at the ground floor excluding the projection of roof-caves. Similar to buildable area.",
+    "is_business_type": false
+  },
+  {
+    "n": 15,
+    "term": "Building, existing",
+    "definition": "a building erected prior to the adoption of this Code or one for which a legal building permit has been issued.",
+    "is_business_type": false
+  },
+  {
+    "n": 16,
+    "term": "Bus Terminal",
+    "definition": "a facility that includes passenger handling, storage, service and maintenance of public transportation vehicles.",
+    "is_business_type": true
+  },
+  {
+    "n": 17,
+    "term": "Business",
+    "definition": "commercial activity customarily engaged in as a means of livelihood and typically involving some independence of judgement and power of division.",
+    "is_business_type": false
+  },
+  {
+    "n": 18,
+    "term": "Car barns",
+    "definition": "terminals or garage for public utility vehicles for hire, such as jeepneys, taxicabs, trucks and animal drawn vehicles, where such vehicles are stored, repaired and maintained within its own premises outside of any street.",
+    "is_business_type": true
+  },
+  {
+    "n": 19,
+    "term": "Central Business District",
+    "definition": "shall refer to areas designated principally for trade, services and business purposes.",
+    "is_business_type": false
+  },
+  {
+    "n": 20,
+    "term": "Cockpit",
+    "definition": "a pit or enclosure within a building or a portion thereof where cockfightings are held. Money betting may or may not be made.",
+    "is_business_type": true
+  },
+  {
+    "n": 21,
+    "term": "Commercial district",
+    "definition": "an area predominantly used for commerce.",
+    "is_business_type": false
+  },
+  {
+    "n": 22,
+    "term": "Condominium building",
+    "definition": "a multi-rise structure usually used for commercial or residential purposes and generally owned by the occupants thereof.",
+    "is_business_type": false
+  },
+  {
+    "n": 23,
+    "term": "Cottage industry",
+    "definition": "an economic activity carried on the homes or in other places for profit, with capitalization not exceeding Php 100,000.00 at the time of registration. The definition provided for in P.D. 817 is hereby adopted for zoning purposes.",
+    "is_business_type": true
+  },
+  {
+    "n": 24,
+    "term": "Department Store / Malls / Shopping Center",
+    "definition": "a large store divided into various departments selling different types of goods. Complex store, restaurants and services establishments with common parking area.",
+    "is_business_type": true
+  },
+  {
+    "n": 25,
+    "term": "District",
+    "definition": "a division of a City.",
+    "is_business_type": false
+  },
+  {
+    "n": 26,
+    "term": "Dominant land use",
+    "definition": "land use which accounts for at least 70% of the area within 1,000 meter radius from the periphery of the lot being applied for.",
+    "is_business_type": false
+  },
+  {
+    "n": 27,
+    "term": "Dormitories",
+    "definition": "an institutional building where boarders are provided with board and lodging, sleeping and eating in common halls and consisting of at least ten (10) or more persons.",
+    "is_business_type": true
+  },
+  {
+    "n": 28,
+    "term": "Dry cleaning",
+    "definition": "the cleaning of textiles, fabrics, garments and other articles by the use of cleaning solvents therefrom, drying and ironing the same. The activities usually housed in a building and consisting of one or more dry cleaning units of machinery or equipment where said articles are carried through a complete cleaning process.",
+    "is_business_type": true
+  },
+  {
+    "n": 29,
+    "term": "Dumping site",
+    "definition": "a lot or land or part thereof used primarily for the disposal by dumping burials, burning or any other means and / or whatsoever purpose of garbage, sewerage, trash, refuse, junk, discarded machinery, vehicles, or part thereof, or waste materials of any kind.",
+    "is_business_type": true
+  },
+  {
+    "n": 30,
+    "term": "Dwelling",
+    "definition": "a building designed or used exclusively as the living quarters for one or more family.",
+    "is_business_type": false
+  },
+  {
+    "n": 31,
+    "term": "Dwelling, one-family",
+    "definition": "a house accommodating a single family and having two side yards.",
+    "is_business_type": false
+  },
+  {
+    "n": 32,
+    "term": "Dwelling, one-family; semi-detached",
+    "definition": "a one-family house having one party wall and one side yard.",
+    "is_business_type": false
+  },
+  {
+    "n": 33,
+    "term": "Dwelling, row or group",
+    "definition": "a building consisting of a series of one-family sections having a common wall between each two adjacent sections.",
+    "is_business_type": false
+  },
+  {
+    "n": 34,
+    "term": "Dwelling, multiple",
+    "definition": "a building used as a home or residence of three (3) or more families living independently from one another each occupying one or more rooms as a single housekeeping unit.",
+    "is_business_type": false
+  },
+  {
+    "n": 35,
+    "term": "Dwelling, two family",
+    "definition": "a house or structure divided into two separate and independent living quarter by a wall extending from the floor to the ceiling. Each portion provides complete living facilities for a household.",
+    "is_business_type": false
+  },
+  {
+    "n": 36,
+    "term": "Filling station",
+    "definition": "any area of land, including structures thereon, that is used or designed to be used for the supply of gasoline or oil or other fuel for the propulsion of motor vehicles and which may include facilities used or designed to be used for polishing, greasing, washing, spraying, dry cleaning or other cleaning or servicing such motor vehicles.",
+    "is_business_type": true
+  },
+  {
+    "n": 37,
+    "term": "Fraternal Clubs and Lodges",
+    "definition": "all buildings used a non-profit private clubs exclusively for civic, religious, charitable and Masonic organizations.",
+    "is_business_type": true
+  },
+  {
+    "n": 38,
+    "term": "Fraternal Chapels",
+    "definition": "private, non-denominational funeral chapels located at or near or attached to cemeteries for the purpose of spiritual meditation and vigil before burial of deceased persons. The display or sale of coffins or flower wreaths are not conducted therein although dedicated wreaths may be displayed in memory of the deceased person.",
+    "is_business_type": true
+  },
+  {
+    "n": 39,
+    "term": "Garage, Commercial",
+    "definition": "a garage where automobile and other vehicles are housed, cared for, equipped, repaired or kept for remuneration at an automobile station defined herein.",
+    "is_business_type": true
+  },
+  {
+    "n": 40,
+    "term": "Garment Factory",
+    "definition": "a factory producing garment of cloth or plastic such as ready-made dresses, hats, shirts, under clothes, children’s clothes, raincoats, etc. of commercial quantity.",
+    "is_business_type": true
+  },
+  {
+    "n": 41,
+    "term": "Gasoline Service Station",
+    "definition": "a place where gasoline or any other motor fuel, lubricating oil or grease from operation of automobile is offered for sale to the public. Deliveries are made directly into the vehicle including lubrication of the premises, the washing of automobiles where no mechanical conveyor, blower or steam cleaning device is involved and including only such other services and minor adjustments as are customarily permitted at gasoline supply station.",
+    "is_business_type": true
+  },
+  {
+    "n": 42,
+    "term": "Home Occupation",
+    "definition": "occupation conducted within a dwelling and not in any accessory building provided no person who is not a resident in the premises is employed, no mechanical equipment is used, except such as is permissible for purely domestic or household purposes and not more than one-fourth (1/4) of the floor area or one storey of the dwelling is devoted to such home occupation does not require internal or external alteration, or involve construction features or use of equipment not customary in dwellings.",
+    "is_business_type": true
+  },
+  {
+    "n": 43,
+    "term": "Hospital",
+    "definition": "unless otherwise specified, the term “hospital” shall be deemed to include sanitarium, prevent rum, clinic, rest house, nursery home, convalescent, or other case of ailments, and shall be deemed to be limited to places for diagnosis, treatment or other cases of human ailment.",
+    "is_business_type": true
+  },
+  {
+    "n": 44,
+    "term": "Hotel",
+    "definition": "a building or part thereof with rooms occupied or intended to be occupied or intended to be occupied for hire as temporary aboding place of individuals with a general kitchen and public dining room service, but no provisions for cooking in any individuals suite or room.",
+    "is_business_type": true
+  },
+  {
+    "n": 45,
+    "term": "Hotel apartment",
+    "definition": "an apartment which may furnish dining room service and other services for the exclusive use of its tenants.",
+    "is_business_type": true
+  },
+  {
+    "n": 46,
+    "term": "Hotel Residential",
+    "definition": "a dwelling occupied by permanent guests only and not by transients. It may include restaurants, newsstands and other accessory services primarily for serving its occupants and only incidental to the public.",
+    "is_business_type": true
+  },
+  {
+    "n": 47,
+    "term": "Junk Yard",
+    "definition": "a lot or part thereof, used primarily for the collection, storage and sale of waste or discarded materials or for the collection, dismantling, storage and salvaging of machinery or vehicles not in running condition and for the sale of parts thereto.",
+    "is_business_type": true
+  },
+  {
+    "n": 48,
+    "term": "Laundromat",
+    "definition": "a business activity provided with individual clothes washing machines for the use of retail customers.",
+    "is_business_type": true
+  },
+  {
+    "n": 49,
+    "term": "Loading and Unloading Areas",
+    "definition": "vehicular loading and unloading of passengers or goods specific, limited areas or zones along the street or driveway system.",
+    "is_business_type": false
+  },
+  {
+    "n": 50,
+    "term": "Lodging House",
+    "definition": "a building or part thereof containing sleeping rooms where lodging is provided for a fixed compensation in accordance with previous arrangements.",
+    "is_business_type": true
+  },
+  {
+    "n": 51,
+    "term": "Lot",
+    "definition": "a parcel of land on which a principal building and its accessories are placed or may be placed together with the required open spaces.",
+    "is_business_type": false
+  },
+  {
+    "n": 52,
+    "term": "Lot Area per Family",
+    "definition": "a portion of an area of a lot allocated for one family.",
+    "is_business_type": false
+  },
+  {
+    "n": 53,
+    "term": "Lot, Depth",
+    "definition": "the average horizontal distance between the front and the rear property lines.",
+    "is_business_type": false
+  },
+  {
+    "n": 54,
+    "term": "Lot, Inside",
+    "definition": "a lot fronting one street or public alley with remaining sides bounded by lot lines.",
+    "is_business_type": false
+  },
+  {
+    "n": 55,
+    "term": "Lot Lines",
+    "definition": "the line of demarcation between either public or private property on all sides.",
+    "is_business_type": false
+  },
+  {
+    "n": 56,
+    "term": "Lot Open",
+    "definition": "as lot bounded on all sides by street lines.",
+    "is_business_type": false
+  },
+  {
+    "n": 57,
+    "term": "Lot, Width",
+    "definition": "the average horizontal distance between the side lot lines.",
+    "is_business_type": false
+  },
+  {
+    "n": 58,
+    "term": "Mixed use",
+    "definition": "refer to areas containing residential, commercial, recreational and institutional.",
+    "is_business_type": false
+  },
+  {
+    "n": 59,
+    "term": "Money Shop",
+    "definition": "an extension service unit of a bank, usually operating within or near a public place with authority to accept money for specific purposes.",
+    "is_business_type": true
+  },
+  {
+    "n": 60,
+    "term": "Motel",
+    "definition": "a hotel for motorists. A group of furnished rooms near or along a highway that offer accommodations for highway travelers for short time periods.",
+    "is_business_type": true
+  },
+  {
+    "n": 61,
+    "term": "Night Club",
+    "definition": "a restaurant open at night usually serving liquor, having a floor show and providing music and space for dancing.",
+    "is_business_type": true
+  },
+  {
+    "n": 62,
+    "term": "Non-conforming building use",
+    "definition": "the use of a building or land or any portion of such building or land which does not conform with the use regulations of the district where it situated.",
+    "is_business_type": false
+  },
+  {
+    "n": 63,
+    "term": "Occupancy",
+    "definition": "the purpose for which a building is used or intended to be used. The term shall also include the building or room housing such use. Change or occupancy is not intended to include change of tenants or proprietors.",
+    "is_business_type": false
+  },
+  {
+    "n": 64,
+    "term": "Office Building",
+    "definition": "commercial buildings used to house offices for lease or rent. It may concern a single occupancy use or mixed occupancy uses not invoicing retail merchandising except professional services.",
+    "is_business_type": true
+  },
+  {
+    "n": 65,
+    "term": "Off-Street Parking",
+    "definition": "the stopping or parking of any vehicle along any street, except at designated areas located in the premises either at the front side and rear yards of the same or any nearby lot.",
+    "is_business_type": false
+  },
+  {
+    "n": 66,
+    "term": "One block deep strip",
+    "definition": "70 meters from the center of the road, unless specified on zoning map and zone boundaries.",
+    "is_business_type": false
+  },
+  {
+    "n": 67,
+    "term": "One lot deep strip",
+    "definition": "30 meters from the center of the road, unless specified on zoning map and zone boundaries.",
+    "is_business_type": false
+  },
+  {
+    "n": 68,
+    "term": "Open Market",
+    "definition": "a public place, government or privately owned where dry and perishable goods are sold. Usually, no refrigeration facilities are available.",
+    "is_business_type": true
+  },
+  {
+    "n": 69,
+    "term": "Open Space",
+    "definition": "an unoccupied space open to the sky on the same lot with the building.",
+    "is_business_type": false
+  },
+  {
+    "n": 70,
+    "term": "Open Storage",
+    "definition": "a roofed structure without sidewalks used for the safekeeping of goods.",
+    "is_business_type": true
+  },
+  {
+    "n": 71,
+    "term": "Open Use",
+    "definition": "any use of a lot that is not conducted within a building.",
+    "is_business_type": false
+  },
+  {
+    "n": 72,
+    "term": "Parking Building",
+    "definition": "a building of several floors used for temporary parking of private vehicles on various floors and provided with the following services, gasoline filling stations, washing, greasing, cleaning and other maintenance services, except vulcanizing of tires and repair of vehicles.",
+    "is_business_type": true
+  },
+  {
+    "n": 73,
+    "term": "Parking Space",
+    "definition": "an off-street space available for the parking of one motor vehicle and having an area of not less than twenty square meter (20 sq. me.) exclusive of passageways and driveways appurtenant thereto and giving access thereto and having direct access to a street or alley.",
+    "is_business_type": false
+  },
+  {
+    "n": 74,
+    "term": "Parking Lot",
+    "definition": "an off-street open area, the principal use of which is for the parking of automobile by the public, whether for compensation or not, or as an accommodation to client or customers.",
+    "is_business_type": true
+  },
+  {
+    "n": 75,
+    "term": "Required Open space",
+    "definition": "any front, side or rear yards, courts usable, open space, or off-street parking space provided about a building in order to meet the requirements of this office.",
+    "is_business_type": false
+  },
+  {
+    "n": 76,
+    "term": "Restaurant",
+    "definition": "any establishment where food are cooked and served.",
+    "is_business_type": true
+  },
+  {
+    "n": 77,
+    "term": "Setback",
+    "definition": "easement from the property line as per the National Building Code.",
+    "is_business_type": false
+  },
+  {
+    "n": 78,
+    "term": "Slum, Blighted Areas",
+    "definition": "an area where the values of real estate tend to deteriorate because of the dilapidated, obsolescent and unsanitary condition of the building within the area.",
+    "is_business_type": false
+  },
+  {
+    "n": 79,
+    "term": "Soda Fountain",
+    "definition": "any place where refreshments and/or drinks are served usually on a counter, where there are stalls lined alongside.",
+    "is_business_type": true
+  },
+  {
+    "n": 80,
+    "term": "Stable",
+    "definition": "any structure designed and intended for the enclosure, shelter or protection of any horse, carabao or other cattle.",
+    "is_business_type": true
+  },
+  {
+    "n": 81,
+    "term": "Stable, private",
+    "definition": "an accessory building in which horses are kept for private use and not for hire, remuneration or sale.",
+    "is_business_type": false
+  },
+  {
+    "n": 82,
+    "term": "Storage house or rooms",
+    "definition": "certain room areas either part of a building or detached accessory building to store limited stock of goods in connection with the nature of retail business or store. The area being restricted according to the nature of zoning uses.",
+    "is_business_type": true
+  },
+  {
+    "n": 83,
+    "term": "Street",
+    "definition": "a public thoroughfare including public roads or highways which afford principal means of access to abutting property.",
+    "is_business_type": false
+  },
+  {
+    "n": 84,
+    "term": "Supper Club",
+    "definition": "any establishment where food and drinks are served to its patrons to the accompaniment of music furnished by the management and where patrons are allowed to dance with partners, whom they bring along. No hostesses are provided for by the management.",
+    "is_business_type": true
+  },
+  {
+    "n": 85,
+    "term": "Tenement Housing",
+    "definition": "refers to the multi-storey buildings composed of single dwelling units designed and erected with public funds to house low-income families at low rentals.",
+    "is_business_type": false
+  },
+  {
+    "n": 86,
+    "term": "Wet/Dry Market",
+    "definition": "a facility (usually semi-enclosed) selling fresh produce meat and poultry as well as basic household wares.",
+    "is_business_type": true
+  },
+  {
+    "n": 87,
+    "term": "Dock",
+    "definition": "an artificial enclosed area of water for ships to be loaded.",
+    "is_business_type": false
+  },
+  {
+    "n": 88,
+    "term": "Wharves",
+    "definition": "a flat form for loading and unloading ships in harbor.",
+    "is_business_type": false
+  },
+  {
+    "n": 89,
+    "term": "Other definition of business establishment not included in this appendix",
+    "definition": "Other definition of business establishment not included in this appendix will be referred to other appropriate national and local laws.",
+    "is_business_type": false
+  }
+]

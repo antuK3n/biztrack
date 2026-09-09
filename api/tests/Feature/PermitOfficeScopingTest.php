@@ -9,8 +9,8 @@ use App\Models\User;
  *
  * `application.view_all` was narrowed to "filings other than my own, in the
  * offices I am routed to". `permit.view_all` was not, and the RBAC seeder hands
- * it to every office role — sanitary, fire, zoning, OBO, CENRO and the market
- * office alike. Measured against the live register, a market administrator
+ * it to every office role — sanitary, fire, zoning, OBO and CENRO alike. Measured against the live
+ * register, an environment officer
  * could list 2 applications and all 4,122 permits, and `GET /permits/{id}/pdf`
  * handed over the owner's name and street address for any of them, which is
  * more than the deliberately anonymous public /verify endpoint gives out.
@@ -31,17 +31,17 @@ function permitOutsideOffice(string $officerEmail): Permit
 }
 
 it('keeps an office reviewer out of permits on filings it never saw', function () {
-    $permit = permitOutsideOffice('market@biztrack.local');
-    $market = authAs('market@biztrack.local');
+    $permit = permitOutsideOffice('cenro@biztrack.local');
+    $cenro = authAs('cenro@biztrack.local');
 
     $listed = collect(
-        test()->withHeaders($market)->getJson('/api/v1/permits?per_page=200')->assertOk()->json('data')
+        test()->withHeaders($cenro)->getJson('/api/v1/permits?per_page=200')->assertOk()->json('data')
     )->pluck('id');
 
     expect($listed)->not->toContain($permit->id, 'the list leaked a permit the office may not read');
 
-    test()->withHeaders($market)->getJson("/api/v1/permits/{$permit->id}")->assertForbidden();
-    test()->withHeaders($market)->get("/api/v1/permits/{$permit->id}/pdf")->assertForbidden();
+    test()->withHeaders($cenro)->getJson("/api/v1/permits/{$permit->id}")->assertForbidden();
+    test()->withHeaders($cenro)->get("/api/v1/permits/{$permit->id}/pdf")->assertForbidden();
 });
 
 it('still lets BPLO and the super admin read the whole register', function () {
@@ -153,7 +153,7 @@ it('lists an office only the clearances it issues', function () {
      * EMPTY list, which satisfies "contains only sanitary permits" while
      * proving nothing whatsoever — the hollow pass this file exists to avoid.
      */
-    $office = collect(['sanitary', 'fire', 'zoning', 'obo', 'cenro', 'market'])
+    $office = collect(['sanitary', 'fire', 'zoning', 'obo', 'cenro'])
         ->map(fn (string $a) => User::where('email', "{$a}@biztrack.local")->firstOrFail())
         ->first(fn (User $u) => Permit::whereHas('permitType', fn ($t) => $t
             ->where('issuing_department_id', $u->department_id))->exists());

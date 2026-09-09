@@ -55,7 +55,6 @@ class ChatbotResponder
         'FSIC' => ['fsic', 'fire', 'fire safety', 'fire clearance', 'fire inspection', 'bumbero', 'bfp', 'sunog'],
         'OCCUPANCY' => ['occupancy', 'occupancy permit', 'building official', 'obo', 'okupansya'],
         'CEC' => ['environmental', 'environment', 'cenro', 'cec', 'ecc', 'kalikasan'],
-        'MARKET' => ['market', 'market clearance', 'palengke', 'stall', 'puwesto'],
         'ZONING' => ['zoning', 'zonal', 'locational', 'location clearance', 'city planning', 'cpdo'],
     ];
 
@@ -86,7 +85,16 @@ class ChatbotResponder
         'capitalization' => 'your capitalization if the business is new',
         'floor_area_sqm' => 'the floor area you occupy',
         'employees' => 'how many people you employ',
-        'stall_count' => 'how many stalls you hold',
+        /*
+         * "in the market you operate", not "you hold". The five rules with
+         * `basis: stall_count` price a BUSINESS permit for the operator who runs
+         * a market — the mayor's-permit market brackets and garbage Schedule J —
+         * not the trader renting one stall inside it. That distinction used to
+         * be blurred by the Market Clearance, which was the stall holder's and
+         * was removed on 6 September 2026; with it gone the only person this
+         * driver can reach is the operator, so it should say so.
+         */
+        'stall_count' => 'how many stalls are in the market you operate',
         'construction_cost' => 'the construction cost of the premises',
         'units' => 'the unit counts you declare (vehicles, signs, machines and the like)',
     ];

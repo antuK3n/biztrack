@@ -47,6 +47,28 @@ class Permit extends Model
      * blank. And the predecessor must belong to the same business, because a
      * cross-business link is worse than no link at all — analytics would read
      * it as one shop's continuous history when it is two shops.
+     *
+     * ── It must be the same PERMIT TYPE, and that was missing ────────────────
+     *
+     * This read `applications.prior_permit_id` — the PRIMARY of the renewal —
+     * and stamped it on every permit the filing issued, checking same-business
+     * and nothing else. That held while a renewal meant one permit. It stopped
+     * holding the moment a renewal could cover several, and on 9 September 2026
+     * a two-permit renewal produced:
+     *
+     *     NEW SANITARY  MCS-2026-000001  prior = SANITARY MCS-2025-000770  ✓
+     *     NEW ZONING    MCZ-2026-000001  prior = SANITARY MCS-2025-000770  ✗
+     *
+     * A zoning certificate declaring it succeeds a sanitary one. Worse than a
+     * missing link and for the same reason as the cross-business case: nothing
+     * downstream can tell it is wrong. RenewalOutcomes reads the chain to
+     * decide whether a renewal was late, so the model was being fitted on a
+     * comparison between two different permits' dates.
+     *
+     * So the predecessor is chosen from the FULL ticked set
+     * (`applications.prior_permits`) by matching permit type, and the primary is
+     * used only when it happens to be the right type. A renewal that covers a
+     * permit the business did not previously hold correctly gets no link.
      */
     protected static function booted(): void
     {
@@ -55,21 +77,33 @@ class Permit extends Model
                 return;
             }
 
-            $prior = Application::query()
-                ->whereKey($permit->application_id)
-                ->value('prior_permit_id');
+            $application = Application::query()
+                ->with('priorPermits:id,business_id,permit_type_id')
+                ->find($permit->application_id);
 
-            if ($prior === null) {
+            if ($application === null) {
                 return;
             }
 
-            $sameBusiness = self::query()
-                ->whereKey($prior)
-                ->where('business_id', $permit->business_id)
-                ->exists();
+            $match = fn (?self $candidate) => $candidate !== null
+                && $candidate->business_id === $permit->business_id
+                && $candidate->permit_type_id === $permit->permit_type_id;
 
-            if ($sameBusiness) {
-                $permit->prior_permit_id = $prior;
+            // The whole ticked set first — it is the complete answer, and the
+            // primary is only its first element.
+            $prior = $application->priorPermits->first($match);
+
+            // Then the primary on its own, for a filing saved before the set
+            // existed. Still type-checked: an unmatched primary is left alone.
+            if ($prior === null && $application->prior_permit_id !== null) {
+                $candidate = self::query()
+                    ->select('id', 'business_id', 'permit_type_id')
+                    ->find($application->prior_permit_id);
+                $prior = $match($candidate) ? $candidate : null;
+            }
+
+            if ($prior !== null) {
+                $permit->prior_permit_id = $prior->id;
             }
         });
     }

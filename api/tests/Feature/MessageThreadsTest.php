@@ -30,6 +30,7 @@ function ownerApplicationId(): int
 
     return test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -60,6 +61,9 @@ function requirementFilingForInbox(): int
 
     $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
         'business_id' => $businessId,
+        // RA 10173 consent is the first gate submit() runs, so a fixture that
+        // means to file has to give it.
+        'data_privacy_consent' => true,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
     ])->assertCreated()->json('data.id');
@@ -132,8 +136,10 @@ it('names the conversation after the applicant for a reviewing officer', functio
  * office is now named on its own.
  */
 it('names the responsible office on a conversation about a routed filing', function () {
-    // Assignments are only created once the fee clears, so a routed filing has
-    // to be borrowed from the register rather than built here.
+    // Borrowed from the register rather than built here: this needs a filing
+    // whose responsible office is settled, and the five clearance offices are
+    // routed one at a time as the applicant opens each permit after paying —
+    // several steps past anything a fixture on this page should be driving.
     $assignment = ApplicationAssignment::with('application.applicant')
         ->whereHas('application.applicant')
         ->firstOrFail();
@@ -200,15 +206,17 @@ it('names the offices an applicant may talk to on each inbox row', function () {
 
     /*
      * This test used to assert exactly ['BPLO'], because an office had to hold
-     * an assignment before it could be written to and a submitted-but-unpaid
-     * filing is routed to nobody. The rule it encoded is no longer true: the
-     * client asked for the owner to choose from the offices the system has, so
-     * every configured office is offered and BPLO is one of them rather than
+     * an assignment before it could be written to and BPLO is the only office
+     * submit() routes — the other five arrive one at a time, as the applicant
+     * opens each clearance after paying. The rule it encoded is no longer true:
+     * the client asked for the owner to choose from the offices the system has,
+     * so every configured office is offered and BPLO is one of them rather than
      * the only one. See addressableOffices().
      *
      * The reasoning that made BPLO special still holds — an applicant whose
-     * filing has not been routed is exactly the applicant with a question — it
-     * simply no longer has to carry every other office's mail to get there.
+     * clearances have not been opened yet is exactly the applicant with a
+     * question — it simply no longer has to carry every other office's mail to
+     * get there.
      */
     $codes = collect($row['offices'])->pluck('code');
 

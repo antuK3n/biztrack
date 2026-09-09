@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import { checkPin, withinMalabon } from '../../lib/malabonGeo'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -11,6 +12,8 @@ import {
 import { Alert } from '../../components/ui/Alert'
 import { DocumentActions } from '../../components/DocumentActions'
 import { TinInput } from '../../components/TinInput'
+import { LandlineInput, MobileNumberInput } from '../../components/ContactNumberInput'
+import { MOBILE_ERROR, canonicalMobile, mobileValid } from '../../lib/phone'
 import { Skeleton } from '../../components/ui/primitives'
 import {
   FieldLabel,
@@ -28,6 +31,7 @@ import {
 } from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
+import { useAuth } from '../../stores/auth'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 /*
  * No clearance or office-form imports here any more, and that absence is the
@@ -51,8 +55,10 @@ import {
   FeeProfileStep,
   buildFeeProfile,
   feeProfileMissing,
+  capitalInvestmentMissing,
   feeProfileToDraft,
   formatAmountInput,
+  padAmountInput,
   type FeeProfileDraft,
 } from './FeeProfileStep'
 import type {
@@ -67,7 +73,45 @@ import type {
   PsicCode,
 } from '../../lib/types'
 
-type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 'review'
+type BasePhase =
+  | 'privacy'
+  /*
+   * Section A of MCG-BPLO-FO-002 v2.0 — renewals only.
+   *
+   * "Do you have any changes or amendments in the previous business
+   * registration?" is the first thing the paper asks after the instructions,
+   * and everything printed after it is conditional on the answer. It is a STEP
+   * and not a block on another step because that conditionality is the whole
+   * point: a No ends the form, and a step that can end the form is not a
+   * paragraph inside one.
+   */
+  | 'amendments'
+  | 'address'
+  | 'business'
+  /*
+   * Section B of the paper — "Business Operation".
+   *
+   * A STEP rather than a heading inside Business Information, because the paper
+   * prints A and B as two sections and the client asked for the wizard to say
+   * so: "Section 3 to be Business Information & Registration, Section 4 to be
+   * Business Operation, Section 5 to be Documentary Requirements."
+   *
+   * A marker was tried first and was not enough. A heading part-way down a step
+   * still reads as a subdivision of that step, and the section map along the top
+   * — which is how an applicant navigates and how they check what is left —
+   * only ever named the STEP. B did not exist in the one place somebody looks to
+   * find it.
+   */
+  | 'operation'
+  | 'documents'
+  | 'fees'
+  | 'review'
+
+/*
+ * `PAY_METHODS` was here — the same three PayPage offers, duplicated because
+ * two screens took a payment. Only one does now. PayPage keeps its own list,
+ * and the duplication that had to be justified no longer exists.
+ */
 /*
  * ── What this wizard is, and why the clearances are not in it ──────────────
  *
@@ -139,14 +183,50 @@ type BasePhase = 'privacy' | 'address' | 'business' | 'documents' | 'fees' | 're
  * comes back wanting them chosen before submission, that is not a reordering
  * of this array: it is the whole flow again, and the argument is in the doc.
  */
-const BASE_PHASES: BasePhase[] = ['privacy', 'address', 'business', 'documents', 'fees', 'review']
+const BASE_PHASES: BasePhase[] = [
+  'privacy',
+  'address',
+  'business',
+  'operation',
+  'documents',
+  'fees',
+  'review',
+]
 
+/**
+ * The amendment form's steps: the base list with its own question in front.
+ *
+ * Only `application_type === 'amendment'` uses this. A renewal ran a variant of
+ * it until 9 September 2026 — see the note on `sequence` below for why it
+ * stopped, and why this stayed.
+ */
+const AMENDMENT_PHASES: BasePhase[] = [
+  'privacy',
+  'amendments',
+  'address',
+  'business',
+  'operation',
+  'documents',
+  'fees',
+  'review',
+]
+
+/*
+ * `business` is captioned with the paper's full section title now — "Business
+ * Information & Registration" — rather than the half of it that fitted while
+ * the step also carried Section B. The two names have to be distinguishable at
+ * a glance in the section map: "Business Information" next to "Business
+ * Operation" is one word apart and easy to misread when you are looking for
+ * where you left off.
+ */
 const BASE_LABELS: Record<BasePhase, string> = {
   privacy: 'Data Privacy Consent',
-  business: 'Business Information',
+  amendments: 'Changes Since Last Permit',
+  business: 'Business Information & Registration',
+  operation: 'Business Operation',
   address: 'Location & Zoning',
   documents: 'Documentary Requirements',
-  fees: 'Business & Tax Profile',
+  fees: 'Fees & Tax Computation',
   review: 'Review & Submit',
 }
 
@@ -187,47 +267,28 @@ const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120',
 /*
  * ── Item 86 · where a pin may be dropped ──────────────────────────────────
  *
- * A bounding box around Malabon City, and deliberately nothing more.
+ * This used to be a bounding box, and the box has been replaced by the real
+ * city polygon — see `lib/malabonGeo.ts` for the check and
+ * `lib/malabonGeo.data.ts` for where the boundaries came from and how they
+ * were verified before being trusted.
  *
- * The system holds no zone polygons and no coastline (the comments on the
- * zoning step and the zoning modal have said so since the step was built), so
- * the only thing that can be checked here honestly is whether the point is
- * anywhere near the city at all. The box is drawn from the coordinates the repo
- * already uses for Malabon — the map's default centre at Malabon City Hall
- * (14.6572, 120.9573), the seeded demo businesses (14.6690/120.9560,
- * 14.6712/120.9605), the analytics heat-map centre (14.669, 120.957) and the
- * analytics history seeder's 14.655–14.685 spread — widened to the city's
- * roughly 6 km × 6 km extent so that a real address near a boundary is not
- * refused. Every coordinate already in the repo falls inside it.
+ * The box was wrong in both directions, which is why it went. A rectangle
+ * around an irregular delta city admits its neighbours, and a tester duly
+ * pinned Caloocan and Valenzuela and was accepted. It was also too tight: it
+ * ran 120.930–120.985 E while Malabon actually reaches 120.921 and 121.001, so
+ * genuine addresses near the east and west edges were being refused.
  *
- * What this does NOT do, and what the applicant is therefore never told it
- * does: it does not prove the pin is inside the city limits (a bounding box
- * around an irregular city necessarily includes slivers of Navotas, Caloocan
- * and Valenzuela), and it does not detect water. Malabon is a river delta —
- * the Tullahan, the Tenejeros-Tanza and the fishpond belt run through it — so
- * "not on water" cannot be answered without a coastline or hydrography layer,
- * which would mean an external service (an OSM/Overpass water query, or a
- * shipped GeoJSON of the city). Neither exists here, and a water check that
- * silently passed everything would be worse than none: it would put the city's
- * name behind a guarantee nobody made. CPDO still evaluates the actual location
- * during processing, which is what the step has always said.
+ * What is checked now is containment in the city outline, and separately
+ * whether the pin agrees with the barangay chosen from the dropdown. What is
+ * still NOT checked, and still never claimed: this does not detect water.
+ * Malabon is a river delta — the Tullahan, the Tenejeros-Tanza and the fishpond
+ * belt run through it — and the boundary set carries no hydrography, so a pin
+ * in the middle of a river is inside the city and passes. Nor does any of this
+ * decide zoning: the ordinance itself cannot be automated into a conformance
+ * answer (`docs/zoning-ordinance/README.md` sets out why), so CPDO evaluates
+ * the actual location during processing, which is what the step has always
+ * said.
  */
-const MALABON_BOUNDS = {
-  minLat: 14.645,
-  maxLat: 14.7,
-  minLng: 120.93,
-  maxLng: 120.985,
-}
-
-/** True when a pin is inside the Malabon bounding box described above. */
-function withinMalabon(latitude: number, longitude: number): boolean {
-  return (
-    latitude >= MALABON_BOUNDS.minLat &&
-    latitude <= MALABON_BOUNDS.maxLat &&
-    longitude >= MALABON_BOUNDS.minLng &&
-    longitude <= MALABON_BOUNDS.maxLng
-  )
-}
 
 /*
  * There is no StepNode type any more, and no `stepKey`.
@@ -304,6 +365,15 @@ interface FormState {
   /* BPLO items A6 and A9 — the main office's landline and website. */
   telephone: string
   website: string
+  /* BPLO items A7 and A8 — the business's own mobile and e-mail. */
+  mobile_number: string
+  email: string
+  /* BPLO items 11 / 12 — the named person on the form. */
+  owner_surname: string
+  owner_given_name: string
+  owner_middle_name: string
+  owner_suffix: string
+  owner_gender: string
   line1: string
   line2: string
   barangay_id: string
@@ -326,6 +396,8 @@ interface FormState {
   president_officer_name: string
   citizenship: string
   capital_participation_filipino: string
+  /** BPLO item B7 — one figure for the whole business, as the paper asks. */
+  capital_investment: string
   /* BPLO item B8 (new form) / B7 (renewal). */
   has_tax_incentives: boolean
 }
@@ -338,6 +410,13 @@ const EMPTY: FormState = {
   tin: '',
   telephone: '',
   website: '',
+  mobile_number: '',
+  email: '',
+  owner_surname: '',
+  owner_given_name: '',
+  owner_middle_name: '',
+  owner_suffix: '',
+  owner_gender: '',
   line1: '',
   line2: '',
   barangay_id: '',
@@ -353,6 +432,7 @@ const EMPTY: FormState = {
   president_officer_name: '',
   citizenship: '',
   capital_participation_filipino: '',
+  capital_investment: '',
   has_tax_incentives: false,
   latitude: null,
   longitude: null,
@@ -367,18 +447,46 @@ const EMPTY: FormState = {
  * for a change of ownership, and only the filing knows which is which.
  */
 interface AmendmentState {
+  /*
+   * ── Section A1 of MCG-BPLO-FO-002 v2.0 ──────────────────────────────────
+   *
+   * "Do you have any changes or amendments in the previous business
+   * registration?" — the first question the renewal form asks, and the one
+   * that decides whether any of the rest of section A is asked at all.
+   *
+   * Three states, not two. `null` is "not answered yet", and it has to be
+   * distinguishable from `false`: a renewal that reaches Confirm without the
+   * question having been put is the same silent-null bug that
+   * `prior_permit_declared_none` exists to prevent one field over. No is a
+   * click, not a default fallen into.
+   *
+   * An AMENDMENT never shows A1 — a filing whose whole purpose is to amend
+   * has already answered Yes by existing — so this stays null there and the
+   * A2 ticks alone carry the answer, exactly as before.
+   */
+  hasChanges: boolean | null
   ownership: boolean
   location: boolean
   nature: boolean
   /** "Others (specify)" — the text is the tick; blank means not ticked. */
   other: string
+  /*
+   * Section A3: "Amendment: From ___ To ___". Blank means not chosen. Only
+   * reachable under a Yes at A1, and the API writes both back to null when A1
+   * is No, so a changed mind cannot leave a conversion behind it.
+   */
+  fromRegistrationType: string
+  toRegistrationType: string
 }
 
 const EMPTY_AMENDMENT: AmendmentState = {
+  hasChanges: null,
   ownership: false,
   location: false,
   nature: false,
   other: '',
+  fromRegistrationType: '',
+  toRegistrationType: '',
 }
 
 /**
@@ -386,10 +494,35 @@ const EMPTY_AMENDMENT: AmendmentState = {
  * "Others (specify)" is not here: it is a text field that ticks itself, so it
  * is rendered separately rather than pretending to be a fourth checkbox.
  */
-const AMENDMENT_KINDS: { key: 'ownership' | 'location' | 'nature'; label: string }[] = [
-  { key: 'ownership', label: 'Ownership' },
-  { key: 'location', label: 'Location' },
-  { key: 'nature', label: 'Nature of Business' },
+const AMENDMENT_KINDS: {
+  key: 'ownership' | 'location' | 'nature'
+  label: string
+  /**
+   * Which section of the form this tick opens, in the applicant's words.
+   *
+   * On a renewal the A2 boxes decide how long the rest of the form is (see
+   * `sequence`), so the box has to say what it costs to tick it. Without this
+   * the applicant discovers the consequence one step later, which is the
+   * wrong order to learn it in.
+   */
+  opens: string
+}[] = [
+  {
+    key: 'ownership',
+    label: 'Ownership',
+    opens: 'Opens Business Information — registration, TIN, owner details.',
+  },
+  {
+    key: 'location',
+    // The paper's own wording: "Location or Address of Business".
+    label: 'Location or Address of Business',
+    opens: 'Opens Location & Zoning — the address and the map pin.',
+  },
+  {
+    key: 'nature',
+    label: 'Nature of Business',
+    opens: 'Opens Business Information — your lines of business and PSIC codes.',
+  },
 ]
 
 /* ── Economic Organization (BPLO item B6) ───────────────────────────────── */
@@ -648,6 +781,23 @@ function websiteValid(raw: string): boolean {
   if (trimmed.includes('@') || /\s/.test(trimmed)) return false
 
   return /^(https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(trimmed)
+}
+
+/**
+ * BPLO item A8 — the BUSINESS's own e-mail, which became required on
+ * 9 September 2026.
+ *
+ * As lenient as `websiteValid` beside it and for the same reason: the mistake
+ * this field attracts is a wrong KIND of answer — a phone number, a name, a
+ * sentence — not a subtly malformed address. Anything with one @ between two
+ * non-empty parts, a dot in the domain and no whitespace is somebody's real
+ * mailbox as far as this form is concerned, and refusing a valid unusual
+ * address is a worse failure than accepting a typo an officer will notice.
+ */
+function emailValid(raw: string): boolean {
+  const trimmed = raw.trim()
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)
 }
 
 /** Strip the display separators before an amount goes to the API. */
@@ -1240,6 +1390,22 @@ function LinesStep({
  * filing against. Nothing here is written until Confirm, which is the whole
  * point of holding it in one object rather than editing the wizard as we go.
  */
+/**
+ * A paper permit attached in the identify dialog, standing in for a form the
+ * applicant did not tick.
+ *
+ * The permit type is what makes the file readable to an office: uploaded with
+ * it, the API names the attachment after that clearance (`HELD_SANITARY` and
+ * friends) instead of filing it as one more untitled PDF in Documentary
+ * Requirements. Without it, the sanitary officer gets a document called
+ * "scan_0012.pdf" and no reason to believe it is theirs.
+ */
+interface PaperCopy {
+  permitTypeId: number
+  permitTypeName: string
+  file: File
+}
+
 interface FilingIdentity {
   businessId: number
   /**
@@ -1248,6 +1414,30 @@ interface FilingIdentity {
    * BizTrack permit to point at, and in year one that is the common case.
    */
   permitId: number | null
+  /**
+   * Every permit this filing covers, primary first.
+   *
+   * `permitId` above is the primary and still keys the renewal chain; this is
+   * the whole answer. A shop renewing its Mayor's Permit, Sanitary Permit and
+   * FSIC makes one visit to the counter and files once, and a dialog that
+   * could only take one of the three left the other two unrecorded — the
+   * offices then had no filing to attach their review to.
+   *
+   * Empty when the escape is ticked, which is the same state `permitId: null`
+   * describes; the two never disagree because one is derived from the other.
+   */
+  permitIds: number[]
+  /**
+   * Paper copies attached in the dialog for permit types NOT ticked above.
+   *
+   * Held as files rather than uploaded on the spot because the dialog runs
+   * BEFORE the draft exists — on entry there is no application id to attach
+   * anything to. The wizard flushes these to the draft the moment it has one,
+   * through the same `documents.upload(..., permitTypeId)` path the LGU
+   * Clearances stage uses for a certificate the applicant already holds, so
+   * the reviewing office reads them off the list it already reads.
+   */
+  paperCopies: PaperCopy[]
   /**
    * Which kind of `null` this is: the applicant having TICKED "no BizTrack
    * permit", or the question simply never having been put.
@@ -1297,6 +1487,7 @@ function IdentifyFilingModal({
   applicationType,
   ownedBusinesses,
   businessesLoading,
+  permitTypes,
   initial,
   mode,
   confirming,
@@ -1307,9 +1498,16 @@ function IdentifyFilingModal({
   applicationType: 'renewal' | 'amendment'
   ownedBusinesses: Business[]
   businessesLoading: boolean
+  /**
+   * The reference list, only so an untick`ed permit's upload can carry the
+   * right `permit_type_id`. A permit embeds its type as `{ code, name }`; the
+   * id lives here.
+   */
+  permitTypes: { id: number; code: string; name: string }[]
   initial: {
     businessId: number | null
     permitId: number | null
+    permitIds: number[]
     declaredNone: boolean
     amendment: AmendmentState
   }
@@ -1326,8 +1524,23 @@ function IdentifyFilingModal({
 }) {
   const verb = applicationType === 'renewal' ? 'renewing' : 'amending'
   const [businessId, setBusinessId] = useState<number | null>(initial.businessId)
-  const [permitId, setPermitId] = useState<number | null>(initial.permitId)
+  /*
+   * The ticked permits, primary first. Order is the answer's own: the first
+   * tick is the permit the renewal chain keys on, so re-ticking to change your
+   * mind about which is primary is just unticking and ticking again.
+   */
+  const [permitIds, setPermitIds] = useState<number[]>(
+    initial.permitIds.length > 0
+      ? initial.permitIds
+      : initial.permitId !== null
+        ? [initial.permitId]
+        : [],
+  )
   const [declaredNone, setDeclaredNone] = useState(initial.declaredNone)
+  /** Paper copies attached for permit types not ticked, keyed by type id. */
+  const [paperCopies, setPaperCopies] = useState<Record<number, PaperCopy>>({})
+  /** Per-row rejection message from `fileRejection` — too big, wrong type. */
+  const [uploadErrors, setUploadErrors] = useState<Record<number, string>>({})
   const [amendment, setAmendment] = useState<AmendmentState>(initial.amendment)
   const [prefill, setPrefill] = useState<PrefillResult | null>(null)
   const [loadingPermits, setLoadingPermits] = useState(false)
@@ -1369,10 +1582,8 @@ function IdentifyFilingModal({
          * when the list still contains it is what makes reopening this dialog
          * to change something else non-destructive.
          */
-        setPermitId((current) =>
-          current !== null && (result.renewable_permits ?? []).some((p) => p.id === current)
-            ? current
-            : null,
+        setPermitIds((current) =>
+          current.filter((id) => (result.renewable_permits ?? []).some((p) => p.id === id)),
         )
       })
       .catch((err) => {
@@ -1389,6 +1600,50 @@ function IdentifyFilingModal({
   const permits = prefill?.renewable_permits ?? []
   const amendmentChosen =
     amendment.ownership || amendment.location || amendment.nature || amendment.other.trim() !== ''
+
+  /*
+   * ── Which forms are covered, and which need a file instead ──────────────
+   *
+   * A permit TYPE is covered when one of this business's permits of that type
+   * is ticked. Anything left over is a form the applicant is renewing without
+   * a BizTrack record to renew from — held on paper by the old counter
+   * process, which in year one is the ordinary case rather than the exception.
+   *
+   * Keyed on the type and not on the permit because that is the question being
+   * asked. Two expired Sanitary Permits from two different years are one
+   * sanitary form; making the applicant upload a copy per row would ask for
+   * the same certificate twice.
+   */
+  const coveredCodes = new Set(
+    permits.filter((p) => permitIds.includes(p.id)).map((p) => p.permit_type?.code),
+  )
+  /*
+   * Matched through the reference list rather than off the permit itself: a
+   * permit embeds `permit_type` as `{ code, name }` with no id, and the upload
+   * needs the id. The code is the stable join — it is what the seeder, the fee
+   * rules and the clearance endpoints all key on.
+   *
+   * A type the reference list does not know is dropped rather than offered
+   * with a guessed id, because an upload carrying the wrong permit type files
+   * the certificate under another office.
+   */
+  const uncoveredTypes = Array.from(
+    permits
+      .reduce((acc, p) => {
+        const t = p.permit_type
+        if (!t || coveredCodes.has(t.code) || acc.has(t.code)) return acc
+        const known = permitTypes.find((pt) => pt.code === t.code)
+        if (known) acc.set(t.code, { id: known.id, name: known.name })
+        return acc
+      }, new Map<string, { id: number; name: string }>())
+      .values(),
+  )
+  const coveredTypeIds = new Set(
+    permits
+      .filter((p) => permitIds.includes(p.id))
+      .map((p) => permitTypes.find((pt) => pt.code === p.permit_type?.code)?.id)
+      .filter((id): id is number => typeof id === 'number'),
+  )
 
   /*
    * Why Confirm will not get you out of here yet — in the order the questions
@@ -1408,7 +1663,7 @@ function IdentifyFilingModal({
    * register are exactly that. Ticking the escape is still one click; the
    * difference is that it is now a click.
    */
-  const answeredPriorPermit = permitId !== null || declaredNone
+  const answeredPriorPermit = permitIds.length > 0 || declaredNone
   const blocked: { reason: string; focus: () => void } | null =
     businessId === null
       ? {
@@ -1421,11 +1676,18 @@ function IdentifyFilingModal({
           ? {
               reason:
                 permits.length > 0
-                  ? `Choose which permit you are ${verb} — or say this business has none issued through BizTrack.`
+                  ? `Tick every permit you are ${verb} — or say this business has none issued through BizTrack.`
                   : `Confirm this business has no permit issued through BizTrack, so we know what you are ${verb}.`,
-              focus: () => permitsRef.current?.querySelector('button')?.focus(),
+              focus: () => permitsRef.current?.querySelector('input')?.focus(),
             }
-          : applicationType === 'amendment' && !amendmentChosen
+          : /*
+             * Section A is not asked here any more — it is the wizard's own
+             * step, after Data Privacy, because a No there ends the form and a
+             * question that can end the form does not belong in the dialog
+             * that opens it. This dialog asks one thing: which permits, or a
+             * paper copy instead.
+             */
+            applicationType === 'amendment' && !amendmentChosen
             ? {
                 reason:
                   'Tick at least one thing you are amending. An amendment that amends nothing is not a filing the BPLO can act on.',
@@ -1443,12 +1705,26 @@ function IdentifyFilingModal({
       return
     }
     if (businessId === null || !prefill) return
-    onConfirm({ businessId, permitId, declaredNone: permitId === null && declaredNone, amendment, prefill })
+    onConfirm({
+      businessId,
+      // Primary is the first tick; the set is the whole answer.
+      permitId: permitIds[0] ?? null,
+      permitIds,
+      // Only the copies for types still untick`ed at Confirm. Attaching a file
+      // and then ticking the permit itself is a change of mind, not two
+      // answers, so the stale file does not ride along.
+      paperCopies: Object.values(paperCopies).filter((c) => !coveredTypeIds.has(c.permitTypeId)),
+      declaredNone: permitIds.length === 0 && declaredNone,
+      amendment,
+      prefill,
+    })
   }
 
   return (
     <ProtoModal
-      title={applicationType === 'renewal' ? 'WHICH PERMIT ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'}
+      title={
+        applicationType === 'renewal' ? 'WHICH PERMITS ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'
+      }
       wide
       cancelLabel={mode === 'entry' ? 'Not now' : 'Keep what I had'}
       confirmLabel={confirming ? 'Opening…' : 'Continue'}
@@ -1458,7 +1734,7 @@ function IdentifyFilingModal({
     >
       <p className="text-sm leading-relaxed text-ink-secondary">
         {applicationType === 'renewal'
-          ? 'A business can hold several permits with different expiry dates, so a renewal has to name the one it is for. We fill the rest of the form in from it.'
+          ? 'Two ways to do this: tick the permits you are renewing, or upload a permit you already hold outside BizTrack. Either way we fill the rest of the form in from it.'
           : 'Say which record you are amending and what about it is changing. We fill the rest of the form in from it.'}
       </p>
 
@@ -1502,7 +1778,10 @@ function IdentifyFilingModal({
       {/* ── 2. Which permit ──────────────────────────────────────────────── */}
       {businessId !== null && (
         <div className="mt-5">
-          <FieldLabel required>Which permit are you {verb}?</FieldLabel>
+          <FieldLabel required>Which permits are you {verb}?</FieldLabel>
+          <p className="mb-2 text-xs text-ink-secondary">
+            Tick every permit this filing covers. You can choose more than one.
+          </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
           ) : loadError ? (
@@ -1513,12 +1792,11 @@ function IdentifyFilingModal({
           ) : (
             <ul
               ref={permitsRef}
-              role="radiogroup"
-              aria-label={`Which permit are you ${verb}?`}
+              aria-label={`Which permits are you ${verb}?`}
               className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
             >
               {permits.map((p) => {
-                const chosen = permitId === p.id
+                const chosen = permitIds.includes(p.id)
                 const days = p.days_until_expiry
                 // Never colour alone: the word says expired or not.
                 const state =
@@ -1532,27 +1810,36 @@ function IdentifyFilingModal({
                 return (
                   // Presentational so the radios are the radiogroup's own
                   // children, not list items wrapping them.
-                  <li key={p.id} role="presentation">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={chosen}
-                      onClick={() => {
-                        setPermitId(chosen ? null : p.id)
-                        // Naming a permit and declaring there is none are
-                        // contradictory, so one unsets the other rather than
-                        // both being held at once. The server resolves it the
-                        // same way, but the radios have to LOOK exclusive.
-                        setDeclaredNone(false)
-                      }}
-                      className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+                  <li key={p.id}>
+                    <label
+                      className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
                         chosen ? 'bg-input' : 'hover:bg-royal-tint'
                       }`}
                     >
-                      <span
-                        className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                          chosen ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
+                      <input
+                        type="checkbox"
+                        checked={chosen}
+                        onChange={() => {
+                          /*
+                           * Appended, never inserted: the first tick is the
+                           * primary and the renewal chain is keyed on it, so
+                           * the order the applicant ticked in IS the answer.
+                           * Untick-and-retick is how you change which is
+                           * primary, which is the only honest way to say it
+                           * without a second control asking the same thing.
+                           */
+                          setPermitIds((current) =>
+                            current.includes(p.id)
+                              ? current.filter((id) => id !== p.id)
+                              : [...current, p.id],
+                          )
+                          // Naming a permit and declaring there is none are
+                          // contradictory, so one unsets the other rather than
+                          // both being held at once. The server resolves it the
+                          // same way, but the boxes have to LOOK consistent.
+                          setDeclaredNone(false)
+                        }}
+                        className="h-4 w-4 shrink-0 accent-royal"
                       />
                       {/*
                        * Number, type and validity dates together, because one
@@ -1573,7 +1860,7 @@ function IdentifyFilingModal({
                           {state.label}
                         </span>
                       )}
-                    </button>
+                    </label>
                   </li>
                 )
               })}
@@ -1599,23 +1886,23 @@ function IdentifyFilingModal({
                * because it is the same question — and one click is not a
                * burden, it is the difference between an answer and a gap.
                */}
-              <li role="presentation">
-                <button
-                  type="button"
-                  role="radio"
-                  aria-checked={declaredNone}
-                  onClick={() => {
-                    setDeclaredNone((d) => !d)
-                    setPermitId(null)
-                  }}
-                  className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${
+              <li>
+                <label
+                  className={`flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors ${
                     declaredNone ? 'bg-input' : 'hover:bg-royal-tint'
                   }`}
                 >
-                  <span
-                    className={`h-4 w-4 shrink-0 rounded-full border-2 ${
-                      declaredNone ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                    }`}
+                  <input
+                    type="checkbox"
+                    checked={declaredNone}
+                    onChange={() => {
+                      setDeclaredNone((d) => !d)
+                      // Still exclusive with the list above, even though the
+                      // list is no longer exclusive within itself: "none of
+                      // these" and "these three" cannot both be true.
+                      setPermitIds([])
+                    }}
+                    className="h-4 w-4 shrink-0 accent-royal"
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold text-ink">
@@ -1628,12 +1915,129 @@ function IdentifyFilingModal({
                       from there.
                     </span>
                   </span>
-                </button>
+                </label>
               </li>
             </ul>
           )}
+
+          {/*
+           * ── The other half of the question: a file where there is no tick ──
+           *
+           * Every permit type this business holds that is NOT ticked above is a
+           * form being renewed without a BizTrack record behind it. The counter
+           * asks for the paper copy in that case, so this does too — beside the
+           * tick it stands in for, rather than three steps later under
+           * Documentary Requirements where the connection to this question is
+           * lost.
+           *
+           * Optional on purpose. A permit left unticked because the applicant
+           * is simply not renewing it this year is an ordinary answer, and
+           * demanding a file for it would make "no" impossible to say. What
+           * this offers is a place to put the copy, not a gate.
+           */}
+          {!loadingPermits && uncoveredTypes.length > 0 && (
+            <div className="mt-4 rounded-lg border border-input-border bg-royal-tint/40 p-4">
+              <p className="text-[13px] font-semibold text-ink">
+                Not renewing one through BizTrack? Attach the paper copy.
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                {uncoveredTypes.length === 1
+                  ? 'One permit type is not ticked above.'
+                  : `${uncoveredTypes.length} permit types are not ticked above.`}{' '}
+                Attaching the certificate you hold lets that office review it with this filing.
+              </p>
+              <ul className="mt-3 space-y-2">
+                {uncoveredTypes.map((t) => {
+                  const held = paperCopies[t.id]
+                  const rejected = uploadErrors[t.id]
+                  return (
+                    <li
+                      key={t.id}
+                      className="flex flex-wrap items-center gap-3 rounded-lg border border-input-border bg-white px-4 py-2.5"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-medium text-ink">{t.name}</span>
+                        {held ? (
+                          <span className="block truncate text-xs text-ink-secondary">
+                            {held.file.name} · {formatBytes(held.file.size)}
+                          </span>
+                        ) : rejected ? (
+                          <span role="alert" className="block text-xs font-medium text-s-red">
+                            {rejected}
+                          </span>
+                        ) : (
+                          <span className="block text-xs text-ink-secondary">
+                            No copy attached — optional
+                          </span>
+                        )}
+                      </span>
+                      {/*
+                       * A label wrapping a hidden input, not a button that
+                       * clicks one: the label IS the control, so it is
+                       * reachable and announced without the click-forwarding
+                       * that leaves a screen reader with a button that says
+                       * nothing about what it opens.
+                       */}
+                      <label className="shrink-0 cursor-pointer rounded-lg border border-royal px-3 py-1.5 text-xs font-semibold text-royal transition-colors hover:bg-royal-tint">
+                        {held ? 'Replace' : 'Upload'}
+                        <span className="sr-only"> paper copy of {t.name}</span>
+                        <input
+                          type="file"
+                          accept={ACCEPT_ATTR}
+                          className="sr-only"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            // Let the same file be picked twice — after a
+                            // rejection the input would otherwise be inert.
+                            e.target.value = ''
+                            if (!file) return
+                            const why = fileRejection(file)
+                            if (why) {
+                              setUploadErrors((m) => ({ ...m, [t.id]: why }))
+                              setPaperCopies((m) => {
+                                const next = { ...m }
+                                delete next[t.id]
+                                return next
+                              })
+                              return
+                            }
+                            setUploadErrors((m) => {
+                              const next = { ...m }
+                              delete next[t.id]
+                              return next
+                            })
+                            setPaperCopies((m) => ({
+                              ...m,
+                              [t.id]: { permitTypeId: t.id, permitTypeName: t.name, file },
+                            }))
+                          }}
+                        />
+                      </label>
+                      {held && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPaperCopies((m) => {
+                              const next = { ...m }
+                              delete next[t.id]
+                              return next
+                            })
+                          }
+                          className="shrink-0 text-xs font-semibold text-ink-secondary underline"
+                        >
+                          Remove
+                          <span className="sr-only"> paper copy of {t.name}</span>
+                        </button>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
+
 
       {/*
        * ── 3. What is being amended (items 82/84) ───────────────────────────
@@ -1689,6 +2093,69 @@ function IdentifyFilingModal({
               />
             </label>
           </div>
+
+          {/*
+           * ── A3 · "Amendment: From ___ To ___" ──────────────────────────
+           *
+           * Shown under Ownership because that is the tick it belongs to: the
+           * paper's From/To row lists the four legal structures, and a change
+           * of structure IS a change of ownership. Ticking Location does not
+           * make a sole proprietorship into a corporation, so asking there
+           * would be asking a question with no answer.
+           *
+           * Not required even when Ownership is ticked. Ownership also covers
+           * a new co-owner or a transferred proprietorship, neither of which
+           * changes the structure — forcing a From/To would make those
+           * applicants invent a conversion that did not happen.
+           */}
+          {amendment.ownership && (
+            <div className="mt-3 rounded-lg border border-input-border bg-white px-4 py-3">
+              <p className="text-[13px] font-semibold text-ink">
+                Did the business structure change?
+              </p>
+              <p className="mt-1 text-xs text-ink-secondary">
+                Only if it converted from one legal form to another. Leave both blank otherwise.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {(
+                  [
+                    { key: 'fromRegistrationType' as const, label: 'From' },
+                    { key: 'toRegistrationType' as const, label: 'To' },
+                  ]
+                ).map((side) => (
+                  <label key={side.key} className="block">
+                    <FieldLabel>{side.label}</FieldLabel>
+                    <select
+                      className={inputCls}
+                      value={amendment[side.key]}
+                      onChange={(e) =>
+                        setAmendment((a) => ({ ...a, [side.key]: e.target.value }))
+                      }
+                    >
+                      <option value="">Not changing</option>
+                      {REGISTRATION_TYPES.map((rt) => (
+                        <option key={rt.value} value={rt.value}>
+                          {rt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {/*
+               * A conversion to the structure it already is is not a
+               * conversion. Said rather than blocked: it is a slip worth
+               * naming, not a filing worth refusing, and the BPLO can read
+               * "from corporation to corporation" for the typo it is.
+               */}
+              {amendment.fromRegistrationType !== '' &&
+                amendment.fromRegistrationType === amendment.toRegistrationType && (
+                  <p className="mt-2 text-xs font-medium text-ink">
+                    From and To are the same structure — check which one changed.
+                  </p>
+                )}
+            </div>
+          )}
         </fieldset>
       )}
 
@@ -1746,6 +2213,13 @@ export function ApplyWizard() {
    */
   const [visited, setVisited] = useState<string[]>([BASE_PHASES[0]])
   const markVisited = (key: string) => setVisited((v) => (v.includes(key) ? v : [...v, key]))
+  /*
+   * Section A's two fieldsets, so a blocked Next can put the cursor on the
+   * question it is complaining about rather than at the top of the step.
+   * Separate refs because both can be on screen at once under a Yes.
+   */
+  const a1Ref = useRef<HTMLFieldSetElement | null>(null)
+  const amendmentRef = useRef<HTMLFieldSetElement | null>(null)
 
   /*
    * ── No clearance state here, deliberately ─────────────────────────────
@@ -1765,6 +2239,24 @@ export function ApplyWizard() {
    * office-form version counter, and the sheet's own save branch.
    */
   const [form, setForm] = useState<FormState>(EMPTY)
+
+  /**
+   * The signed-in account, used to prefill the paper's contact and name fields.
+   *
+   * Items A7, A8 and 11 all ask for something the applicant already gave at
+   * sign-up: `users` holds mobile_number, email, first_name, middle_name,
+   * last_name, SUFFIX and GENDER. The fields were missing from this form
+   * entirely, and the officer's sheet quietly showed the account's values in
+   * their place — which is a different fact, and wrong the moment a corporation
+   * files with a staff member's login.
+   *
+   * So the fields exist now, in the places the paper prints them, filled in
+   * ahead. Editable, because the business's contact number is not necessarily
+   * the filer's, and stored on the BUSINESS, so correcting one never edits a
+   * profile.
+   */
+  const account = useAuth((s) => s.user)
+  const accountPrefilledRef = useRef(false)
   /*
    * The applicant's own name for this filing. Blank is normal and means "call
    * it by the business name", which is what the header and the Drafts page do.
@@ -1833,6 +2325,19 @@ export function ApplyWizard() {
   // Renewal/amendment prefill (v2): reuse an existing business + link prior permit.
   const [prefillBusinessId, setPrefillBusinessId] = useState<number | null>(null)
   const [priorPermitId, setPriorPermitId] = useState<number | null>(null)
+  /*
+   * Every permit the filing covers, primary first. `priorPermitId` above stays
+   * the primary because the renewal chain, analytics and the BPLO form header
+   * all read it; this is the rest of the answer, and the two are written
+   * together so they can never drift.
+   */
+  const [priorPermitIds, setPriorPermitIds] = useState<number[]>([])
+  /*
+   * Paper copies chosen in the identify dialog, waiting for a draft to attach
+   * them to. The dialog runs before the application exists, so these sit here
+   * until `ensureDraft` has an id and `flushPaperCopies` can upload them.
+   */
+  const [pendingPaperCopies, setPendingPaperCopies] = useState<PaperCopy[]>([])
   /*
    * The other half of the prior-permit answer: whether a null `priorPermitId`
    * is the applicant saying "this business has no BizTrack permit" or the
@@ -1905,12 +2410,36 @@ export function ApplyWizard() {
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
   // Keyed by document type; the document id is what a removal needs.
-  const [uploaded, setUploaded] = useState<Record<number, UploadedFile>>({})
+  /*
+   * Files per documentary requirement, keyed by document-type id.
+   *
+   * A LIST per requirement, not one file. It was `Record<number, UploadedFile>`
+   * and every upload replaced the last, on the reasoning that "the officer never
+   * sees two files for one line" — which reads as tidiness and cost applicants
+   * real documents. A lease runs to several pages, a barangay clearance arrives
+   * front-and-back, a sketch plan comes as two scans; there was no way to attach
+   * the second without silently deleting the first, and the screen said "click
+   * to replace" rather than warning that it would.
+   *
+   * "Other Requirements" already worked this way (`otherDocs`), which is what
+   * made the restriction look deliberate rather than incidental. It was neither
+   * enforced nor needed anywhere else: `application_documents` has no unique
+   * index on `(application_id, document_type_id)`, `DocumentController::store`
+   * refuses nothing, and the officer's review sheet maps `app.documents` flat —
+   * so a second file for one requirement already rendered correctly everywhere
+   * that reads one. The whole constraint lived in this map's type.
+   */
+  const [uploaded, setUploaded] = useState<Record<number, UploadedFile[]>>({})
   // "Other Requirements" allows multiple files (repeatable uploads).
   const [otherDocs, setOtherDocs] = useState<UploadedFile[]>([])
   const [uploadingType, setUploadingType] = useState<number | null>(null)
   const [removingDoc, setRemovingDoc] = useState<number | null>(null)
   const [tracking, setTracking] = useState<string | null>(null)
+  /*
+   * `payMethod`, `receipt` and `payError` were here and are gone with the
+   * payment itself. The wizard takes no money: BPLO approves the form, and the
+   * Tax Order of Payment is settled on PayPage afterwards.
+   */
 
   /*
    * Item 59 — "I already hold this clearance, here is the copy" — moved out
@@ -2023,6 +2552,13 @@ export function ApplyWizard() {
         tin: b.tin ?? '',
         telephone: b.address.telephone ?? '',
         website: b.address.website ?? '',
+        mobile_number: b.address.mobile_number || account?.mobile_number || '',
+        email: b.address.email || account?.email || '',
+        owner_surname: b.owner?.surname || account?.last_name || '',
+        owner_given_name: b.owner?.given_name || account?.first_name || '',
+        owner_middle_name: b.owner?.middle_name || account?.middle_name || '',
+        owner_suffix: b.owner?.suffix || account?.suffix || '',
+        owner_gender: b.owner?.gender || account?.gender || '',
         line1: b.address.line1 ?? '',
         line2: b.address.line2 ?? '',
         barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
@@ -2038,6 +2574,7 @@ export function ApplyWizard() {
         president_officer_name: b.president_officer_name ?? '',
         citizenship: b.citizenship ?? '',
         capital_participation_filipino: percentToInput(b.capital_participation_filipino),
+        capital_investment: formatAmountInput(String(b.capital_investment ?? '')),
         has_tax_incentives: b.has_tax_incentives ?? false,
         latitude: b.address.latitude ?? null,
         longitude: b.address.longitude ?? null,
@@ -2148,11 +2685,18 @@ export function ApplyWizard() {
         }
       }
       setPriorPermitId(identity.permitId)
+      setPriorPermitIds(identity.permitIds)
       // Written after `selectBusinessForReuse`, which clears both halves: the
       // dialog's answer is about the business it just settled on, so it has to
       // land last or the clear would eat it.
       setPriorPermitDeclaredNone(identity.declaredNone)
       setAmendment(identity.amendment)
+      /*
+       * Queued, not uploaded. There may be no draft yet — on entry there
+       * certainly is not — and a file uploaded to nothing is a file lost. The
+       * flush happens where an id is guaranteed, in `saveDraft`.
+       */
+      setPendingPaperCopies(identity.paperCopies)
       setIdentify(null)
     } finally {
       setConfirmingIdentity(false)
@@ -2401,22 +2945,104 @@ export function ApplyWizard() {
    * `jumpBlocked`, Part n of N) is written against "the running order" and
    * should not have to care that the running order is currently constant.
    */
-  const sequence: BasePhase[] = BASE_PHASES
+  /*
+   * ── The running order, which a renewal computes rather than inherits ─────
+   *
+   * ── A renewal runs the same steps as a new application ─────────────────
+   *
+   * It did not, and the shape it had was built around one question. MCG-BPLO-FO-002
+   * section A1 — "any changes or amendments in the previous business
+   * registration?" — used to decide how much of the rest of the form existed:
+   * unanswered stopped the wizard dead, No skipped to Review, and Yes opened
+   * only the sections matching what was ticked in A2.
+   *
+   * The client removed that question on 9 September 2026: *"REMOVE THE
+   * AMENDMENT PART on the BPLO renewal part. We don't need that anymore."*
+   * Their model of a renewal is *"ALMOST the same as the application process.
+   * With the only difference is that you will choose what to renew at the
+   * start"* — the applicant walks the same steps and edits whatever has changed
+   * as they go, rather than declaring up front what they intend to change and
+   * being shown a form cut down to match.
+   *
+   * That is the better shape for a reason the conditional sequence could not
+   * fix: A2's four ticks were a lossy index of the form. A renewal that changed
+   * its telephone number, its employee count or its capitalisation ticked
+   * nothing — none of the four names those — and was then shown a wizard with
+   * no step it could change them on. The applicant's only route was to tick
+   * "Others (specify)" and describe a phone number in prose.
+   *
+   * So the sequence is now `BASE_PHASES` for every filing type, and the one
+   * renewal-specific question — which permits — is asked before the wizard
+   * opens, in the entry dialog, where it always was.
+   *
+   * The `amendments` phase itself is NOT deleted: `application_type ===
+   * 'amendment'` is a separate filing type the client is dealing with
+   * separately, and it still asks A1/A2/A3. Deleting the step to tidy up the
+   * renewal would take the amendment form's only question with it.
+   */
+  const sequence: BasePhase[] = useMemo(
+    () => (applicationType === 'amendment' ? AMENDMENT_PHASES : BASE_PHASES),
+    [applicationType],
+  )
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
   const phase: BasePhase = sequence[stepIndex]
   const isLast = stepIndex === sequence.length - 1
 
-  /* Attach the implicit Mayor's / Business Permit as soon as reference data lands. */
+  /*
+   * ── What this filing is FOR ─────────────────────────────────────────────
+   *
+   * On a NEW application or an amendment: the Mayor's / Business Permit,
+   * implicitly and always. It is what the whole filing is for, the wizard never
+   * offers it as a choice, and the API attaches the five required clearances
+   * alongside it at submission.
+   *
+   * On a RENEWAL: exactly the permits the applicant ticked in the entry dialog,
+   * and NOTHING else — the Mayor's Permit included only if they ticked it.
+   *
+   * The client's rule, 9 September 2026: the six permits expire on six
+   * different dates, so a renewal is of whichever ones are actually due. A shop
+   * whose Sanitary Permit runs out in September and whose FSIC runs to November
+   * renews the one. Forcing the business permit on here would put a renewal of
+   * it — and its fee — onto a filing that never asked for one, which is the
+   * same defect the API had until `attachRequiredPermitTypes` learned to leave
+   * a renewal alone: measured before the fix, a two-permit renewal came out of
+   * submit carrying six.
+   *
+   * Derived from `priorPermitIds` rather than accumulated, so unticking a
+   * permit in the dialog removes it here too. A renewal that names no permit at
+   * all is the paper-permit escape ("this business has no BizTrack permit"),
+   * and that one DOES take the business permit: there is nothing in the
+   * register to renew, so what they are filing is a business permit renewal
+   * against a certificate we never issued.
+   */
   useEffect(() => {
     if (businessTypeId === null) return
+
+    if (applicationType !== 'renewal') {
+      setForm((f) =>
+        f.permit_type_ids.includes(businessTypeId)
+          ? f
+          : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+      )
+
+      return
+    }
+
+    const ticked = priorPermitIds
+      .map((id) => renewablePermits.find((p) => p.id === id)?.permit_type?.code)
+      .filter((code): code is string => typeof code === 'string')
+    const ids = permitTypes.filter((pt) => ticked.includes(pt.code)).map((pt) => pt.id)
+    const next = ids.length > 0 ? ids : [businessTypeId]
+
     setForm((f) =>
-      f.permit_type_ids.includes(businessTypeId)
+      f.permit_type_ids.length === next.length &&
+      next.every((id) => f.permit_type_ids.includes(id))
         ? f
-        : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+        : { ...f, permit_type_ids: next },
     )
-  }, [businessTypeId])
+  }, [businessTypeId, applicationType, priorPermitIds, renewablePermits, permitTypes])
 
   const feeLines = useMemo(
     () =>
@@ -2543,6 +3169,23 @@ export function ApplyWizard() {
           }
           if (!form.name.trim()) missing.push('Business Name')
           /*
+           * Items 11/12 — the named person the filing is in.
+           *
+           * Prefilled from the signed-in account, so for a sole proprietor
+           * these are already answered before the step is opened and the check
+           * costs them nothing. It bites on the case it is for: a corporation
+           * naming somebody other than the account holder, who clears the boxes
+           * and does not refill them.
+           *
+           * Middle name and suffix stay optional — plenty of people have
+           * neither, and a form that insists otherwise is asking them to invent
+           * one. Gender is required because CENRO's paper prints a SEX box and
+           * nothing else on the filing answers it.
+           */
+          if (!form.owner_surname.trim()) missing.push('Owner’s Family Name')
+          if (!form.owner_given_name.trim()) missing.push('Owner’s First Name')
+          if (!form.owner_gender.trim()) missing.push('Owner’s Sex')
+          /*
            * Item 94 — the structure is listed FIRST, and the number is named
            * after the agency that structure implies.
            *
@@ -2568,31 +3211,119 @@ export function ApplyWizard() {
           if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
           else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
           /*
-           * The fields transcribed from the paper BPLO form are all optional —
-           * none of the three paper forms marks any field required, and every
-           * asterisk in this wizard is our own judgement. So nothing below is
-           * listed for being blank; they are listed only when what is in them
-           * cannot be stored, on the same pattern as the emergency contact
-           * number on the Location & Zoning step.
+           * ── The blanket "paper fields are optional" rule ended here ────────
+           *
+           * It read: none of the three paper forms marks any field required,
+           * every asterisk in this wizard is our own judgement, so nothing
+           * transcribed from paper is listed for being blank.
+           *
+           * The client reversed it on 9 September 2026 after seeing the cost.
+           * A filing reached CENRO with no products or services, no employee
+           * split, no landline and no mobile — five of the six boxes on that
+           * office's Business Details block were empty, and the office had
+           * nothing to work from. "Can you make ALL non-optional fields
+           * required now so that we won't have the same problem again."
+           *
+           * So the rule is now per field rather than blanket, and the test is
+           * whether an office can do its job without the answer:
+           *
+           *  REQUIRED — Mobile Number and E-mail Address: how the office
+           *    reaches the applicant, and every business has both.
+           *  OPTIONAL — Telephone (Landline): most sari-sari stores,
+           *    carinderias and market stalls genuinely have none, so requiring
+           *    one buys a false answer rather than a real one (client's
+           *    decision, 9 September 2026).
+           *  OPTIONAL — Website and Trade Name: the same, more so.
+           *
+           * Anything still optional is validated when filled and never demanded
+           * when blank, which is what these three checks were doing for
+           * everything.
            */
+          if (!form.mobile_number.trim()) missing.push('Mobile Number')
+          else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
+          if (!form.email.trim()) missing.push('E-mail Address')
+          else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
+          }
+          /*
+           * Item 10 — the mobile is checked on the same terms as the landline
+           * beside it: optional, so never listed for being blank, listed only
+           * when what is in it is not a number that can be rung. `mobileValid`
+           * and not `phoneValid`, because this field means one specific thing —
+           * ten digits after +63 starting with 9 — where phoneValid is the loose
+           * "mobile or landline" rule the other four contact fields share.
+           */
+          if (form.mobile_number.trim() && !mobileValid(form.mobile_number)) {
+            missing.push('A valid Mobile Number')
           }
           if (form.website.trim() && !websiteValid(form.website)) {
             missing.push('A valid Website Address')
           }
+          /*
+           * A13-A15, asked only of the structures that have a president or
+           * officer-in-charge — `hasPresidentOrOfficer` already hides them from
+           * a sole proprietorship, and demanding a field nobody is shown would
+           * be a dead end rather than a rule.
+           */
+          if (hasPresidentOrOfficer(form.registration_type)) {
+            if (!form.president_officer_name.trim()) {
+              missing.push('Name of President / OIC')
+            }
+            if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
+            if (!form.capital_participation_filipino.trim()) {
+              missing.push('Capital Participation (Filipino)')
+            }
+          }
           if (!percentValid(form.capital_participation_filipino)) {
             missing.push('A Capital Participation between 0 and 100 percent')
           }
+          return missing
+        }
+        /*
+         * Section B. One check, and it is conditional rather than new: on the
+         * paper, "Others ____" is a blank you cannot tick without filling in.
+         * Ticking it here and leaving the blank empty records less than choosing
+         * nothing at all would have.
+         *
+         * Nothing else on this step can be incomplete — economic organisation
+         * and tax incentives are both optional, like every other field
+         * transcribed from the paper (none of the three paper forms marks any
+         * field required; every asterisk in this wizard is our own judgement).
+         * So this step is passable empty, by design.
+         */
+        case 'operation': {
+          const missing: string[] = []
           /*
-           * The one exception, and it is conditional rather than new: on the
-           * paper, "Others ____" is a blank you cannot tick without filling in.
-           * Ticking it here and leaving the blank empty records less than
-           * choosing nothing at all would have.
+           * B6 became required on 9 September 2026 with the rest of the paper
+           * fields. It is a closed list of establishment types the applicant
+           * picks from, not free text — there is no business it fails to
+           * describe, and "Others" with its own blank is there for the ones the
+           * list does not name. A blank here is an unanswered question rather
+           * than an inapplicable one, which is the test the whole reversal turns
+           * on.
            */
-          if (form.economic_organization === 'others' && !form.economic_organization_others.trim()) {
+          if (!form.economic_organization) missing.push('Economic Organization')
+          if (
+            form.economic_organization === 'others' &&
+            !form.economic_organization_others.trim()
+          ) {
             missing.push('What “Others” means for your Economic Organization')
           }
+          // Section B's own figures — B1 business area, B2 employees, B3 how
+          // many of them live in the LGU. They write the fee draft like the rest
+          // of the profile, so the check comes from the same place, scoped.
+          missing.push(
+            ...feeProfileMissing(
+              feeDraft,
+              { applicationType, permitCodes: [BUSINESS_PERMIT_CODE], lines: feeLines },
+              'operation',
+            ),
+          )
+          // BPLO item B7, which replaced the per-line capitalization on the fee
+          // step. Same rules it had: required on a new filing, positive, bounded.
+          missing.push(...capitalInvestmentMissing(form.capital_investment, applicationType))
+
           return missing
         }
         case 'address': {
@@ -2619,6 +3350,28 @@ export function ApplyWizard() {
             missing.push('A real PSIC trade in place of the unclassified line')
           }
           /*
+           * Products / Services, required per line from 9 September 2026.
+           *
+           * The PSIC code says what CATEGORY the trade falls in; this says what
+           * the business actually sells, and three offices print it on their
+           * paper — CENRO's form has a PRODUCTS/SERVICES box beside LINE OF
+           * BUSINESS, and it reached them empty on the filing that prompted
+           * this change. "Retail sale in non-specialized stores" tells a
+           * sanitary inspector nothing about whether there is food on the
+           * premises; "milk tea, fried snacks" tells them everything.
+           *
+           * Named per line, because a filing can declare several and only one
+           * of them may be blank.
+           */
+          form.lines.forEach((line, index) => {
+            if (!(line.products_services ?? '').trim()) {
+              const label = psic.find((c) => c.id === line.psic_code_id)?.title
+              missing.push(
+                `Products / Services for ${label ?? `line of business ${index + 1}`}`,
+              )
+            }
+          })
+          /*
            * "Capital for every line of business" was checked here and no longer
            * is. The question moved to Business & Tax Profile, where the `fees`
            * phase below requires it per line for a new filing (feeProfileIssues
@@ -2638,6 +3391,53 @@ export function ApplyWizard() {
            */
           else if (!withinMalabon(form.latitude, form.longitude)) {
             missing.push('A pin within Malabon')
+          }
+          /*
+           * The pin and the barangay are checked against each other HERE as
+           * well as in the click handler — a safety net now rather than the
+           * main defence, and it is worth saying which changed.
+           *
+           * This used to be the only thing catching "drop a valid pin in
+           * Acacia, then change the dropdown to Tonsuya": the pin did not move,
+           * so nothing re-ran onPick, and the disagreement was caught on the
+           * way out of the step. Item 8 replaced that with prevention — the map
+           * takes no pin until a barangay is named, and changing the barangay
+           * clears the pin (see the <select>'s onChange) — so an applicant can
+           * no longer reach this check by that route at all.
+           *
+           * It stays because a pin can still arrive without passing through
+           * onPick: a renewal prefills one, and a reopened draft restores one.
+           * Deleting it would leave those two paths unchecked, which is exactly
+           * the hole it was written to close.
+           *
+           * ── Why this is gated on `touched.barangay_id` ────────────────────
+           *
+           * Because the register is full of filings whose pin and barangay
+           * already disagree, and blocking on those punishes the applicant for
+           * our history. Nothing checked this until now, so pins were dropped
+           * anywhere the old bounding box allowed: of 788 addresses on file
+           * only 61 sit inside their own barangay, 543 are off by a median of
+           * 1.4 km, and 184 are not in Malabon at all. A renewal prefills both
+           * values from that record, so an unconditional check here would stop
+           * essentially every renewal dead on section 2, with a message about a
+           * pin the applicant never placed.
+           *
+           * So the rule is: we enforce what the applicant ENTERS, not what we
+           * handed them. Touching the barangay means they have answered the
+           * question and the answer must be consistent. Leaving the prefill
+           * alone lets a legacy filing through — the map still draws their
+           * barangay and their pin, so the disagreement is visible and fixable,
+           * and CPDO checks the site regardless.
+           *
+           * A NEW filing is unaffected: its barangay starts empty, so it cannot
+           * be submitted without being touched. Moving the pin is covered by
+           * onPick, which refuses a mismatch at the moment of the click.
+           */
+          else if (barangayName !== undefined && touched.barangay_id) {
+            const verdict = checkPin(form.latitude, form.longitude, barangayName)
+            if (verdict.kind === 'wrong-barangay') {
+              missing.push(`A pin inside ${barangayName} (it is currently in ${verdict.actual ?? 'neither'})`)
+            }
           }
           // Only when renting: the API enforces the same three with required_if.
           if (form.is_rented) {
@@ -2663,9 +3463,40 @@ export function ApplyWizard() {
         // rather than the submit button seven steps later.
         case 'privacy':
           return consent ? [] : ['Your agreement to the Data Privacy Consent']
+        /*
+         * Section A, and the two ways it can be incomplete.
+         *
+         * A1 unanswered blocks because the answer decides the length of the
+         * form: letting Next through would have to pick No on the applicant's
+         * behalf, and No is the answer that files "nothing changed" — a
+         * statement about the business, not a blank field.
+         *
+         * A Yes that ticks nothing blocks for the reason the amendment gate
+         * has always blocked: it claims a change and names none, so no office
+         * can act on it and no section opens to describe it.
+         */
+        case 'amendments': {
+          if (amendment.hasChanges === null) {
+            return ['Whether anything has changed since your last permit']
+          }
+          if (
+            amendment.hasChanges &&
+            !amendment.ownership &&
+            !amendment.location &&
+            !amendment.nature &&
+            amendment.other.trim() === ''
+          ) {
+            return ['Which details changed — tick at least one box']
+          }
+          return []
+        }
         case 'documents':
+          // One file satisfies a requirement; more are allowed and change
+          // nothing here. `?.length` rather than presence because a requirement
+          // whose last file was removed keeps no empty array (see the remove
+          // handler) — but a future edit that left one must not read as done.
           return requiredDocs
-            .filter((dt) => dt.is_required !== false && !uploaded[dt.id])
+            .filter((dt) => dt.is_required !== false && !uploaded[dt.id]?.length)
             .map((dt) => dt.name)
         case 'fees':
           /*
@@ -2678,11 +3509,13 @@ export function ApplyWizard() {
            * on the application, so a clearance's lines appear when and only
            * when it is applied for on its own stage.
            */
-          return feeProfileMissing(feeDraft, {
-            applicationType,
-            permitCodes: [BUSINESS_PERMIT_CODE],
-            lines: feeLines,
-          })
+          return feeProfileMissing(
+            feeDraft,
+            { applicationType, permitCodes: [BUSINESS_PERMIT_CODE], lines: feeLines },
+            // This step no longer owns the whole profile: paper section B's four
+            // figures moved to Business Operation and are checked there.
+            'fees',
+          )
         case 'review':
           return []
       }
@@ -2701,6 +3534,34 @@ export function ApplyWizard() {
       priorPermitId,
       renewablePermits,
       amendmentChosen,
+      /*
+       * The whole object, because the `amendments` case reads five of its
+       * fields and the step's gate is only correct if it recomputes when any
+       * of them move. Memoised on `amendmentChosen` alone, answering No after
+       * Yes left the old "tick at least one box" complaint standing over a
+       * step that no longer asked the question.
+       */
+      amendment,
+      priorPermitAnswered,
+      /*
+       * The barangay check reads this, so it belongs here.
+       *
+       * It happens to change in lockstep with `form.barangay_id`, which is
+       * already a dependency, so leaving it out worked by luck rather than by
+       * design — and only for as long as `barangayName` stays derived from the
+       * form. If it ever comes from somewhere else the gate would go stale and
+       * keep refusing a barangay the applicant has already corrected.
+       */
+      barangayName,
+      /*
+       * And the flag that decides whether that check runs at all. Unlike
+       * `barangayName` this one does NOT move with anything else already
+       * listed: it flips once, on first blur of the barangay field, while
+       * `form.barangay_id` may not change at that moment at all. Omitted, the
+       * gate would keep using the pre-blur answer and let a mismatch the
+       * applicant just created walk straight through.
+       */
+      touched.barangay_id,
     ],
   )
 
@@ -2719,6 +3580,97 @@ export function ApplyWizard() {
     if (last >= 0) flags[last] = flags.slice(0, last).every(Boolean)
     return flags
   }, [missingFor, sequence])
+
+  /**
+   * Where a reopened draft opens: the first section still wanting an answer.
+   *
+   * It opened on part 1 every time, which is the wrong place for all but the
+   * applicant who abandoned the form immediately. Someone who left off at
+   * Documentary Requirements came back to Data Privacy Consent and had to walk
+   * forward through four finished sections to reach the one they were on — and
+   * on a seven-part form that is how a draft stops being worth reopening.
+   *
+   * ── Computed, not remembered ──────────────────────────────────────────────
+   *
+   * The alternative is to store the last step the applicant was on. This is
+   * better for two reasons. It needs no column and no write on every step
+   * change; and it is right in the case a stored cursor gets wrong — an
+   * applicant who filled parts 1-5, jumped BACK to part 2 to fix a typo and
+   * closed the tab has a stored cursor of 2 and unfinished work at 6. "First
+   * unfinished" answers "what do I still have to do", which is the actual
+   * question. Where nothing is unfinished it lands on Review, which is the only
+   * thing left to do.
+   *
+   * ── Once ──────────────────────────────────────────────────────────────────
+   *
+   * `landedRef` matters as much as the calculation. `stepComplete` recomputes on
+   * every keystroke, so without the guard this would fire again the moment a
+   * section became incomplete — dragging the applicant backwards out of the
+   * part they were typing in, which is worse than the bug it fixes.
+   *
+   * Only for a REOPENED draft (`draftIdParam`). A new filing has nothing
+   * answered and part 1 is already the first unfinished section, so running this
+   * would land it exactly where it starts.
+   */
+  /*
+   * Fill the account's answers in, once, and never over an answer.
+   *
+   * Each field is guarded with `||` so a value already in the form wins: a
+   * renewal prefilled from an existing business, or a reopened draft, has real
+   * answers and this must not overwrite them with the filer's own details. On a
+   * blank new filing the guard passes and the account fills the gap.
+   */
+  useEffect(() => {
+    if (accountPrefilledRef.current || !account) return
+    /*
+     * Wait for a reopened draft to finish loading.
+     *
+     * This effect fires as soon as the account is known, which on a draft is
+     * long before the filing arrives — and hydration then replaces the WHOLE
+     * form object, so every value put here was overwritten a second later by
+     * the business's own (blank) ones. The fields rendered empty and the
+     * prefill looked as though it had never run.
+     *
+     * Waiting is only half the fix: hydration itself now falls back to the
+     * account for these fields, so a draft whose business has no owner row on
+     * file still opens filled in. This guard is what stops the two racing.
+     */
+    if (hydrating) return
+    accountPrefilledRef.current = true
+    setForm((f) => ({
+      ...f,
+      mobile_number: f.mobile_number || (account.mobile_number ?? ''),
+      email: f.email || account.email,
+      owner_surname: f.owner_surname || account.last_name,
+      owner_given_name: f.owner_given_name || account.first_name,
+      owner_middle_name: f.owner_middle_name || (account.middle_name ?? ''),
+      owner_suffix: f.owner_suffix || (account.suffix ?? ''),
+      owner_gender: f.owner_gender || account.gender,
+    }))
+  }, [account, hydrating])
+
+  const landedRef = useRef(false)
+  useEffect(() => {
+    if (landedRef.current || !draftIdParam) return
+    /*
+     * Wait for the answers AND for the reference data.
+     *
+     * `hydrating` alone was not enough. `missingFor` asks whether a line of
+     * business is a real PSIC code and whether the permit types resolve — both
+     * of which read `refs`, so while that request is still in flight a fully
+     * answered step reports itself incomplete. This runs once, so it would have
+     * settled on the wrong step and stayed there: an applicant reopening a
+     * finished draft would land on Location & Zoning with nothing wrong on it.
+     *
+     * Computing it mid-hydration is the other half — that reads a blank form and
+     * lands on part 1, which is the behaviour being removed.
+     */
+    if (hydrating || hydrateFailed || refs.loading) return
+
+    landedRef.current = true
+    const firstUnfinished = stepComplete.findIndex((done) => !done)
+    setStep(firstUnfinished === -1 ? sequence.length - 1 : firstUnfinished)
+  }, [draftIdParam, hydrating, hydrateFailed, refs.loading, stepComplete, sequence.length])
 
   /**
    * True when jumping forward to `index` would step over an unfinished
@@ -2822,6 +3774,21 @@ export function ApplyWizard() {
      * rule to keep in step with the first.
      */
     telephone: form.telephone.trim() && !phoneValid(form.telephone) ? PHONE_ERROR : '',
+    /*
+     * Item 10 — wired, where it was not. The mobile field has existed since the
+     * business gained its own contact details, but nothing here ever produced
+     * an error for it, so `fieldErrors.mobile_number` was undefined and the
+     * input rendered no message, no aria-invalid and no description: a field
+     * that could be filled in wrongly and never said so.
+     *
+     * Silent until the applicant leaves the group, for TIN's reason — the boxes
+     * pass through nine invalid lengths on the way to a valid one, and painting
+     * them red for all nine teaches the applicant to ignore the colour.
+     */
+    mobile_number:
+      touched.mobile_number && form.mobile_number.trim() && !mobileValid(form.mobile_number)
+        ? MOBILE_ERROR
+        : '',
     website:
       form.website.trim() && !websiteValid(form.website)
         ? 'Enter your website as it is typed into a browser, like malabon.gov.ph or https://malabon.gov.ph.'
@@ -2890,6 +3857,23 @@ export function ApplyWizard() {
        * the radios are the sole writer — and the API bands it again against
        * Business::ECONOMIC_ORGANIZATIONS regardless.
        */
+      // BPLO item B7. One figure for the whole business, which is what the paper
+      // asks; the per-line `capitalization` on the fee profile is a different
+      // thing and stays where the fee engine reads it.
+      capital_investment: plainAmount(form.capital_investment) || undefined,
+      /*
+       * BPLO items 11 / 12. Sent as an object and always sent, so clearing a
+       * prefilled name is stored as the blank it is — the controller treats an
+       * ABSENT `owner` key as "this request is not about the owner" and leaves
+       * the row alone, which is what a fee-profile-only save wants.
+       */
+      owner: {
+        surname: form.owner_surname.trim() || undefined,
+        given_name: form.owner_given_name.trim() || undefined,
+        middle_name: form.owner_middle_name.trim() || undefined,
+        suffix: form.owner_suffix.trim() || undefined,
+        gender: form.owner_gender || undefined,
+      },
       economic_organization:
         (form.economic_organization as BusinessPayload['economic_organization']) || undefined,
       // Only meaningful against "Others"; sending it with any of the other five
@@ -2928,6 +3912,25 @@ export function ApplyWizard() {
          */
         telephone: form.telephone.trim() || undefined,
         website: form.website.trim() || undefined,
+        /*
+         * BPLO items A7 and A8 — the business's own, prefilled from the account
+         * but stored here, so editing one never edits a profile.
+         *
+         * Canonicalised to +63 on the way out, and this is the single choke
+         * point for it (item 10). The control emits +63 for anything the
+         * applicant types, but a renewal that never touches the field carries
+         * the 09 form it was prefilled with straight from `users.mobile_number`
+         * — so normalising only in the control would store two spellings of the
+         * same number depending on whether anyone looked at the box.
+         *
+         * `business_addresses.mobile_number` is `nullable|string|max:40`
+         * (BusinessController), which is a different rule from the profile
+         * field's `regex:/^09\d{9}$/` in AuthController. They are different
+         * facts — who owns the account, versus how the city rings the business
+         * — and the profile's rule is deliberately not touched here.
+         */
+        mobile_number: canonicalMobile(form.mobile_number) || undefined,
+        email: form.email.trim() || undefined,
       },
       /*
        * The free-text line rides on the same payload; the API stores it on
@@ -2973,7 +3976,9 @@ export function ApplyWizard() {
       application_type: applicationType,
       title: title.trim() || undefined,
       payment_mode: paymentMode,
+      data_privacy_consent: consent,
       permit_type_ids: form.permit_type_ids,
+      ...(priorPermitIds.length > 0 ? { prior_permit_ids: priorPermitIds } : {}),
       ...(priorPermitId
         ? { prior_permit_id: priorPermitId }
         : /*
@@ -2998,13 +4003,30 @@ export function ApplyWizard() {
    * saying no to a question its form never asked.
    */
   function amendmentPayload(): AmendmentAnswers {
-    if (applicationType !== 'amendment') return {}
+    /*
+     * Renewals send section A too now — MCG-BPLO-FO-002 asks A1/A2/A3 and the
+     * API accepts them for both types. `new` still sends nothing: there is no
+     * section A on MCG-BPLO-FO-001 to answer.
+     *
+     * A renewal that has not answered A1 sends nothing either. The dialog will
+     * not let Confirm through without an answer, so an unanswered A1 here means
+     * a draft reopened from before this question existed — and writing false
+     * for it would turn "never asked" into "answered no" on a filing nobody
+     * asked. That is the exact conversion `prior_permit_declared_none` was
+     * added to stop happening one field over.
+     */
+    if (applicationType === 'new') return {}
+    if (applicationType === 'renewal' && amendment.hasChanges === null) return {}
 
     return {
       amendment_ownership: amendment.ownership,
       amendment_location: amendment.location,
       amendment_nature: amendment.nature,
       amendment_other: amendment.other.trim() || null,
+      // The API nulls both whenever A1 is No, so sending them unconditionally
+      // cannot leave a stale conversion behind.
+      amendment_from_registration_type: amendment.fromRegistrationType || null,
+      amendment_to_registration_type: amendment.toRegistrationType || null,
     }
   }
 
@@ -3026,11 +4048,15 @@ export function ApplyWizard() {
     setSaving(true)
     setSubmitError(null)
     try {
-      if (phase === 'address' || phase === 'business') {
+      if (phase === 'address' || phase === 'business' || phase === 'operation') {
         if (applicationId) {
           const bid = businessId ?? prefillBusinessId
           if (bid) await businesses.update(bid, businessPayload())
-        } else if (phase === 'business' && canCreateDraft) {
+          // `operation` joins the two steps that describe the business, because
+          // its two answers are columns on `businesses` like every other field
+          // here. Leaving it out would have made economic organisation and tax
+          // incentives the only answers in the wizard that never autosaved.
+        } else if ((phase === 'business' || phase === 'operation') && canCreateDraft) {
           // The last section that describes the business, and so the earliest
           // point a draft can legally exist (item 69 folded Line of Business
           // into Location & Zoning, which now runs before this one). There has
@@ -3038,6 +4064,23 @@ export function ApplyWizard() {
           // even if the autosave debounce has not fired yet.
           await ensureDraftRaw()
         }
+      } else if (phase === 'amendments') {
+        /*
+         * A renewal that answers No at A1 goes straight from here to Review,
+         * so this step is the last chance to create the draft.
+         *
+         * The draft used to be created on leaving `business`, which was safe
+         * while every filing passed through it. A No-path renewal never does —
+         * its sequence is privacy → amendments → review — and without this it
+         * would reach Review with no application id, no autosave having
+         * anything to write to, and a Submit button with nothing to submit.
+         *
+         * Guarded on `canCreateDraft` for the same reason the `business`
+         * branch is: a draft cannot be posted before the business it is for is
+         * known, and on a renewal that is settled by the identify dialog long
+         * before this step.
+         */
+        if (!applicationId && canCreateDraft) await ensureDraftRaw()
       } else if (phase === 'fees') {
         const id = await ensureDraftRaw()
         await applications.update(id, {
@@ -3045,6 +4088,7 @@ export function ApplyWizard() {
             applicationType,
             permitCodes: [BUSINESS_PERMIT_CODE],
             lineIds: form.lines.map((l) => l.psic_code_id),
+            capitalInvestment: form.capital_investment,
           }),
         })
       }
@@ -3184,6 +4228,7 @@ export function ApplyWizard() {
         applicationType,
         permitCodes: [BUSINESS_PERMIT_CODE],
         lineIds: form.lines.map((l) => l.psic_code_id),
+        capitalInvestment: form.capital_investment,
       })
       if (hadDraft) {
         const bid = businessId ?? prefillBusinessId
@@ -3203,6 +4248,13 @@ export function ApplyWizard() {
           title: title.trim(),
           fee_profile: feeProfile,
           payment_mode: paymentMode,
+          /*
+           * On every autosave, not only on creation. The tick can be given —
+           * and taken back — at any point while the draft is open, and it is on
+           * step 1 of seven, so a draft created later in the flow would
+           * otherwise be created with `false` and never corrected.
+           */
+          data_privacy_consent: consent,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -3210,7 +4262,36 @@ export function ApplyWizard() {
         // Which permit is being renewed can change after the draft exists, and
         // it is not part of the general application update (item 50).
         if (isReuse) {
-          await applications.setPriorPermit(id, priorPermitId, priorPermitDeclaredNone)
+          await applications.setPriorPermit(
+            id,
+            priorPermitId,
+            priorPermitDeclaredNone,
+            priorPermitIds,
+          )
+        }
+        /*
+         * The paper copies the identify dialog took, now that there is
+         * somewhere to put them. Uploaded through the held-clearance path
+         * (`permitTypeId`, no document type) so each one arrives named after
+         * the office that has to read it rather than as an untitled file.
+         *
+         * Cleared before the awaits, not after: a second autosave firing
+         * mid-upload would otherwise find the same queue and attach every file
+         * twice. A failure is swallowed on purpose — the applicant can still
+         * attach the copy under Documentary Requirements, and a draft that
+         * refuses to save because an optional attachment did not stick would
+         * lose the answers that DID.
+         */
+        if (pendingPaperCopies.length > 0) {
+          const queued = pendingPaperCopies
+          setPendingPaperCopies([])
+          for (const copy of queued) {
+            try {
+              await documents.upload(id, null, copy.file, copy.permitTypeId)
+            } catch {
+              /* Optional attachment; Documentary Requirements is the retry. */
+            }
+          }
         }
       } else {
         await applications.update(id, { fee_profile: feeProfile, payment_mode: paymentMode })
@@ -3253,6 +4334,23 @@ export function ApplyWizard() {
         priorPermitDeclaredNone,
         // Items 82/84: ticking a box is an edit, so autosave has to see it.
         amendment,
+        /*
+         * The Data Privacy tick, and leaving it out is what made the first
+         * attempt at persisting consent do nothing at all.
+         *
+         * This object is the ONLY thing that decides whether a draft is dirty:
+         * the effect below compares it against the last saved copy and returns
+         * early when they match. `autosave()` was already sending
+         * `data_privacy_consent` — correctly — and was never once called after
+         * the box was ticked, because ticking it changed nothing here. The
+         * header sat on "All Changes Saved" while the answer went nowhere,
+         * which is the worst version of the bug: it reported success.
+         *
+         * Anything an applicant can change has to appear in this object. A field
+         * that is saved but not watched is invisible to the only thing that
+         * triggers a save.
+         */
+        consent,
       }),
     [
       title,
@@ -3263,6 +4361,7 @@ export function ApplyWizard() {
       priorPermitId,
       priorPermitDeclaredNone,
       amendment,
+      consent,
     ],
   )
   const syncedRef = useRef(false)
@@ -3311,19 +4410,23 @@ export function ApplyWizard() {
         registration_type: '',
         registration_number: '',
         tin: '',
-        // Everything transcribed from the paper's section A and items B6/B8 is
-        // an input of THIS part, so "clear the inputs on this part" has to take
-        // it. Leaving any of them standing would clear the fields around an
-        // answer and leave the answer behind — the bug the privacy branch below
-        // documents, arriving from the other direction.
+        /*
+         * Everything transcribed from the paper's section A is an input of THIS
+         * part, so "clear the inputs on this part" has to take it. Leaving any
+         * of them standing would clear the fields around an answer and leave the
+         * answer behind — the bug the privacy branch below documents, arriving
+         * from the other direction.
+         *
+         * Items B6 and B8 were cleared here too and are not any more: they moved
+         * to the Business Operation step and are cleared by its own branch. Clear
+         * All is scoped to "this part", and a button that reached into the next
+         * step would be the same bug it exists to avoid.
+         */
         telephone: '',
         website: '',
-        economic_organization: '',
-        economic_organization_others: '',
         president_officer_name: '',
         citizenship: '',
         capital_participation_filipino: '',
-        has_tax_incentives: false,
       }))
       if (isReuse) {
         setPrefillBusinessId(null)
@@ -3338,6 +4441,33 @@ export function ApplyWizard() {
         // and leave the answer standing.
         setAmendment(EMPTY_AMENDMENT)
       }
+    } else if (phase === 'operation') {
+      // Section B's three inputs. `has_tax_incentives` resets to false rather
+      // than to null because the column is `boolean not null default false` —
+      // there is no "unanswered" to return it to.
+      setForm((f) => ({
+        ...f,
+        economic_organization: '',
+        economic_organization_others: '',
+        has_tax_incentives: false,
+        capital_investment: '',
+      }))
+      /*
+       * Section B's figures live in the fee draft, not in `form`, so Clear All
+       * on this step has to reach into it as well — otherwise the button clears
+       * the fields around them and leaves four answers standing, which is the
+       * bug the privacy branch below documents.
+       */
+      setFeeDraft((d) => ({
+        ...d,
+        floor_area_sqm: '',
+        employees: '',
+        male_employees: '',
+        female_employees: '',
+        employees_in_lgu: '',
+        delivery_vehicles_motorized: '',
+        delivery_vehicles_other: '',
+      }))
     } else if (phase === 'address') {
       // The lines of business are inputs of this part now (item 69), so
       // "clear all inputs for this part" has to take them with it.
@@ -3378,29 +4508,46 @@ export function ApplyWizard() {
     setShowClear(false)
   }
 
-  async function handleUpload(docTypeId: number, file: File) {
-    if (!applicationId) return
-    const rejection = fileRejection(file)
-    if (rejection) {
-      setSubmitError(rejection)
-      return
-    }
+  /**
+   * Attach one or more files to a documentary requirement. Each one ADDS.
+   *
+   * It used to replace: upload the new file, then delete the previous one, so a
+   * requirement held exactly one attachment. That silently destroyed the earlier
+   * file, and the only warning was the words "click to replace" on a control
+   * most people read as "click to attach".
+   *
+   * Several files at once are accepted because the picker now allows it, and
+   * they are uploaded ONE AT A TIME rather than in parallel. Two reasons, both
+   * about what the applicant sees when something goes wrong: the size and type
+   * check is per file, so a rejected third file must not take two good ones with
+   * it; and each response can carry OCR suggestions, which are applied as they
+   * arrive rather than raced.
+   */
+  async function handleUpload(docTypeId: number, files: File[]) {
+    if (!applicationId || files.length === 0) return
+
     setUploadingType(docTypeId)
     setSubmitError(null)
     try {
-      // Replacing a requirement: the old attachment goes, so the officer never
-      // sees two files for one line.
-      const previous = uploaded[docTypeId]
-      const doc = await documents.upload(applicationId, docTypeId, file)
-      if (previous) {
-        await documents.remove(applicationId, previous.id).catch(() => {
-          /* The new file is already attached; a stale one is not worth a stop. */
-        })
-      }
-      setUploaded((u) => ({ ...u, [docTypeId]: { id: doc.id, name: file.name, size: file.size } }))
-      // OCR-lite: surface any suggestions from the upload response (v2).
-      if (doc.ocr_suggestions && Object.keys(doc.ocr_suggestions).length > 0) {
-        setOcr(doc.ocr_suggestions)
+      for (const file of files) {
+        const rejection = fileRejection(file)
+        if (rejection) {
+          // Named, because "a file was rejected" on a multi-file drop leaves the
+          // applicant checking all of them to find out which.
+          setSubmitError(files.length > 1 ? `${file.name}: ${rejection}` : rejection)
+          continue
+        }
+
+        const doc = await documents.upload(applicationId, docTypeId, file)
+        setUploaded((u) => ({
+          ...u,
+          [docTypeId]: [...(u[docTypeId] ?? []), { id: doc.id, name: file.name, size: file.size }],
+        }))
+
+        // OCR-lite: surface any suggestions from the upload response (v2).
+        if (doc.ocr_suggestions && Object.keys(doc.ocr_suggestions).length > 0) {
+          setOcr(doc.ocr_suggestions)
+        }
       }
     } catch (err) {
       setSubmitError(uploadErrorMessage(err))
@@ -3454,8 +4601,14 @@ export function ApplyWizard() {
       await documents.remove(applicationId, doc.id)
       if (docTypeId !== undefined) {
         setUploaded((u) => {
+          // Drop the one file, keep the requirement's others. The key is deleted
+          // only when it empties, so `!uploaded[id]?.length` stays the single
+          // test for "this requirement is still outstanding".
+          const rest = (u[docTypeId] ?? []).filter((f) => f.id !== doc.id)
           const next = { ...u }
-          delete next[docTypeId]
+          if (rest.length > 0) next[docTypeId] = rest
+          else delete next[docTypeId]
+
           return next
         })
       } else {
@@ -3468,6 +4621,33 @@ export function ApplyWizard() {
     }
   }
 
+  /*
+   * Submit. One write, and no money.
+   *
+   * ── This used to submit AND pay, and that was wrong ───────────────────────
+   *
+   * The press called `applications.submit()` and then `payments.pay()` back to
+   * back, on the reasoning that a separate Pay screen was a wasted step ("it
+   * should be here the payment already"). Collapsing the walk was right; what
+   * it collapsed was not, because it assumed submission bills the applicant.
+   *
+   * It no longer does. The verified counter procedure puts BPLO's reading of
+   * the main form BEFORE the money: submit → For Approval → BPLO approves →
+   * Pending Payment → pay. The client stated it twice, the second time plainly
+   * — "after submission, the business owner will wait for the approval of BPLO
+   * then the payment will go AFTER".
+   *
+   * The old code did not merely describe the wrong order, it performed it. The
+   * `pay()` call landed at For Approval, where `PaymentController` had no
+   * refusal for a filing that had not been billed yet, so the charge went
+   * through; `WorkflowService::onPaymentCompleted` then returned early because
+   * the status was not PendingPayment, leaving the money taken and the filing
+   * unmoved. The API now refuses that outright (`ApplicationStatus::isBillable`),
+   * so this is the honest half of a fix that has a guard behind it — the guard
+   * is the part that matters, and it must not be relaxed to let this back in.
+   *
+   * Payment is `PayPage`'s again, reached from the filing once BPLO approves.
+   */
   async function submit() {
     if (!applicationId) return
     setSaving(true)
@@ -3535,12 +4715,27 @@ export function ApplyWizard() {
          * that blank over the answer, which is the draft losing it silently.
          */
         setAmendment(
-          app.amendments
+          /*
+           * Amendments only, since 9 September 2026. A renewal no longer asks
+           * section A at all, so restoring its old answers would put state
+           * behind a step that is not in its sequence — and the API writes
+           * those columns back to false on every renewal save, so what came
+           * back here would be a stale copy of something already cleared.
+           *
+           * Renewal drafts saved BEFORE that change may still carry ticks. They
+           * are deliberately not restored and not re-shown: the applicant edits
+           * whatever changed on the ordinary steps now, which is where BPLO
+           * reads it from.
+           */
+          app.amendments && app.application_type === 'amendment'
             ? {
+                hasChanges: app.amendments.has_amendments,
                 ownership: app.amendments.ownership,
                 location: app.amendments.location,
                 nature: app.amendments.nature,
                 other: app.amendments.other ?? '',
+                fromRegistrationType: app.amendments.from_registration_type ?? '',
+                toRegistrationType: app.amendments.to_registration_type ?? '',
               }
             : EMPTY_AMENDMENT,
         )
@@ -3554,6 +4749,13 @@ export function ApplyWizard() {
           tin: b.tin ?? '',
           telephone: b.address?.telephone ?? '',
           website: b.address?.website ?? '',
+          mobile_number: b.address?.mobile_number || account?.mobile_number || '',
+          email: b.address?.email || account?.email || '',
+          owner_surname: b.owner?.surname || account?.last_name || '',
+          owner_given_name: b.owner?.given_name || account?.first_name || '',
+          owner_middle_name: b.owner?.middle_name || account?.middle_name || '',
+          owner_suffix: b.owner?.suffix || account?.suffix || '',
+          owner_gender: b.owner?.gender || account?.gender || '',
           line1: b.address?.line1 ?? '',
           line2: b.address?.line2 ?? '',
           barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
@@ -3574,6 +4776,7 @@ export function ApplyWizard() {
           president_officer_name: b.president_officer_name ?? '',
           citizenship: b.citizenship ?? '',
           capital_participation_filipino: percentToInput(b.capital_participation_filipino),
+          capital_investment: formatAmountInput(String(b.capital_investment ?? '')),
           has_tax_incentives: b.has_tax_incentives ?? false,
           latitude: b.address?.latitude ?? null,
           longitude: b.address?.longitude ?? null,
@@ -3595,11 +4798,52 @@ export function ApplyWizard() {
           permit_type_ids: ids,
         })
         setPaymentMode(app.payment_mode === 'quarterly' ? 'quarterly' : 'annual')
+        /*
+         * A draft saved before Capital Investment was one field.
+         *
+         * Its capital sits per line on the fee profile, and nothing writes that
+         * any more — so without this the figure would silently read as blank and
+         * the applicant would be asked for it again, having already given it
+         * (once per line). Summing is exactly right: the paper's B7 is the total,
+         * and the lines are how the total used to be broken up.
+         *
+         * Only when the business record has no figure of its own, so a real
+         * answer is never overwritten by a reconstruction of an old one.
+         */
+        if (!(app.business?.capital_investment ?? '')) {
+          const perLine = (app.fee_profile?.lines ?? []).reduce(
+            (sum, l) => sum + Number(l.capitalization ?? 0),
+            0,
+          )
+          if (perLine > 0) {
+            setForm((f) => ({ ...f, capital_investment: formatAmountInput(String(perLine)) }))
+          }
+        }
+        /*
+         * Put the Data Privacy tick back.
+         *
+         * The one line that fixes what the client reported: "why is data privacy
+         * always asked whenever I reopen the draft?" Because `consent` was
+         * `useState(false)` and nothing else — never sent, never stored, never
+         * restored — so every reopen started it blank and asked again. Being
+         * re-asked something you have already answered is what teaches people to
+         * tick consent without reading it.
+         *
+         * `?? false` because the field is optional on the type: a payload built
+         * before the API sent it back reads as not-yet-consented, which is the
+         * safe direction to be wrong in.
+         */
+        setConsent(app.data_privacy_consent ?? false)
         setFeeDraft(feeProfileToDraft(app.fee_profile, lineIds))
         // Restore uploaded documents by document-type code.
         const codeToId = new Map<string, number>()
         for (const dt of refData.documentTypes) codeToId.set(dt.code, dt.id)
-        const restored: Record<number, UploadedFile> = {}
+        // Grouped into a list per requirement, not assigned. Assigning kept the
+        // LAST document of each type and dropped the rest, so reopening a draft
+        // with two pages of a lease showed one — and removing it would have left
+        // the other orphaned on the record, visible to the officer and to nobody
+        // else.
+        const restored: Record<number, UploadedFile[]> = {}
         const others: UploadedFile[] = []
         for (const doc of app.documents ?? []) {
           const code = doc.document_type?.code
@@ -3615,7 +4859,7 @@ export function ApplyWizard() {
             others.push(file)
           } else {
             const dtId = codeToId.get(code)
-            if (dtId != null) restored[dtId] = file
+            if (dtId != null) (restored[dtId] ??= []).push(file)
           }
         }
         setUploaded(restored)
@@ -3627,7 +4871,14 @@ export function ApplyWizard() {
          * documents uploaded shows Documentary Requirements unticked, which is
          * the truth about it.
          */
-        setVisited([...BASE_PHASES])
+        /*
+         * A reopened draft has been everywhere, so every step is jumpable.
+         * `amendments` is listed alongside BASE_PHASES rather than added to it:
+         * the constant is the running order for a NEW filing, and a renewal's
+         * order is computed. Naming an extra key here is harmless for the types
+         * that never show it — `visited` is a list of keys, not a sequence.
+         */
+        setVisited([...BASE_PHASES, 'amendments'])
         /*
          * Item 50: which permit this renewal is for, chosen when the draft was
          * started. The list is loaded too (item 85) so Business Information can
@@ -3660,6 +4911,19 @@ export function ApplyWizard() {
           ])
           if (!active) return
           setPriorPermitId(prior?.prior_permit_id ?? null)
+          /*
+           * The whole ticked set, falling back to the primary alone for a
+           * draft saved before the dialog was multi-select. Without the
+           * fallback such a draft would reopen with nothing ticked and the
+           * next autosave would sync an empty pivot over a real answer.
+           */
+          setPriorPermitIds(
+            prior?.prior_permit_ids?.length
+              ? prior.prior_permit_ids
+              : prior?.prior_permit_id
+                ? [prior.prior_permit_id]
+                : [],
+          )
           setPriorPermitDeclaredNone(prior?.declared_none ?? false)
           const amendmentAnswered =
             app.application_type !== 'amendment' ||
@@ -3685,7 +4949,13 @@ export function ApplyWizard() {
     return () => {
       active = false
     }
-  }, [draftIdParam, refs.data, navigate])
+    /*
+     * `account` is read for the item 11 / A7 / A8 fallbacks and listed whole
+     * rather than field by field. The effect is one-shot behind `hydratedRef`,
+     * so a new object identity cannot re-run it; naming seven properties would
+     * be seven chances to forget one when the fallback list changes.
+     */
+  }, [draftIdParam, refs.data, navigate, account])
 
   /*
    * ── Two fetches that used to live here, and why neither does ──────────────
@@ -3761,7 +5031,25 @@ export function ApplyWizard() {
    * has not been given one for, and writes a real one on the first keystroke.
    */
 
-  /* Success screen after submit (kept). */
+  /*
+   * The one screen after Submit, and the last one the wizard owns.
+   *
+   * It carries the tracking ID — the only thing here the applicant cannot get
+   * back any other way — and says what they are now waiting for.
+   *
+   * ── What it stopped promising ─────────────────────────────────────────────
+   *
+   * It used to say "Submitted and paid", print a receipt, and offer "Apply for
+   * LGU Clearances" as the FIRST action, because this screen was where the
+   * clearances opened. It is not any more: the clearances open on payment, and
+   * payment now waits on BPLO. Leaving that button here would have sent every
+   * applicant straight into a stage whose gate (`ClearanceService::isUnlocked`,
+   * `status->isPaid()`) refuses them — a primary action that always fails.
+   *
+   * The receipt block and the payment-failure alert went with it. Both existed
+   * because the press took money; nothing is charged here now, so a receipt
+   * would have nothing to report and a payment error nothing to report about.
+   */
   if (tracking) {
     return (
       <div className="mx-auto max-w-lg py-10 text-center">
@@ -3775,12 +5063,20 @@ export function ApplyWizard() {
         <p className="display-serif mt-6 rounded-2xl bg-white px-4 py-4 text-xl text-ink shadow-card">
           {tracking}
         </p>
-        <div className="mt-7 flex justify-center gap-3">
+        {/*
+          * What they are waiting for, and that there is nothing to do while
+          * they wait. "No action needed from you right now" is worth the line:
+          * a filing that sits still with no explanation is the state testers
+          * report as broken.
+          */}
+        <p className="mt-6 text-sm text-ink-secondary">
+          BPLO is now reviewing your form. No action needed from you right now — we will tell you
+          when your Tax Order of Payment is ready, and your five LGU clearances open once it is
+          paid.
+        </p>
+        <div className="mt-4 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
             Track this application
-          </PillButton>
-          <PillButton className="bg-white !text-royal border-2 border-royal hover:bg-royal-tint" onClick={() => navigate('/applications')}>
-            All applications
           </PillButton>
         </div>
       </div>
@@ -4080,8 +5376,8 @@ export function ApplyWizard() {
               */}
               {priorPermitChoice && (
                 <p className="mt-2 text-xs text-ink-secondary">
-                  Renewing its clearances comes after this — once you have paid for the business
-                  permit, the LGU clearances open and you apply for the ones you need.
+                  Renewing its clearances comes after this — once you submit, the LGU clearances
+                  open and you apply for the ones you need.
                 </p>
               )}
             </div>
@@ -4288,19 +5584,27 @@ export function ApplyWizard() {
               */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <label className="block">
-                <FieldLabel>Telephone (Landline)</FieldLabel>
-                <input
-                  inputMode="tel"
+                {/*
+                  * Item 10 — the area code is its own group, not a convention
+                  * the applicant has to remember. A single box with "Area code
+                  * and number" under it asked for a shape and then accepted any
+                  * shape at all, so `02 8123 4567`, `0281234567` and
+                  * `(02)8123-4567` all went into the same column and nothing
+                  * downstream could tell where the area code stopped.
+                  *
+                  * No <label>/<FieldLabel> here: the control is two boxes with
+                  * their own accessible names inside a fieldset, and its legend
+                  * is the question. A label wrapping both would make the first
+                  * box answer to two names at once.
+                  */}
+                <LandlineInput
+                  legend="Telephone (Landline)"
                   value={form.telephone}
-                  onChange={(e) => update('telephone', e.target.value)}
+                  onChange={(v) => update('telephone', v)}
                   onBlur={() => touch('telephone')}
-                  placeholder="Area code and number"
-                  className={inputCls}
-                  aria-invalid={Boolean(fieldErrors.telephone)}
-                  aria-describedby={fieldErrors.telephone ? 'telephone-error' : undefined}
+                  error={fieldErrors.telephone || undefined}
+                  errorId="telephone-error"
                 />
-                </label>
                 {fieldErrors.telephone && (
                   <p id="telephone-error" role="alert" className="mt-1 text-xs font-medium text-s-red">
                     {fieldErrors.telephone}
@@ -4326,6 +5630,172 @@ export function ApplyWizard() {
                     {fieldErrors.website}
                   </p>
                 )}
+              </div>
+            </div>
+
+            {/*
+              ── Items A7 and A8 — the business's mobile number and e-mail ────
+
+              Both were absent from this form and present on the paper. The
+              officer's sheet filled the gap with the ACCOUNT holder's details,
+              which is a different fact and wrong the moment a staff member files
+              for a corporation.
+
+              Prefilled from the signed-in account, because for a sole proprietor
+              they are the same and retyping a number you gave at sign-up is not
+              a question worth asking. Editable, and stored on the business.
+            */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                {/*
+                  * Item 10 — +63 and ten digits, and the 09 form does not
+                  * appear here at all.
+                  *
+                  * It was a plain text box whose placeholder read "09XX XXX
+                  * XXXX", which taught the one shape the client says this field
+                  * must not use. The prefix is now part of the control rather
+                  * than something to type, so the question cannot be answered
+                  * in the wrong notation; a prefilled 09 number from the
+                  * account still reads back correctly, as its ten digits.
+                  *
+                  * This is the BUSINESS's number. The account's own field keeps
+                  * its 09 rule in AuthController and is untouched — see
+                  * businessPayload for why the two are validated apart.
+                  */}
+                <MobileNumberInput
+                  legend="Mobile Number"
+                  value={form.mobile_number}
+                  onChange={(v) => update('mobile_number', v)}
+                  onBlur={() => touch('mobile_number')}
+                  error={fieldErrors.mobile_number || undefined}
+                  hintId="mobile-number-hint"
+                  errorId="mobile-number-error"
+                />
+                <p id="mobile-number-hint" className="mt-1 text-xs text-ink-secondary">
+                  The number the city should ring about this business.
+                </p>
+                {fieldErrors.mobile_number && (
+                  <p
+                    id="mobile-number-error"
+                    role="alert"
+                    className="mt-1 text-xs font-medium text-s-red"
+                  >
+                    {fieldErrors.mobile_number}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block">
+                  <FieldLabel>E-mail Address</FieldLabel>
+                  <input
+                    inputMode="email"
+                    value={form.email}
+                    onChange={(e) => update('email', e.target.value)}
+                    onBlur={() => touch('email')}
+                    placeholder="business@example.com"
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/*
+              ── Items 11 / 12 — the named person on the form ─────────────────
+
+              Surname, given name, middle name, SUFFIX and GENDER. All five have
+              had columns on `business_owners` since the schema was aligned with
+              the manuscript, and until now only the seeders wrote them — so a
+              paper that asks for a suffix and a gender had nowhere to put
+              either.
+
+              Item 11 is the sole proprietor; item 12 is the corporation's,
+              partnership's or cooperative's named officers, and the paper prints
+              TWO rows for it. One is written here (the primary); the relation is
+              plural on both sides so the second needs no migration when it is
+              asked for.
+            */}
+            <div>
+              <p className="text-sm font-bold text-ink">
+                {form.registration_type === 'sole_proprietorship'
+                  ? 'Sole Proprietor'
+                  : 'Name on the Registration'}
+              </p>
+              <p className="mb-2 text-xs text-ink-secondary">
+                Filled in from your account. Change it if the business is registered in another
+                name.
+              </p>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <FieldLabel>Surname</FieldLabel>
+                  <input
+                    value={form.owner_surname}
+                    onChange={(e) => update('owner_surname', e.target.value)}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <FieldLabel>Given Name</FieldLabel>
+                  <input
+                    value={form.owner_given_name}
+                    onChange={(e) => update('owner_given_name', e.target.value)}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <FieldLabel>Middle Name</FieldLabel>
+                  <input
+                    value={form.owner_middle_name}
+                    onChange={(e) => update('owner_middle_name', e.target.value)}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <FieldLabel>Suffix</FieldLabel>
+                  <input
+                    value={form.owner_suffix}
+                    onChange={(e) => update('owner_suffix', e.target.value)}
+                    placeholder="Jr., III"
+                    className={inputCls}
+                  />
+                </label>
+              </div>
+              <div className="mt-4">
+                <FieldLabel>Gender</FieldLabel>
+                {/*
+                  Two options, as the paper's M / F boxes print. A radiogroup
+                  rather than toggles, so a screen reader announces that picking
+                  one unpicks the other — the same treatment Type of Registration
+                  and Economic Organization get above.
+                */}
+                <div role="radiogroup" aria-label="Gender" className="flex flex-wrap gap-2">
+                  {[
+                    { value: 'M', label: 'Male' },
+                    { value: 'F', label: 'Female' },
+                  ].map((opt) => {
+                    const selected = form.owner_gender === opt.value
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => update('owner_gender', selected ? '' : opt.value)}
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-royal bg-input text-ink'
+                            : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                        }`}
+                      >
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full border-2 ${
+                            selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                          }`}
+                        />
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
@@ -4369,7 +5839,14 @@ export function ApplyWizard() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block">
-                      <FieldLabel>Citizenship</FieldLabel>
+                      {/*
+                        The paper's own wording, item 14: "Citizenship (of
+                        President/OIC)". It was a label plus an explanatory line
+                        underneath, which said the same thing in more words and
+                        in a place the eye reaches after the input. On the label
+                        it is read before the field it qualifies.
+                      */}
+                      <FieldLabel>Citizenship (of President/OIC)</FieldLabel>
                       <input
                         value={form.citizenship}
                         onChange={(e) => update('citizenship', e.target.value)}
@@ -4377,9 +5854,6 @@ export function ApplyWizard() {
                         className={inputCls}
                       />
                       </label>
-                      <p className="mt-1 text-xs text-ink-muted">
-                        Of the president or officer in charge named above.
-                      </p>
                     </div>
                     <div>
                       <label className="block">
@@ -4413,6 +5887,47 @@ export function ApplyWizard() {
                 </div>
               )}
             </div>
+          </div>
+        </FormSheet>
+      )}
+
+      {/*
+        ── B. Business Operation (paper section B) ─────────────────────────
+
+        Its own step, between Business Information & Registration and
+        Documentary Requirements, because the client asked for the wizard to
+        number the sections the way the paper does: "Section 3 to be Business
+        Information & Registration, Section 4 to be Business Operation, Section
+        5 to be Documentary Requirements."
+
+        It was a heading part-way down step 3 first, and that was not enough.
+        The section map along the top is how an applicant navigates and how they
+        check what is left, and it names STEPS — so a heading inside one meant
+        Section B did not appear in the only place somebody looks for it.
+
+        ── What is here, and what is not ───────────────────────────────────
+
+        Items B6 (Economic Organization) and B8 (Tax Incentives) — the two the
+        codebase records paper item numbers for, so the two I can place without
+        guessing.
+
+        The paper's other B items are still elsewhere: the line-of-business
+        table, the business location address, the lessor block and the emergency
+        contact on step 2 ("Location & Zoning"), and employees and floor area on
+        the fee profile step, where they double as inputs to the fee engine.
+        Moving those is a separate decision — the line-of-business table in
+        particular has a real reason to stay where it is, because the zoning
+        conformity check on that step is a judgment about a NAMED TRADE and
+        needs the trade beside it. Recorded rather than done.
+      */}
+      {phase === 'operation' && (
+        <FormSheet meta={typeMeta}>
+          <SectionMarker letter="B" label="Business Operation" />
+          <p className="mt-3 text-sm text-ink-secondary">
+            How this business operates. Both answers are optional — leave either blank if it does
+            not apply to you.
+          </p>
+          <div className="mt-4 space-y-4">
 
             {/*
               * ── Item B6 — Economic Organization ───────────────────────────
@@ -4562,6 +6077,78 @@ export function ApplyWizard() {
               )}
             </div>
           </div>
+
+          {/*
+            Item B7 — Capital Investment (Php).
+            ────────────────────────────────────────────────────────────────
+            ONE figure for the whole business, which is what the paper asks for.
+            It is deliberately not the fee profile's per-line `capitalization`:
+            the Revenue Code prices each line of business separately, so the
+            engine needs a breakdown the paper never collects. Both are kept,
+            and `businesses.capital_investment` — a column that existed and was
+            written by nothing — is finally where this one lands.
+          */}
+          <div className="mt-6 max-w-sm">
+            <label className="block">
+              <FieldLabel required={applicationType === 'new'}>Capital Investment (₱)</FieldLabel>
+              <input
+                inputMode="decimal"
+                value={form.capital_investment}
+                onChange={(e) => update('capital_investment', formatAmountInput(e.target.value))}
+                /*
+                 * Padded to centavos on blur, not on change.
+                 *
+                 * `formatAmountInput` groups thousands as you type, so "1000"
+                 * showed as "1,000" and stayed there — a peso amount printed
+                 * without its centavos. Padding on every keystroke instead
+                 * would fight the caret: typing "1000.5" would become
+                 * "1,000.50" mid-entry and put the cursor behind the digit
+                 * still being typed.
+                 *
+                 * `padAmountInput` leaves a digit-free string alone, so a blank
+                 * field stays blank rather than becoming "0.00" — a
+                 * capitalization of zero is a declaration nobody made, and on a
+                 * new filing this field is required precisely so it cannot be
+                 * skipped silently.
+                 */
+                onBlur={() => {
+                  update('capital_investment', padAmountInput(form.capital_investment))
+                  touch('capital_investment')
+                }}
+                placeholder="e.g. 250,000.00"
+                className={inputCls}
+              />
+            </label>
+            <p className="mt-1 text-xs text-ink-secondary">
+              {applicationType === 'new'
+                ? 'The total capital you are putting into this business.'
+                : 'The total capital in this business. A renewal is assessed on last year’s gross sales, so this is optional.'}
+            </p>
+          </div>
+
+          {/*
+            Section B items 1-4: business area, employees and their split, how
+            many live in the LGU, and the delivery units. They were on the fee
+            step because they price the permit; the paper asks them here, and
+            the client's rule is that the wizard follows the paper.
+
+            The same component the fee step mounts, scoped. Both write one
+            `FeeProfileDraft`, so nothing about the calculation changed — only
+            where the questions are put.
+          */}
+          <div className="mt-6">
+            <FeeProfileStep
+              scope="operation"
+              applicationType={applicationType}
+              registrationType={form.registration_type}
+              permitCodes={[BUSINESS_PERMIT_CODE]}
+              lines={feeLines}
+              value={feeDraft}
+              onChange={setFeeDraft}
+              paymentMode={paymentMode}
+              onPaymentModeChange={setPaymentMode}
+            />
+          </div>
         </FormSheet>
       )}
 
@@ -4573,19 +6160,52 @@ export function ApplyWizard() {
        * processing. The copy here says "zoning clearance", never "Mayor's
        * permit" (user-testing feedback).
        *
-       * The one thing it does decide is item 86: a pin nowhere near Malabon is
-       * refused outright, because no amount of CPDO review makes a business in
-       * another city licensable here. That is a bounding-box check and nothing
-       * more — see MALABON_BOUNDS.
+       * The two things it does decide: a pin outside Malabon is refused
+       * outright, because no amount of CPDO review makes a business in another
+       * city licensable here; and a pin that contradicts the barangay chosen
+       * from the dropdown is refused, because one of the two is then wrong and
+       * neither the applicant nor CPDO gains from storing both. Those are
+       * geometry checks against the city and barangay polygons — see
+       * `lib/malabonGeo.ts` — and nothing more. They say where the premises
+       * are, never whether the trade is allowed there.
        */}
       {phase === 'address' && (
         <div>
           <h1 className="mb-1 text-2xl font-bold text-ink">Zoning Clearance - Selecting Business Location</h1>
           <div className="mb-2 h-px bg-ink/40" />
           <p className="mb-6 text-xs text-ink-secondary">
-            Pin your location and enter your address. The pin must fall inside Malabon. CPDO evaluates
-            your zoning clearance from it during processing.
+            Pin your location and enter your address. The pin must fall inside Malabon, and inside
+            the barangay you select below. CPDO evaluates your zoning clearance from it during
+            processing.
           </p>
+
+          {/*
+            * Says where the other five clearances went, on the step where they
+            * are missed.
+            *
+            * A tester reported them "missing" and asked for them back. They
+            * were not deleted — they moved out of this wizard and onto
+            * /applications/:id/clearances when payment went first, which Review
+            * & Submit does explain. But Review is the LAST step, and this is
+            * the step whose heading says "Zoning Clearance", so this is where
+            * somebody looking for the clearances looks and concludes they are
+            * gone. Answering only at the end answers after the alarm.
+            *
+            * The six are named rather than counted, because "six LGU
+            * clearances" does not let an applicant check whether the one THEY
+            * need is among them. Not a link: there is no application to link to
+            * until this filing is submitted.
+            */}
+          <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
+            <p className="text-xs text-ink-secondary">
+              <span className="font-semibold text-ink">The other permits come later.</span> Fire,
+              Sanitary, Building/Occupancy, Environmental and this Zoning clearance are not part of
+              this form. Once BPLO approves your application and you have paid, all five open under{' '}
+              <span className="font-semibold text-ink">Other Permits</span> — you need every one of
+              them, and for each you either fill in that office’s sheet or hand in the permit you
+              already hold.
+            </p>
+          </div>
 
           {/*
             * Item 69 — the one and only Line of Business question.
@@ -4673,17 +6293,54 @@ export function ApplyWizard() {
                  * while the next lookup is in flight.
                  */
                 radiusM={insightsRadiusM}
+                highlightBarangay={barangayName ?? null}
+                /*
+                 * The map is never locked. Pin first or choose the barangay
+                 * first — either order is allowed.
+                 *
+                 * This step gated the map twice before, first on the line of
+                 * business and then on the barangay, both on the theory that a
+                 * mismatch is best prevented by refusing the click. The client
+                 * ruled otherwise: let the pin land, and resolve the
+                 * disagreement when the barangay is named. A lock spends a
+                 * disabled control on a case the barangay change handler
+                 * already cleans up, and it strands anyone who reaches for the
+                 * map first — which is most people, because the map is the
+                 * thing on the screen that looks clickable.
+                 *
+                 * Two guards remain, and they are the ones that matter: a pin
+                 * outside Malabon is still refused outright in `onPick`, and a
+                 * pin that contradicts an already-chosen barangay is still
+                 * refused there too. Only the empty-barangay case is now let
+                 * through.
+                 */
                 onPick={(lat, lng) => {
                   /*
                    * Item 86 — a pin outside the city is refused rather than
                    * stored and argued with later. The wording names exactly what
-                   * was checked (is it near Malabon) and no more: this cannot
-                   * tell land from water, so it never says it did. See
-                   * MALABON_BOUNDS for what the check is and is not.
+                   * was checked and no more: this cannot tell land from water,
+                   * so it never says it did.
+                   *
+                   * The barangay mismatch is refused here too, and phrased to
+                   * leave both ways out open — the pin may be wrong, or the
+                   * dropdown may be. Naming the barangay the pin actually fell
+                   * in is what makes the message actionable; "that is the wrong
+                   * barangay" alone would send someone hunting. See
+                   * BARANGAY_TOLERANCE_M for why a near-miss is accepted
+                   * silently rather than argued with.
                    */
-                  if (!withinMalabon(lat, lng)) {
+                  const verdict = checkPin(lat, lng, barangayName ?? null)
+                  if (verdict.kind === 'outside-city') {
                     setPinError(
                       `That point (${lat}, ${lng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                    )
+                    return
+                  }
+                  if (verdict.kind === 'wrong-barangay') {
+                    setPinError(
+                      verdict.actual !== null
+                        ? `That pin is in ${verdict.actual}, but you selected ${barangayName}. Move the pin into ${barangayName} — the highlighted area — or change your barangay above.`
+                        : `That pin is about ${verdict.metres} m outside ${barangayName}. Move it into the highlighted area, or change your barangay above.`,
                     )
                     return
                   }
@@ -4716,6 +6373,11 @@ export function ApplyWizard() {
                 </p>
               ) : (
                 <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
+                  {/* One state now. This used to fork on whether a barangay had
+                      been chosen, because the map refused clicks until one was
+                      and sending somebody to a dead control is worse than saying
+                      nothing. The map takes a pin at any point in the step, so
+                      there is only one instruction left to give. */}
                   Required: click the map to drop a pin where your business is.
                 </p>
               )}
@@ -4724,6 +6386,42 @@ export function ApplyWizard() {
                   {pinError}
                 </p>
               )}
+              {/*
+                * A disagreement the applicant did not cause, said out loud.
+                *
+                * A renewal prefills its pin and its barangay from the business
+                * on record, and most records disagree — nothing checked this
+                * until now, so only 61 of 788 addresses on file sit inside their
+                * own barangay. The step deliberately does NOT block on a
+                * prefill (see the gate in `missingFor`), because refusing to let
+                * someone renew over a pin they never placed is our history
+                * charged to them.
+                *
+                * But silence is the wrong other extreme: it leaves a known-wrong
+                * location to be carried into a zoning clearance. So it is stated
+                * and left to them. Deliberately NOT `role="alert"` and not the
+                * error red — nothing has gone wrong here and the applicant is
+                * not being stopped; #bd0000 is reserved for what actually blocks
+                * (DESIGN.md, "Red Means Stop"). It reads as amber-free plain
+                * text with a bold lead-in, so it survives greyscale.
+                */}
+              {form.latitude !== null &&
+                form.longitude !== null &&
+                barangayName !== undefined &&
+                !touched.barangay_id &&
+                pinError === null &&
+                (() => {
+                  const verdict = checkPin(form.latitude, form.longitude, barangayName)
+                  if (verdict.kind !== 'wrong-barangay') return null
+                  return (
+                    <p className="bg-white px-4 pb-2.5 text-xs text-ink-secondary">
+                      <span className="font-semibold text-ink">Check this location.</span> The saved
+                      pin sits in {verdict.actual ?? 'no barangay we can identify'}, but this
+                      application says {barangayName}. Click the map to move the pin, or change the
+                      barangay below — whichever is wrong.
+                    </p>
+                  )
+                })()}
               {/*
                 * The pin locates the premises; it does not clear them. Said
                 * plainly so the boundary check above is not mistaken for a
@@ -4778,7 +6476,82 @@ export function ApplyWizard() {
                 <FieldLabel required>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
-                  onChange={(e) => update('barangay_id', e.target.value)}
+                  /*
+                   * Marked touched on CHANGE as well as on blur, and the change
+                   * is the one that matters.
+                   *
+                   * Picking from a dropdown is answering the question — there
+                   * is no half-typed state to be patient about, which is the
+                   * only reason the other fields wait for blur. The pin/barangay
+                   * check keys off this flag to tell an answer the applicant
+                   * gave from a value we prefilled for them, so relying on blur
+                   * alone let someone change the barangay to one their pin
+                   * contradicts and walk on, provided they never focused
+                   * anything else before pressing Next.
+                   */
+                  onChange={(e) => {
+                    const next = e.target.value
+                    /*
+                     * ── Item 8 — a new barangay drops a CONTRADICTING pin ───
+                     *
+                     * The client asked for the pin to disappear when the
+                     * barangay changes, "to avoid pinning outside the selected
+                     * barangay". A pin that survives the change is a pin that
+                     * was checked against a question which has since been
+                     * answered differently, and leaving it there is how a
+                     * mismatch gets created after the click handler has stopped
+                     * looking.
+                     *
+                     * So the pin is re-checked against the barangay just named,
+                     * and dropped only if it disagrees. Clearing unconditionally
+                     * — which this did while the map was locked until a barangay
+                     * was chosen — costs the pin of anyone who worked the other
+                     * way round: drop the pin, then name the barangay it is
+                     * already sitting in, and watch it vanish for agreeing.
+                     * That order is now the common one, because the map no
+                     * longer waits for the dropdown.
+                     *
+                     * ── Why this lives in the CHANGE HANDLER, not an effect ──
+                     *
+                     * Because an effect watching `form.barangay_id` cannot tell
+                     * a person from a prefill. A renewal and a reopened draft
+                     * both arrive with a barangay AND coordinates, written in by
+                     * a single `setForm` some time after mount — so to an effect
+                     * that is a change, and it would wipe a pin the applicant
+                     * never placed the instant the form hydrated. That would
+                     * break every renewal, which is a bug this repo has already
+                     * shipped once.
+                     *
+                     * `touched.barangay_id` is the same distinction one step
+                     * removed. It is set HERE, on change rather than on blur,
+                     * precisely so the mismatch gate can tell an answer the
+                     * applicant gave from a value we handed them (see the long
+                     * note in `missingFor`). Keying the clear off that flag from
+                     * an effect would buy nothing: the flag only ever flips in
+                     * this handler, so anything reading it is this handler with
+                     * a render in between — the same decision, made later and
+                     * harder to follow.
+                     *
+                     * Guarded on the value actually differing, so re-picking the
+                     * barangay already selected is not a change and costs nobody
+                     * their pin.
+                     */
+                    if (next !== form.barangay_id) {
+                      const nextName =
+                        barangays.find((b) => String(b.id) === next)?.name ?? null
+                      setForm((f) => {
+                        const keepsPin =
+                          f.latitude === null ||
+                          f.longitude === null ||
+                          checkPin(f.latitude, f.longitude, nextName).kind === 'ok'
+                        return keepsPin
+                          ? { ...f, barangay_id: next }
+                          : { ...f, barangay_id: next, latitude: null, longitude: null }
+                      })
+                      setPinError(null)
+                    }
+                    touch('barangay_id')
+                  }}
                   onBlur={() => touch('barangay_id')}
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.barangay_id)}
@@ -5039,17 +6812,26 @@ export function ApplyWizard() {
               <p className="text-sm text-ink-secondary">No documents required for the selected permits.</p>
             ) : (
               requiredDocs.map((dt) => {
-                const done = uploaded[dt.id]
+                const files = uploaded[dt.id] ?? []
                 const busy = uploadingType === dt.id
-                const removing = done && removingDoc === done.id
                 return (
-                  <div
-                    key={dt.id}
-                    className={`flex items-center gap-4 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 ${
-                      busy || removing ? 'opacity-60' : ''
-                    }`}
-                  >
-                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-4 transition-colors">
+                  <div key={dt.id}>
+                    {/*
+                      The dashed box is the ADD control, and stays one row tall
+                      however many files a requirement holds. The files are
+                      listed under it, which is the same shape "Other
+                      Requirements" has always used — that section was the only
+                      repeatable one, and copying its pattern means an applicant
+                      does not meet two different ways of attaching a file on one
+                      screen. That section is otherwise untouched [client,
+                      6 September 2026] — it takes one file per press as it always
+                      has, and only the numbered requirements above changed.
+                    */}
+                    <label
+                      className={`flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
+                        busy ? 'opacity-60' : ''
+                      }`}
+                    >
                       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-input-border bg-white text-royal">
                         <UploadIcon size={18} />
                       </span>
@@ -5063,52 +6845,84 @@ export function ApplyWizard() {
                           )}
                         </span>
                         <span className="block truncate text-xs text-ink-muted">
-                          {done
-                            ? `${done.name} · ${formatBytes(done.size)} · click to replace`
-                            : busy
-                              ? 'Uploading…'
+                          {busy
+                            ? 'Uploading…'
+                            : files.length > 0
+                              ? /*
+                                 * It said "click to replace", which was true and
+                                 * is the behaviour that was wrong: the press
+                                 * destroyed the file already there. It adds now,
+                                 * and says so — the count is what tells an
+                                 * applicant the earlier pages are still attached.
+                                 */
+                                `${files.length} file${files.length === 1 ? '' : 's'} attached · click to add another`
                               : dt.help_text || 'file type: png, jpg, pdf only'}
                         </span>
                       </span>
+                      {files.length > 0 && (
+                        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
+                          <CheckIcon size={16} /> Uploaded
+                        </span>
+                      )}
                       <input
                         type="file"
                         accept={ACCEPT_ATTR}
+                        multiple
                         className="sr-only"
-                        disabled={busy || Boolean(removing)}
+                        disabled={busy}
                         onChange={(e) => {
-                          const file = e.target.files?.[0]
-                          if (file) void handleUpload(dt.id, file)
+                          const chosen = Array.from(e.target.files ?? [])
+                          if (chosen.length > 0) void handleUpload(dt.id, chosen)
                           e.target.value = ''
                         }}
                       />
                     </label>
-                    {done && (
-                      <>
-                        <span className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-s-green">
-                          <CheckIcon size={16} /> Uploaded
-                        </span>
-                        {/*
-                          Item 96. Until now the only thing an applicant could
-                          do with a file they had sent was replace it or delete
-                          it — there was no way to see what had actually
-                          arrived. Uploading the wrong scan is the easiest
-                          mistake on this screen and it was the one mistake the
-                          screen would not let you check for, so the reasonable
-                          move was to delete and re-upload on a hunch. View
-                          opens the stored copy, not the local File object, so
-                          what is shown is what the office will read.
-                        */}
-                        <DocumentActions id={done.id} filename={done.name} label={dt.name} />
-                        <button
-                          type="button"
-                          onClick={() => void handleRemoveDocument(done, dt.id)}
-                          disabled={Boolean(removing)}
-                          aria-label={`Remove ${dt.name}`}
-                          className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
-                        >
-                          {removing ? 'Removing…' : 'Remove'}
-                        </button>
-                      </>
+
+                    {files.length > 0 && (
+                      <ul className="mt-2 space-y-2 pl-4">
+                        {files.map((f) => {
+                          const removing = removingDoc === f.id
+                          return (
+                            <li
+                              key={f.id}
+                              className={`flex items-center gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-2.5 ${
+                                removing ? 'opacity-60' : ''
+                              }`}
+                            >
+                              <span className="min-w-0 flex-1 truncate text-sm text-ink">{f.name}</span>
+                              <span className="tnum shrink-0 text-xs text-ink-muted">
+                                {formatBytes(f.size)}
+                              </span>
+                              {/*
+                                Item 96. The only thing an applicant could once
+                                do with a file they had sent was replace it or
+                                delete it — there was no way to see what had
+                                actually arrived. Uploading the wrong scan is the
+                                easiest mistake on this screen and it was the one
+                                mistake the screen would not let you check for.
+                                View opens the STORED copy, not the local File
+                                object, so what is shown is what the office reads.
+
+                                The label is the filename rather than the
+                                requirement's name: several rows can now share
+                                one requirement, so "View Lease Contract" three
+                                times over would name three different files
+                                identically to a screen reader.
+                              */}
+                              <DocumentActions id={f.id} filename={f.name} />
+                              <button
+                                type="button"
+                                onClick={() => void handleRemoveDocument(f, dt.id)}
+                                disabled={removing}
+                                aria-label={`Remove ${f.name} from ${dt.name}`}
+                                className="shrink-0 text-sm font-semibold text-s-red underline underline-offset-2 disabled:opacity-60"
+                              >
+                                {removing ? 'Removing…' : 'Remove'}
+                              </button>
+                            </li>
+                          )
+                        })}
+                      </ul>
                     )}
                   </div>
                 )
@@ -5240,6 +7054,218 @@ export function ApplyWizard() {
         </div>
       )}
 
+      {/*
+        ── Section A · MCG-BPLO-FO-002 v2.0 ────────────────────────────────
+
+        "A. BUSINESS INFORMATION AND REGISTRATION", transcribed. Three
+        questions in the order the paper prints them:
+
+          A1  Do you have any changes or amendments in the previous business
+              registration?                                        Yes / No
+          A2  If yes, please check the appropriate box/es —
+              Ownership · Location or Address of Business ·
+              Nature of Business · Others ______
+          A3  Amendment: From [structure] To [structure]
+
+        A1 is asked HERE, immediately after Data Privacy, and not in the dialog
+        that opened the filing. The dialog's job is to say which permits are
+        being renewed; this is the form's first question, and a No means the
+        form is finished — a decision the wizard can only act on by shortening
+        itself, which it can only do from inside its own sequence.
+
+        A2 does more work here than it does on paper. On the form it is a
+        record of what changed; here it also decides which of the later
+        sections the applicant is shown at all, so a renewal that only moved
+        premises answers one section instead of six. `sequence` above is where
+        that mapping lives.
+      */}
+      {phase === 'amendments' && (
+        <FormSheet meta={typeMeta}>
+          <h2 className="text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
+            A. Business Information and Registration
+          </h2>
+          <div className="mb-6 mt-2 h-px bg-royal/30" />
+
+          {/* ── A1 ─────────────────────────────────────────────────────── */}
+          <fieldset ref={a1Ref} className="border-0 p-0">
+            <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+              1. Do you have any changes or amendments in the previous business registration?
+              <span className="text-s-red"> *</span>
+            </legend>
+            <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+              Answer No and the details on record carry over to this renewal unchanged.
+            </p>
+            <div className="flex gap-2">
+              {/*
+                Two buttons, not one checkbox. The paper prints two boxes, and
+                an unticked checkbox cannot tell "No" from "not answered yet" —
+                the distinction this whole step turns on, because one of those
+                ends the form and the other must not.
+              */}
+              {[
+                { value: true, label: 'Yes' },
+                { value: false, label: 'No' },
+              ].map((opt) => {
+                const chosen = amendment.hasChanges === opt.value
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    aria-pressed={chosen}
+                    onClick={() =>
+                      setAmendment((a) =>
+                        opt.value
+                          ? { ...a, hasChanges: true }
+                          : /*
+                             * No clears section A. Leaving the ticks behind
+                             * would file a renewal claiming nothing changed
+                             * while still naming Location as changed, and the
+                             * API would have to pick one of the two to believe.
+                             */
+                            {
+                              ...a,
+                              hasChanges: false,
+                              ownership: false,
+                              location: false,
+                              nature: false,
+                              other: '',
+                              fromRegistrationType: '',
+                              toRegistrationType: '',
+                            },
+                      )
+                    }
+                    className={
+                      chosen
+                        ? 'min-w-[6rem] rounded-lg border border-royal bg-royal px-5 py-2.5 text-sm font-semibold text-white'
+                        : 'min-w-[6rem] rounded-lg border border-input-border bg-white px-5 py-2.5 text-sm font-semibold text-ink transition-colors hover:bg-royal-tint'
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                )
+              })}
+            </div>
+          </fieldset>
+
+          {/* ── A1 = No · the form is finished ─────────────────────────── */}
+          {amendment.hasChanges === false && (
+            <div className="mt-5 max-w-2xl rounded-lg border border-input-border bg-royal-tint px-5 py-4">
+              <p className="text-sm font-semibold text-royal">Your renewal is ready to submit.</p>
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-secondary">
+                Nothing has changed, so there is nothing further to fill in. Every detail carries
+                over from the permit you are renewing. Press Next to check it over and file.
+              </p>
+            </div>
+          )}
+
+          {/* ── A2 ─────────────────────────────────────────────────────── */}
+          {amendment.hasChanges === true && (
+            <fieldset ref={amendmentRef} className="mt-6 border-0 p-0">
+              <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+                2. If yes, please check the appropriate box/es
+                <span className="text-s-red"> *</span>
+              </legend>
+              <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+                Tick only what actually changed. We will ask you to fill in those sections and
+                nothing else — the rest carries over from your last permit.
+              </p>
+              <div className="max-w-2xl space-y-2">
+                {AMENDMENT_KINDS.map((kind) => (
+                  <label
+                    key={kind.key}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-white px-4 py-3"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={amendment[kind.key]}
+                      onChange={(e) =>
+                        setAmendment((a) => ({ ...a, [kind.key]: e.target.checked }))
+                      }
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-ink">{kind.label}</span>
+                      {/*
+                        What ticking it will actually make them fill in. Said on
+                        the box rather than discovered two steps later, because
+                        the tick is now a choice about the length of the form
+                        and not only a record of what changed.
+                      */}
+                      <span className="block text-xs text-ink-secondary">{kind.opens}</span>
+                    </span>
+                  </label>
+                ))}
+                {/*
+                  "Others (specify)" is one control, not a checkbox with a box
+                  beside it: on the paper you cannot tick Others without writing
+                  the other in, so typing IS ticking and a separate tick could
+                  only ever contradict the text.
+                */}
+                <label className="block rounded-lg border border-input-border bg-white px-4 py-3">
+                  <span className="mb-1.5 block text-sm font-medium text-ink">Others (specify)</span>
+                  <input
+                    value={amendment.other}
+                    onChange={(e) => setAmendment((a) => ({ ...a, other: e.target.value }))}
+                    placeholder="what else changed"
+                    maxLength={255}
+                    className={inputCls}
+                  />
+                  <span className="mt-1.5 block text-xs text-ink-secondary">
+                    Opens Business Information so you can edit the details.
+                  </span>
+                </label>
+              </div>
+            </fieldset>
+          )}
+
+          {/* ── A3 ─────────────────────────────────────────────────────── */}
+          {amendment.hasChanges === true && amendment.ownership && (
+            <fieldset className="mt-6 border-0 p-0">
+              <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+                3. Amendment
+              </legend>
+              <p className="mb-3 max-w-2xl text-xs leading-relaxed text-ink-secondary">
+                Only if the business converted from one legal structure to another. Leave both as
+                they are if ownership changed hands without the structure changing.
+              </p>
+              <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+                {[
+                  { key: 'fromRegistrationType' as const, label: 'From' },
+                  { key: 'toRegistrationType' as const, label: 'To' },
+                ].map((side) => (
+                  <label key={side.key} className="block">
+                    <FieldLabel>{side.label}</FieldLabel>
+                    <select
+                      className={inputCls}
+                      value={amendment[side.key]}
+                      onChange={(e) => setAmendment((a) => ({ ...a, [side.key]: e.target.value }))}
+                    >
+                      <option value="">Not changing</option>
+                      {REGISTRATION_TYPES.map((rt) => (
+                        <option key={rt.value} value={rt.value}>
+                          {rt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {/*
+                A conversion to the structure it already is is not a conversion.
+                Said rather than blocked: it is a slip worth naming, not a
+                filing worth refusing.
+              */}
+              {amendment.fromRegistrationType !== '' &&
+                amendment.fromRegistrationType === amendment.toRegistrationType && (
+                  <p className="mt-2 max-w-2xl text-xs font-medium text-ink">
+                    From and To are the same structure — check which one changed.
+                  </p>
+                )}
+            </fieldset>
+          )}
+        </FormSheet>
+      )}
+
       {/* ── Business & Tax Profile (revenue-code fee inputs) ───────────── */}
       {phase === 'fees' && (
         <FormSheet meta={typeMeta}>
@@ -5283,24 +7309,23 @@ export function ApplyWizard() {
             {/*
               What happens next, said here rather than discovered later.
 
-              This paragraph used to read: "Submitting produces one Tax Order of
-              Payment covering your Business Permit and every clearance below.
-              Nothing else is charged afterwards." Every clause of it is now
-              false. The Tax Order of Payment raised at submit covers the
-              business permit ALONE; the clearances have not been offered yet;
-              and something else is very much charged afterwards, which is the
-              one thing an applicant must not be surprised by.
+              The whole "Pay with" fieldset stood below this paragraph and is
+              gone, along with the sentence that promised the press would settle
+              a bill. Submission does not bill anybody: BPLO reads the form
+              first, and the Tax Order of Payment is raised only if they accept
+              it (docs/application-flow-2026-09.md).
 
-              So it says the opposite, in the order it will happen. The second
-              sentence is not decoration — an applicant who thinks this bill is
-              the whole bill is the failure this screen exists to prevent, and
-              the clearance stage's own balance block is the other half of the
-              same promise.
+              Three stages named, in the order they happen, because each is a
+              wait the applicant would otherwise experience as nothing
+              happening. The last clause is the one that must not be dropped in
+              a future trim — an applicant who thinks approval is the end, or
+              that payment is the end, is the surprise this screen exists to
+              prevent.
             */}
             <p className="max-w-md text-sm text-ink-muted">
-              Submitting produces a Tax Order of Payment for your Business Permit. Once that payment
-              clears, the six LGU clearances open for you to apply for — each one you apply for adds
-              its own fee, and your permit is released when the balance reaches zero.
+              BPLO reviews this form first. If they accept it, we raise your Tax Order of Payment
+              and you pay — and once that is settled, your five LGU clearances open. Your Business
+              Permit is released after all of them are approved.
             </p>
             {priorPermitChoice && (
               <p className="tnum mt-6 text-sm text-ink-secondary">
@@ -5356,7 +7381,12 @@ export function ApplyWizard() {
                 disabled={saving || !consent}
                 className="min-w-28"
               >
-                Submit
+                {/*
+                  * "Submit", because that is now all it does. It read "Submit &
+                  * Pay" while the press also charged the applicant; the charge
+                  * has moved behind BPLO's approval, so the label goes back.
+                  */}
+                {saving ? 'Submitting…' : 'Submit'}
               </PillButton>
             )}
             {stepIndex > 0 && (
@@ -5516,7 +7546,16 @@ export function ApplyWizard() {
             void submit()
           }}
         >
-          <p className="py-4 text-center text-lg">Are you sure you want to submit this application?</p>
+          {/*
+            * Back to naming one action, because the press takes one. It named a
+            * payment method while it also charged; a confirmation that
+            * over-describes what it confirms is as misleading as one that
+            * under-describes it, and this one would have promised a debit that
+            * the API now refuses at this stage.
+            */}
+          <p className="py-4 text-center text-lg">
+            Submit this application to BPLO for approval?
+          </p>
         </ProtoModal>
       )}
 
@@ -5541,9 +7580,11 @@ export function ApplyWizard() {
           applicationType={applicationType as 'renewal' | 'amendment'}
           ownedBusinesses={ownedBusinesses.data ?? []}
           businessesLoading={ownedBusinesses.loading}
+          permitTypes={permitTypes}
           initial={{
             businessId: prefillBusinessId,
             permitId: priorPermitId,
+            permitIds: priorPermitIds,
             declaredNone: priorPermitDeclaredNone,
             amendment,
           }}

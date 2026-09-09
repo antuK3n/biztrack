@@ -4,6 +4,7 @@ use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Department;
 use App\Models\DocumentType;
+use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 
@@ -18,10 +19,19 @@ use Illuminate\Support\Facades\Storage;
  * question the rest of the application does.
  */
 
-/** One requirement on RxCare's under-review filing (routed to BPLO, CHO, BFP). */
+/**
+ * One requirement on RxCare's paid, in-flight filing (routed to BPLO, CHO, BFP).
+ *
+ * `under_review` is not an application status any more — the work it described
+ * belongs to one permit and lives on `application_permit_types.status`
+ * (docs/application-flow-2026-09.md). The seeded RxCare filing is at
+ * `awaiting_other_permits`, which is the same stage of the same story: paid,
+ * with its offices working. Nothing about the document boundary under test
+ * depends on which name that stage has.
+ */
 function scopedDocument(): array
 {
-    $app = Application::where('status', 'under_review')
+    $app = Application::where('status', 'awaiting_other_permits')
         ->whereHas('business', fn ($b) => $b->where('name', 'RxCare Pharmacy'))
         ->firstOrFail();
 
@@ -65,15 +75,15 @@ it('lets an office that holds an assignment on the filing download it', function
 it('refuses an office the filing never reached', function () {
     ['application' => $app, 'document' => $doc] = scopedDocument();
 
-    $market = Department::where('code', 'CMO-MARKET')->firstOrFail();
+    $cenro = Department::where('code', 'CENRO')->firstOrFail();
     expect(
         ApplicationAssignment::where('application_id', $app->id)
-            ->where('department_id', $market->id)
+            ->where('department_id', $cenro->id)
             ->exists()
     )->toBeFalse();
 
     // A real reviewer with a real session, guessing at a document id.
-    authAs('market@biztrack.local');
+    authAs('cenro@biztrack.local');
     $this->get("/api/v1/documents/{$doc['id']}/download")
         // 403, not a 500 and not a stream: the reader exists, the answer is no.
         ->assertStatus(403);
@@ -100,7 +110,7 @@ it('refuses a reviewer with no department at all', function () {
     ['document' => $doc] = scopedDocument();
 
     // Strip the office off a scoped reviewer: the boundary has to fail closed.
-    \App\Models\User::where('email', 'sanitary@biztrack.local')->update(['department_id' => null]);
+    User::where('email', 'sanitary@biztrack.local')->update(['department_id' => null]);
 
     authAs('sanitary@biztrack.local');
     $this->get("/api/v1/documents/{$doc['id']}/download")->assertStatus(403);

@@ -48,8 +48,20 @@ function requirementApplication(string $businessName, string $registrationNumber
         'business_id' => $businessId,
         'application_type' => 'new',
         'permit_type_ids' => PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+        /*
+         * RA 10173 consent, carried on the filing itself.
+         *
+         * submit() refuses without it — it is the first of two gates there, and
+         * the lawful basis for processing anything else on the form. A
+         * PRECONDITION of this fixture: the resubmission loop below needs a
+         * filing that actually reached an office.
+         */
+        'data_privacy_consent' => true,
     ])->assertCreated()->json('data.id');
 
+    // Lands on For Approval, not Pending Payment: BPLO reads the main form
+    // before any bill is raised. Requirements are raised by an assigned office
+    // and do not wait on payment, so the fixture stops here.
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
     /*

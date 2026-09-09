@@ -130,27 +130,6 @@
     "requires_officer": true
   },
   {
-    "code": "market.stall_rental",
-    "title": "Public market stall rental (officer-set, pending Market Code)",
-    "section": "none in A10-2016",
-    "source": "A10-2016",
-    "office": "CMO-MARKET",
-    "group": "city_charge",
-    "permit_types": [
-      "MARKET"
-    ],
-    "conditions": {},
-    "basis": "fixed",
-    "computation": {
-      "type": "fixed",
-      "amount": 0
-    },
-    "cap": null,
-    "notes": "requires_officer: Ordinance A10-2016 contains no public-market stall fee schedule (Chapter V covers only city-owned commercial space leases at P200/sqm/month). Stall rates presumably live in a separate Market Code ordinance not on file. Officers set this line via fee adjustment. The computable MARKET lines are the mayor's-permit markets-by-stall-count bracket and garbage Schedule J.",
-    "defects": [],
-    "requires_officer": true
-  },
-  {
     "code": "exempt.bmbe_claim",
     "title": "BMBE exemption claim (officer-reviewed)",
     "section": "RA 9178 Sec. 7-8",

@@ -36,8 +36,21 @@ class ReferenceSeeder extends Seeder
                 'description' => 'Issues occupancy permits for business premises.'],
             ['code' => 'CENRO', 'name' => 'City Environment and Natural Resources Office',
                 'description' => 'Issues the City Environmental Certificate.'],
-            ['code' => 'CMO-MARKET', 'name' => 'Office of the City Market Administrator',
-                'description' => 'Issues market clearance for market-based businesses.'],
+            /*
+             * CMO-MARKET (Office of the City Market Administrator) was here and
+             * is gone [client, 2026-09-06]. It issued the Market Clearance, which
+             * has been removed from the system entirely — the client confirmed
+             * with the LGU that neither the clearance nor its admin is needed.
+             * A business that genuinely needs one is asked for it by hand,
+             * through Other Requirements.
+             *
+             * To bring it back: restore this row, the MARKET permit type below,
+             * its requirement checklist, the `market.stall_rental` rule in
+             * database/data/revenue_code/system.json, and MARKET in
+             * PermitType::OFFICE_FORM_CODES / CLEARANCE_ORDER plus the web's
+             * OFFICE_FORM_CODES. It was never used: no filing in the register
+             * ever requested it.
+             */
         ];
         foreach ($departments as $d) {
             Department::updateOrCreate(['code' => $d['code']], $d);
@@ -331,15 +344,8 @@ class ReferenceSeeder extends Seeder
             // 345 processing = 735), which supersede this column.
             'base_fee' => 735, 'per_line_surcharge' => 0,
         ]);
-        $market = PermitType::updateOrCreate(['code' => 'MARKET'], [
-            'name' => 'Market Clearance',
-            'permit_number_prefix' => 'MCM',
-            'issuing_department_id' => $dept('CMO-MARKET'),
-            'validity_days' => 365, 'description' => 'Clearance for market-based businesses.',
-            // Inspected, like the other clearances — see the note on OCCUPANCY.
-            'requires_inspection' => true,
-            'base_fee' => 300, 'per_line_surcharge' => 0,
-        ]);
+        // MARKET (Market Clearance, MCM, CMO-MARKET) removed 2026-09-06 — see
+        // the note where its department used to be seeded.
 
         // --- Requirement checklists (context per paper Table 59 enum) --------
         $byCode = fn (string $c) => DocumentType::where('code', $c)->first()->id;
@@ -394,7 +400,6 @@ class ReferenceSeeder extends Seeder
         ]);
         $req($cec, ['LOCATIONAL' => [], 'VALID_ID' => []]);
         $req($zoning, ['LEASE_TITLE' => [], 'BRGY_CLEARANCE' => [], 'VALID_ID' => []]);
-        $req($market, ['BRGY_CLEARANCE' => [], 'VALID_ID' => []]);
 
         /*
          * --- Form signatories -------------------------------------------------

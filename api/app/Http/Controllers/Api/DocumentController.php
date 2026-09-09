@@ -70,21 +70,40 @@ class DocumentController extends Controller
              * payment) — so the two windows do not overlap and neither has to
              * know about the other."*
              *
-             * Every clause of that is now false. `4fb2d54` moved the clearance
-             * stage from after payment to before submission, so
-             * ClearanceService::isUnlocked is `status === Draft` and its window
-             * is a SUBSET of this one, not a successor to it. On a draft both
-             * endpoints are open at once. The two windows fully overlap, and
-             * "neither has to know about the other" was the reasoning that let
-             * this path stay unguarded.
+             * That became false when `4fb2d54` moved the clearance stage from
+             * after payment to before submission: `isUnlocked` became
+             * `status === Draft`, its window a SUBSET of this one rather than a
+             * successor, and on a draft both endpoints were open at once.
              *
-             * What that costs, precisely: ClearanceController::storeHeld
-             * refuses to file a held copy while the same permit type is
-             * attached to the filing, because a clearance is either one the
-             * applicant holds or one they are asking us to issue, never both —
-             * the invariant HeldPermits is built on. This endpoint performs no
-             * such check, so a direct POST here with `permit_type_id` set can
-             * write the state that refusal exists to prevent.
+             * ── And it is TRUE again as of 6 September 2026 ──────────────────
+             *
+             * The verified counter procedure puts the clearance stage back after
+             * payment, so `ClearanceService::isUnlocked` is now
+             * `status->isPaid()`. This endpoint allows Draft and Returned. Those
+             * two sets are disjoint — a paid filing is neither — so the windows
+             * genuinely do not overlap and neither endpoint can write the state
+             * the other refuses.
+             *
+             * Do NOT read that as the guard being unnecessary. It is one
+             * `isUnlocked` edit away from overlapping again, and the invariant
+             * below is what would break first.
+             *
+             * What that used to cost: `ClearanceController::storeHeld` refused
+             * a held copy while the same permit type was attached to the filing,
+             * because a clearance was either one the applicant holds or one they
+             * are asking us to issue, never both. This endpoint performs no such
+             * check, so a direct POST with `permit_type_id` could write the state
+             * that refusal existed to prevent.
+             *
+             * That invariant INVERTED on 6 September 2026 and the exposure went
+             * with it. Five of the six permits are required now, so every one of
+             * them is on the pivot from submission whichever way it will be
+             * satisfied, and `application_permit_types.mode` — not the presence
+             * or absence of the row — is what says whether the applicant filled
+             * a form or handed in a copy. There is no longer a contradictory
+             * state for the two records to be in. What `storeHeld` refuses
+             * instead is narrower and about timing: you cannot swap the evidence
+             * after the office has accepted it.
              *
              * It is not reachable from the product: `documents.upload`'s
              * optional `permitTypeId` (web/src/lib/resources.ts) is passed by
@@ -169,6 +188,30 @@ class DocumentController extends Controller
             $app !== null && ApplicationVisibility::canView($request->user(), $app),
             403,
             'You may not access this document.'
+        );
+
+        /*
+         * SEP-8, the second half. Filtering the list is not a boundary.
+         *
+         * `canView` above answers "may you open this filing", which every office
+         * routed to it can. An attachment carrying a `permit_type_id` is a
+         * permit the applicant already holds, filed as that office's evidence —
+         * so the finer question has to be asked too, or the sanitary officer is
+         * one typed id away from a Fire Safety Inspection Certificate the list
+         * correctly declined to show them. Document ids are sequential.
+         *
+         * Attachments with no permit type are shared requirements and are
+         * untouched: `readsOfficeSheet` is only consulted when there is an
+         * office to consult it about.
+         */
+        abort_unless(
+            $document->permit_type_id === null
+                || ApplicationVisibility::readsOfficeSheet(
+                    $request->user(),
+                    $document->loadMissing('permitType')->permitType?->issuing_department_id,
+                ),
+            403,
+            'This certificate was filed with another office.'
         );
 
         abort_unless(Storage::disk('local')->exists($document->stored_path), 404, 'File not found.');

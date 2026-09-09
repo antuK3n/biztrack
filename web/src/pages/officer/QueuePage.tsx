@@ -21,134 +21,206 @@ import type { ApplicationListItem, ApplicationStatus, Assignment, PageMeta } fro
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
-type Tab = 'payment' | 'approval' | 'inspection'
+type Tab = 'approval' | 'inspection' | 'payment' | 'final'
 
 /**
- * The stages, in the order the client described them: "pending payment, next up
- * when a user has paid, for approval, then for inspection ..., then approved".
+ * The stages, in the order the flow visits them (docs/application-flow-2026-09.md):
+ * For Approval → Pending Payment → the other permits (reviewed, then inspected)
+ * → BPLO's Final Approval.
  *
- * Pending Payment leads the row and is NOT the tab that opens. The officer's
- * work starts at For Approval — nothing on the payment stage is actionable by an
- * officer at all (see PaymentQueueRow) — and landing every officer on a tab they
- * can only read would be a worse screen than the one this fixes.
+ * For Approval opens, and still is not first in the row. The officer's work
+ * starts there — nothing on the payment stage is actionable by an officer at all
+ * (see the note on the row that cannot be opened) — and landing every officer on
+ * a tab they can only read would be a worse screen than the one this fixes. The
+ * row is ordered by the process; the default is ordered by the job.
+ *
+ * ── What these four replaced, and why three tabs were not enough ──────────
+ *
+ * They were Pending Payment / For Approval / For Inspection, filtering on
+ * `submitted`, `under_review` and `for_inspection`. All three of those statuses
+ * were deleted on 6 September 2026, so every tab matched nothing and the whole
+ * queue was empty however many filings were waiting.
+ *
+ * Rebuilding it needed a fourth, because BPLO now acts TWICE — once on the main
+ * form before payment, once on the whole application after every other permit is
+ * in — and those two acts are different work at opposite ends of the process.
+ * Folding them into one tab would put a form nobody has paid for next to an
+ * application waiting only on a signature.
  */
 const TABS: { value: Tab; label: string }[] = [
-  { value: 'payment', label: 'Pending Payment' },
   { value: 'approval', label: 'For Approval' },
+  { value: 'payment', label: 'Pending Payment' },
   { value: 'inspection', label: 'For Inspection' },
+  { value: 'final', label: 'Final Approval' },
 ]
 
-/**
- * Before the money lands. The stage the client kept reporting as missing:
- * "unpaid applications are still not reflected in the tracking of applications".
- *
- * They were missing because the other two tabs read `/assignments`, and an
- * unpaid filing HAS no assignment. WorkflowService::submit takes a draft to
- * `submitted` and straight on to `pending_payment`; routing is
- * WorkflowService::routeToDepartments, and the only caller is
- * `onPaymentCompleted`. That is deliberate — `assigned_at` starts the office's
- * service-time clock that ProcessingTimeAnalytics and StaffingSimulation
- * measure, and it must not start while an applicant is still typing. So there is
- * no assignment row to find, and no filter on the assignment feed could have
- * surfaced one. Listing `pending_payment` under APPROVAL_STATUSES, as this file
- * used to, was querying for something that structurally cannot exist.
- *
- * Hence a different feed for this tab: `/applications`, filtered by status. See
- * loadPage below.
- *
- * `submitted` rides along even though the register holds none of them: submit()
- * passes through it inside one transaction, so it is only ever observable if a
- * filing gets stuck there. A stuck filing appearing in the wrong tab is a
- * nuisance; a stuck filing appearing in NO tab is the bug being fixed here.
- */
-const PAYMENT_STATUSES = ['submitted', 'pending_payment'] as const
 
 /**
- * With the offices, waiting on a decision.
+ * Before the money lands, and it is no longer an unrouted filing.
  *
- * `submitted` and `pending_payment` used to be here too, and moved to
- * PAYMENT_STATUSES above rather than being listed in both places. They cannot
- * reach this tab — it reads the assignment feed and they have no assignments —
- * so leaving them would have put two entries in this tab's own status Filter
- * that always return nothing. A control that reliably does nothing is the
- * failure mode this codebase already paid for once (see the note on `SortFilter`
- * in e2e/track-search.spec.ts).
+ * The stage the client kept reporting as missing: "unpaid applications are still
+ * not reflected in the tracking of applications". The old reason was structural
+ * — routing happened on payment, so an unpaid filing had no assignment and no
+ * filter on the assignment feed could surface one.
  *
- * Checked against ApplicationStatus: draft, submitted, pending_payment,
- * under_review, for_inspection, approved, rejected, returned, cancelled. Every
- * pre-decision status except draft now has a tab, and draft belongs out — an
- * unfiled draft is not an officer's work.
+ * That is only half true now. `WorkflowService::submit()` routes to BPLO
+ * immediately, so a filing awaiting payment DOES have an assignment: BPLO's,
+ * already `completed`, because BPLO approving the form is what raised the bill.
+ * The tab still reads `/applications` rather than the assignment feed, for a
+ * better reason than before — this stage is waiting on the APPLICANT, not on an
+ * office, and there is no office whose queue it belongs in.
+ *
+ * `submitted` used to ride along here for stuck filings. That status no longer
+ * exists; `for_approval` is a real stage with its own tab and does not belong to
+ * this one.
  */
-const APPROVAL_STATUSES = ['under_review', 'returned', 'for_inspection'] as const
+const PAYMENT_STATUSES = ['pending_payment'] as const
+
 /**
- * Statuses on the inspection side, for a filing this office has already signed
- * off but which is not finished.
+ * Waiting on this office to READ something.
  *
- * `under_review` is in here as well as in APPROVAL_STATUSES, and that is not a
- * duplicate — see the note on OPEN_ASSIGNMENT_STATUSES below. The two lists are
- * never read on their own: each is paired with an assignment-status filter, and
- * between them those two filters partition this office's work with nothing
- * falling between. Same filing, same status, opposite sides of the partition
- * depending on whether the office reading it still owes a review.
+ * Three filing statuses, because two different offices are answered by this one
+ * tab and they are busy at different points:
  *
- * `approved` and `issued` were here and are gone. The reasoning had been that
- * an inspector wants the approved filings still in view — but this is a QUEUE,
- * and a decided filing is nobody's outstanding work. The client: "Those who are
- * already done with the whole application process (accepted and all) is still
- * displayed in the For inspection tab of the Track page of all admins."
+ *  - `for_approval` / `returned` — BPLO, reading the main form. Its assignment
+ *    is `pending` from submission and stays open until it approves.
+ *  - `awaiting_other_permits` — one of the five other offices, reading the
+ *    clearance the applicant has just applied for. `startClearance()` routes to
+ *    that office at that moment, so its assignment opens then and not before.
  *
- * They pile up permanently, and they crowd out the thing the tab exists to
- * show. The register holds over 1,400 approved filings against a handful in
- * flight, so left here the tab converges on being a list of finished work with
- * the live cases buried in it.
+ * The assignment filter is what keeps those from bleeding into each other, and
+ * it does the whole job here: BPLO's assignment is `completed` by
+ * `approveMainForm()`, so BPLO drops out of this tab the instant it approves,
+ * and each other office drops out as `approveClearance()` completes its own.
+ * Nothing needs the clearance status — an office holding an open assignment owes
+ * a reading, whichever office it is.
  *
- * Reaching a decided filing is a different question from working a queue, and
- * it already has answers: search finds it by tracking ID or business name
- * (server-side, over the whole queue), and the permit is on the business. If a
- * "recently decided" view is ever wanted, it wants to be its own tab with its
- * own ordering — not the inspection queue silently doubling as an archive.
+ * `draft` belongs out: an unfiled draft is not an officer's work. Terminal
+ * statuses belong out for the reason INSPECTION_STATUSES gives below.
  *
- * `rejected` and `cancelled` were never here, and belong out for the same
- * reason.
+ * ── One row here can have nothing to read, and only on old filings ────────
+ *
+ * A row whose permit reads "Not Started" is a filing migrated from the previous
+ * model, where payment routed all six offices at once. Its assignment is open
+ * and the applicant has not started that permit, so the office is holding
+ * something with no form behind it yet.
+ *
+ * No new filing can produce it: `startClearance()` routes the office and moves
+ * the permit to `for_approval` in one transaction, so the assignment and the
+ * paperwork arrive together. It is left visible rather than filtered out because
+ * the row states its own permit's status — an officer reads "Not Started" and
+ * knows why there is nothing to do — whereas hiding it would strand a real
+ * assignment in no tab at all, which is the failure this screen was rebuilt to
+ * end. Filtering it away would also need `clearance_status` on this tab, and
+ * that would drop BPLO: its Business Permit pivot is `not_started` for exactly
+ * as long as BPLO's own first review is open.
  */
-const INSPECTION_STATUSES = ['under_review', 'for_inspection'] as const
+const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits'] as const
+
+/**
+ * This office's permit is out for a site visit.
+ *
+ * ── Why this tab stopped being a filing status ────────────────────────────
+ *
+ * It filtered on `for_inspection`, which used to be a status of the APPLICATION
+ * and is not one any more. It could not be: five permits are inspected
+ * independently, so one filing can have a fire inspection booked, a sanitary
+ * inspection passed and a zoning clearance not yet applied for, all at once. A
+ * single column cannot hold that, and the column that tried was deleted.
+ *
+ * So this tab asks the second machine instead — `clearance_status`, which the
+ * assignment feed now takes, matched against the reader's OWN office. Every
+ * filing here is `awaiting_other_permits`; what varies is whose permit is where,
+ * and that is exactly what the filter answers.
+ *
+ * No assignment-status filter, and that is the important part rather than an
+ * omission. `approveClearance()` marks the assignment `completed` at the moment
+ * it moves the permit to `for_inspection` — accepting the paperwork and
+ * conducting the visit are one office's two acts and only the first closes the
+ * assignment — so filtering on an OPEN assignment here would empty the tab of
+ * precisely the rows it exists to show.
+ *
+ * BPLO never appears, and needs no special case: its Business Permit pivot goes
+ * `not_started` → `for_approval` → `approved` and is never `for_inspection`.
+ *
+ * `approved` and `issued` were on this list once and are gone. The reasoning had
+ * been that an inspector wants the approved filings still in view — but this is
+ * a QUEUE, and a decided filing is nobody's outstanding work. The client: "Those
+ * who are already done with the whole application process (accepted and all) is
+ * still displayed in the For inspection tab of the Track page of all admins."
+ * The register holds over 1,400 approved filings against a handful in flight, so
+ * left here the tab converges on a list of finished work with the live cases
+ * buried in it. Reaching a decided filing is a different question and already
+ * has answers: search finds it by tracking ID or business name, server-side over
+ * the whole queue, and the permit is on the business.
+ */
+const INSPECTION_STATUSES = ['awaiting_other_permits'] as const
+
+/** The clearance statuses that put a row in the For Inspection tab. */
+const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
+
+/**
+ * BPLO's second act: the application is complete and wants a signature.
+ *
+ * `refreshReadiness()` moves a filing here the moment the last required permit
+ * is approved, and moves it back out if one stops being approved. So this tab is
+ * the set of applications that qualify RIGHT NOW — nothing in it is waiting on
+ * anybody but BPLO.
+ *
+ * It reads the assignment feed rather than `/applications`, unlike Pending
+ * Payment, and the difference is that a row here has to be OPENABLE. BPLO has to
+ * press Approve, and the review sheet is addressed by assignment id — so a feed
+ * that cannot supply one would render a tab of rows that do not click.
+ *
+ * No assignment-status filter, for a reason worth stating plainly because it
+ * looks like an oversight: BPLO's assignment is `completed` here, closed by
+ * `approveMainForm()` at the other end of the process, and nothing reopens it.
+ * Its final approval is work with no open work item behind it. Filtering on an
+ * open assignment would empty this tab permanently.
+ */
+const FINAL_STATUSES = ['for_final_approval'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
-  payment: PAYMENT_STATUSES,
   approval: APPROVAL_STATUSES,
+  payment: PAYMENT_STATUSES,
   inspection: INSPECTION_STATUSES,
+  final: FINAL_STATUSES,
 }
 
 const TAB_LABEL: Record<Tab, string> = {
-  payment: 'Pending Payment',
   approval: 'For Approval',
+  payment: 'Pending Payment',
   inspection: 'For Inspection',
+  final: 'Final Approval',
 }
 
 /**
  * What a status MEANS inside the tab it is being offered in.
  *
- * The Filter dropdown lists the tab's own statuses, and since the two
- * assignment tabs overlap (see INSPECTION_STATUSES) the same filing status can
- * appear in both. `applicationStatusMeta` labels it the same way in each,
- * because it describes the FILING and knows nothing about which office is
- * reading — so an officer would see "For Approval" offered inside the For
- * Inspection tab and reasonably read it as a bug.
+ * The Filter dropdown lists the tab's own statuses, and `applicationStatusMeta`
+ * labels each one the same way everywhere because it describes the FILING and
+ * knows nothing about which office is reading. Two of them need saying
+ * differently from this seat.
  *
- * These labels say what picking it narrows to from this seat. Deliberately only
- * the two entries the overlap introduced — everything else keeps the shared
- * filing label, which is right where the two readings agree, and renaming a
- * status that was already unambiguous would move a control out from under the
- * tests that press it by name.
+ * Both are `awaiting_other_permits`. To an applicant that status means "the
+ * other permits are being worked"; an office reading its own queue is one of the
+ * workers, and the row is there because the work is theirs. The bare label would
+ * read as an explanation of why the row is NOT actionable, which is the opposite
+ * of true.
+ *
+ * Deliberately only where the two readings diverge. Everywhere else the shared
+ * filing label is right, and renaming a status that was already unambiguous
+ * would move a control out from under the tests that press it by name.
  */
 const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
-  payment: {},
   approval: {
-    for_inspection: 'Waiting on you · another office booked an inspection',
+    awaiting_other_permits: 'Your permit · waiting on your review',
   },
+  payment: {},
   inspection: {
-    under_review: 'You have approved · other offices still reviewing',
+    awaiting_other_permits: 'Your permit · site visit outstanding',
   },
+  final: {},
 }
 
 /**
@@ -156,71 +228,37 @@ const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
  *
  * "After approving an application it still shows approval." The application's
  * status is not this office's status: a filing is routed to every office that
- * issues one of its clearances, and it stays `under_review` until ALL of them
- * have signed off (WorkflowService::afterReviewProgress). So an office that
- * approved its part this morning was still shown the row under For Approval,
- * because the filing really was still under review — by somebody else.
+ * issues one of its permits, and it stays in flight until all of them have
+ * signed off. So an office that approved its part this morning was still shown
+ * the row under For Approval, because the filing really was still in progress —
+ * by somebody else.
  *
  * Filtering on the assignment instead answers the question the tab is actually
  * asking, which is "what is waiting on ME". `completed` is the one state left
  * out. `returned` stays in: the office sent it back and the filing comes to it
  * again when the applicant answers, so it is still that office's open work.
  *
- * Pending Payment must never adopt this: an unrouted filing matches none of
- * these states, which is precisely how the eight unpaid filings in the register
- * were being filtered out of a tab whose status list already named them.
+ * Used by For Approval alone now. The other three tabs each say in their own
+ * note why an assignment filter would be wrong for them, and the short version
+ * is the same in all three: an assignment closes before the office's work does.
  */
 const OPEN_ASSIGNMENT_STATUSES = 'pending,in_progress,returned'
 
 /**
- * The other half of the partition: this office is done, somebody else is not.
+ * Which statuses still owe money, for the chip on the right of every row.
  *
- * ── Why the tabs had a hole in them (INS-2) ────────────────────────────────
- *
- * Until now For Approval carried the assignment filter above and For Inspection
- * carried none, so the second tab was decided by the FILING's status alone.
- * Both filters were written against an invariant that commit 5da4daa deleted —
- * that an assignment can only be pending while the filing is `under_review` or
- * `returned`. Since that commit the first inspecting office's approval flips the
- * whole filing to `for_inspection` while the other five assignments are still
- * `pending`, and two things went wrong at once:
- *
- *  - An office that still OWED a review on a `for_inspection` filing did not
- *    appear under For Approval at all (the tab excluded the status) and did
- *    appear under For Inspection (which asked nothing about the assignment).
- *    Its outstanding paperwork was filed under a heading about site visits, and
- *    the row opened on a screen with no controls — INS-1, reached through the
- *    wrong door. Searching For Approval for it answered "Nothing matches",
- *    which is the client's report 4 in its live form.
- *  - BPLO, whose BUSINESS permit type sets `requires_inspection = 0`, approved a
- *    filing and watched it vanish from BOTH tabs: For Approval had dropped it
- *    because BPLO's assignment was now `completed`, and For Inspection did not
- *    want it because the filing was still `under_review`. That is the client's
- *    report 1 — "I approved it as BPLO and it is not in For Inspection".
- *
- * ── The rule now ──────────────────────────────────────────────────────────
- *
- * A filing lands in the tab matching THIS OFFICE'S outstanding work, not the
- * filing's global status. For Approval is "my review is still open"; For
- * Inspection is "my review is closed and the filing has not finished". The
- * predicate is the same one ReviewPage branches on — an assignment that is
- * `completed` is a review this office no longer owes — so a row can no longer
- * appear in a tab whose screen then offers nothing to do.
- *
- * The two application-status lists overlap on `under_review` and
- * `for_inspection` on purpose: those are exactly the statuses where two offices
- * on one filing are in different states. The assignment filter, not the status
- * list, is what keeps a single filing out of both tabs for a single reader.
- *
- * Terminal statuses (`rejected`, `cancelled`) are in neither list, deliberately.
- * 101 rejected filings on this register still carry a pending assignment
- * (INS-5); they are not work waiting on anybody and must not be offered as if
- * they were.
+ * Written out rather than aliased to PAYMENT_STATUSES, which is what it used to
+ * be. Those two lists answered the same question while payment was the first
+ * thing that happened; they stopped agreeing when BPLO's approval moved in front
+ * of it. A `for_approval` filing is unpaid and would have shown a green "Paid"
+ * chip, on the very tab that exists to hold it.
  */
-const DONE_ASSIGNMENT_STATUSES = 'completed'
-
-/** Pre-payment statuses show the orange block; everything else is paid. */
-const PENDING_PAYMENT_STATUSES: readonly string[] = PAYMENT_STATUSES
+const UNPAID_STATUSES: readonly string[] = [
+  'draft',
+  'for_approval',
+  'returned',
+  'pending_payment',
+]
 
 /**
  * Who may open the Pending Payment tab at all.
@@ -339,7 +377,18 @@ interface QueueItem {
   at: string | null
   /** `at` in milliseconds, for the browser-side sorts. Missing sorts as brand new. */
   atMs: number
-  pendingPayment: boolean
+  unpaid: boolean
+  /**
+   * This office's own permit on the filing, when the row came from an
+   * assignment. Null on the Pending Payment tab, whose rows are applications and
+   * belong to no office yet.
+   *
+   * The row prints this rather than the filing's status, because they answer
+   * different questions and only one of them is the officer's. Five offices
+   * share `awaiting_other_permits`, and printing it would tell all five the same
+   * thing while each is at a different point.
+   */
+  clearance: Assignment['clearance']
 }
 
 /**
@@ -379,7 +428,8 @@ function fromAssignment(item: Assignment): QueueItem {
     ...nameOf(app.business, app.tracking_id),
     at: item.assigned_at,
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
-    pendingPayment: PENDING_PAYMENT_STATUSES.includes(app.status),
+    unpaid: UNPAID_STATUSES.includes(app.status),
+    clearance: item.clearance,
   }
 }
 
@@ -396,7 +446,9 @@ function fromApplication(app: ApplicationListItem): QueueItem {
      */
     at: app.submitted_at,
     atMs: app.submitted_at ? new Date(app.submitted_at).getTime() : 0,
-    pendingPayment: PENDING_PAYMENT_STATUSES.includes(app.status),
+    unpaid: UNPAID_STATUSES.includes(app.status),
+    // No office holds this filing yet, so there is no "your permit" to report.
+    clearance: null,
   }
 }
 
@@ -411,7 +463,9 @@ async function loadPage(args: {
   tab: Tab
   statuses: string
   assignmentStatuses?: string
-  /** Server-side search term, Pending Payment only. '' means no search. */
+  /** This office's own permit's state. For Inspection only; see that tab's note. */
+  clearanceStatuses?: string
+  /** Server-side search term. '' means no search. */
   query: string
   page: number
   perPage: number
@@ -430,6 +484,7 @@ async function loadPage(args: {
   const res = await assignments.page({
     application_status: args.statuses,
     ...(args.assignmentStatuses ? { status: args.assignmentStatuses } : {}),
+    ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
     page: args.page,
     per_page: args.perPage,
@@ -502,24 +557,62 @@ function QueueRow({ item }: { item: QueueItem }) {
           */}
         {!item.href && (
           <p className="mt-1 text-sm text-ink-muted">
-            Waiting on the applicant’s payment. It reaches an office for review once the fees are
-            settled.
+            Waiting on the applicant’s payment. It reaches an office for review once BPLO has
+            approved the form and the fees are settled.
+          </p>
+        )}
+        {/*
+          * Which permit this row is, and where it has got to.
+          *
+          * Without it the four other offices' rows are indistinguishable: they
+          * share the filing, the business and the tracking ID, and the only
+          * thing that differs is the permit — which was the one fact the row did
+          * not carry. An officer with sanitary and fire work on the same
+          * business saw the same three lines twice.
+          *
+          * The office's own name is deliberately absent. Every row in this queue
+          * belongs to the reader's office, so printing it would repeat the same
+          * word down the page; the PERMIT is what varies.
+          */}
+        {item.clearance && (
+          <p className="mt-1 text-sm text-ink-secondary">
+            {item.clearance.name}
+            {item.clearance.status_label && (
+              <span className="text-ink-muted"> · {item.clearance.status_label}</span>
+            )}
+            {/*
+              * An uploaded copy has no form behind it — only an image — so the
+              * officer needs to know before they open it that there is nothing
+              * to read but the attachment.
+              */}
+            {item.clearance.mode === 'upload' && (
+              <span className="text-ink-muted"> · copy on file</span>
+            )}
           </p>
         )}
       </div>
+      {/*
+        * Whether the fees are settled — and NOT the filing's stage, which is
+        * what it looked like it was saying.
+        *
+        * It read "Pending Payment", which was unambiguous while unpaid and
+        * at-the-payment-stage were the same fact. They came apart on 6 September
+        * 2026: BPLO now reads the main form BEFORE the bill is raised, so a
+        * `for_approval` filing is unpaid and is two steps away from Pending
+        * Payment. The chip then sat on the For Approval tab, in the same words
+        * as the tab beside it, reporting a stage the filing had not reached —
+        * and it was read exactly that way, immediately, by the first person to
+        * open the screen.
+        *
+        * "Unpaid" says the one thing this chip knows. The stage is the tab's job
+        * and the permit line's, and no two of the three now use the same words
+        * for different things.
+        */}
       <StatusChip
-        tone={item.pendingPayment ? 'orange' : 'green'}
+        tone={item.unpaid ? 'orange' : 'green'}
         className="w-28 shrink-0 rounded-none! px-4 py-3 text-sm"
       >
-        {item.pendingPayment ? (
-          <span>
-            Pending
-            <br />
-            Payment
-          </span>
-        ) : (
-          'Paid'
-        )}
+        {item.unpaid ? 'Unpaid' : 'Paid'}
       </StatusChip>
     </>
   )
@@ -560,9 +653,17 @@ export function QueuePage() {
   /** The search the SERVER has been asked for. Pending Payment only; see below. */
   const [serverQuery, setServerQuery] = useState('')
 
-  // See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
-  // and an empty queue is a claim this screen cannot make to them truthfully.
-  const tabs = canReadEveryOffice ? TABS : TABS.filter((t) => t.value !== 'payment')
+  /*
+   * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
+   * and an empty queue is a claim this screen cannot make to them truthfully.
+   *
+   * Two tabs are hidden now rather than one. Final Approval joins Pending
+   * Payment because it is BPLO's act, not an office's: a filing reaches it only
+   * once every clearance is approved, so a sanitary officer's own work on it is
+   * finished and the tab could only ever tell them what somebody else owes.
+   */
+  const BPLO_ONLY_TABS: Tab[] = ['payment', 'final']
+  const tabs = canReadEveryOffice ? TABS : TABS.filter((t) => !BPLO_ONLY_TABS.includes(t.value))
   /*
    * Every tab searches on the server now, not just Pending Payment.
    *
@@ -596,33 +697,51 @@ export function QueuePage() {
     : tabStatuses
   const statuses = activeStatuses.join(',')
   /*
-   * The half of the partition this tab is asking about (INS-2).
+   * Which of the three server-side filters each tab needs, and — as important —
+   * which it must NOT send.
    *
-   * Both assignment tabs carry one now. For Approval asks "what review is still
-   * open for me"; For Inspection asks "what have I signed off that is not
-   * finished yet". Pending Payment gets `undefined` and must keep getting it —
-   * its rows come from `/applications` and have no assignment at all, so any
-   * value here would filter the whole tab to nothing (see PAYMENT_STATUSES).
+   * For Approval is the only one that asks about the assignment. It is asking
+   * "what review is still open for me", and an open assignment is exactly that,
+   * for BPLO reading a main form and for an office reading a clearance alike.
    *
-   * A useful side effect: the list query applies it, so `meta.total` — and with
-   * it the "Showing N of M" line — counts the tab the officer is actually
-   * looking at. For Inspection previously counted every assignment the office
-   * had ever held in those statuses, open or closed.
+   * For Inspection asks the clearance instead. It used to send
+   * `status=completed`, on a partition that assumed an assignment stays open
+   * until the office's work is done. It does not: `approveClearance()` closes it
+   * when the paperwork is accepted, which is BEFORE the site visit. So
+   * `completed` now covers both the visit outstanding and the permit issued, and
+   * the tab needs the clearance status to tell them apart.
+   *
+   * Final Approval sends neither. BPLO's assignment there is `completed` —
+   * closed by its own first approval and never reopened — and its Business
+   * Permit pivot has read `for_approval` since Pending Payment. Both filters
+   * would be wrong; the application's status is the whole of the question.
+   *
+   * Pending Payment gets `undefined` for both and must keep getting them: its
+   * rows come from `/applications` and are not assignments at all.
+   *
+   * A useful side effect of filtering server-side: `meta.total` — and with it
+   * the "Showing N of M" line — counts the tab the officer is actually looking
+   * at, rather than every assignment the office has ever held.
    */
-  const assignmentStatuses =
-    tab === 'approval'
-      ? OPEN_ASSIGNMENT_STATUSES
-      : tab === 'inspection'
-        ? DONE_ASSIGNMENT_STATUSES
-        : undefined
+  const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
+  const clearanceStatuses = tab === 'inspection' ? INSPECTION_CLEARANCE_STATUSES : undefined
   // A deep page buys nothing where the server is doing the searching; only the
   // browser-side sorts still need more rows than fit on a screen.
   const deep = searchesOnServer ? sort !== 'newest' : isDeep(search, sort)
   const perPage = deep ? DEEP_PAGE_SIZE : PAGE_SIZE
 
   const { data, loading, error, reload } = useAsync(
-    () => loadPage({ tab, statuses, assignmentStatuses, query: serverQuery, page, perPage }),
-    [tab, statuses, assignmentStatuses, serverQuery, page, perPage],
+    () =>
+      loadPage({
+        tab,
+        statuses,
+        assignmentStatuses,
+        clearanceStatuses,
+        query: serverQuery,
+        page,
+        perPage,
+      }),
+    [tab, statuses, assignmentStatuses, clearanceStatuses, serverQuery, page, perPage],
   )
 
   // Paging in extends the list being read; a new tab starts its own list. Merged

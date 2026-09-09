@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
 
 /*
  * The API and the web must call a status the same thing.
@@ -95,10 +96,22 @@ it('gives every application status one label on both sides of the wire', functio
  * are, so a future rename is a deliberate edit to a spec-backed expectation
  * rather than something that slides through because both files were touched.
  */
-it('uses the wording the design specifies for the four states an admin tracks', function () {
-    expect(ApplicationStatus::PendingPayment->label())->toBe('Pending Payment')
-        ->and(ApplicationStatus::UnderReview->label())->toBe('For Approval')
-        ->and(ApplicationStatus::ForInspection->label())->toBe('For Inspection')
+it('uses the wording the design specifies for the stages an admin tracks', function () {
+    /*
+     * The list follows the queue's four tabs, in flow order, plus the two end
+     * states. It used to name `under_review` and `for_inspection` and both are
+     * gone: `for_approval` carries the wording the first one always printed, and
+     * "For Inspection" moved to the OTHER machine — it is a state of one permit
+     * now, not of the filing, which is why it is asserted against
+     * `ClearanceStatus` rather than dropped. The words the LGU signed off did
+     * not change; which enum owns them did.
+     */
+    expect(ApplicationStatus::ForApproval->label())->toBe('For Approval')
+        ->and(ApplicationStatus::PendingPayment->label())->toBe('Pending Payment')
+        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Awaiting Other Permits')
+        ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')
         ->and(ApplicationStatus::Approved->label())->toBe('Approved')
         ->and(ApplicationStatus::Rejected->label())->toBe('Rejected');
+
+    expect(ClearanceStatus::ForInspection->label())->toBe('For Inspection');
 });

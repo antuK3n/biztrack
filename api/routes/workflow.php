@@ -65,6 +65,34 @@ Route::middleware('auth:sanctum')->group(function () {
     // Write allowed for the owner (answers) OR a reviewing officer (issuance
     // dates only) — which keys each may set is enforced in the controller.
     Route::put('applications/{application}/office-forms/{permitTypeCode}', [OfficeFormController::class, 'upsert']);
+    /*
+     * The zoning sheet's CHECKLIST OF REQUIREMENTS (MCG-CPDD-FO-003 v1.2).
+     *
+     * Owner-only, checked in the controller alongside the same "may this sheet
+     * still be written" test the answers use — the documents are part of the
+     * sheet, not a separate filing, so they close when it does. Under the same
+     * `application.create` group as the clearance stage for the reason stated
+     * there: these are all one decision about what this filing is asking for.
+     */
+    /*
+     * Section X, blank, for the applicant to take to a notary. Outside the
+     * write group on purpose: it is a read, and CPDD holding the notarised scan
+     * has an obvious reason to want the blank it was made from.
+     */
+    Route::get(
+        'applications/{application}/office-forms/{permitTypeCode}/declaration',
+        [OfficeFormController::class, 'declarationTemplate'],
+    );
+    Route::middleware('permission:application.create')->group(function () {
+        Route::post(
+            'applications/{application}/office-forms/{permitTypeCode}/requirements/{documentCode}',
+            [OfficeFormController::class, 'storeRequirement'],
+        );
+        Route::delete(
+            'applications/{application}/office-forms/{permitTypeCode}/requirements/{documentCode}',
+            [OfficeFormController::class, 'destroyRequirement'],
+        );
+    });
 
     // Application create/edit + owner state changes (application.create)
     Route::middleware('permission:application.create')->group(function () {
@@ -156,9 +184,19 @@ Route::middleware('auth:sanctum')->group(function () {
     });
     // Receipt PDF (owner-of or officer, enforced in controller)
     Route::get('payments/{payment}/receipt', [PaymentController::class, 'receipt']);
-    // Fee adjustment (officer: fee.adjust)
-    Route::middleware('permission:fee.adjust')
-        ->post('applications/{application}/fee/adjust', [PaymentController::class, 'adjustFee']);
+    /*
+     * Fee adjustment is GONE [client, 2026-09-06]: the fee is system-computed
+     * and BPLO cannot change it.
+     *
+     * It comes from the revenue-code rules in FeeCalculator, is assessed once at
+     * submission, and is the figure the applicant has been looking at ever since
+     * — so there is no moment at which moving it would not move a number
+     * somebody had already decided to pay. The `fee.adjust` permission is left
+     * in RbacSeeder rather than dropped, because revoking a permission is a
+     * migration on live role rows and nothing now grants a route with it; if
+     * BPLO turns out to need this, the route comes back rather than the
+     * permission being reinvented.
+     */
 
     // Officer queues + review (application.review)
     Route::middleware('permission:application.review')->group(function () {
@@ -205,6 +243,20 @@ Route::middleware('auth:sanctum')->group(function () {
          * inspection until somebody conducts the new visit.
          */
         Route::post('inspections/{inspection}/reinspect', [InspectionController::class, 'reinspect']);
+
+        /*
+         * The office books its FIRST visit on one permit and picks the date.
+         *
+         * Addressed by permit code rather than inspection id because no
+         * inspection exists yet — this is what creates one. Same permission as
+         * the rest of the group: it is the same act by the same people, and the
+         * office boundary is enforced in the controller against the permit's
+         * issuing department.
+         */
+        Route::post(
+            'applications/{application}/permits/{code}/inspection',
+            [InspectionController::class, 'schedule'],
+        );
     });
 
     // Permits — list/show (owner or permit.view_all, enforced in controller)

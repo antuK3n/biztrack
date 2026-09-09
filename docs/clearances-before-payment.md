@@ -1,3 +1,12 @@
+# SUPERSEDED — 6 September 2026
+
+The live spec is `docs/application-flow-2026-09.md`, verified with the client
+against the actual counter procedure. Review now precedes payment, the other
+permits open on payment, each is inspected and released on its own, and BPLO
+approves twice. Nothing below describes the system as it is.
+
+---
+
 # Everything is submitted, then paid for once
 
 Decided 4 August 2026, replacing `docs/clearances-after-payment.md`.

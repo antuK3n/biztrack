@@ -40,6 +40,7 @@ import type {
   MessageTranscriptMeta,
   Notification,
   OfficeForm,
+  OfficeFormRequirement,
   OfficerRequest,
   PageMeta,
   PageParams,
@@ -260,15 +261,28 @@ export interface AmendmentAnswers {
   amendment_location?: boolean
   amendment_nature?: boolean
   amendment_other?: string | null
+  /**
+   * Section A3 — From/To. The API constrains these to the four structures the
+   * paper form prints and writes both back to null whenever A1 is No, so a
+   * caller cannot leave a stale conversion on a renewal that changes nothing.
+   */
+  amendment_from_registration_type?: string | null
+  amendment_to_registration_type?: string | null
 }
 
 /**
- * Which permit a renewal or amendment is for — and, when it is for none of
+ * Which permits a renewal or amendment is for — and, when it is for none of
  * them, whether that was said or merely never asked.
+ *
+ * `prior_permit_id` is the PRIMARY: the renewal chain is keyed on it and the
+ * BPLO form prints it in its header. `prior_permit_ids` is every permit the
+ * filing covers, primary included, because a shop renews the Mayor's Permit,
+ * the Sanitary Permit and the FSIC in one visit rather than one at a time.
  */
 export interface PriorPermitChoice {
   prior_permit_id: number | null
   prior_permit: Permit | null
+  prior_permit_ids: number[]
   declared_none: boolean
 }
 
@@ -298,6 +312,12 @@ export const applications = {
     /** Set on renewal/amendment to link the prior permit (v2). */
     prior_permit_id?: number
     /**
+     * Every permit this renewal covers. Sent alongside `prior_permit_id`, not
+     * instead of it — the primary keys the renewal chain and this is the full
+     * set the applicant ticked.
+     */
+    prior_permit_ids?: number[]
+    /**
      * The applicant's ticked "this business has no BizTrack permit" — the
      * year-one escape for permits issued on paper. Sent instead of, never
      * alongside, `prior_permit_id`: submit accepts either, and a bare null is
@@ -308,6 +328,8 @@ export const applications = {
     fee_profile?: FeeProfile
     /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
     payment_mode?: 'annual' | 'quarterly'
+    /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
+    data_privacy_consent?: boolean
   } & AmendmentAnswers) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
@@ -317,6 +339,7 @@ export const applications = {
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
       payment_mode?: 'annual' | 'quarterly'
+      data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
@@ -335,11 +358,17 @@ export const applications = {
    * looked exactly like a renewal of a paper permit — which is how seven
    * renewals of nothing reached the register.
    */
-  setPriorPermit: (id: number, priorPermitId: number | null, declaredNone = false) =>
+  setPriorPermit: (
+    id: number,
+    priorPermitId: number | null,
+    declaredNone = false,
+    priorPermitIds: number[] = [],
+  ) =>
     unwrap<PriorPermitChoice>(
       api.put(`/applications/${id}/prior-permit`, {
         prior_permit_id: priorPermitId,
-        declared_none: priorPermitId === null && declaredNone,
+        prior_permit_ids: priorPermitIds,
+        declared_none: priorPermitId === null && priorPermitIds.length === 0 && declaredNone,
       }),
     ),
   reject: (id: number, reason: string) =>
@@ -417,12 +446,77 @@ export const officeForms = {
   /** All saved per-office form payloads for an application. */
   list: (applicationId: number) =>
     unwrap<OfficeForm[]>(api.get(`/applications/${applicationId}/office-forms`)),
-  /** Upsert one office form's opaque JSON (draft/returned only, owner). */
-  save: (applicationId: number, permitTypeCode: string, formData: Record<string, unknown>) =>
+  /**
+   * Upsert one office form's opaque JSON.
+   *
+   * `submit` is what separates saving from handing in. Saving a sheet stores
+   * the answers and nothing else; a sheet is submitted to its office — the
+   * permit moves to For Approval and the office is routed — only when the
+   * caller says every required answer is there.
+   *
+   * The caller decides because the caller is the only one who can:
+   * `officeFormMissing` is the rule, it lives in the browser beside the sheet
+   * it describes, and there is no PHP copy of it to re-check against. That is a
+   * weak guarantee on purpose — an applicant who forces `submit` on a
+   * half-filled sheet gets it returned by the office, which is the same outcome
+   * as filling it in badly, and is a far smaller cost than a form that cannot
+   * be saved at all.
+   */
+  save: (
+    applicationId: number,
+    permitTypeCode: string,
+    formData: Record<string, unknown>,
+    submit = false,
+  ) =>
     unwrap<OfficeForm>(
       api.put(`/applications/${applicationId}/office-forms/${permitTypeCode}`, {
         form_data: formData,
+        submit,
       }),
+    ),
+  /**
+   * Put one file into one slot of the zoning sheet's checklist.
+   *
+   * A `FormData` post rather than the JSON every other call here makes, for the
+   * same reason `documents.upload` does: the file has to leave the browser as a
+   * multipart part. The response carries the whole checklist back rather than
+   * the one row, so the panel never has to merge server state into its own.
+   */
+  uploadRequirement: (
+    applicationId: number,
+    permitTypeCode: string,
+    documentCode: string,
+    file: File,
+  ) => {
+    const body = new FormData()
+    body.append('file', file)
+
+    return unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
+      api.post(
+        `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
+        body,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      ),
+    )
+  },
+  /**
+   * Section X of the CPDD paper, blank, for the applicant to take to a notary.
+   *
+   * A bearer-fetched blob rather than a plain link, like every other PDF here:
+   * the endpoint is authenticated, so an <a href> would download the login
+   * page's 401 envelope instead of the form.
+   */
+  declaration: (applicationId: number, permitTypeCode: string, filename: string) =>
+    downloadBlob(
+      `/applications/${applicationId}/office-forms/${permitTypeCode}/declaration`,
+      filename,
+    ),
+  /** Take one checklist file back off, deleting the stored copy with it. */
+  removeRequirement: (applicationId: number, permitTypeCode: string, documentCode: string) =>
+    unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
+      api.delete(
+        `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
+      ),
     ),
 }
 
@@ -702,11 +796,23 @@ export interface AssignmentFilters extends PageParams {
    */
   status?: string
   /**
-   * The *application's* status, which is what the queue tabs split on.
-   * Comma-separated, e.g. 'submitted,pending_payment,under_review,returned'.
+   * The *application's* status, which is what most of the queue tabs split on.
+   * Comma-separated, e.g. 'for_approval,returned,awaiting_other_permits'.
    * Filter here rather than in the browser — see AssignmentPageMeta.
    */
   application_status?: string
+  /**
+   * The state of THIS OFFICE'S own permit on the filing — the second machine.
+   * Comma-separated, e.g. 'for_inspection'.
+   *
+   * Needed because neither status above can answer "what is waiting on me" once
+   * a permit reaches its site visit: `approveClearance()` completes the
+   * assignment when the paperwork is accepted, and the filing stays
+   * `awaiting_other_permits` throughout. The server matches this against the
+   * permit whose issuing office IS the assignment's department, so an office is
+   * never selected on a clearance beside its own.
+   */
+  clearance_status?: string
 }
 
 export const assignments = {
@@ -762,6 +868,35 @@ export const inspections = {
   list: (filters: { status?: string; page?: number; per_page?: number } = {}) =>
     unwrapPaged<Inspection>(api.get('/inspections', { params: filters })),
   get: (id: number) => unwrap<Inspection>(api.get(`/inspections/${id}`)),
+  /**
+   * Book the FIRST visit on one permit. Answers with the inspection it creates.
+   *
+   * Addressed by the permit's CODE and not by an inspection id, unlike every
+   * other call in this object, because there is no inspection yet — this is what
+   * opens one. That is also why it hangs off the application: the pivot row
+   * `application_permit_types` is the thing being moved, and it is keyed on the
+   * pair.
+   *
+   * Booking is a separate act from approving the paperwork, deliberately. The
+   * service used to schedule a visit two working days out the instant an office
+   * approved (`scheduleInspectionFor`); the client's verified procedure is
+   * "Select Inspection Date and Approve Inspection", so the office says when. A
+   * permit sits at `for_inspection` with no visit until somebody calls this, and
+   * before this method existed there was no screen that could.
+   *
+   * Only the office that ISSUES the permit may call it —
+   * `InspectionController::schedule` compares the caller's department against
+   * `permit_types.issuing_department_id` and answers 403 otherwise — so a caller
+   * must not draw the control on another office's clearance.
+   *
+   * `scheduled_at` is a full ISO instant, not a date: the applicant's Awaiting
+   * Other Permits card prints it with `formatDateTime`, so a bare day would show
+   * a visit booked for midnight.
+   */
+  schedule: (applicationId: number, code: string, scheduled_at: string) =>
+    unwrap<Inspection>(
+      api.post(`/applications/${applicationId}/permits/${code}/inspection`, { scheduled_at }),
+    ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
   reschedule: (id: number, scheduled_at: string) =>

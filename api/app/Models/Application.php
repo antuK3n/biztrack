@@ -33,6 +33,13 @@ class Application extends Model
         'complexity_set_by_user_id', 'complexity_set_at',
         'rejection_reason', 'fee_profile', 'payment_mode',
         /*
+         * RA 10173 consent for THIS filing. Absent from this list the column is
+         * dropped by mass assignment in silence, which is how it stayed empty on
+         * every row while a column for it sat on the table — the wizard held the
+         * tick in browser state and nothing ever carried it here.
+         */
+        'data_privacy_consent',
+        /*
          * The paper BPLO form's "Amendment from:" block (checklist items 82/84).
          * The manuscript-alignment migration created these columns and nothing
          * ever wrote them, so /apply?type=amendment was the new-application
@@ -47,6 +54,13 @@ class Application extends Model
          */
         'has_amendments', 'amendment_ownership', 'amendment_location',
         'amendment_nature', 'amendment_other',
+        /*
+         * Section A3 of the renewal form — what the business structure changed
+         * FROM and TO. Listed for the same reason the four above are: mass
+         * assignment is how the controller writes them, and an unlisted column
+         * is dropped in silence rather than refused.
+         */
+        'amendment_from_registration_type', 'amendment_to_registration_type',
         /*
          * The applicant saying, in as many words, that there is no BizTrack
          * permit to point at — their last one was issued on paper by the old
@@ -79,6 +93,9 @@ class Application extends Model
         'amendment_location' => 'boolean',
         'amendment_nature' => 'boolean',
         'prior_permit_declared_none' => 'boolean',
+        // Same reason as the four above: SQLite hands back 0/1, and the submit
+        // gate reads this as a boolean.
+        'data_privacy_consent' => 'boolean',
     ];
 
     /**
@@ -124,9 +141,42 @@ class Application extends Model
         return $this->belongsTo(User::class, 'complexity_set_by_user_id')->withTrashed();
     }
 
+    /**
+     * The permits this filing asks for, each carrying its OWN progress.
+     *
+     * The pivot is no longer just a link — it holds the per-permit state machine
+     * (`ClearanceStatus`), so every read of this relation needs `withPivot` or
+     * the status silently comes back missing rather than wrong. That is the one
+     * failure mode worth knowing about here: `$app->permitTypes` without the
+     * pivot columns yields models whose `pivot->status` is null, which reads as
+     * "not started" to anything that casts it and is how a filing would appear
+     * to have lost six approvals.
+     *
+     * `withTimestamps` so `updated_at` on the pivot moves when a permit
+     * progresses; ProcessingTimeAnalytics measures per-office service time off
+     * assignments, but the pivot is the only row that knows when the APPLICANT
+     * did their half.
+     */
     public function permitTypes(): BelongsToMany
     {
-        return $this->belongsToMany(PermitType::class, 'application_permit_types');
+        return $this->belongsToMany(PermitType::class, 'application_permit_types')
+            ->withPivot(['status', 'mode', 'submitted_at', 'decided_at', 'remarks', 'rejection_reason'])
+            ->withTimestamps()
+            ->using(ApplicationPermitType::class);
+    }
+
+    /**
+     * The other permits — everything except the Mayor's / Business Permit.
+     *
+     * BPLO's row is on the same pivot and must be excluded from every "are they
+     * all approved?" question, because it is the one waiting on the answer:
+     * including it makes `for_final_approval` unreachable, since the business
+     * permit is only approved once BPLO has given the final sign-off that this
+     * predicate gates. A circular wait that presents as filings stuck forever.
+     */
+    public function otherPermitTypes(): BelongsToMany
+    {
+        return $this->permitTypes()->where('permit_types.code', '!=', PermitType::OUTCOME_CODE);
     }
 
     public function documents(): HasMany
@@ -167,6 +217,25 @@ class Application extends Model
     public function priorPermit(): BelongsTo
     {
         return $this->belongsTo(Permit::class, 'prior_permit_id');
+    }
+
+    /**
+     * Every permit this renewal covers, primary included.
+     *
+     * `priorPermit()` above still answers "which permit does this renew" and
+     * still keys the renewal chain. This answers the different question the
+     * counter actually asks — a shop holding a Mayor's Permit, a Sanitary
+     * Permit and an FSIC renews all three in one visit — and the set contains
+     * the primary as well, so a reader wanting the whole list never has to
+     * union two sources and hope they agree.
+     *
+     * A renewal filed against a paper permit has none of these and
+     * `prior_permit_declared_none` instead; an empty set is an ordinary state,
+     * not a broken one.
+     */
+    public function priorPermits(): BelongsToMany
+    {
+        return $this->belongsToMany(Permit::class, 'application_prior_permits')->withTimestamps();
     }
 
     /**

@@ -4,10 +4,12 @@ namespace Database\Seeders;
 
 use App\Models\Barangay;
 use App\Models\ZoningClassification;
+use App\Models\ZoningOverlay;
 use Illuminate\Database\Seeder;
 
 /**
- * CPDO's zoning legend, and what each barangay's official sheet actually shows.
+ * CPDO's zoning legend, what each barangay's official sheet actually shows, and
+ * the overlay zones the ordinance lays over them.
  *
  * ## Source
  *
@@ -88,6 +90,25 @@ use Illuminate\Database\Seeder;
  *  - A few entries sit just over the floor and are the ones to re-check first:
  *    Bayan-bayanan Institutional (291), Maysilo Cemetery (276), Niugan Parks
  *    (277), Tugatog Parks (424), Longos R-1 (497).
+ *
+ * ## The overlay zones come from the ordinance, not from the sheets
+ *
+ * The three overlays below were not read off pixels — they are not drawn in the
+ * sheets' 19-entry legend at all. They are designated in City Ordinance No.
+ * 24-2018 Art. IV §3 and assigned in Annex C's map index, with Art. IV §5's
+ * right-hand column agreeing independently. That is why they are their own
+ * table: see the migration 2026_09_01_000020.
+ *
+ * Heritage is the one assignment where our two readings of the ordinance do not
+ * match, and we take Annex C. The text-layer extraction of the §5 table
+ * (`docs/zoning-ordinance/zone-boundaries.json`) attributes Heritage to eight
+ * barangays — the five below plus Bayan-Bayanan, Dampalit and Flores — but that
+ * table's overlay column is misaligned in the Institutional Zone block, which
+ * `docs/zoning-ordinance/README.md` records and which makes per-row attribution
+ * from it unrecoverable. Annex C's map index gives five. The extraction's own
+ * README says to confirm against Annex C, so five it is; a Heritage designation
+ * we invented for three barangays would be a rule an applicant is told about
+ * that the city never made.
  */
 class ZoningSeeder extends Seeder
 {
@@ -154,6 +175,55 @@ class ZoningSeeder extends Seeder
         'Tugatog' => ['tugatog', ['R-2-BASIC', 'R-2-MAX', 'C-1', 'C-2', 'I-1', 'I-2', 'INSTITUTIONAL', 'PARKS', 'UTILITIES', 'CEMETERY']],
     ];
 
+    /**
+     * The three overlay zones, in the ordinance's own order (Art. IV §3), with
+     * the barangays each is designated over and a one-line description of what
+     * the overlay is.
+     *
+     * The codes are ours, because the ordinance gives two sets and they
+     * disagree: Art. IV §3 writes LSD-OZ / HTG-OZ / ET-OZ, Art. V §4 writes
+     * FLD-OZ / HTG-OZ / ETM-OZ. Only Heritage agrees. We use Art. V's, since
+     * Art. V is where the overlay's regulations are actually written and FLD
+     * reads as Flood where LSD reads as nothing. Recorded rather than smoothed
+     * over: a reader holding Art. IV will not find FLD-OZ in it.
+     *
+     * The descriptions state what the overlay IS and what regulations it adds,
+     * paraphrased from Art. V §4. They say nothing about any applicant's
+     * property, and nothing downstream may turn them into one — which lots an
+     * overlay covers inside a barangay is CPDO's to determine, exactly as with
+     * the base classifications.
+     */
+    private const OVERLAYS = [
+        [
+            'FLD-OZ',
+            'Flood Overlay Zone',
+            // Says what the ordinance adds and stops. An earlier draft ended
+            // "and changes no allowed use", which is true of Art. V §4.1 and is
+            // still the card starting a sentence about what an applicant may
+            // do — the one thing this screen does not get to discuss.
+            'Areas the city identifies as prone to flooding. The ordinance adds construction requirements here, chiefly raising a building’s ground floor above the base flood elevation.',
+            // All 21. Art. IV §5 and Annex C both put Flood over every barangay,
+            // which is why this list is written out rather than derived from
+            // SHEETS: the two happen to coincide today and mean different things.
+            ['Acacia', 'Baritan', 'Bayan-bayanan', 'Catmon', 'Concepcion', 'Dampalit', 'Flores',
+                'Hulong Duhat', 'Ibaba', 'Longos', 'Maysilo', 'Muzon', 'Niugan', 'Panghulo',
+                'Potrero', 'San Agustin', 'Santulan', 'Tañong', 'Tinajeros', 'Tonsuya', 'Tugatog'],
+        ],
+        [
+            'HTG-OZ',
+            'Heritage Overlay Zone',
+            'Areas with declared houses of ancestry. The ordinance limits what those structures may be used for, caps the height of new building near them, and asks new designs to match their period.',
+            // Annex C, not the §5 extraction — see the class docblock.
+            ['Baritan', 'Concepcion', 'Hulong Duhat', 'Ibaba', 'San Agustin'],
+        ],
+        [
+            'ETM-OZ',
+            'Eco-Tourism Overlay Zone',
+            'The existing fishponds of Barangay Dampalit. The ordinance adds tourism-related uses to the base zone and caps how much of a lot may be built on.',
+            ['Dampalit'],
+        ],
+    ];
+
     public function run(): void
     {
         $byCode = [];
@@ -199,6 +269,54 @@ class ZoningSeeder extends Seeder
                 $ids[] = $byCode[$code]->id;
             }
             $barangay->zoningClassifications()->attach($ids);
+        }
+
+        $this->seedOverlays();
+    }
+
+    /**
+     * The overlay zones and their per-barangay designations.
+     *
+     * Same ownership rule as the classifications above — firstOrCreate for the
+     * rows, and a barangay that already has any overlay is left alone — for the
+     * same reason. An overlay removed by an admin because CPDO said we had it
+     * wrong must not come back on the next `db:seed`.
+     *
+     * Guarded per barangay and not per table: Heritage covers five barangays and
+     * Eco-Tourism one, so "the table already has rows" would mean the other
+     * sixteen never got their Flood designation on a later run.
+     *
+     * The set of already-designated barangays is taken ONCE, before anything is
+     * attached. Asking mid-loop would be wrong in a way that is easy to miss:
+     * Flood is attached to all 21 first, so by the time Heritage came round
+     * every barangay would look already-designated and Heritage would never be
+     * attached at all on a first run.
+     */
+    private function seedOverlays(): void
+    {
+        $alreadyDesignated = Barangay::has('zoningOverlays')->pluck('id')->all();
+
+        foreach (self::OVERLAYS as $i => [$code, $name, $description, $barangayNames]) {
+            $overlay = ZoningOverlay::firstOrCreate(
+                ['code' => $code],
+                ['name' => $name, 'description' => $description, 'sort_order' => $i],
+            );
+
+            foreach ($barangayNames as $barangayName) {
+                $barangay = Barangay::where('name', $barangayName)->first();
+                if (! $barangay) {
+                    // ReferenceSeeder owns the barangay list. A name that drifts
+                    // is reported by the row simply not existing, rather than by
+                    // this seeder inventing a barangay to hang an overlay on.
+                    continue;
+                }
+
+                if (in_array($barangay->id, $alreadyDesignated, true)) {
+                    continue;
+                }
+
+                $barangay->zoningOverlays()->attach($overlay->id);
+            }
         }
     }
 }
