@@ -8,6 +8,7 @@ import { useAuth } from '../../stores/auth'
 import type {
   AdminCaseload,
   AdminRole,
+  CaseloadCase,
   AdminUser,
   AdminUserPayload,
   AuditLog,
@@ -286,7 +287,35 @@ function ReassignModal({
   const [busy, setBusy] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
 
-  const moving = caseload ? scopeCount(caseload, scope) : 0
+  const finished = caseload?.finished_reviews ?? 0
+  /*
+   * The cases this officer is holding, which is what Scope now IS.
+   *
+   * `?? []` rather than a guard: a payload from before this shipped carries no
+   * list, and the dialog then falls back to the scope categories it has always
+   * had instead of rendering an empty chooser.
+   */
+  const held = caseload?.cases ?? []
+  const key = (c: CaseloadCase) => `${c.kind}:${c.id}`
+
+  /*
+   * Everything ticked to begin with.
+   *
+   * The common act is still "this officer has gone, move their work", and that
+   * should not cost a dozen clicks. Picking a subset is the deliberate act, so
+   * it is the one that takes effort. `null` means "not touched yet", which is
+   * what lets the default follow a list that arrives after the first render.
+   */
+  const [picked, setPicked] = useState<Set<string> | null>(null)
+  const chosen = picked ?? new Set(held.map(key))
+  const moving = held.length > 0 ? chosen.size : caseload ? scopeCount(caseload, scope) : 0
+
+  function toggle(c: CaseloadCase) {
+    const next = new Set(chosen)
+    if (next.has(key(c))) next.delete(key(c))
+    else next.add(key(c))
+    setPicked(next)
+  }
 
   async function confirm() {
     setBusy(true)
@@ -294,7 +323,15 @@ function ReassignModal({
     try {
       const result = await admin.reassignCaseload(user.id, {
         to_user_id: target ? Number(target) : null,
-        scope,
+        /*
+         * The picked rows when there is a list to pick from; the category
+         * otherwise. Never both — the API requires exactly one, and sending a
+         * scope beside a list would leave two answers to "what moves" in one
+         * request with no rule saying which wins.
+         */
+        ...(held.length > 0
+          ? { cases: held.filter((c) => chosen.has(key(c))).map((c) => ({ kind: c.kind, id: c.id })) }
+          : { scope }),
         reason: reason.trim(),
       })
       const where = result.to ? `to ${result.to.name}` : 'to the office queue'
@@ -332,7 +369,14 @@ function ReassignModal({
       confirmLabel={target ? 'Move caseload' : 'Release to office'}
       onCancel={onClose}
       onConfirm={confirm}
-      confirmDisabled={busy || !reason.trim()}
+      /*
+       * Nothing to move is a real state and the button says so rather than
+       * pretending. It used to be pressable: the endpoint answered 200 with
+       * `{"total": 0}` and the screen printed a tick, so an admin typed a
+       * reason, confirmed, and was told a move had happened that had not.
+       * The server refuses it now; this stops the reader getting that far.
+       */
+      confirmDisabled={busy || !reason.trim() || moving === 0}
     >
       <div className="mb-5 border-b border-line pb-3">
         <p className="text-sm font-bold text-ink">{fullName(user)}</p>
@@ -361,25 +405,142 @@ function ReassignModal({
         </div>
       </dl>
 
-      {formError && (
-        <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{formError}</p>
+      {/*
+        * Why this dialog and the Officer in Charge register can disagree.
+        *
+        * That screen lists every assignment an officer's NAME is on, finished
+        * ones included, because it is the record of who did the work. This one
+        * counts only what is still open, because that is all a move can touch.
+        * An admin reading "officer in charge of two filings" over there and
+        * "holding nothing" here is reading two true sentences, and was left to
+        * work out why on their own.
+        */}
+      {finished > 0 && (
+        <p className="mb-4 rounded-lg bg-canvas px-4 py-3 text-xs text-ink-secondary">
+          Also named on <span className="font-bold text-ink">{finished}</span> finished review
+          {finished === 1 ? '' : 's'}. Those stay — a completed review keeps the name of the officer
+          who made it, which is why the Officer in Charge page can show more than this dialog moves.
+        </p>
       )}
 
+      {formError && (
+        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+          {formError}
+        </p>
+      )}
+
+      {/* The three fields, in the order the client names them: Scope, Reassign
+          to, Reason. */}
       <div className="space-y-4">
-        <label className="block">
-          <FieldLabel required>Scope</FieldLabel>
+      {/*
+        * Scope IS the list of permits this officer is holding.
+        *
+        * It was three categories — everything, reviews only, inspections only
+        * — and no category can express the ordinary act: one filing going to a
+        * colleague because it is stuck, while the rest of the caseload stays
+        * where it is. The categories also said nothing about WHICH filings
+        * were about to change hands, so Confirm was a decision made blind.
+        *
+        * The rows carry what the rest of this feature carries: business,
+        * business number, office, permit. Everything is ticked to begin with,
+        * because "this officer has gone, move their work" is still the common
+        * case and should not cost a dozen clicks.
+        */}
+      <div>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <FieldLabel required>Scope — the permits {fullName(user)} is holding</FieldLabel>
+          {held.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setPicked(chosen.size === held.length ? new Set() : new Set(held.map(key)))}
+              className="text-xs font-semibold text-royal hover:underline"
+            >
+              {chosen.size === held.length ? 'Clear all' : 'Select all'}
+            </button>
+          )}
+        </div>
+
+        {held.length === 0 ? (
+          /*
+           * No list to pick from: either the officer holds nothing, or the
+           * payload predates `cases`. The category control stays for the second
+           * case rather than leaving an admin with no way to move anything.
+           */
           <select
             className={inputCls}
             value={scope}
-            onChange={(e) => setScope(e.target.value as CaseloadMovePayload['scope'])}
+            onChange={(e) => setScope(e.target.value as CaseloadMovePayload['scope'] & string)}
           >
             {SCOPES.map((s) => (
               <option key={s.value} value={s.value}>
-                {s.label} ({scopeCount(caseload, s.value)})
+                {s.label} ({caseload ? scopeCount(caseload, s.value) : 0})
               </option>
             ))}
           </select>
-        </label>
+        ) : (
+          <ul className="max-h-60 overflow-y-auto rounded-lg border border-line">
+            {held.map((c) => (
+              <li key={key(c)} className="border-b border-line last:border-b-0">
+                <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 hover:bg-canvas">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 shrink-0 accent-royal"
+                    checked={chosen.has(key(c))}
+                    onChange={() => toggle(c)}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <span className="text-sm font-semibold text-ink">
+                        {/* The tracking ID when the business is gone: a filing
+                            outlives its business, and a blank name reads as
+                            broken rather than as history. */}
+                        {c.business ?? c.tracking_id ?? 'Business removed from the register'}
+                      </span>
+                      <span className="tnum text-xs text-ink-muted">{c.tracking_id ?? '—'}</span>
+                    </span>
+                    <span className="mt-0.5 block text-xs text-ink-secondary">
+                      {c.office?.name ?? 'No office'}
+                      {c.permit && <span> · {c.permit}</span>}
+                      {c.kind === 'inspection' && <span> · site visit</span>}
+                      {c.status_label && <span className="text-ink-muted"> · {c.status_label}</span>}
+                    </span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/*
+          * Nothing chosen is a real state, said here rather than after the
+          * button is pressed. The Reason box is required, so without this the
+          * reader types a sentence first and only then finds out there is
+          * nothing to move — and the server refuses it anyway.
+          *
+          * Lost once already: the rewrite that turned Scope into this chooser
+          * removed the warning along with the block it lived in, and the dialog
+          * showed "Will move 0" with no explanation. A browser test caught it.
+          */}
+        {moving === 0 && (
+          <p className="mt-2 rounded-lg bg-s-orange-tint px-4 py-3 text-sm font-medium text-s-orange-ink">
+            {caseload.total === 0
+              ? `${fullName(user)} is not holding any open work, so there is nothing to move.`
+              : 'Nothing falls under the scope chosen above. Tick at least one permit.'}
+          </p>
+        )}
+
+        {/*
+          * The list is capped server-side while the count is exact, so when the
+          * two disagree the screen says which number is real — and says that
+          * only the listed ones can be picked.
+          */}
+        {caseload.total > held.length && held.length > 0 && (
+          <p className="mt-1.5 text-xs text-ink-muted">
+            Showing the {held.length} oldest of {caseload.total}. Move these, or use Deactivate to
+            release the whole caseload.
+          </p>
+        )}
+      </div>
 
         <label className="block">
           <FieldLabel required>Reassign to</FieldLabel>

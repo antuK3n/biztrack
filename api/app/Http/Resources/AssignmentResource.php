@@ -76,6 +76,22 @@ class AssignmentResource extends JsonResource
              * row, and "somebody signed this off" stays true after they leave.
              */
             'officer_withheld' => ! $readsWords && $this->officer_user_id !== null,
+            /*
+             * What this reader may DO with the row, decided here rather than in
+             * the browser.
+             *
+             * The queue has to render a colleague's case read-only and its own
+             * as workable, and those two rows are identical apart from an id
+             * comparison. Making the screen do that comparison puts the OIC rule
+             * in two places — one of which nobody can enforce — and the two
+             * would drift the first time the rule gains a case. So the server
+             * answers, and the screen renders the answer.
+             *
+             * Both are false for a reader outside the office: they can neither
+             * take it nor act on it, which is what `authorizeDepartment` says.
+             */
+            'can_claim' => $this->canClaim($request),
+            'can_act' => $this->canAct($request),
             'assigned_at' => optional($this->assigned_at)->toISOString(),
             'completed_at' => optional($this->completed_at)->toISOString(),
             /*
@@ -157,5 +173,34 @@ class AssignmentResource extends JsonResource
             'mode' => $type->pivot?->mode,
             'requires_inspection' => (bool) $type->requires_inspection,
         ];
+    }
+
+    /** May this reader take an unheld case in their own office? */
+    private function canClaim(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user !== null
+            && $user->department_id !== null
+            && $user->department_id === $this->department_id
+            && $this->officer_user_id === null;
+    }
+
+    /**
+     * May this reader work the case — approve, return, check, classify?
+     *
+     * Unheld counts: acting on a case nobody holds claims it, which is the rule
+     * AssignmentController::authorizeHolder applies. This mirrors that method,
+     * and the pairing is deliberate — a screen that offered a button the server
+     * then refused would be worse than no button.
+     */
+    private function canAct(Request $request): bool
+    {
+        $user = $request->user();
+
+        return $user !== null
+            && $user->department_id !== null
+            && $user->department_id === $this->department_id
+            && ($this->officer_user_id === null || $this->officer_user_id === $user->id);
     }
 }

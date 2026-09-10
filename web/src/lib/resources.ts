@@ -795,6 +795,19 @@ export interface AssignmentWithApplication extends Assignment {
 
 export interface AssignmentFilters extends PageParams {
   /**
+   * Who holds the case (client §10): nobody, me, or a colleague.
+   *
+   * Server-side, like every other narrowing on this list, because the queue is
+   * paged — splitting fifty downloaded rows in the browser would tell an
+   * officer whose cases are on page two that they hold nothing.
+   *
+   * Absent means "all", which is the tab the client asks for first. An unknown
+   * value is a 422 rather than a silently-ignored parameter: a queue that
+   * answers "Unassigned" with everybody's caseload invites an officer to take
+   * work that is already somebody's.
+   */
+  oic?: 'unassigned' | 'mine' | 'others'
+  /**
    * The assignment's own state: pending | in_progress | completed | returned.
    * Comma-separated, like `application_status` below.
    *
@@ -847,6 +860,14 @@ export const assignments = {
     unwrap<Assignment>(api.post(`/assignments/${id}/approve`, { remarks })),
   return: (id: number, remarks: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/return`, { remarks })),
+  /**
+   * Take this case: become its Officer in Charge (client §2).
+   *
+   * 409 when a colleague got there first — a conflict rather than a permission
+   * problem, because the officer was entitled to try and the answer is about
+   * timing. The screen prints who holds it and stops offering the button.
+   */
+  claim: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/claim`)),
   /** Assign a specific officer to this assignment (permission oic.assign; v2). */
   assign: (id: number, officer_user_id: number, reason?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/assign`, { officer_user_id, reason })),
@@ -1220,6 +1241,18 @@ export const admin = {
   /** Move it. `to_user_id: null` releases it to the office queue. */
   reassignCaseload: (id: number, body: CaseloadMovePayload) =>
     unwrap<CaseloadMove>(api.post(`/admin/users/${id}/reassign-caseload`, body)),
+  /*
+   * The Officer-in-Charge register: every office's caseload in one list.
+   *
+   * The other side of `caseload` above — that one lists an OFFICER's cases and
+   * moves them all; this lists CASES and moves one. Both write the same column,
+   * so the two screens cannot disagree about who holds what.
+   */
+  oicAssignments: (filters: OicFilters = {}) =>
+    unwrapPaged<OicAssignment, OicPageMeta>(api.get('/admin/oic-assignments', { params: filters })),
+  /** The officers this one row may be moved to — its own office's, and active. */
+  oicCandidates: (assignmentId: number) =>
+    unwrap<OicCandidate[]>(api.get(`/admin/oic-assignments/${assignmentId}/candidates`)),
   auditLogs: async (
     pageOrFilters: number | AuditLogFilters = 1,
   ): Promise<{ data: AuditLog[]; lastPage: number; total: number }> => {
@@ -1323,4 +1356,41 @@ export const profilePhoto = {
   },
 
   remove: (): Promise<User> => unwrap<User>(api.delete('/auth/profile/photo')),
+}
+
+/** One row of the super admin's Officer-in-Charge register. */
+export interface OicAssignment {
+  id: number
+  application_id: number | null
+  tracking_id: string | null
+  application_type: string | null
+  business: { id: number; name: string } | null
+  office: { id: number; code: string; name: string } | null
+  /** Null means nobody has taken it — on this screen, never a withheld value. */
+  officer: { id: number; name: string; email: string } | null
+  assigned_at: string | null
+  completed_at: string | null
+  status: string | null
+  status_label: string | null
+  application_status: string | null
+  application_status_label: string | null
+}
+
+export interface OicCandidate {
+  id: number
+  name: string
+  email: string
+  department_id: number | null
+  is_current: boolean
+}
+
+export interface OicFilters extends PageParams {
+  department_id?: number
+  holder?: 'assigned' | 'unassigned'
+  q?: string
+}
+
+export interface OicPageMeta extends PageMeta {
+  /** The offices to filter by, off the register rather than retyped here. */
+  departments: { id: number; code: string; name: string }[]
 }

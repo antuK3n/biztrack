@@ -38,6 +38,7 @@ import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
 import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
+import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { RecordsPage } from './pages/admin/RecordsPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -466,6 +467,21 @@ export default function App() {
             element={
               <RequirePermission permission="owner.manage_status">
                 <OwnersPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            * `oic.assign`, the same permission the endpoints behind this screen
+            * are gated on — not `user.manage`. Naming who handles a case and
+            * correcting an officer's surname are different powers, and the
+            * route must ask for the one the page actually exercises or the
+            * screen would render for an account the API then refuses.
+            */}
+          <Route
+            path="/staff/admin/oic"
+            element={
+              <RequirePermission permission="oic.assign">
+                <OicPage />
               </RequirePermission>
             }
           />
