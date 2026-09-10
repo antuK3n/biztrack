@@ -12,6 +12,7 @@ use App\Models\ApplicationAssignment;
 use App\Models\ComplianceCheck;
 use App\Models\User;
 use App\Services\WorkflowService;
+use App\Support\Audit;
 use App\Support\Ra11032;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -81,6 +82,15 @@ class AssignmentController extends Controller
              * whole table on every keystroke.
              */
             'q' => ['sometimes', 'string', 'max:100'],
+            /*
+             * Who holds the case: unassigned, mine, or a colleague's.
+             *
+             * Validated rather than defaulted, so an unknown value is a 422 and
+             * not the whole queue under a heading that says "Unassigned". A
+             * silently-ignored narrowing is the worst of the three outcomes: the
+             * officer reads somebody else's caseload as free to take.
+             */
+            'oic' => ['sometimes', 'in:unassigned,mine,others'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -100,6 +110,7 @@ class AssignmentController extends Controller
         ]);
 
         $this->scopeToDepartment($request, $query);
+        $this->scopeToHolder($request, $query);
 
         $assignmentStatuses = $this->assignmentStatuses($request);
         if ($assignmentStatuses !== []) {
@@ -370,7 +381,7 @@ class AssignmentController extends Controller
 
     public function approve(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
-        $this->authorizeDepartment($request, $assignment);
+        $this->authorizeHolder($request, $assignment);
         $data = $request->validate(['remarks' => ['nullable', 'string', 'max:1000']]);
 
         /*
@@ -388,7 +399,7 @@ class AssignmentController extends Controller
          * expect: decide, then record who decided.
          */
         $this->workflow->approveAssignment($assignment, $data['remarks'] ?? null);
-        $assignment->update(['officer_user_id' => $request->user()->id]);
+        $this->recordHolder($request, $assignment);
 
         return response()->json([
             'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
@@ -397,15 +408,15 @@ class AssignmentController extends Controller
 
     public function return(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
-        $this->authorizeDepartment($request, $assignment);
+        $this->authorizeHolder($request, $assignment);
         $data = $request->validate([
             'remarks' => ['required', 'string', 'max:1000'],
         ], [
             'remarks.required' => 'Explain what the applicant needs to fix.',
         ]);
 
-        $assignment->update(['officer_user_id' => $request->user()->id]);
         $this->workflow->returnAssignment($assignment, $data['remarks']);
+        $this->recordHolder($request, $assignment);
 
         return response()->json([
             'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
@@ -446,7 +457,7 @@ class AssignmentController extends Controller
      */
     public function classify(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
-        $this->authorizeDepartment($request, $assignment);
+        $this->authorizeHolder($request, $assignment);
 
         /*
          * `Rule::in` over `Ra11032::tierKeys()`, not a written-out list. The
@@ -480,7 +491,7 @@ class AssignmentController extends Controller
 
     public function checks(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
-        $this->authorizeDepartment($request, $assignment);
+        $this->authorizeHolder($request, $assignment);
         $data = $request->validate([
             'application_document_id' => ['nullable', 'exists:application_documents,id'],
             'label' => ['required', 'string', 'max:255'],
@@ -541,6 +552,141 @@ class AssignmentController extends Controller
 
         return response()->json([
             'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
+        ]);
+    }
+
+    /**
+     * Claim this review: become its Officer in Charge (client §2).
+     *
+     * First writer wins, and the race is decided by the DATABASE rather than by
+     * a read followed by a write. Two officers pressing Claim on the same row
+     * within the same second is the ordinary case in an office of three, and a
+     * check-then-update would let both through: both read null, both write, the
+     * second silently overwrites the first, and two people believe they hold it.
+     *
+     * `where('officer_user_id', null)->update(...)` is one statement; SQLite and
+     * MySQL both serialise it, so exactly one of the two updates one row and the
+     * other updates none. The loser is told 409 — a conflict, not a permission
+     * problem, because they were entitled to try.
+     *
+     * Claiming a case you already hold is not a conflict. A double-click, or a
+     * tab left open, must not read as stealing a case from yourself.
+     */
+    public function claim(Request $request, ApplicationAssignment $assignment): JsonResponse
+    {
+        $this->authorizeDepartment($request, $assignment);
+
+        $user = $request->user();
+
+        if ($assignment->officer_user_id === $user->id) {
+            return $this->assignmentJson($assignment);
+        }
+
+        $taken = ApplicationAssignment::whereKey($assignment->id)
+            ->whereNull('officer_user_id')
+            ->update(['officer_user_id' => $user->id, 'assigned_at' => now()]);
+
+        if ($taken === 0) {
+            $holder = $assignment->fresh()->load('officer')->officer;
+            abort(409, $holder
+                ? "This filing is already with {$holder->name}. Only the system administrator can move it."
+                : 'This filing is already with another officer.');
+        }
+
+        Audit::log('assignment.claimed', $assignment->fresh(), ['officer_user_id' => $user->id]);
+
+        return $this->assignmentJson($assignment->fresh());
+    }
+
+    /**
+     * Narrow the queue by who holds the case (`?oic=`), client §10.
+     *
+     * Server-side, like every other narrowing on this list, because the list is
+     * paged: a browser-side split of fifty downloaded rows would answer "you
+     * have nothing assigned" to an officer whose cases are on page two.
+     */
+    private function scopeToHolder(Request $request, $query): void
+    {
+        $narrow = $request->query('oic');
+        if ($narrow === null) {
+            return;
+        }
+
+        $userId = $request->user()->id;
+
+        match ($narrow) {
+            'unassigned' => $query->whereNull('officer_user_id'),
+            'mine' => $query->where('officer_user_id', $userId),
+            'others' => $query->whereNotNull('officer_user_id')->where('officer_user_id', '!=', $userId),
+            default => null,
+        };
+    }
+
+    /**
+     * The office boundary, and then the holder.
+     *
+     * `authorizeDepartment` answers "is this your office's work", which is where
+     * the rules stopped: any officer of the office could approve, return,
+     * re-check or re-classify a review a colleague was already holding, and the
+     * audit row would name whoever pressed last. Recording an OIC while letting
+     * anyone act is a label, not an assignment.
+     *
+     * An UNHELD assignment is not refused: acting on it claims it. That is the
+     * rule `approve()` has always had — it stamped `officer_user_id` on the way
+     * past — and it is kept on purpose, because an office of one should not have
+     * to press Claim to be allowed to do its job.
+     *
+     * This method only ASKS. The write is `recordHolder()` below, called after
+     * the action has succeeded, which preserves the ordering `approve()` already
+     * took care over: `approveAssignment()` refuses before any write precisely
+     * so a refused approval leaves nothing behind, and claiming the case on the
+     * way in would have put the refusing officer's name on a review they had
+     * just been told they could not make.
+     */
+    private function authorizeHolder(Request $request, ApplicationAssignment $assignment): void
+    {
+        $this->authorizeDepartment($request, $assignment);
+
+        abort_unless(
+            $assignment->officer_user_id === null
+                || $assignment->officer_user_id === $request->user()->id,
+            403,
+            'This filing is with another officer. Only the system administrator can move it.'
+        );
+    }
+
+    /**
+     * Record who did the work, once it is known to have been accepted.
+     *
+     * Called on the far side of the action, never before it. Silent when the
+     * case is already held by this officer — re-stamping `assigned_at` on every
+     * approval would make the admin's "Assignment Date" column report the last
+     * thing the officer did rather than when the case became theirs.
+     */
+    private function recordHolder(Request $request, ApplicationAssignment $assignment): void
+    {
+        if ($assignment->officer_user_id !== null) {
+            return;
+        }
+
+        $assignment->forceFill([
+            'officer_user_id' => $request->user()->id,
+            'assigned_at' => now(),
+        ])->save();
+
+        Audit::log('assignment.claimed', $assignment, [
+            'officer_user_id' => $request->user()->id,
+            'implicit' => true,
+        ]);
+    }
+
+    /** One assignment, loaded the way every action on it returns it. */
+    private function assignmentJson(ApplicationAssignment $assignment): JsonResponse
+    {
+        return response()->json([
+            'data' => new AssignmentResource(
+                $assignment->load(['department', 'officer', 'application.business', 'application.permitTypes'])
+            ),
         ]);
     }
 
