@@ -9,6 +9,7 @@ import {
   StatusChip,
   type SortFilterOption,
 } from '../../components/ui/Proto'
+import { toApiError } from '../../lib/api'
 import { applications, assignments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
 import { applicationStatusMeta } from '../../lib/status'
@@ -47,6 +48,18 @@ type Tab = 'approval' | 'inspection' | 'payment' | 'final'
  * Folding them into one tab would put a form nobody has paid for next to an
  * application waiting only on a signature.
  */
+/*
+ * The client's §10 sections. "All" first and selected by default: an officer
+ * arriving at the screen should see the office's work, not an empty list under
+ * a narrowing they did not choose.
+ */
+const HOLDER_PILLS: { value: '' | 'unassigned' | 'mine' | 'others'; label: string }[] = [
+  { value: '', label: 'All' },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'mine', label: 'My assigned' },
+  { value: 'others', label: 'Assigned to others' },
+]
+
 const TABS: { value: Tab; label: string }[] = [
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
@@ -389,6 +402,17 @@ interface QueueItem {
    * thing while each is at a different point.
    */
   clearance: Assignment['clearance']
+  /**
+   * The assignment id, when this row came from the assignment feed. Claiming
+   * addresses the assignment, not the filing: one filing is several offices'
+   * work and each office holds its own row.
+   */
+  assignmentId: number | null
+  /** Who holds this case, or null when nobody has taken it (client §2). */
+  officer: { id: number; name: string } | null
+  /** May this reader take it, and may they work it? Both come from the server. */
+  canClaim: boolean
+  canAct: boolean
 }
 
 /**
@@ -430,6 +454,17 @@ function fromAssignment(item: Assignment): QueueItem {
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
     clearance: item.clearance,
+    assignmentId: item.id,
+    officer: item.officer,
+    /*
+     * Read from the payload, never worked out here. The server decides who may
+     * take and who may act (AssignmentResource::canClaim/canAct), and an older
+     * payload without the flags means "do not offer the button" rather than
+     * "offer it and find out" — a button the server then refuses is worse than
+     * no button.
+     */
+    canClaim: item.can_claim === true,
+    canAct: item.can_act === true,
   }
 }
 
@@ -437,6 +472,12 @@ function fromApplication(app: ApplicationListItem): QueueItem {
   return {
     key: `application:${app.id}`,
     href: null,
+    // No assignment exists yet on this tab, so there is nothing to hold and
+    // nobody to hold it — the filing has not been routed to an office.
+    assignmentId: null,
+    officer: null,
+    canClaim: false,
+    canAct: false,
     trackingId: app.tracking_id,
     ...nameOf(app.business, app.tracking_id),
     /*
@@ -467,6 +508,8 @@ async function loadPage(args: {
   clearanceStatuses?: string
   /** Server-side search term. '' means no search. */
   query: string
+  /** Who holds the case. undefined = all, which is the default tab. */
+  oic?: 'unassigned' | 'mine' | 'others'
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -486,6 +529,7 @@ async function loadPage(args: {
     ...(args.assignmentStatuses ? { status: args.assignmentStatuses } : {}),
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
+    ...(args.oic ? { oic: args.oic } : {}),
     page: args.page,
     per_page: args.perPage,
   })
@@ -515,7 +559,15 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
 
 const CARD = 'flex items-stretch overflow-hidden rounded-lg bg-white shadow-card'
 
-function QueueRow({ item }: { item: QueueItem }) {
+function QueueRow({
+  item,
+  onClaim,
+  claiming,
+}: {
+  item: QueueItem
+  onClaim?: (item: QueueItem) => void
+  claiming?: boolean
+}) {
   const body = (
     <>
       <div className="min-w-0 flex-1 px-6 py-4">
@@ -626,6 +678,42 @@ function QueueRow({ item }: { item: QueueItem }) {
       ) : (
         <div className={CARD}>{body}</div>
       )}
+      {/*
+        * Who holds the case, under the row rather than inside it.
+        *
+        * Outside the Link on purpose: Claim is a button and the row is an
+        * anchor, and a button inside an anchor is both invalid markup and a
+        * control that navigates when pressed by a keyboard.
+        *
+        * A row from the Pending Payment tab has no assignment, so it says
+        * nothing here — there is no office holding it yet, and "Unassigned"
+        * would read as work waiting to be taken.
+        */}
+      {item.assignmentId !== null && (
+        <div className="-mt-px flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-line bg-white px-6 py-2.5">
+          <p className="text-sm text-ink-secondary">
+            {item.officer ? (
+              <>
+                <span className="text-ink-muted">Officer in charge: </span>
+                <span className="font-semibold text-ink">{item.officer.name}</span>
+                {!item.canAct && <span className="text-ink-muted"> · read-only for you</span>}
+              </>
+            ) : (
+              <span className="text-ink-muted">Not yet taken by anyone</span>
+            )}
+          </p>
+          {item.canClaim && onClaim && (
+            <button
+              type="button"
+              onClick={() => onClaim(item)}
+              aria-disabled={claiming || undefined}
+              className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+            >
+              {claiming ? 'Taking…' : 'Claim this filing'}
+            </button>
+          )}
+        </div>
+      )}
     </li>
   )
 }
@@ -652,6 +740,18 @@ export function QueuePage() {
   const [statusFilter, setStatusFilter] = useState('')
   /** The search the SERVER has been asked for. Pending Payment only; see below. */
   const [serverQuery, setServerQuery] = useState('')
+  /*
+   * Who holds the case (client §10). '' is All, which is what the officer sees
+   * on arrival — the other three are narrowings of it, not a replacement for it.
+   *
+   * Server-side, like the tab and the search: the queue is paged, and a browser
+   * split of one page would tell an officer they hold nothing because their
+   * cases are further down the feed.
+   */
+  const [holder, setHolder] = useState<'' | 'unassigned' | 'mine' | 'others'>('')
+  /** The row being claimed, so one press cannot be double-fired. */
+  const [claimingId, setClaimingId] = useState<number | null>(null)
+  const [claimError, setClaimError] = useState<string | null>(null)
 
   /*
    * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
@@ -738,10 +838,14 @@ export function QueuePage() {
         assignmentStatuses,
         clearanceStatuses,
         query: serverQuery,
+        // Pending Payment reads `/applications`, which has no assignment to
+        // hold; sending the narrowing there would be a parameter that endpoint
+        // does not know and a filter the tab cannot honour.
+        oic: tab === 'payment' || holder === '' ? undefined : holder,
         page,
         perPage,
       }),
-    [tab, statuses, assignmentStatuses, clearanceStatuses, serverQuery, page, perPage],
+    [tab, statuses, assignmentStatuses, clearanceStatuses, serverQuery, holder, page, perPage],
   )
 
   // Paging in extends the list being read; a new tab starts its own list. Merged
@@ -809,6 +913,41 @@ export function QueuePage() {
     // hand the server a status list that matches nothing.
     setStatusFilter('')
     restart()
+  }
+
+  function selectHolder(next: '' | 'unassigned' | 'mine' | 'others') {
+    if (next === holder) return
+    setHolder(next)
+    setClaimError(null)
+    restart()
+  }
+
+  /*
+   * Take the case (client §2).
+   *
+   * The list is re-read rather than patched in place. A claim changes more than
+   * the one row's officer — under "Unassigned" the row must LEAVE the list, and
+   * under "Assigned to others" a colleague's claim must appear in it — and a
+   * local edit would leave the row sitting under a heading that no longer
+   * describes it.
+   *
+   * A 409 is the ordinary outcome of two officers pressing at once, not a fault:
+   * the server's message names who got there first, and it is shown as written
+   * rather than replaced by "Something went wrong".
+   */
+  async function claim(item: QueueItem) {
+    if (item.assignmentId === null || claimingId !== null) return
+    setClaimingId(item.assignmentId)
+    setClaimError(null)
+    try {
+      await assignments.claim(item.assignmentId)
+      restart()
+      reload()
+    } catch (err) {
+      setClaimError(toApiError(err).message)
+    } finally {
+      setClaimingId(null)
+    }
   }
 
   function selectStatus(next: string) {
@@ -982,6 +1121,31 @@ export function QueuePage() {
       </div>
 
       {/*
+        * Who holds the case — the client's four sections, as a second row of
+        * pills rather than more tabs.
+        *
+        * They are a different question from the tabs above, and crossing them is
+        * the point: "my assigned filings that are for approval" is the officer's
+        * actual working list, and folding these into the tab row would make the
+        * two mutually exclusive.
+        *
+        * Hidden on Pending Payment, where the rows are filings no office has
+        * been routed yet. There is nothing to hold there, and offering the
+        * narrowing would return an empty list under every heading but "All".
+        */}
+      {tab !== 'payment' && (
+        <div className="mb-5">
+          <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
+        </div>
+      )}
+
+      {claimError && (
+        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-sm font-medium text-s-red">
+          {claimError}
+        </p>
+      )}
+
+      {/*
         * Mounted unconditionally, not tucked inside the list branch: an
         * aria-live region only announces changes to text it already owns, so
         * one that is unmounted whenever the list is empty stays silent on the
@@ -1049,7 +1213,12 @@ export function QueuePage() {
         <>
           <ul className="space-y-4">
             {visible.map((item) => (
-              <QueueRow key={item.key} item={item} />
+              <QueueRow
+                key={item.key}
+                item={item}
+                onClaim={claim}
+                claiming={claimingId === item.assignmentId}
+              />
             ))}
           </ul>
           {hasMore && (

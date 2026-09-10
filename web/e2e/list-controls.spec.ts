@@ -553,15 +553,23 @@ test.describe('the owner’s home page names a refusal as a refusal', () => {
  * The other half of office separability, and the half the applicant sees.
  *
  * The boundary itself is proved server-side (OtherRequirementsWorkflowTest:
- * seven offices raise on one shared filing and each reads only its own). What
+ * every office raises on one shared filing and each reads only its own). What
  * that cannot prove is that the owner is TOLD which office is asking. Their
  * table has an "Office" column where an officer's has "Submitted", and it is
  * the only thing on the row that answers "who wants this from me" — a business
  * owner with a sanitary certificate and a fire clearance outstanding cannot act
  * on either if both say only "Health Certificate".
  *
- * Stubbed: the point is the column, not the register, and seven live offices
- * raising requirements is what the API suite already does.
+ * SIX offices are current. CMO-MARKET is the seventh row here on purpose: the
+ * Market Clearance came out of the system on 6 September 2026, so no NEW
+ * requirement can come from that office — and the register still holds the ones
+ * it raised before then. A column that only knows how to name offices still
+ * being seeded would go blank on those rows, which is the reader's own history
+ * turning into "—". `from_office` is a stored fact about who asked, not a
+ * lookup against today's roster, and this row is what holds that.
+ *
+ * Stubbed: the point is the column, not the register, and live offices raising
+ * requirements is what the API suite already does.
  */
 const OWNER_OFFICES = [
   { code: 'BPLO', name: 'Business Permits and Licensing Office' },
@@ -569,8 +577,9 @@ const OWNER_OFFICES = [
   { code: 'BFP', name: 'Bureau of Fire Protection' },
   { code: 'OBO', name: 'Office of the Building Official' },
   { code: 'CENRO', name: 'City Environment and Natural Resources Office' },
-  { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
   { code: 'CPDO', name: 'City Planning and Development Office (Zoning)' },
+  // Retired 6 September 2026; its old requirements are still in the register.
+  { code: 'CMO-MARKET', name: 'Office of the City Market Administrator' },
 ]
 
 test.describe('the owner is told which office is asking', () => {

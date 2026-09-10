@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
+use App\Http\Controllers\Api\Admin\OicAssignmentController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
@@ -202,6 +203,16 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:application.review')->group(function () {
         Route::get('assignments', [AssignmentController::class, 'index']);
         Route::get('assignments/{assignment}', [AssignmentController::class, 'show']);
+        /*
+         * Take a case: become its Officer in Charge.
+         *
+         * In the review group and not behind `oic.assign` — that permission is
+         * the power to hand a case to SOMEBODY ELSE, which is the super admin's.
+         * Taking an unheld case in your own office is ordinary review work, and
+         * gating it on the admin's permission would mean no officer could ever
+         * claim anything.
+         */
+        Route::post('assignments/{assignment}/claim', [AssignmentController::class, 'claim']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
@@ -417,6 +428,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('permission:oic.assign')->group(function () {
             Route::get('users/{user}/caseload', [UserController::class, 'caseload']);
             Route::post('users/{user}/reassign-caseload', [UserController::class, 'reassignCaseload']);
+            /*
+             * The OIC register: every office's caseload in one list, and the
+             * officers one row may be moved to.
+             *
+             * Same permission as the move itself and as the per-officer caseload
+             * above, because it is the same power seen from the other side —
+             * this lists cases and picks an officer, that lists officers and
+             * picks cases. An office reader must not hold it: the list names
+             * every office's holder, which is the cross-office read the boundary
+             * refuses everywhere else.
+             */
+            Route::get('oic-assignments', [OicAssignmentController::class, 'index']);
+            Route::get('oic-assignments/{assignment}/candidates', [OicAssignmentController::class, 'candidates']);
         });
         Route::middleware('permission:owner.manage_status')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);

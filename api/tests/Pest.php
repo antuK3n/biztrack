@@ -1,6 +1,10 @@
 <?php
 
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
+use App\Models\Barangay;
+use App\Models\PermitType;
+use App\Models\PsicCode;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Ra11032;
@@ -126,4 +130,69 @@ function classifyAsOfficer(Application $app, string $email = 'bplo@biztrack.loca
         $tier ?? $app->complexity ?? Ra11032::tierFor($app),
         User::where('email', $email)->firstOrFail(),
     );
+}
+
+/** A paid, routed filing carrying BUSINESS + SANITARY (BPLO + CHO). */
+function scopedAssignmentFiling(string $name): int
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => $name.' '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '3 Scoped Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 150000]],
+    ])->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::whereIn('code', ['BUSINESS', 'SANITARY'])->pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    // BPLO accepts the main form first; the bill does not exist before that.
+    bploApprovesForm($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
+
+    /*
+     * And the applicant opens SANITARY and hands its sheet in, which is what
+     * reaches CHO.
+     *
+     * Paying no longer routes anybody but BPLO. Under
+     * docs/application-flow-2026-09.md the clearance stage opens on payment and
+     * each office is handed the filing when the owner submits that office's
+     * permit, so without these two calls CHO has no assignment and every case
+     * below is arguing about a row that does not exist.
+     *
+     * Two calls because SANITARY carries a form. Apply OPENS the sheet and
+     * stops — it used to announce "For Approval" on a form nobody had filled in
+     * (client, 9 September 2026) — and it is saving the sheet with `submit`
+     * that hands it over and creates the assignment. The answers travel in the
+     * same write on purpose: `ownerMayEdit` closes the sheet the instant it is
+     * submitted, so apply → fill → submit is the only order left, and one PUT
+     * is that order.
+     */
+    test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/clearances/SANITARY/apply")
+        ->assertSuccessful();
+
+    test()->withHeaders($owner)
+        ->putJson("/api/v1/applications/{$appId}/office-forms/SANITARY", [
+            'form_data' => ['sanitary_classification' => 'Food Establishment'],
+            'submit' => true,
+        ])->assertSuccessful();
+
+    return $appId;
+}
+
+/** CHO's assignment on this filing. */
+function choAssignmentId(int $applicationId): int
+{
+    return ApplicationAssignment::where('application_id', $applicationId)
+        ->whereHas('department', fn ($d) => $d->where('code', 'CHO'))
+        ->value('id');
 }

@@ -125,6 +125,7 @@ const NAV_ITEMS: NavItem[] = [
     },
   },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },
+  { label: 'Officer in Charge', icon: ClipboardIcon, to: '/admin/oic', permission: 'oic.assign' },
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
   /*
    * Records is the SUPER ADMIN's console, and `user.manage` is what says so.

@@ -568,6 +568,263 @@ it('leaves finished work alone', function () {
         ->and($closedInspection->fresh()->inspector_user_id)->toBe($held->id);
 });
 
+/*
+ * ── A move that would move nothing ──────────────────────────────────────────
+ *
+ * The dialog let it through and the endpoint agreed: HTTP 200,
+ * `{"total": 0}`, and the screen printed a tick. An admin typed a reason,
+ * pressed Release to office, was told it had happened, and nothing had. It is
+ * the same class of defect the Reassign dialog was built to fix — a control
+ * that reports success without doing anything — reappearing at the one input
+ * combination nobody tried.
+ *
+ * Refused rather than quietly succeeded, because the two readings of a zero are
+ * both worth stopping on: either the admin is looking at the wrong officer, or
+ * the officer's work has already gone somewhere and the screen is stale.
+ */
+it('refuses a caseload move that would move nothing', function () {
+    $empty = officerIn('CHO', 'sanitary_officer', 'cho.empty@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.willing@biztrack.local');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$empty->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id, 'scope' => 'all', 'reason' => 'Nothing to move.',
+        ])->assertStatus(422);
+});
+
+it('refuses a scope that is empty even when the officer holds other work', function () {
+    // The trap the "all" case hides: an officer with reviews and no inspections
+    // has a caseload, so a total-based guard would let an inspections-only move
+    // through and report zero moved.
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.reviewsonly@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.taker@biztrack.local');
+    assignmentHeldBy($held, 'DTI-91020');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id, 'scope' => 'inspections', 'reason' => 'No visits held.',
+        ])->assertStatus(422);
+
+    // …and the review it does hold is untouched by the refusal.
+    expect(ApplicationAssignment::where('officer_user_id', $held->id)->count())->toBe(1);
+});
+
+/*
+ * ── The two screens have to agree about one officer ─────────────────────────
+ *
+ * The super admin's OIC register lists every assignment an officer is NAMED on,
+ * finished ones included — that is the record of who did the work. This dialog
+ * counts only what is still open, because that is all a move can touch.
+ *
+ * Both are right and together they read as a contradiction: the register says
+ * Liza Reyes is officer in charge of two filings, and the dialog beside it says
+ * she is holding nothing. So the payload carries the finished count as well,
+ * and the dialog can say which number is which instead of leaving the admin to
+ * reconcile two screens.
+ */
+it('reports the finished work an officer is named on, beside what is still open', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.mixed@biztrack.local');
+
+    $open = assignmentHeldBy($held, 'DTI-91021');
+    $done = assignmentHeldBy($held, 'DTI-91022');
+    $done->update(['status' => AssignmentStatus::Completed]);
+
+    $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
+
+    expect($caseload['open_reviews'])->toBe(1)
+        ->and($caseload['total'])->toBe(1)
+        // The number that reconciles this dialog with the OIC register.
+        ->and($caseload['finished_reviews'])->toBe(1);
+
+    expect($open->fresh()->officer_user_id)->toBe($held->id);
+});
+
+/*
+ * ── The dialog names the work, not just its size ────────────────────────────
+ *
+ * Reassign said "Open reviews: 2" and stopped there, so the admin confirmed a
+ * move without ever being told WHICH filings were about to change hands. The
+ * client's own framing everywhere else on this feature is by name — business,
+ * business number, office, permit — and this was the one screen that reduced
+ * all of it to a count.
+ *
+ * It matters most where the decision is: an officer holding two filings from
+ * the same business, or one filing that is nearly finished, is not the same
+ * caseload as two unrelated new ones, and only the list distinguishes them.
+ */
+it('lists the filings an officer is holding, not merely how many', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.named@biztrack.local');
+    $assignment = assignmentHeldBy($held, 'DTI-91030');
+
+    $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
+
+    expect($caseload['cases'])->toHaveCount(1);
+
+    $case = $caseload['cases'][0];
+    expect($case['kind'])->toBe('review')
+        ->and($case['id'])->toBe($assignment->id)
+        ->and($case['tracking_id'])->not->toBeNull()
+        ->and($case['business'])->toBe('Caseload Cafe')
+        ->and($case['office']['code'])->toBe('CHO')
+        ->and($case['status_label'])->not->toBeNull();
+});
+
+it('says which permit each held filing is about', function () {
+    /*
+     * "Kung anong permits ang nasa kanya" — the office's own clearance on the
+     * filing, which is the thing the officer is actually reviewing. Without it
+     * two rows of the same business are the same three lines twice, and the
+     * admin cannot tell the sanitary review from the fire one.
+     */
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.permit@biztrack.local');
+    assignmentHeldBy($held, 'DTI-91031');
+
+    $cases = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data.cases');
+
+    // The key is always present. Null is a real answer — an office can hold a
+    // filing that carries no permit it issues — and an absent key would make
+    // the screen print `undefined`.
+    expect($cases[0])->toHaveKey('permit');
+});
+
+it('lists a held inspection beside the reviews, and says which it is', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.visits@biztrack.local');
+    $assignment = assignmentHeldBy($held, 'DTI-91032');
+
+    $visit = Inspection::create([
+        'application_id' => $assignment->application_id,
+        'department_id' => $held->department_id,
+        'inspector_user_id' => $held->id,
+        'status' => 'scheduled',
+        'scheduled_at' => now()->addWeekdays(3),
+    ]);
+
+    $cases = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data.cases'));
+
+    expect($cases)->toHaveCount(2);
+    expect($cases->pluck('kind')->sort()->values()->all())->toBe(['inspection', 'review']);
+    expect($cases->firstWhere('kind', 'inspection')['id'])->toBe($visit->id);
+});
+
+it('leaves finished work off the list, as it leaves it out of the count', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.donelist@biztrack.local');
+    $open = assignmentHeldBy($held, 'DTI-91033');
+    $done = assignmentHeldBy($held, 'DTI-91034');
+    $done->update(['status' => AssignmentStatus::Completed]);
+
+    $cases = collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data.cases'));
+
+    // The list and the number are the same claim; a list showing work the
+    // count excludes would be the two-screen contradiction all over again.
+    expect($cases->pluck('id')->all())->toBe([$open->id]);
+});
+
+/*
+ * ── Choosing WHICH permits move ─────────────────────────────────────────────
+ *
+ * Scope was three categories — everything, reviews only, inspections only —
+ * and the client's reading of that field is different: it is the list of
+ * permits the officer is holding, and the admin picks from it. The categories
+ * cannot express the ordinary case, which is one filing going to a colleague
+ * because it is stuck while the rest of the caseload stays put.
+ *
+ * `cases` therefore names the rows. `scope` stays and still works, because
+ * "move everything" is a real intent that should not need a list of forty ids
+ * enumerated to say it — and because the Deactivate path uses it.
+ */
+it('moves only the permits the admin picked', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.pick@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.pickee@biztrack.local');
+
+    $moving = assignmentHeldBy($held, 'DTI-91040');
+    $staying = assignmentHeldBy($held, 'DTI-91041');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id,
+            'cases' => [['kind' => 'review', 'id' => $moving->id]],
+            'reason' => 'That one filing is stuck.',
+        ])->assertOk()->assertJsonPath('data.total', 1);
+
+    expect($moving->fresh()->officer_user_id)->toBe($colleague->id)
+        ->and($staying->fresh()->officer_user_id)->toBe($held->id);
+});
+
+it('refuses to move a case the officer is not holding', function () {
+    /*
+     * The important refusal. `cases` arrives from a browser, so without this
+     * the endpoint would take any id and hand ANOTHER officer's filing to
+     * whoever the dialog happened to name — a reassignment nobody asked for,
+     * recorded against an admin who did not choose it.
+     */
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.owner@biztrack.local');
+    $other = officerIn('CHO', 'sanitary_officer', 'cho.stranger@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.receiver@biztrack.local');
+
+    $notTheirs = assignmentHeldBy($other, 'DTI-91042');
+    assignmentHeldBy($held, 'DTI-91043');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id,
+            'cases' => [['kind' => 'review', 'id' => $notTheirs->id]],
+            'reason' => 'Trying to move somebody else’s work.',
+        ])
+        // Pinned to the rule, not merely to a 422: these cases passed before
+        // `cases` existed at all, because `scope` was required and its absence
+        // produced the same status. A test that cannot tell those apart would
+        // go on passing if the ownership check were deleted.
+        ->assertStatus(422)
+        ->assertJsonValidationErrors('cases');
+
+    expect($notTheirs->fresh()->officer_user_id)->toBe($other->id);
+});
+
+it('refuses to move a case that is already finished', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.closed@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.closedtaker@biztrack.local');
+
+    $done = assignmentHeldBy($held, 'DTI-91044');
+    $done->update(['status' => AssignmentStatus::Completed]);
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id,
+            'cases' => [['kind' => 'review', 'id' => $done->id]],
+            'reason' => 'Rewriting history.',
+        ])->assertStatus(422)->assertJsonValidationErrors('cases');
+
+    // A completed review keeps the name of the officer who made it.
+    expect($done->fresh()->officer_user_id)->toBe($held->id);
+});
+
+it('still takes a whole caseload without listing every case', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.whole@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.wholetaker@biztrack.local');
+    assignmentHeldBy($held, 'DTI-91045');
+    assignmentHeldBy($held, 'DTI-91046');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id, 'scope' => 'all', 'reason' => 'Officer has left.',
+        ])->assertOk()->assertJsonPath('data.total', 2);
+});
+
+it('refuses a request that names neither a scope nor a list', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.neither@biztrack.local');
+    assignmentHeldBy($held, 'DTI-91047');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => null, 'reason' => 'Which cases?',
+        ])->assertStatus(422)->assertJsonValidationErrors('scope');
+});
+
 it('refuses to hand a caseload across offices or to a deactivated account', function () {
     $held = officerIn('CHO', 'sanitary_officer', 'cho.held@biztrack.local');
     $otherOffice = officerIn('BFP', 'fire_inspector', 'bfp.other@biztrack.local');
