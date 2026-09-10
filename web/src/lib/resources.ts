@@ -775,6 +775,16 @@ export const payments = {
   historyPage: (params: PageParams = {}) => unwrapPaged<Payment>(api.get('/payments', { params })),
   /** Download the simulated payment receipt PDF (Bearer blob; v2). */
   receipt: (id: number, filename: string) => downloadBlob(`/payments/${id}/receipt`, filename),
+  /**
+   * The same receipt, opened rather than saved.
+   *
+   * The endpoint is behind a Bearer token, so no `<a href>` can reach it and
+   * downloading was the only thing the screen could offer. That is the wrong
+   * default for the commonest reason to come here — checking what a charge was
+   * — which should not cost a file in the Downloads folder. Pass a tab opened
+   * synchronously inside the click handler; see `viewBlob`.
+   */
+  viewReceipt: (id: number, target?: Window | null) => viewBlob(`/payments/${id}/receipt`, target),
 }
 
 /* ── Officer queues + review ──────────────────────────────────────────── */
