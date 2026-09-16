@@ -554,15 +554,30 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
      * had been applied for before the attach-at-submit change, which is why one
      * card worked and the rest did not.)
      *
-     * `clearanceStarted` is the predicate, so the question asked here is the one
-     * that matters — has this clearance been started — rather than a list of
-     * status names that can go stale again.
+     * `clearanceStarted` was the predicate, and it went stale the same way the
+     * status list did. Splitting Apply into two acts created a state it cannot
+     * see: the applicant has pressed Apply, `mode` is recorded, and the status
+     * is STILL `not_started` because nothing routes until the sheet is handed
+     * in. So a permit that HAD been applied for read as un-started, the POST
+     * ran a second time, and the server refused it — 422, "You have already
+     * applied for the ..." — after which `runAction` returns false and the sheet
+     * never opens.
+     *
+     * The cost is not a wasted click. That button reads "Finish form" once a
+     * mode is recorded, and it is the only way back into a half-filled sheet.
+     * Pressing it showed an error banner and nothing else.
+     *
+     * `ClearanceService::isAppliedFor` had already been given the second half of
+     * this question on the server — `status !== NotStarted || mode !== null` —
+     * and this copy of it was missed. Asking both halves here puts the screen
+     * and the API back in agreement.
      *
      * `removingCopy` is the other way in: swapping a held copy back to an
      * application. The old union spelled that `submitted`; it is a held document
      * on the row, which the line above already read.
      */
-    if (!clearanceStarted(row.state) || removingCopy) {
+    const started = clearanceStarted(row.state) || row.mode !== null
+    if (!started || removingCopy) {
       const ok = await runAction(
         code,
         /*
