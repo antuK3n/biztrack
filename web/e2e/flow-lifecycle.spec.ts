@@ -346,6 +346,78 @@ async function approveOwnReview(page: Page) {
   }
 }
 
+/**
+ * The office's SECOND act on its own clearance: say when the inspector calls.
+ *
+ * ── Approving the paperwork books nothing, and that is deliberate ──────────
+ *
+ * `approveOwnReview` above completes this office's assignment and moves its
+ * permit to `for_inspection`. It books NO VISIT. `WorkflowService::approveClearance`
+ * says so in as many words — "this books nothing and grants nothing; it moves
+ * the permit into the stage where the office picks a date" — because the
+ * automatic scheduler that used to pick a date two working days out was removed
+ * on purpose: "an automatic date is a promise made to the applicant by a
+ * scheduler that does not know whether anyone is free." The client's verified
+ * procedure is two steps, "Select Inspection Date and Approve Inspection".
+ *
+ * This narrative performed only the first for as long as approving still booked
+ * for it, and every downstream assertion about visits read an empty list — no
+ * visit, so nothing to pass, so no clearance issued and no filing reaching Final
+ * Approval. One missing act, nine red tests.
+ *
+ * ── Reopened from the For Inspection tab, not from where we stood ──────────
+ *
+ * Approving moves the filing out of this office's For Approval tab and into For
+ * Inspection, and `approveOwnReview` may have dismissed its confirmation by
+ * navigating to the Tracking Page. So the office comes back to the filing the
+ * way an officer would, through the queue.
+ *
+ * ── Matched by shape rather than by permit name ───────────────────────────
+ *
+ * The card is named after its permit — `Book the ‹permit› visit` — because a
+ * filing carries a clearance per office and the cards sit side by side. From
+ * here the regex is enough and is better than a name table: ReviewPage gates the
+ * booking control on `data.clearance`, THIS office's permit on this filing, so
+ * exactly one such card is ever drawn for the office that is signed in. A name
+ * map in the test would be the same rule written down a second time, where it
+ * can drift.
+ */
+async function bookOwnVisit(page: Page, narrative: Narrative) {
+  await openFromQueue(page, 'For Inspection', narrative)
+
+  const dateField = page.getByLabel(/^Date and time of the .+ inspection$/)
+  const book = page.getByRole('button', { name: /^Book the .+ visit$/ })
+  await expect(
+    book,
+    'the office that just accepted the paperwork is not offered its booking control',
+  ).toBeVisible({ timeout: 30_000 })
+
+  /*
+   * Three days out at 10:00, in LOCAL time. The control is `datetime-local`, so
+   * the browser reads it in the reader's zone — which is exactly the conversion
+   * that has to hold for the date the applicant is shown to be the date the
+   * officer picked. A UTC string here would test the wrong thing and pass.
+   */
+  const when = new Date(Date.now() + 3 * 86_400_000)
+  when.setHours(10, 0, 0, 0)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  await dateField.fill(
+    `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T10:00`,
+  )
+
+  const [created] = await Promise.all([
+    page.waitForResponse(
+      (r) => /\/permits\/[A-Z]+\/inspection$/.test(r.url()) && r.request().method() === 'POST',
+      { timeout: 30_000 },
+    ),
+    book.click(),
+  ])
+  expect(
+    created.status(),
+    `booking this office's visit was refused: ${await created.text()}`,
+  ).toBe(201)
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
  * 1. The owner files.
  * ────────────────────────────────────────────────────────────────────────── */
@@ -417,7 +489,40 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
           },
           emergency_contact_name: 'Ana Dela Cruz',
           emergency_contact_number: '0917 123 4567',
-          lines: [{ psic_code_id: psic[0].id, capitalization: 500000 }],
+          /*
+           * Paper items B6 and B7, both required on a NEW filing since
+           * 9 September 2026 and both gating the Business Operation section.
+           *
+           * They live on the BUSINESS, not the application — `paperFormFields`
+           * in BusinessController writes them on store as well as update — so
+           * they belong in this POST and nowhere else. Omitted, the wizard's
+           * `missingFor('operation')` never empties, section 4 never earns its
+           * tick, and the forward jump to Review & Submit below is refused: the
+           * map will not step over an unfinished section. That is the map doing
+           * its job, so the fix is to fill the section, never to relax the jump.
+           *
+           * `single_establishment` because that is what this fixture is — one
+           * shop, no branches. Any of Business::ECONOMIC_ORGANIZATIONS would
+           * pass the gate; this one is picked so it does not also have to carry
+           * `economic_organization_others`, which only "others" requires.
+           */
+          economic_organization: 'single_establishment',
+          capital_investment: 500000,
+          lines: [
+            {
+              psic_code_id: psic[0].id,
+              capitalization: 500000,
+              /*
+               * Required per line, and it gates Location & Zoning — the same
+               * 9 September change. Free text on purpose: the PSIC code says
+               * which CATEGORY the trade is in, this says what is actually
+               * sold, and three offices print it on their paper. A blank here
+               * left section 2 unticked and blocked the jump exactly as B6/B7
+               * did on section 4.
+               */
+              products_services: 'Bottled drinks, packaged snacks',
+            },
+          ],
         }),
       }),
     )
@@ -436,6 +541,20 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
             floor_area_sqm: 120,
             employees: 12,
             employees_in_lgu: 6,
+            /*
+             * Paper item B2's own split, and the last thing that kept Business
+             * Operation unticked. `employees` alone is not the whole question:
+             * the section asks for the headcount AND how it divides, and the
+             * wizard checks all of it under the 'operation' scope.
+             *
+             * 7 + 5 = 12 deliberately. ApplicationController refuses a split
+             * that exceeds the total (`$splitFitsTotal`), so a lazy 12 + 12
+             * would be rejected by the API rather than by the wizard, and the
+             * failure would read as a 422 on create rather than as a fixture
+             * that does not add up.
+             */
+            male_employees: 7,
+            female_employees: 5,
             lines: [{ psic_code_id: psic[0].id, category: 'retailer', capitalization: 500000 }],
           },
         }),
@@ -488,24 +607,73 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
   /* ── Submit, for real, from the wizard's last step ────────────────────── */
 
   await page.goto(`/apply?draft=${appId}`)
-  // Consent is the one answer the API has no field for.
-  await page.getByRole('checkbox').first().check()
 
   const map = page.locator('ol[aria-label="Application sections"]')
   await expect(map).toBeVisible({ timeout: 30_000 })
 
   /*
-   * Six sections, fixed. It was `7 + 6` — seven phases plus one office sheet
-   * per clearance applied for — and that arithmetic is gone with the clearance
-   * step: the wizard is the business permit application alone now, so nothing
-   * can grow this map.
+   * Wait for the draft to HYDRATE before touching anything, and wait on a tick
+   * that only hydration can produce.
+   *
+   * The consent box used to be ticked on the line after `goto`, and hydration
+   * then threw the tick away: `setConsent(app.data_privacy_consent ?? false)`
+   * runs when the GET comes back, so a box ticked in the gap between paint and
+   * response is silently reset to the row's `false`. Nothing reported it —
+   * consent went back to its saved value, so the draft was not dirty, the
+   * header said "All Changes Saved" truthfully, and the only symptom was a 422
+   * from `POST /submit` a few lines later.
+   *
+   * The map being VISIBLE is not the signal: it renders off `BASE_PHASES`,
+   * which is a constant, so it paints in full before a single answer has
+   * arrived. Documentary Requirements carrying "(complete)" is the signal —
+   * that tick comes from the uploaded documents, so it cannot appear until the
+   * draft's own answers are in state.
+   */
+  await expect(
+    map.getByRole('button', { name: /documentary requirements.*complete/i }),
+  ).toBeVisible({ timeout: 30_000 })
+
+  /*
+   * Consent is the one answer this fixture leaves to the browser.
+   *
+   * `POST /api/v1/applications` does accept `data_privacy_consent` — it is not,
+   * as a comment here long claimed, a field the API lacks — but sending it
+   * would leave every section complete, and the wizard opens a reopened draft
+   * on the first UNFINISHED one. With nothing unfinished it opens on Review &
+   * Submit, and the jump below becomes a click on the button for the step
+   * already being shown, which the map renders `disabled`. Leaving consent for
+   * the UI is what keeps the wizard on section 1 and keeps that jump a real
+   * jump across six finished sections — which is the whole assertion.
+   */
+  await page.getByRole('checkbox').first().check()
+
+  /*
+   * SEVEN sections, fixed — and seven is the right number, not a regression to
+   * undo. `BASE_PHASES` in ApplyWizard.tsx is: Data Privacy Consent, Location &
+   * Zoning, Business Information & Registration, BUSINESS OPERATION,
+   * Documentary Requirements, Fees & Tax Computation, Review & Submit.
+   *
+   * This said six until 242bc1d reconciled the wizard with MCG-BPLO-FO-001
+   * v2.0, which splits Section A (Business Information & Registration) from
+   * Section B (Business Operation) and prints them as two sections. The client
+   * asked the wizard to say so — "Section 3 to be Business Information &
+   * Registration, Section 4 to be Business Operation" — so `operation` became a
+   * STEP of its own rather than a heading part-way down the business step. The
+   * section map is the one place an applicant looks to find what is left, and a
+   * heading inside another step does not appear there at all.
+   *
+   * So: do NOT put this back to 6. Six would mean Section B has been folded
+   * back into Section A and the paper's shape has been lost again. Renewals and
+   * new filings both run BASE_PHASES; only `application_type === 'amendment'`
+   * runs eight (AMENDMENT_PHASES prepends "Changes Since Last Permit"), and
+   * this narrative files a NEW application.
    *
    * Still asserted, because the jump below is what proves the filing is
    * complete: the map refuses a forward jump over an unfinished section, so
    * reaching Review & Submit in one click IS the statement that nothing is
    * outstanding.
    */
-  await expect(map.locator('li')).toHaveCount(6)
+  await expect(map.locator('li')).toHaveCount(7)
 
   /*
    * Walked to Review & Submit, then submitted through the API rather than by
@@ -526,13 +694,30 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
    */
   await map.getByRole('button', { name: /review & submit/i }).click()
   await expect(page.getByRole('button', { name: /^submit$/i })).toBeEnabled()
+  /*
+   * Wait for the draft to be WRITTEN before submitting around the button.
+   *
+   * The consent tick above lives in React state until autosave debounces
+   * (AUTOSAVE_DELAY_MS, 1.2s) and PATCHes it. Everything else this filing needs
+   * was created through the API, so consent is the one answer that exists only
+   * in the browser — and `POST /submit` validates `data_privacy_consent` on the
+   * ROW, not on whatever the tab happens to be holding. Submitting straight
+   * after the click raced the save and came back 422 "Agree to the Data Privacy
+   * Consent before submitting this application."
+   *
+   * An enabled Submit button is NOT that signal: it reads the same unsaved
+   * state the tick went into, so it turns green a full second before the row
+   * agrees. "All Changes Saved" is the header's `applicationId && !dirty`, which
+   * is the write actually having landed — the only claim worth waiting on.
+   */
+  await expect(page.getByText('All Changes Saved')).toBeVisible({ timeout: 20_000 })
   await page.evaluate(async (id) => {
     const token = localStorage.getItem('biztrack.token.public')
     const res = await fetch(`/api/v1/applications/${id}/submit`, {
       method: 'POST',
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     })
-    if (!res.ok) throw new Error(`submit answered ${res.status}`)
+    if (!res.ok) throw new Error(`submit answered ${res.status}: ${await res.text()}`)
   }, appId)
 
   const filed = await filing(page, 'public', appId)
@@ -742,6 +927,31 @@ test('the applicant’s row says which permit is moving and which have not start
    * which is the property that made the old lie a lie. If a future change
    * flattens these chips back to one hardcoded label, the Not Started
    * assertions below go red, which is the same defect arriving by a new door.
+   *
+   * ── AND IT HAS. This test is RED, and the defect is in the product. ───────
+   *
+   * The door it came back through is the one the paragraph above predicted. All
+   * SIX chips currently read "Not Yet Submitted", the Mayor's / Business Permit
+   * included, on a filing that has been submitted and is sitting in BPLO's
+   * queue. `permitChip()` is faithful — it prints `clearanceStatusMeta(status)`
+   * off each pivot — so the flattening is upstream of it, in what the pivots
+   * say: `WorkflowService::submit` attaches every permit type at
+   * `not_started`, BPLO included, and nothing moves the Business Permit off it
+   * until `approveMainForm` ("BPLO accepted the form"), which is a stage LATER
+   * than this one. Between filing and BPLO's acceptance the outcome permit has
+   * no state of its own, so the row has nothing exact to print about it.
+   *
+   * The applicant is therefore told their business permit is "Not Yet
+   * Submitted" while an officer is reading it, which is the same false sentence
+   * as the original defect with the opposite words in it.
+   *
+   * DO NOT make this green by expecting six "Not Yet Submitted" chips. That
+   * encodes the lie as the specification and deletes the only assertion that
+   * would notice it going away. The fix is in `api/` or `web/src/` — either
+   * `submit()` moves the outcome pivot to `for_approval` alongside the routing
+   * it already does, or `ApplicationsPage` reports the application's own status
+   * for the outcome permit the way `appStateChip` already does for the unpaid
+   * and decided cases. Until one of those lands, this stays red on purpose.
    */
   await page.goto('/applications')
   await page.getByLabel(/Search your applications/).fill(trackingId)
@@ -882,20 +1092,52 @@ test('paying opens the clearance stage, and applying routes each office', async 
       }
     }
     /*
-     * The office sheets, which are the second half of applying. Three of the six
-     * will not be saved without an answer (`officeFormMissing`); they are filled
-     * here for the same reason the rest of the form is, so that an unfilled one
-     * is not what this file ends up measuring.
+     * ── The office sheets, and HANDING THEM IN is what routes the office ─────
+     *
+     * Applying is two acts now, not one. `POST .../apply` records the applicant's
+     * intent — it writes `mode` on the pivot — and routes NOBODY; the pivot stays
+     * `not_started` on purpose (`ClearanceService::isAppliedFor` reads exactly
+     * that pair). The office is routed by `WorkflowService::submitClearanceForm`,
+     * which `OfficeFormController::upsert` calls only when the PUT carries
+     * `submit: true`. Absent, the endpoint saves a draft and says nothing, which
+     * its own comment calls the safe default: "a caller that does not know about
+     * submitting cannot accidentally do it."
+     *
+     * This fixture was that caller. It PUT `{ form_data }` alone, so five sheets
+     * were saved, five offices were never routed, and the only assignment on the
+     * filing was BPLO's — which is what the routing assertion below was reading
+     * when it failed. The apply loop above is not enough by itself and never
+     * was; it only looked like it was while saving still submitted.
+     *
+     * ── Why all five, and why these answers ──────────────────────────────────
+     *
+     * All five, because every office has to be routed for the rest of this
+     * narrative to have anybody to approve, inspect and sign off. Only two were
+     * listed before, which is the other half of the same stale assumption.
+     *
+     * The answers are the ones `officeFormMissing` requires, sheet by sheet, and
+     * they are filled honestly rather than stubbed: the API trusts the `submit`
+     * flag and has no PHP counterpart to re-check it, so a fixture that lied
+     * here would hand in sheets a real applicant could not have handed in.
+     * SANITARY wants a classification, OCCUPANCY an application type, and CEC
+     * both an owner's address — the one field on MCG-CENRO-FO-001 the register
+     * does not hold anywhere — and the certification, which is an act rather
+     * than a fact. FSIC and ZONING require nothing: FSIC derives every answer,
+     * and CPDD's paper marks neither of its two questions mandatory. They still
+     * PUT, because the PUT is the hand-in.
      */
     const sheets: Record<string, Record<string, string>> = {
       SANITARY: { sanitary_classification: 'Food Establishment' },
       OCCUPANCY: { application_type: 'Full' },
+      CEC: { owner_address: '3 Playwright St., Longos, Malabon City', certified: 'yes' },
+      FSIC: {},
+      ZONING: {},
     }
     for (const [code, form_data] of Object.entries(sheets)) {
       const res = await fetch(`/api/v1/applications/${id}/office-forms/${code}`, {
         method: 'PUT',
         headers,
-        body: JSON.stringify({ form_data }),
+        body: JSON.stringify({ form_data, submit: true }),
       })
       if (!res.ok) {
         throw new Error(`office form ${code} answered ${res.status}: ${await res.text()}`)
@@ -986,34 +1228,55 @@ test('the officer’s queue row names the filing that was searched for', async (
   const { trackingId, businessName } = narrative
 
   /*
-   * ── DEFECT. This test is expected to FAIL, and must not be weakened. ──────
+   * ── A DEFECT TEST, NOW GREEN. It is a regression guard, not a bug report. ──
+   *
+   * Read the history before touching it, because the assertion at the foot is
+   * unchanged and only its verdict moved.
    *
    * The queue's search box is named "Search this queue by tracking ID or
    * business name", the tracking ID is the handle the applicant quotes down the
-   * phone, and `AssignmentController::index` really does match on it. What comes
-   * back does not print it. `QueuePage`'s `QueueItem` carries `trackingId` and
-   * uses it in exactly two places — `matchesSearch` and the fallback for a
-   * business that has been removed from the register — and never renders it. The
-   * row is the business name, a date, and a paid/unpaid block.
+   * phone, and `AssignmentController::index` really does match on it. What came
+   * back did not print it. `QueuePage`'s `QueueItem` carried `trackingId` and
+   * used it in exactly two places — `matchesSearch` and the fallback for a
+   * business that has been removed from the register — and never rendered it.
+   * The row was the business name, a date, and a paid/unpaid block.
    *
-   * So an officer who searches "BIZ-2026-00964" is shown a row that nowhere says
-   * BIZ-2026-00964, and cannot confirm they are about to open the filing they
-   * were asked about. A business with two filings in flight — a renewal and an
-   * amendment, which is ordinary — produces two rows that are identical on
-   * screen, and the only way to tell them apart is to open one and look.
+   * So an officer who searched "BIZ-2026-00964" was shown a row that nowhere
+   * said BIZ-2026-00964, and could not confirm they were about to open the
+   * filing they were asked about. A business with two filings in flight — a
+   * renewal and an amendment, which is ordinary — produced two rows identical on
+   * screen, and the only way to tell them apart was to open one and look.
    *
-   * That this was not already caught is worth recording, because it explains why
-   * it is still here: `track-search.spec.ts` does assert
+   * The row prints the tracking ID now, so this passes. It stays exactly as it
+   * is: the assertion is cheap, and it is the only place that would notice the
+   * ID being dropped from the row again.
+   *
+   * That it was not caught sooner is worth recording, because it explains how it
+   * survived: `track-search.spec.ts` does assert
    * `rows.first()).toContainText('BIZ-2026-00203')` — but the fixture behind
    * that row has `business: null` ("business removed"), so `nameOf()` falls back
    * to printing the tracking ID AS the name. The one existing assertion about a
    * tracking ID on a queue row passes only down the path where there is no
    * business name to print instead.
    *
-   * Asserted from BPLO's seat, which is the coordinating office and the one that
-   * fields the phone calls.
+   * ── Asserted from CHO's seat, and it used to be BPLO's ───────────────────
+   *
+   * BPLO was chosen as the coordinating office, the one that fields the phone
+   * calls. That seat stopped being able to see this filing when BPLO's review
+   * moved in front of payment: `approveMainForm()` completes BPLO's assignment,
+   * and the Approval tab's own note says BPLO "drops out of this tab the instant
+   * it approves". Two stages of this narrative have happened since, so by the
+   * time this test runs the filing is correctly absent from BPLO's queue and the
+   * row lookup below found nothing — a defect test failing at its SETUP, which
+   * documents nothing and reads like the defect it names has changed.
+   *
+   * CHO holds an open assignment here: the applicant handed in the sanitary
+   * sheet two tests ago and City Health has not read it yet. The seat is the
+   * only thing that moves — an officer searching a tracking ID and being shown
+   * the row it belongs to is the same claim at any desk, and the assertion below
+   * is untouched.
    */
-  await asOffice(browser, 'bplo', async (page) => {
+  await asOffice(browser, 'sanitary', async (page) => {
     await page.goto('/staff/queue')
     await expect(
       page.getByRole('heading', { name: 'Application Verification', level: 1 }),
@@ -1035,33 +1298,45 @@ test('a queue search says how many filings actually matched it', async ({ browse
   const { trackingId } = narrative
 
   /*
-   * ── DEFECT. This test is expected to FAIL, and must not be weakened. ──────
+   * ── A DEFECT TEST, NOW GREEN. It is a regression guard, not a bug report. ──
    *
-   * Search a tracking ID in For Approval and the queue answers, verbatim:
+   * Searching a tracking ID in For Approval used to answer, verbatim:
    *
    *     Showing 1 of 11 matching “BIZ-2026-00964”, newest first.
    *
-   * One filing matches. Eleven is every filing in the tab, and it is stated as
-   * the number that MATCHED the term the officer typed.
+   * One filing matched. Eleven was every filing in the tab, stated as the number
+   * that MATCHED the term the officer typed.
    *
-   * `QueuePage` takes the assignment tabs' total from
+   * `QueuePage` took the assignment tabs' total from
    * `meta.application_status_counts` — summed across the tab's statuses — and
-   * that breakdown is computed without the `q` the same request carried.
-   * `meta.total` beside it is correctly 1. So the sentence pairs a searched
-   * numerator with an unsearched denominator, and it is the denominator that an
+   * that breakdown was computed without the `q` the same request carried.
+   * `meta.total` beside it was correctly 1. So the sentence paired a searched
+   * numerator with an unsearched denominator, and it is the denominator an
    * officer reads as "how much is there".
    *
-   * This is the same failure the queue has already paid for once and by name:
-   * the client was shown "Showing 0 of the 13 loaded" while searching a business
-   * the register plainly held, and the fix was meant to be that the count is the
-   * queue's rather than the page's. It is neither now — it is the tab's.
+   * It was the same failure the queue had already paid for once and by name: the
+   * client was shown "Showing 0 of the 13 loaded" while searching a business the
+   * register plainly held, and the fix was meant to be that the count is the
+   * queue's rather than the page's. For a while it was neither — it was the
+   * tab's. Both numbers come from the searched response now, so this passes.
    *
+   * ── The fixture has to be able to TELL, which is why the seat matters ─────
+   *
+   * This runs from CHO's seat, and not only because BPLO completed its review
+   * two stages back and no longer carries this filing at all (see the test
+   * above). CHO's For Approval tab holds 18 filings at this point in the
+   * narrative against the one that matches, so "1 of 1" is a real statement
+   * about the search rather than a coincidence.
+   *
+   * That distinction is the whole reason the defect survived as long as it did.
    * `track-search.spec.ts` cannot see it: its stub returns
    * `application_status_counts: { returned: 1, for_approval: 2 }`, which sums to
    * exactly the three rows the stub also returns, so the wrong number and the
-   * right number are the same number in the fixture.
+   * right number are the same number in the fixture. A seat whose tab held only
+   * this filing would reintroduce that blindness here — so if this ever has to
+   * move again, move it to a BUSY queue.
    */
-  await asOffice(browser, 'bplo', async (page) => {
+  await asOffice(browser, 'sanitary', async (page) => {
     await page.goto('/staff/queue')
     await expect(
       page.getByRole('heading', { name: 'Application Verification', level: 1 }),
@@ -1132,6 +1407,10 @@ test('one office’s approval closes its own review and moves nobody else’s', 
   await asOffice(browser, first.account, async (officePage) => {
     await openFromQueue(officePage, 'For Approval', narrative)
     await approveOwnReview(officePage)
+    // The second half of this office's turn. Approving books nothing — see
+    // bookOwnVisit — so without this the visit assertion below reads an empty
+    // list and the narrative never reaches an inspection at all.
+    await bookOwnVisit(officePage, narrative)
   })
 
   const afterFirst = await filing(page, 'public', appId)
@@ -1294,6 +1573,10 @@ test('a second office’s visit is booked beside the first, not instead of it', 
   await asOffice(browser, second.account, async (officePage) => {
     await openFromQueue(officePage, 'For Approval', narrative)
     await approveOwnReview(officePage)
+    // Its own visit, booked by the office that just accepted the paperwork —
+    // which is what makes "beside the first, not instead of it" a claim about
+    // two bookings rather than about none.
+    await bookOwnVisit(officePage, narrative)
   })
 
   const after = await filing(page, 'public', appId)
@@ -1397,6 +1680,16 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
       `${third.code} approved and was given no confirmation that anything happened`,
     ).toBeVisible({ timeout: 10_000 })
     await page.getByRole('button', { name: 'Tracking Page' }).click()
+
+    /*
+     * This office's visit, booked here rather than in the next test, because
+     * this is where its approval happened. The test above is about the
+     * confirmation dialog and nothing else; the booking rides along for the
+     * same reason the approval does — the narrative has to leave this office in
+     * the state the next stage assumes, which is paperwork accepted AND a visit
+     * on the calendar.
+     */
+    await bookOwnVisit(page, narrative)
   })
 })
 
@@ -1430,6 +1723,9 @@ test('once every office has accepted its paperwork, a visit is booked for each',
     await asOffice(browser, office.account, async (officePage) => {
       await openFromQueue(officePage, 'For Approval', narrative)
       await approveOwnReview(officePage)
+      // Every office in `remaining` inspects — `done` holds BPLO — so each one
+      // books, and the count below is five bookings rather than five approvals.
+      await bookOwnVisit(officePage, narrative)
     })
   }
 
