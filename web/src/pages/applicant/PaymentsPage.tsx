@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDownIcon, DownloadIcon, PaymentsIcon } from '../../components/icons'
+import { ChevronDownIcon, DownloadIcon, PaymentsIcon, SearchIcon } from '../../components/icons'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { PageTitle, SortFilter } from '../../components/ui/Proto'
@@ -144,11 +144,47 @@ export function PaymentsPage() {
 
   const [openId, setOpenId] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, FeeDetail>>({})
-  const [receiptBusy, setReceiptBusy] = useState<number | null>(null)
+  /*
+   * Keyed by payment AND by action, because the row now offers two of them and
+   * a single busy id would grey out both — telling somebody their download had
+   * stalled when it was the view they pressed.
+   */
+  const [receiptBusy, setReceiptBusy] = useState<{ id: number; act: 'view' | 'save' } | null>(null)
   const [receiptError, setReceiptError] = useState<string | null>(null)
 
+  /*
+   * View comes first, and download stays.
+   *
+   * The screen could only hand over a file, because the receipt endpoint is
+   * behind a Bearer token and an anchor cannot carry one. But the ordinary
+   * reason to open Payment History is to check a charge — how much, when, on
+   * what — and answering that should not leave a PDF in the Downloads folder
+   * every time. Downloading remains for the case that wants a copy to keep or
+   * to attach to something.
+   */
+  async function viewReceipt(p: Payment) {
+    /*
+     * Opened inside the click, before any await. By the time the fetch resolves
+     * the user gesture has expired and the popup blocker takes the tab
+     * silently — the same rule DocumentActions works to.
+     */
+    const tab = window.open('', '_blank')
+    setReceiptBusy({ id: p.id, act: 'view' })
+    setReceiptError(null)
+    try {
+      await payments.viewReceipt(p.id, tab)
+    } catch (err) {
+      // Close the blank tab, or the failure leaves them looking at an empty
+      // window with the message on the page behind it.
+      tab?.close()
+      setReceiptError(toApiError(err).message)
+    } finally {
+      setReceiptBusy(null)
+    }
+  }
+
   async function downloadReceipt(p: Payment) {
-    setReceiptBusy(p.id)
+    setReceiptBusy({ id: p.id, act: 'save' })
     setReceiptError(null)
     try {
       await payments.receipt(p.id, `receipt-${p.reference_number}.pdf`)
@@ -257,15 +293,44 @@ export function PaymentsPage() {
                       className={`shrink-0 text-ink-secondary transition-transform ${open ? 'rotate-180' : ''}`}
                     />
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => downloadReceipt(p)}
-                    disabled={receiptBusy === p.id}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
-                  >
-                    <DownloadIcon size={14} />
-                    {receiptBusy === p.id ? 'Preparing…' : 'Receipt'}
-                  </button>
+                  {/*
+                    * Two actions, and the reading one leads.
+                    *
+                    * "Receipt" used to be a single button that saved a file,
+                    * which answered the rarer need. Checking a charge is what
+                    * brings somebody to this screen, and it should cost a look
+                    * rather than a download. So View Receipt is the filled
+                    * control and Save is the quiet one beside it.
+                    *
+                    * Both name the noun. "View" and "Save" alone would read as
+                    * being about the ROW — its breakdown is what the chevron
+                    * opens — and two controls a few pixels apart doing
+                    * different things under the same verb is how a receipt gets
+                    * mistaken for the expander.
+                    */}
+                  <span className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => viewReceipt(p)}
+                      disabled={receiptBusy?.id === p.id}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                    >
+                      <SearchIcon size={14} />
+                      {receiptBusy?.id === p.id && receiptBusy.act === 'view'
+                        ? 'Opening…'
+                        : 'View Receipt'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadReceipt(p)}
+                      disabled={receiptBusy?.id === p.id}
+                      aria-label={`Save receipt ${p.reference_number} as a PDF`}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
+                    >
+                      <DownloadIcon size={14} />
+                      {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
+                    </button>
+                  </span>
                 </div>
                 {open && (
                   <div className="pl-4 sm:pl-8">
