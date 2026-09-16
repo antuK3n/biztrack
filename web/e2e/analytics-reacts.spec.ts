@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
-import { sessionFor, waitForAnalytics } from './helpers'
+import { mergedStorageState, sessionFor, waitForAnalytics } from './helpers'
 
 /*
  * Do the dashboards answer to the register, or do they merely draw?
@@ -68,6 +68,20 @@ const BPLO_SESSION = sessionFor('bplo')
 const SANITARY_SESSION = sessionFor('sanitary')
 const SUPER_ADMIN_SESSION = sessionFor('admin')
 
+/*
+ * One browser holding both portals, for the one test that has to make the
+ * filing it then tries to approve.
+ *
+ * The RA 11032 gate now fires at BPLO's FIRST approval and nowhere else (see
+ * bploReviewAwaitingCategory below), and the snapshot this stack copies holds
+ * no filing at `for_approval` at all — every live row in it is already past
+ * that moment. So the state under test has to be made: the owner submits a
+ * draft, which is the only act that puts a filing in front of BPLO. Two
+ * sessions, not two logins — the tokens are keyed by portal and merge without
+ * collision, and logging in again would spend the sign-in limiter.
+ */
+const OWNER_AND_BPLO = mergedStorageState(['owner.json', 'bplo.json'])
+
 /**
  * One API call made from inside the app's own origin, carrying the session the
  * browser is already holding.
@@ -79,15 +93,25 @@ const SUPER_ADMIN_SESSION = sessionFor('admin')
  *
  * The status comes back rather than being thrown on, because two tests below are
  * ABOUT a status: a 422 that must happen and a 200 that must not be refused.
+ *
+ * `portal` defaults to staff because every officer call below is one. It exists
+ * for the single test that also speaks as the applicant: the two tokens are
+ * separate keys in the same localStorage, and reading the wrong one gets a 401
+ * that looks like a broken session rather than the wrong door.
  */
 async function api(
   page: Page,
   path: string,
-  init: { method?: string; body?: Record<string, unknown> } = {},
+  init: { method?: string; body?: Record<string, unknown>; portal?: 'staff' | 'public' } = {},
 ): Promise<{ status: number; body: Record<string, unknown> | null }> {
   return page.evaluate(
-    async (call: { path: string; method: string; body: Record<string, unknown> | null }) => {
-      const token = localStorage.getItem('biztrack.token.staff')
+    async (call: {
+      path: string
+      method: string
+      body: Record<string, unknown> | null
+      portal: string
+    }) => {
+      const token = localStorage.getItem(`biztrack.token.${call.portal}`)
       const res = await fetch(call.path, {
         method: call.method,
         headers: {
@@ -101,7 +125,12 @@ async function api(
 
       return { status: res.status, body }
     },
-    { path, method: init.method ?? 'GET', body: init.body ?? null },
+    {
+      path,
+      method: init.method ?? 'GET',
+      body: init.body ?? null,
+      portal: init.portal ?? 'staff',
+    },
   )
 }
 
@@ -582,6 +611,136 @@ test.describe('an uncategorised filing cannot be approved', () => {
     const after = await api(page, `/api/v1/applications/${target!.applicationId}`)
     expect((after.body?.data as { status?: string })?.status).toBe(statusBefore)
   })
+})
+
+/*
+ * ── The same rule, at the door the screen cannot guard ──────────────────────
+ *
+ * Its own block, and as BPLO rather than as a clearance office, because the
+ * September rework moved the gate. `requireProcessingCategory` used to run on
+ * every office's approval, so a sanitary session reached it; it is now called
+ * from `approveMainForm` and restated in `approveOverall`, which are BPLO's two
+ * acts and nobody else's. Asking sanitary to approve an uncategorised filing
+ * therefore no longer meets the gate at all — the filing it was handed is at
+ * `awaiting_other_permits` with its sanitary row never started, so the refusal
+ * that came back was `status` ("A Not Yet Submitted permit cannot become For
+ * Inspection"), a true sentence about something else entirely.
+ *
+ * Narrowing the gate to BPLO is deliberate (WorkflowService, above
+ * requireProcessingCategory: "BPLO is now the office that answers it, at their
+ * FIRST approval"), so the test moves rather than the product. The screen's
+ * guard stays office-wide and the test above stays where it is: ReviewPage shuts
+ * Approve for whoever is reading, which is conservative and costs nobody a
+ * decision they were entitled to make.
+ */
+test.describe('and the rule is the server’s, not the screen’s', () => {
+  test.use({ storageState: OWNER_AND_BPLO })
+
+  /**
+   * A BPLO review waiting on a filing whose category nobody has confirmed.
+   *
+   * ── Why `source`, and not `tier === null` ─────────────────────────────────
+   *
+   * The gate passes only when a PERSON chose the tier — `isTier($app->complexity)
+   * && complexity_set_by_user_id !== null`. `submit()` seeds a guess from
+   * Ra11032::tierFor with no user against it, so a filing made through the
+   * product arrives with a tier that still trips the gate. `source` is the
+   * server's own word for that distinction: 'officer' once somebody put their
+   * name to it, 'automatic' while it is only our guess, null on the rows that
+   * predate classification-at-submission. Keying on a null tier would have
+   * looked for the rarest case and missed the ordinary one — the same mistake
+   * ReviewPage made before it moved to `source`.
+   *
+   * ── Why it may have to make one ───────────────────────────────────────────
+   *
+   * The gate fires at `for_approval`, and the register this stack copies holds
+   * no filing at that status: every live row in it is already paid and out with
+   * the other offices. A filing therefore has to be put in front of BPLO, and
+   * the only act that does that is the applicant submitting a draft — which is
+   * why this block carries the owner's session as well.
+   *
+   * An open review is looked for before one is made, and costs a single list
+   * call. It is not usually found, and that is worth writing down rather than
+   * discovering: a refused approval writes nothing (AssignmentController::
+   * approve decides first, records the holder second), so the filing this test
+   * makes survives the run — but the rejection test at the top of this file
+   * takes a `new` filing in any live status filed this month, which is exactly
+   * what this one leaves behind. In practice each run spends a draft and hands
+   * the next run's rejection test its target. The owner's draft pool is dozens
+   * deep and e2e-stack.sh re-copies it, so that trade is cheap; what it must
+   * not do is silently become a skip, hence the assertion at the call site.
+   *
+   * Only `new` drafts are submitted: a renewal or an amendment is refused at
+   * submit unless it names the permit it carries forward, and the point here is
+   * to reach BPLO, not to exercise that gate.
+   */
+  async function bploReviewAwaitingCategory(page: Page): Promise<number | null> {
+    await page.goto('/staff/queue')
+
+    const openBploReview = async (): Promise<number | null> => {
+      const list = await api(
+        page,
+        '/api/v1/assignments?application_status=for_approval&status=pending,in_progress,returned&per_page=50',
+      )
+      const rows = (list.body?.data ?? []) as {
+        id: number
+        department: { code: string } | null
+        application: { id: number } | null
+      }[]
+
+      for (const row of rows) {
+        // Only BPLO is routed at `for_approval`, so this filter changes nothing
+        // today. It is here because BPLO's visibility is the whole register —
+        // its /assignments answer carries other offices' rows at other statuses
+        // — and a row belonging to somebody else would take a different branch
+        // of approveAssignment and refuse for a different reason.
+        if (row.department?.code !== 'BPLO' || !row.application) continue
+        const detail = await api(page, `/api/v1/applications/${row.application.id}`)
+        const ra = (detail.body?.data as { ra11032?: { source: string | null } } | undefined)
+          ?.ra11032
+        if (ra && ra.source !== 'officer') return row.id
+      }
+
+      return null
+    }
+
+    const existing = await openBploReview()
+    if (existing !== null) return existing
+
+    const drafts = await api(page, '/api/v1/applications?status=draft&per_page=50', {
+      portal: 'public',
+    })
+    const candidates = ((drafts.body?.data ?? []) as { id: number; application_type: string }[])
+      .filter((row) => row.application_type === 'new')
+      .slice(0, 5)
+
+    for (const draft of candidates) {
+      /*
+       * The consent tick, then the filing. It is the only thing submit() asks
+       * of a `new` draft that a half-finished autosave will not already have —
+       * documents are not checked here — and it is refused on the server
+       * precisely because the wizard is not the only way in.
+       *
+       * PUT is a partial update, so sending the one field leaves the rest of
+       * the draft alone.
+       */
+      await api(page, `/api/v1/applications/${draft.id}`, {
+        method: 'PUT',
+        portal: 'public',
+        body: { data_privacy_consent: true },
+      })
+      const submitted = await api(page, `/api/v1/applications/${draft.id}/submit`, {
+        method: 'POST',
+        portal: 'public',
+      })
+      // A draft can be refused for reasons of its own — a suspended business,
+      // an answer never given. That is this draft's problem, not the test's, so
+      // the next one is tried rather than the run being failed on it.
+      if (submitted.status === 200) return await openBploReview()
+    }
+
+    return null
+  }
 
   test('the API refuses a direct approval with a 422 keyed on complexity', async ({ page }) => {
     /*
@@ -591,10 +750,22 @@ test.describe('an uncategorised filing cannot be approved', () => {
      * refactor, every test above would still pass and permits would issue with
      * no statutory clock behind them.
      */
-    const target = await findUncategorisedReview(page)
-    test.skip(target === null, 'every filing on this office’s queue already has a category')
+    const assignmentId = await bploReviewAwaitingCategory(page)
 
-    const refused = await api(page, `/api/v1/assignments/${target!.assignmentId}/approve`, {
+    /*
+     * Asserted, not skipped. Every other fixture in this file reads the
+     * register and may honestly find nothing left in it; this one MAKES the
+     * state it needs, so coming back empty means the making failed — and a rule
+     * nobody checked, reported as a pass, is the outcome this whole file is
+     * written against. If it ever fires, restart e2e-stack.sh: it re-copies the
+     * register and the draft pool comes back.
+     */
+    expect(
+      assignmentId,
+      'no BPLO review could be opened on an unconfirmed filing, and none could be filed either',
+    ).not.toBeNull()
+
+    const refused = await api(page, `/api/v1/assignments/${assignmentId}/approve`, {
       method: 'POST',
       body: {},
     })
@@ -624,8 +795,9 @@ test.describe('rejection is deliberately not gated', () => {
      * demanding a tier before rejecting would stop an officer saying no for the
      * sake of a field nothing will ever measure — RA 11032 has no deadline for a
      * transaction that was refused. `requireProcessingCategory` is called from
-     * approveAssignment and approveAndIssue and from nowhere else; this is what
-     * proves that stayed true after today's change.
+     * approveMainForm and approveOverall and from nowhere else — BPLO's two
+     * acts, and no rejection among them; this is what proves that stayed true
+     * after today's change.
      *
      * Run as BPLO because `application.reject` is BPLO's and the super admin's.
      * The six clearance offices decide their own review and cannot refuse the
