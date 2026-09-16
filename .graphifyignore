@@ -1,0 +1,27 @@
+# Keep the knowledge graph about OUR code.
+#
+# graphify's built-in skip list covers node_modules, dist, build and its own
+# output, but not Composer's vendor/ — so the PHP half of this repo was indexed
+# as Laravel framework internals. A 106 MB graph answered "where is the
+# clearance two-act split enforced" with Stringable, InvalidArgumentException
+# and psysh's readline buffer, which is why the mandatory query hook was being
+# ignored: the tool had nothing useful to say.
+#
+# Everything below is either somebody else's source, generated, or a test
+# artefact. None of it is architecturally meaningful for this system.
+
+api/vendor
+api/storage
+api/bootstrap/cache
+
+web/dist
+web/test-results
+web/playwright-report
+web/.auth
+
+graphify-out
+.planning/graphs
+
+# Build outputs and caches that the default list misses in this layout
+**/.vite
+**/coverage
