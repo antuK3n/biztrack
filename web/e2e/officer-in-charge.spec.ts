@@ -136,11 +136,13 @@ test.describe('the office Track page', () => {
     const theirs = page.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
 
     await expect(free).toContainText('Not yet taken by anyone')
-    await expect(free.getByRole('button', { name: /claim this filing/i })).toBeVisible()
+    // "Assign to Me" is the client's wording for this control; the test tracks
+    // the label a reader actually sees rather than an internal name.
+    await expect(free.getByRole('button', { name: /assign to me/i })).toBeVisible()
 
     // Held by the reader: named, and no Claim — you cannot take what is yours.
     await expect(mine).toContainText(`Officer in charge: ${ME.name}`)
-    await expect(mine.getByRole('button', { name: /claim this filing/i })).toHaveCount(0)
+    await expect(mine.getByRole('button', { name: /assign to me/i })).toHaveCount(0)
 
     /*
      * A colleague's case is the one that matters. It must be visibly SOMEBODY
@@ -150,12 +152,12 @@ test.describe('the office Track page', () => {
      */
     await expect(theirs).toContainText(`Officer in charge: ${COLLEAGUE.name}`)
     await expect(theirs).toContainText('read-only for you')
-    await expect(theirs.getByRole('button', { name: /claim this filing/i })).toHaveCount(0)
+    await expect(theirs.getByRole('button', { name: /assign to me/i })).toHaveCount(0)
   })
 
   test('claiming asks the server, and re-reads the list rather than editing it', async ({ page }) => {
     const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
-    await free.getByRole('button', { name: /claim this filing/i }).click()
+    await free.getByRole('button', { name: /assign to me/i }).click()
 
     await expect.poll(() => claimed).toContain(FREE.id)
 

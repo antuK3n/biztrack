@@ -510,6 +510,12 @@ async function loadPage(args: {
   query: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
+  /**
+   * Drop the stage narrowing, so a holder section covers the office's whole
+   * queue. See the note at the call site: narrowing by stage AND by holder is
+   * what made "My assigned" empty for an officer who was holding work.
+   */
+  spanStages?: boolean
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -525,9 +531,9 @@ async function loadPage(args: {
   }
 
   const res = await assignments.page({
-    application_status: args.statuses,
-    ...(args.assignmentStatuses ? { status: args.assignmentStatuses } : {}),
-    ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
+    ...(args.spanStages ? {} : { application_status: args.statuses }),
+    ...(args.assignmentStatuses && !args.spanStages ? { status: args.assignmentStatuses } : {}),
+    ...(args.clearanceStatuses && !args.spanStages ? { clearance_status: args.clearanceStatuses } : {}),
     ...(args.query ? { q: args.query } : {}),
     ...(args.oic ? { oic: args.oic } : {}),
     page: args.page,
@@ -709,7 +715,7 @@ function QueueRow({
               aria-disabled={claiming || undefined}
               className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
-              {claiming ? 'Taking…' : 'Claim this filing'}
+              {claiming ? 'Assigning…' : 'Assign to Me'}
             </button>
           )}
         </div>
@@ -842,6 +848,21 @@ export function QueuePage() {
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
+        /*
+         * A holder section spans the office's work; it does not sit inside the
+         * stage tab.
+         *
+         * "My assigned" has to mean everything I hold, and a filing does not
+         * stay at one stage: BPLO's assignment is marked completed the moment
+         * the main form is approved, months before the filing is decided, so an
+         * officer holding three live filings saw an empty "My assigned" — the
+         * tab's own status filters had already excluded every one of them.
+         * That is the defect, and narrowing twice is what caused it.
+         *
+         * The stage tabs still rule the "All" section, which is the view they
+         * were built for.
+         */
+        spanStages: holder !== '',
         page,
         perPage,
       }),
@@ -1049,6 +1070,19 @@ export function QueuePage() {
    * would understate a search that really did cover the register. The sort is
    * still the browser's, so a non-default sort keeps its caveat.
    */
+  /*
+   * A holder section ignores the stage tab above it, so the count line says so.
+   *
+   * Without it the screen contradicts itself in the reader's head: they are
+   * standing on "For Approval" and looking at a filing that is out for
+   * inspection. Saying which question is being answered costs one clause and
+   * removes the whole confusion.
+   */
+  const sectionNote =
+    holder === ''
+      ? ''
+      : ` Every stage, not just ${tabs.find((t) => t.value === tab)?.label ?? 'this tab'}.`
+
   const summary = firstLoad
     ? 'Loading the queue…'
     : error
@@ -1057,10 +1091,17 @@ export function QueuePage() {
         ? rows.length === 0
           ? needle
             ? `Nothing in this queue matches “${search.trim()}”.`
-            : 'Nothing in this queue right now.'
+            : holder === 'mine'
+              ? 'You are not holding any filings in this office yet.'
+              : holder === 'unassigned'
+                ? 'Every filing in this office is already with an officer.'
+                : holder === 'others'
+                  ? 'No filing here is with another officer.'
+                  : 'Nothing in this queue right now.'
           : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}` +
             `${needle ? ` matching “${search.trim()}”` : ''}, ${sortLabel}.` +
-            `${sort !== 'newest' && partial ? ' Load more to sort the rest.' : ''}`
+            `${sort !== 'newest' && partial ? ' Load more to sort the rest.' : ''}` +
+            sectionNote
         : rows.length === 0
           ? 'Nothing in this queue right now.'
           : needle || sort !== 'newest'
@@ -1169,7 +1210,16 @@ export function QueuePage() {
               : tab === 'payment'
                 ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
-                  ? 'Nothing is waiting on your department’s review right now.'
+                  ? /*
+                     * Points at the sections, because this is where the screen
+                     * misleads. A tab is a STAGE, and an office can own live
+                     * filings while owing nothing at this one — BPLO's
+                     * assignment is marked done the moment it approves the main
+                     * form, months before the filing is decided. An officer
+                     * holding four live filings was landing on "Your queue is
+                     * clear" and reasonably concluding the feature was broken.
+                     */
+                    'Nothing is waiting on your department’s review at this stage. Unassigned and My assigned above cover every stage.'
                   : // Both halves of what this tab now holds: filings this
                     // office has signed off and that have not finished.
                     'Nothing your office has approved is still in progress.'

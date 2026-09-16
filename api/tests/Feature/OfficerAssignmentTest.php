@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ApplicationStatus;
 use App\Enums\AssignmentStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
@@ -537,7 +538,13 @@ it('leaves finished work alone', function () {
 
     $open = assignmentHeldBy($held, 'DTI-91008');
     $done = assignmentHeldBy($held, 'DTI-91009');
-    $done->update(['status' => AssignmentStatus::Completed]);
+    /*
+     * Finished is the FILING being decided, not this office's step being
+     * signed off. BPLO's assignment is `completed` at the start of every
+     * filing; treating that as finished froze the OIC of live work. See the
+     * note on Caseload::reviews.
+     */
+    $done->application->update(['status' => ApplicationStatus::Approved]);
 
     $closedInspection = Inspection::create([
         'application_id' => $open->application_id,
@@ -627,7 +634,7 @@ it('reports the finished work an officer is named on, beside what is still open'
 
     $open = assignmentHeldBy($held, 'DTI-91021');
     $done = assignmentHeldBy($held, 'DTI-91022');
-    $done->update(['status' => AssignmentStatus::Completed]);
+    $done->application->update(['status' => ApplicationStatus::Approved]);
 
     $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
@@ -714,7 +721,7 @@ it('leaves finished work off the list, as it leaves it out of the count', functi
     $held = officerIn('CHO', 'sanitary_officer', 'cho.donelist@biztrack.local');
     $open = assignmentHeldBy($held, 'DTI-91033');
     $done = assignmentHeldBy($held, 'DTI-91034');
-    $done->update(['status' => AssignmentStatus::Completed]);
+    $done->application->update(['status' => ApplicationStatus::Approved]);
 
     $cases = collect(test()->withHeaders(authAs('admin@biztrack.local'))
         ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data.cases'));
@@ -790,7 +797,7 @@ it('refuses to move a case that is already finished', function () {
     $colleague = officerIn('CHO', 'sanitary_officer', 'cho.closedtaker@biztrack.local');
 
     $done = assignmentHeldBy($held, 'DTI-91044');
-    $done->update(['status' => AssignmentStatus::Completed]);
+    $done->application->update(['status' => ApplicationStatus::Approved]);
 
     test()->withHeaders(authAs('admin@biztrack.local'))
         ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
@@ -823,6 +830,90 @@ it('refuses a request that names neither a scope nor a list', function () {
         ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
             'to_user_id' => null, 'reason' => 'Which cases?',
         ])->assertStatus(422)->assertJsonValidationErrors('scope');
+});
+
+/*
+ * ── What "still holding it" means ───────────────────────────────────────────
+ *
+ * A caseload counted `application_assignments.status != completed`, and that
+ * reading freezes the OIC of a live filing.
+ *
+ * `completed` on an assignment does not mean the case is closed. BPLO's row is
+ * completed the moment the main form is approved — which is the START of the
+ * filing, not the end: the applicant then pays, five offices work their
+ * clearances, inspections are booked, and the filing sits at
+ * `awaiting_other_permits` for weeks with BPLO's assignment already marked
+ * done. On the tester register every BPLO assignment is in exactly that state.
+ *
+ * The consequences were both visible on screen. The officer's "My assigned"
+ * section was empty for an officer who was holding three live filings, and the
+ * super admin's Reassign dialog refused to move any of them — while the OIC
+ * register three menu items away listed all three under that officer's name.
+ *
+ * So the line is the FILING, not the office's own step: the case is held while
+ * the application is live, and becomes a record — with the name of whoever had
+ * it — once the application is decided.
+ */
+it('counts a live filing as held even after this office has signed its part off', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.live@biztrack.local');
+    $assignment = assignmentHeldBy($held, 'DTI-91050');
+
+    // The office's own step is done; the filing is not.
+    $assignment->update(['status' => AssignmentStatus::Completed]);
+    expect($assignment->application->status->isTerminal())->toBeFalse();
+
+    $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
+
+    expect($caseload['total'])->toBe(1)
+        ->and($caseload['finished_reviews'])->toBe(0)
+        ->and(collect($caseload['cases'])->pluck('id')->all())->toBe([$assignment->id]);
+});
+
+it('lets the super admin move a filing whose office step is already signed off', function () {
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.signed@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.successor@biztrack.local');
+
+    $assignment = assignmentHeldBy($held, 'DTI-91051');
+    $assignment->update(['status' => AssignmentStatus::Completed]);
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id,
+            'cases' => [['kind' => 'review', 'id' => $assignment->id]],
+            'reason' => 'Officer is on leave and the filing is still running.',
+        ])->assertOk()->assertJsonPath('data.total', 1);
+
+    expect($assignment->fresh()->officer_user_id)->toBe($colleague->id);
+});
+
+it('leaves a decided filing’s reviewer named on it for good', function () {
+    /*
+     * The other side of the same line, and the reason it is drawn at the filing
+     * rather than dropped altogether: once an application is approved or
+     * rejected, its reviews are the record of who decided them. Moving a name
+     * there would make the audit trail show a successor signing off work they
+     * never saw.
+     */
+    $held = officerIn('CHO', 'sanitary_officer', 'cho.decided@biztrack.local');
+    $colleague = officerIn('CHO', 'sanitary_officer', 'cho.latecomer@biztrack.local');
+
+    $assignment = assignmentHeldBy($held, 'DTI-91052');
+    $assignment->application->update(['status' => ApplicationStatus::Approved]);
+
+    $caseload = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson("/api/v1/admin/users/{$held->id}/caseload")->assertOk()->json('data');
+
+    expect($caseload['total'])->toBe(0)->and($caseload['finished_reviews'])->toBe(1);
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/users/{$held->id}/reassign-caseload", [
+            'to_user_id' => $colleague->id,
+            'cases' => [['kind' => 'review', 'id' => $assignment->id]],
+            'reason' => 'Trying to rewrite a decision.',
+        ])->assertStatus(422)->assertJsonValidationErrors('cases');
+
+    expect($assignment->fresh()->officer_user_id)->toBe($held->id);
 });
 
 it('refuses to hand a caseload across offices or to a deactivated account', function () {
