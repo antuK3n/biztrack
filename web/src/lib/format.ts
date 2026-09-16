@@ -49,15 +49,44 @@ export function pesoToNumber(value: string | number | null | undefined): number 
   return Number.isFinite(n) ? (negative ? -n : n) : Number.NaN
 }
 
+/*
+ * The month is SPELLED OUT — "September 16, 2026", never "Sep 16, 2026".
+ *
+ * These two formatters are the only date rendering in the app, so the house
+ * style has to live here or not at all. The client asked for whole month names
+ * and the reason is the paperwork: a permit's validity, a receipt's date and an
+ * RA 11032 deadline are dates people transcribe onto printed forms and quote
+ * back at a counter, and an abbreviation is one more thing to expand — or
+ * mis-expand, since "Jan" through "Dec" are not the abbreviations every clerk
+ * writes. Spelling it out means the screen and the form say the same thing.
+ *
+ * `month: 'long'` also changes the time connector, which is the knock-on worth
+ * knowing: en-PH renders the short form as "Sep 16, 2026, 11:45 PM" and the
+ * long form as "September 16, 2026 at 11:45 PM". The comma becomes "at". That
+ * is the better string for a timestamp and no caller parses one back, so it is
+ * left alone — but anyone diffing screenshots should expect the separator to
+ * move, not just the month.
+ *
+ * No short-form escape hatch, deliberately. Every caller was checked and none
+ * is laid out so tightly that it breaks: the list rows that put a date beside a
+ * title (Messages, Notifications, the officer queue) give the date `shrink-0`
+ * next to a `truncate` neighbour, so the extra characters cost the title some
+ * room rather than wrapping the row, and the table cells that carry one are
+ * left-aligned columns that simply widen. Adding a `formatDateShort()` for a
+ * layout that merely got tighter would reintroduce exactly the inconsistency
+ * this issue exists to remove, and the second helper is the one that quietly
+ * spreads. If a screen ever genuinely cannot hold the long form, the fix is a
+ * named helper that says what it is FOR — not a generic short formatter.
+ */
 const dateFmt = new Intl.DateTimeFormat('en-PH', {
   year: 'numeric',
-  month: 'short',
+  month: 'long',
   day: 'numeric',
 })
 
 const dateTimeFmt = new Intl.DateTimeFormat('en-PH', {
   year: 'numeric',
-  month: 'short',
+  month: 'long',
   day: 'numeric',
   hour: 'numeric',
   minute: '2-digit',
