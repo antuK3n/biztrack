@@ -530,8 +530,8 @@ export function feeProfileIssues(
      * why they must add up to it below rather than merely not exceed it.
      */
     for (const [key, label] of [
-      ['male_employees', 'Male Employees'],
-      ['female_employees', 'Female Employees'],
+      ['male_employees', 'Number of Male Employees'],
+      ['female_employees', 'Number of Female Employees'],
     ] as const) {
       push(
         numericIssue({
@@ -551,7 +551,7 @@ export function feeProfileIssues(
     push(
       numericIssue({
         key: 'employees_in_lgu',
-        label: 'Employees Residing in Malabon',
+        label: 'Number of Employees Residing in Malabon',
         value: draft.employees_in_lgu,
         required: true,
         blankMessage: 'Enter how many of your employees live in Malabon. Enter 0 if none.',
@@ -574,14 +574,14 @@ export function feeProfileIssues(
     if (total !== undefined && male !== undefined && female !== undefined && male + female !== total) {
       issues.push({
         key: 'male_employees',
-        label: 'Male and Female Employees',
+        label: 'Number of Male and Female Employees',
         message: `These must add up to your total of ${total}. You have entered ${male + female}.`,
       })
     }
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
-        label: 'Employees Residing in Malabon',
+        label: 'Number of Employees Residing in Malabon',
         message: 'This can’t be more than your total number of employees.',
       })
     }
@@ -598,9 +598,9 @@ export function feeProfileIssues(
      * 9 September 2026 ("TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE ___" — the two
      * boxes ARE the total on CENRO's paper), and requiring both fields is what
      * makes it safe: the check above runs only when male, female and the total
-     * all parse, so a half-typed split reports "Female Employees is missing"
-     * rather than "your arithmetic is wrong". The typing complaint the loose
-     * rule existed to avoid cannot arise.
+     * all parse, so a half-typed split reports "Number of Female Employees is
+     * missing" rather than "your arithmetic is wrong". The typing complaint
+     * the loose rule existed to avoid cannot arise.
      *
      * The strict rule is a superset — 3 male + 4 female against a total of 5
      * still fails — so nothing it caught is now let through.
@@ -1526,9 +1526,25 @@ export function FeeProfileStep({
               error={errorFor('employees', value.employees)}
               placeholder="e.g. 3"
             />
-            {/* Unified form asks this separately; some LGU incentives key off it. */}
+            {/*
+              ── Every count below says "Number of" out loud (#66) ──────────
+
+              These boxes read "Male Employees" and "Female Employees" until
+              the client asked for the quantity to be named. "Male Employees"
+              is a KIND of employee; it never says that what goes in the box
+              is a count of them. The extra two words cost a line of layout
+              and remove the guess.
+
+              The validator labels in `feeProfileIssues` were reworded in the
+              same breath, because `feeProfileMissing` lists what is missing
+              BY LABEL — a field called one thing on screen and another in
+              the error list reads as two different fields.
+
+              Unified form asks the Malabon subset separately; some LGU
+              incentives key off it.
+            */}
             <NumberField
-              label="Employees Residing in Malabon"
+              label="Number of Employees Residing in Malabon"
               kind="count"
               value={value.employees_in_lgu}
               onChange={(next) => set('employees_in_lgu', next)}
@@ -1550,7 +1566,7 @@ export function FeeProfileStep({
               your total above.
             </p>
             <NumberField
-              label="Male Employees"
+              label="Number of Male Employees"
               kind="count"
               value={value.male_employees}
               onChange={(next) => set('male_employees', next)}
@@ -1558,7 +1574,7 @@ export function FeeProfileStep({
               error={errorFor('male_employees', value.male_employees)}
             />
             <NumberField
-              label="Female Employees"
+              label="Number of Female Employees"
               kind="count"
               value={value.female_employees}
               onChange={(next) => set('female_employees', next)}
