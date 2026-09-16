@@ -150,15 +150,113 @@ async function renewablePermits(page: Page, businessId: number): Promise<SeededP
 }
 
 /**
+ * Barangay, then a pin that agrees with it — in that order, which is forced.
+ *
+ * The map takes no pin until a barangay is named, and naming a different one
+ * clears the pin, so the two cannot be answered independently. Which barangay
+ * the map centre falls in is read off the step's own refusal rather than
+ * hardcoded: a renewal opens on the coordinates already held for the business
+ * it renews, and those differ per business.
+ *
+ * It re-answers both even though a renewal arrives with them prefilled, because
+ * prefilled is not the same as valid. Of 788 addresses on file only 61 sit
+ * inside their own barangay; the gate lets an UNTOUCHED disagreement through
+ * deliberately (see `missingFor`'s note on `touched.barangay_id`), so a helper
+ * that relied on the prefill would be relying on a leniency rather than on an
+ * answer, and would still have nothing to offer a business that was never
+ * pinned at all.
+ */
+async function pinAtMapCentre(page: Page) {
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  const barangay = page.getByLabel(/barangay name/i)
+
+  // Re-picking the value already selected is deliberately not a change, so
+  // "the first option, unless that is the one already chosen" is what forces
+  // one — and a forced change is what clears a prefilled pin.
+  const values = await barangay
+    .locator('option[value]:not([value=""])')
+    .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
+  const current = await barangay.inputValue()
+  await barangay.selectOption(current === values[0] ? values[1] : values[0])
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+
+  await map.click()
+
+  // Either the pin landed, or the step refused it and named the barangay it
+  // really fell in — which is the read this is after. Waiting on the pair
+  // rather than on one of them keeps the branch below from racing React.
+  const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
+  await expect(refusal.or(page.getByText(/pinned at/i)).first()).toBeVisible()
+  if (await refusal.isVisible()) {
+    const named = (await refusal.innerText()).match(/pin is in (.+?), but you selected/i)
+    expect(named).not.toBeNull()
+    await barangay.selectOption({ label: named![1].trim() })
+    await map.click()
+  }
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+}
+
+/**
+ * Answer Location & Zoning to the minimum its own gate demands.
+ *
+ * A trade, Products / Services for every line, a pin inside the city under a
+ * barangay that agrees, an address, and someone an inspector can reach.
+ *
+ * The trade is only DECLARED when the filing does not already carry one. A
+ * renewal prefills the lines of business from the shop's record, and picking a
+ * trade from the search replaces the whole carried-over set — so searching
+ * unconditionally would quietly rewrite the fixture these tests are about.
+ *
+ * Products / Services became required per line on 9 September 2026 (CENRO
+ * prints it beside the trade and had been receiving it blank). Carried-over
+ * lines predate that, so a renewal can arrive holding lines with the box empty
+ * and no way past the step — hence filling every blank one rather than the
+ * first. It is a precondition of reaching part 3 at all, not a subject of any
+ * test here, which is why it lives in the helper.
+ */
+async function completeZoningStep(page: Page) {
+  const declared = page.getByRole('button', { name: /clear line of business/i })
+  if ((await declared.count()) === 0) {
+    const search = page.getByLabel(/search for the one line of business/i)
+    await search.click()
+    await search.fill('sari-sari')
+    // The footer names the query it counted, so it appears only once the rows
+    // below it are the search's rows and not the full list of 135 trades.
+    await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+    // Matched on the element, not on a role: the rows carry `role="radio"` now
+    // that a filing declares one trade, so `getByRole('button')` finds nothing.
+    await page.locator('#psic-results button').first().click()
+  }
+
+  const products = page.getByLabel(/products \/ services/i)
+  for (let i = 0; i < (await products.count()); i += 1) {
+    const box = products.nth(i)
+    if ((await box.inputValue()).trim() === '') await box.fill('milk tea, fried snacks')
+  }
+
+  await pinAtMapCentre(page)
+
+  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
+  await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
+}
+
+/**
  * Business Information on a renewal, without walking the whole wizard.
  *
- * A renewal's running order is not the fixed seven phases — section A1 of
- * MCG-BPLO-FO-002 decides how much of the form exists. Unanswered it is two
- * parts (Data Privacy, Changes Since Last Permit) and Business Information is
- * not in the sequence at all, so there is nothing to jump to. Answering Yes and
- * ticking Ownership is what puts it there, at part 3 of 7 — which is why this
- * has to drive those two answers rather than clicking a chip on the section map
- * that a renewal has not earned yet.
+ * A renewal runs the same seven parts as a new filing, so Business Information
+ * is part 3 and the only thing between it and consent is Location & Zoning.
+ *
+ * It did not always. Section A1 of MCG-BPLO-FO-002 — "any changes or amendments
+ * in the previous business registration?" — used to decide how much of the form
+ * existed, so this helper answered Yes and ticked Ownership to make Business
+ * Information join the sequence at all. The client removed that question from
+ * the renewal path on 9 September 2026 ("REMOVE THE AMENDMENT PART on the BPLO
+ * renewal part"); the `amendments` step survives for `application_type ===
+ * 'amendment'` alone. If a Yes/No ever comes back here, it comes back as its
+ * own step and this walk gets a step longer — it does not go back to being
+ * conditional.
  *
  * The consent tick is deliberately never restored on a reopen (RA 10173:
  * consent is given, not remembered), so it is taken here every time.
@@ -168,11 +266,12 @@ async function openBusinessStep(page: Page) {
   await page.getByRole('button', { name: 'Next' }).click()
 
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
-  await page.getByRole('button', { name: 'Yes', exact: true }).click()
-  // Ownership is the tick that opens Business Information; the box says so.
-  await page.getByRole('checkbox', { name: /^Ownership/ }).check()
+  await completeZoningStep(page)
 
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: /^next$/i }).click()
+  // Leaving the zoning step opens the conformity finding on the way out; it is
+  // a modal, so part 3 is behind its Proceed button and not behind Next.
+  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
 
@@ -250,8 +349,16 @@ test('two permits of the same type are told apart by number and dates', async ({
   for (const text of texts) {
     // A permit number, and BOTH ends of the validity it was issued for.
     expect(text, 'a permit row with no permit number').toMatch(/[A-Z]{2,}-\d{4}-\d+/)
+    /*
+     * "August 24, 2025 – July 31, 2026". The month is spelled out because
+     * `formatDate` spells it out everywhere — a deliberate decision with no
+     * short-form escape hatch (see the note over `dateFmt` in lib/format.ts),
+     * so a pattern written for "Aug 24" is asserting a format the app stopped
+     * emitting rather than the rule this test is about. The rule is that both
+     * ends are printed, and both still are.
+     */
     expect(text, 'a permit row with no validity dates').toMatch(
-      /\w{3}\s+\d{1,2},\s+\d{4}\s+–\s+\w{3}\s+\d{1,2},\s+\d{4}/,
+      /[A-Z][a-z]+\s+\d{1,2},\s+\d{4}\s+–\s+[A-Z][a-z]+\s+\d{1,2},\s+\d{4}/,
     )
   }
   // They differ. If two rows ever read the same, the question is unanswerable.
