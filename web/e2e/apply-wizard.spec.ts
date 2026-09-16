@@ -1231,34 +1231,43 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
  * its own right now, not only somewhere to pass through: Business Location
  * Insights renders on it, so tests need to arrive and stop here.
  *
- * NEW filings only, and that is the change rather than a narrowing. This took a
- * `type` and opened `/apply?type=renewal` when it was given one, on the
- * assumption that a renewal runs the same seven phases with an extra dialog in
- * front. It does not: section A1 of MCG-BPLO-FO-002 decides how much of the form
- * a renewal even has, so part 2 of a renewal is Changes Since Last Permit and
- * Location & Zoning is not in the sequence at all. The line-of-business picker
- * this waits for is therefore never on screen, and the wait was the failure.
- * `goToRenewalBusinessStep` below walks the renewal's own running order.
+ * It takes no `type` and opens nothing. A renewal reaches this same step by the
+ * same route once its entry dialog is answered — `goToRenewalBusinessStep`
+ * below opens the filing and then hands over to here — so the walk is one walk
+ * and not two. It was briefly two: section A1 of MCG-BPLO-FO-002 used to decide
+ * how much of the form a renewal had, which put Changes Since Last Permit at
+ * part 2 and left Location & Zoning out of the sequence entirely. The client
+ * removed that question from the renewal path on 9 September 2026, so a renewal
+ * runs the same seven parts as a new filing again.
  */
 async function goToZoningStep(page: Page) {
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
 
-  const search = page.getByLabel(/search for the one line of business/i)
-  await search.click()
-  await search.fill('sari-sari')
   /*
-   * Wait for the list to be the SEARCH's list before clicking a row in it.
-   * Opening the picker now renders all 135 trades — item 104b, the shortlist
-   * was hiding the other 127 — and the row a bare `.first()` resolves to is
-   * detached the instant the query narrows it. The footer names the query it
-   * counted, so it appears only once the results below it are the right ones.
+   * A trade is DECLARED only when the filing does not already carry one. A new
+   * filing never does, so this is the ordinary path; a renewal arrives with the
+   * shop's lines of business prefilled, and picking from the search replaces
+   * the whole carried-over set — so searching unconditionally would rewrite the
+   * very thing a renewal test is standing on.
    */
-  await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
-  // Matched on the element, not on a role: the rows carry `role="radio"` now
-  // that a filing declares one trade, so `getByRole('button')` finds nothing.
-  await page.locator('#psic-results button').first().click()
+  if ((await page.getByRole('button', { name: /clear line of business/i }).count()) === 0) {
+    const search = page.getByLabel(/search for the one line of business/i)
+    await search.click()
+    await search.fill('sari-sari')
+    /*
+     * Wait for the list to be the SEARCH's list before clicking a row in it.
+     * Opening the picker now renders all 135 trades — item 104b, the shortlist
+     * was hiding the other 127 — and the row a bare `.first()` resolves to is
+     * detached the instant the query narrows it. The footer names the query it
+     * counted, so it appears only once the results below it are the right ones.
+     */
+    await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
+    // Matched on the element, not on a role: the rows carry `role="radio"` now
+    // that a filing declares one trade, so `getByRole('button')` finds nothing.
+    await page.locator('#psic-results button').first().click()
+  }
 
   /*
    * Products / Services, required per line since 9 September — CENRO prints it
@@ -1268,8 +1277,16 @@ async function goToZoningStep(page: Page) {
    * precondition of reaching the map at all, not a subject of any test here:
    * the step will not advance without it, so a test that omitted it would fail
    * on a missing answer while appearing to fail on the pin.
+   *
+   * Every BLANK one, not the first one: a renewal can carry several lines, and
+   * they were declared before the field was required, so any number of them can
+   * arrive empty. Filling one already answered would be overwriting the record.
    */
-  await page.getByLabel(/products \/ services/i).fill('milk tea, fried snacks')
+  const products = page.getByLabel(/products \/ services/i)
+  for (let i = 0; i < (await products.count()); i += 1) {
+    const box = products.nth(i)
+    if ((await box.inputValue()).trim() === '') await box.fill('milk tea, fried snacks')
+  }
 }
 
 /**
@@ -1359,39 +1376,34 @@ async function goToBusinessStep(page: Page) {
 }
 
 /**
- * Business Information (part 3) on a RENEWAL, which is a different walk.
+ * Business Information (part 3) on a RENEWAL: the same walk, opened differently.
  *
- * A renewal is not the seven fixed phases with a dialog bolted on the front.
- * Section A1 of MCG-BPLO-FO-002 asks what has changed since the last permit, and
- * that answer decides which parts of the form exist at all: left unanswered a
- * renewal is two parts — Data Privacy, then Changes Since Last Permit — and
- * Business Information is not in the sequence for the wizard to walk to. Ticking
- * Ownership is what puts it there, at part 3 of 7.
+ * A renewal is the seven fixed phases with a dialog in front of them. It was
+ * briefly not — section A1 of MCG-BPLO-FO-002 ("any changes or amendments in
+ * the previous business registration?") decided which parts existed at all, so
+ * an unanswered renewal was two parts, Location & Zoning was not in the
+ * sequence, and ticking Ownership was what made Business Information reachable.
+ * The client removed that question from the renewal path on 9 September 2026
+ * ("REMOVE THE AMENDMENT PART on the BPLO renewal part"). The `amendments` step
+ * survives for `application_type === 'amendment'` alone, which is why this takes
+ * no type: an amendment still asks A1, so it still runs a walk one part longer,
+ * and nothing here exercises it. Give this an amendment and it would land on
+ * Location & Zoning believing it was on Business Information.
  *
- * So this cannot go through `goToZoningStep`, which waits for a line-of-business
- * picker a renewal never renders. It follows renewal-modal.spec.ts, which is
- * where this dialog and this running order have their own cover; the point here
- * is only to arrive at the four TIN boxes with a stored value behind them.
+ * So the whole difference from a new filing is the dialog, and the rest is
+ * `goToBusinessStep`. The dialog and the renewal's running order have their own
+ * cover in renewal-modal.spec.ts; the point here is only to arrive at the four
+ * TIN boxes with a stored value behind them.
  */
-async function goToRenewalBusinessStep(page: Page, type: 'renewal' | 'amendment') {
+async function goToRenewalBusinessStep(page: Page) {
   // `beforeEach` opened a NEW filing. A renewal has to be opened as one from
   // the start: the type decides whether the identity dialog is asked at all,
   // and that dialog's answer is where the prefill under test comes from.
-  await page.goto(`/apply?type=${type}`)
-  await answerIdentityDialog(page, type)
+  await page.goto('/apply?type=renewal')
+  await answerIdentityDialog(page, 'renewal')
   await expect(page.getByText(/data privacy/i).first()).toBeVisible({ timeout: 30_000 })
 
-  await page.getByRole('checkbox').first().check()
-  await page.getByRole('button', { name: /^next$/i }).click()
-  await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
-
-  // "Yes, something changed", then the one change that opens Business
-  // Information. The checkbox says so on its own face.
-  await page.getByRole('button', { name: 'Yes', exact: true }).click()
-  await page.getByRole('checkbox', { name: /^Ownership/ }).check()
-
-  await page.getByRole('button', { name: /^next$/i }).click()
-  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await goToBusinessStep(page)
 }
 
 /** The Business Location Insights card, wherever on the page it happens to be. */
@@ -2159,12 +2171,12 @@ test('a TIN already on file reads back into the four boxes', async ({ page }) =>
    * on part 3 the prefill has already run — which is the point of the item and
    * makes this test read the way it always meant to.
    *
-   * A renewal's own walk, not `goToBusinessStep`. That helper goes through
-   * Location & Zoning, and a renewal has no such part: it asks what has changed
-   * since the last permit instead, and Business Information only joins the
-   * sequence once something is ticked.
+   * A renewal's own entry, then the ordinary walk. The two diverged while
+   * section A1 shortened a renewal's form; they do not any more, so the only
+   * thing this adds over `goToBusinessStep` is opening the filing as a renewal
+   * and answering the dialog — which is exactly where the stored TIN comes from.
    */
-  await goToRenewalBusinessStep(page, 'renewal')
+  await goToRenewalBusinessStep(page)
 
   const boxes = tinBoxes(page)
   await expect(boxes[0]).toHaveValue(/^\d{3}$/)
