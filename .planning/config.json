@@ -1,0 +1,11 @@
+{
+  "graphify": {
+    "enabled": true
+  },
+  "statusline": {
+    "show_context_tokens": true,
+    "show_git": true,
+    "show_last_command": true,
+    "state_format": "compact"
+  }
+}
