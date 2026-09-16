@@ -9,8 +9,13 @@ import { mergedStorageState } from './helpers'
  * apply button, sometimes it will actually redirect to the form"):
  *
  *   Apply always opens that office's form.
- *   Submit always opens the upload box.
+ *   Upload an existing copy always opens the upload box.
  *   Neither toggles.
+ *
+ * ("Submit" was the name of the second one until the client asked for the first:
+ * *"instead of 'Submit' why not 'Upload an existing copy' to avoid confusion?"*
+ * — the office sheet's own button also read Submit, so one verb meant both
+ * "hand the office my answers" and "hand them a certificate I already hold".)
  *
  * They were toggles, so the outcome depended on state the applicant could not
  * see and flipped on every click — and one of the two outcomes was destructive:
@@ -47,6 +52,19 @@ import { mergedStorageState } from './helpers'
  *   "each clearance adds its own fee" or "the permit is held until the balance
  *   reaches zero" was asserting the previous arrangement; release is five
  *   approved permits now, not a settled balance.
+ *
+ *   **APPLYING IS NOT SUBMITTING.** `startClearance(…, MODE_APPLY)` on a permit
+ *   that carries an office form — which all five do
+ *   (`PermitType::OFFICE_FORM_CODES` is the same five) — records the chosen
+ *   `mode` and stops. The status stays `not_started`, nothing is routed, and
+ *   `submitClearanceForm()` is what hands it in when the applicant saves the
+ *   sheet. It used to do the lot on the press of Apply, and that wrong claim was
+ *   read from both seats of the same filing: the applicant's Track page showed
+ *   For Approval on clearances they had not filled in (*"I still haven't
+ *   submitted any applications yet the status says it is For Approval"*) and
+ *   CENRO opened a queue row with no answers on it. So a fixture that presses
+ *   Apply leaves the permit at `not_started`/`apply`, and any test asserting
+ *   `for_approval` after an Apply is asserting the bug.
  *
  *   **All five clearances are REQUIRED** (`PermitType::REQUIRED_CLEARANCE_CODES`)
  *   and are attached to the filing at submission so the one bill can price them.
@@ -93,58 +111,18 @@ async function onDashboard(page: Page) {
   await expect(page.getByRole('heading').first()).toBeVisible({ timeout: 30_000 })
 }
 
-/**
- * Make a draft of our own, through the API, rather than hunting for one.
+/*
+ * `makeDraft` stood here and is gone with its last caller.
  *
- * Deliberately not a fixture found in the data. This suite runs against a
- * throwaway copy of the SQLite file, and whether it happens to contain a draft
- * with a clearance already applied for is not a property of the code — a spec
- * that skips when the snapshot is unlucky is a spec that stops catching
- * anything. Creating the exact state under test costs one round trip.
+ * It built the minimum filing — a business, an application, the business permit
+ * and nothing else — and the two locked-stage tests used it as "the shut state".
+ * A draft is still shut, but it is no longer a state with anything on this
+ * screen to look at: the stage renders the FILING's permit types, and the five
+ * clearances are not attached until `submit()` runs. See
+ * `makeSubmittedApplication` below, which is what those two tests use now.
+ *
+ * Bring it back pointed at whatever needs a bare draft; it is in git history.
  */
-async function makeDraft(page: Page): Promise<number> {
-  return page.evaluate(async () => {
-    const token = localStorage.getItem('biztrack.token.public')
-    const headers = {
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    }
-    const json = async (res: Response) => (await res.json()).data
-
-    const barangays = await json(await fetch('/api/v1/reference/barangays', { headers }))
-    const psic = await json(await fetch('/api/v1/reference/psic-codes', { headers }))
-    const permitTypes = await json(await fetch('/api/v1/reference/permit-types', { headers }))
-    const business = await json(
-      await fetch('/api/v1/businesses', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          name: `E2E Clearances ${Date.now()}`,
-          registration_type: 'DTI',
-          registration_number: 'DTI-E2E-001',
-          tin: '123-456-789-000',
-          address: { line1: '1 Playwright St.', barangay_id: barangays[0].id },
-          lines: [{ psic_code_id: psic[0].id, capitalization: 500000 }],
-        }),
-      }),
-    )
-    const app = await json(
-      await fetch('/api/v1/applications', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          business_id: business.id,
-          application_type: 'new',
-          permit_type_ids: [
-            permitTypes.find((pt: { code: string }) => pt.code === 'BUSINESS').id,
-          ],
-        }),
-      }),
-    )
-    return app.id as number
-  })
-}
 
 /**
  * A draft complete enough to be walked to the end of the wizard and submitted:
@@ -213,7 +191,41 @@ async function makeCompleteDraft(page: Page): Promise<number> {
           },
           emergency_contact_name: 'Ana Dela Cruz',
           emergency_contact_number: '0917 123 4567',
-          lines: [{ psic_code_id: psic[0].id, capitalization: 500000 }],
+          /*
+           * ── Three fields the wizard will not walk past without ─────────────
+           *
+           * Added because the one test in this file that drives the WIZARD could
+           * not reach Review & Submit any more: the section map refuses a
+           * forward jump over an unfinished section, and this fixture left two
+           * of the seven unfinished — Location & Zoning and Business Operation,
+           * with the latter unreachable behind the former.
+           *
+           * All three are on the BUSINESS payload rather than the application's,
+           * which is why they sit here and not in the fee profile below.
+           *
+           * `economic_organization` is BPLO item B6 and `capital_investment` is
+           * B7, both made required on 9 September 2026 with the rest of the
+           * paper fields. B7 in particular moved: it replaced the per-line
+           * capitalisation that used to be asked on the fee step.
+           *
+           * `products_services` is required per line from the same date, and it
+           * is the one worth not getting wrong. The PSIC code says what CATEGORY
+           * a trade falls in; this says what the business actually sells, and
+           * three offices print it on their paper — CENRO's form has a
+           * PRODUCTS/SERVICES box beside LINE OF BUSINESS and it reached them
+           * empty on the filing that prompted the change. "Retail sale in
+           * non-specialized stores" tells a sanitary inspector nothing about
+           * whether there is food on the premises.
+           */
+          economic_organization: 'single_establishment',
+          capital_investment: 500000,
+          lines: [
+            {
+              psic_code_id: psic[0].id,
+              capitalization: 500000,
+              products_services: 'milk tea, fried snacks',
+            },
+          ],
         }),
       }),
     )
@@ -241,6 +253,16 @@ async function makeCompleteDraft(page: Page): Promise<number> {
             floor_area_sqm: 120,
             employees: 12,
             employees_in_lgu: 6,
+            /*
+             * B2's split, which joined the headcount as a required answer and is
+             * the last thing that kept Business Operation unfinished for this
+             * fixture. It has to RECONCILE — `feeProfileIssues` refuses a split
+             * that does not add up to the total three fields above it, and the
+             * API applies the same rule to both halves — so 7 and 5 against a
+             * total of 12 rather than any two numbers.
+             */
+            male_employees: 7,
+            female_employees: 5,
             lines: [
               { psic_code_id: psic[0].id, category: 'retailer', capitalization: 500000 },
             ],
@@ -321,6 +343,38 @@ async function uploadRequiredDocuments(page: Page, appId: number): Promise<void>
  * file merges two sessions (see `test.use` at the top).
  */
 async function makePaidApplication(page: Page): Promise<number> {
+  const appId = await makeSubmittedApplication(page)
+  await approveAndPay(page, appId)
+  return appId
+}
+
+/**
+ * A filing that has been SUBMITTED and nothing more — the locked state with
+ * cards in it.
+ *
+ * ── Why the locked tests can no longer use a draft ──────────────────────────
+ *
+ * They did, and it was right while the stage listed every clearance the register
+ * knows about. It does not any more: `ClearanceService::forApplication` renders
+ * *the filing's own* permit types (`$carried`), which a renewal forced — an
+ * applicant renewing the Sanitary Permit alone would otherwise open this stage
+ * looking at four cards for clearances the filing does not carry, is not billed
+ * for and cannot grant, and Apply on one of those adds a permit to a filing
+ * already priced and paid.
+ *
+ * A draft carries the business permit and nothing else. The five clearances are
+ * attached by `attachRequiredPermitTypes` inside `submit()`, because the one Tax
+ * Order of Payment cannot price what is not on the filing. So a draft's
+ * clearance stage now draws a locked reason and ZERO cards, and the two tests
+ * asserting "visible but locked" were asserting it of the one state that has
+ * nothing to see.
+ *
+ * Submitted-and-unpaid is the state they were always about. It is "before the
+ * first payment" exactly — BPLO has not read the form, nothing is payable, the
+ * stage is shut — and the five are on the filing to be looked at, which is the
+ * half the test exists for.
+ */
+async function makeSubmittedApplication(page: Page): Promise<number> {
   const appId = await makeCompleteDraft(page)
   await page.evaluate(async (id) => {
     const token = localStorage.getItem('biztrack.token.public')
@@ -336,7 +390,6 @@ async function makePaidApplication(page: Page): Promise<number> {
       throw new Error(`submitting answered ${submitted.status}: ${await submitted.text()}`)
     }
   }, appId)
-  await approveAndPay(page, appId)
   return appId
 }
 
@@ -405,7 +458,20 @@ async function approveAndPay(page: Page, appId: number): Promise<void> {
   }, appId)
 }
 
-/** Apply for one clearance, so a card is in the started state. */
+/**
+ * Press Apply on one clearance — the FIRST of the two acts, and only the first.
+ *
+ * This was "so a card is in the started state", and it no longer is. All five
+ * clearances carry an office form (`PermitType::OFFICE_FORM_CODES` is the same
+ * five as `REQUIRED_CLEARANCE_CODES`), and `WorkflowService::startClearance`
+ * returns early for MODE_APPLY on a form-bearing permit: it records `mode` and
+ * stops. The status stays `not_started`, nothing is routed, and no office has
+ * anything to read until `submitClearanceForm()` hands the sheet in.
+ *
+ * That early return IS the client's report — *"I still haven't submitted any
+ * applications yet the status says it is For Approval"* — so a fixture that
+ * quietly walked past it would be re-asserting the bug.
+ */
 async function applyFor(page: Page, appId: number, code: string): Promise<void> {
   await page.evaluate(
     async ({ appId, code }) => {
@@ -429,6 +495,26 @@ async function applyFor(page: Page, appId: number, code: string): Promise<void> 
  * change" without depending on how the card happens to render at the time.
  */
 async function readClearanceState(page: Page, appId: number, code: string): Promise<string> {
+  return (await readClearance(page, appId, code)).state
+}
+
+/**
+ * One clearance's state AND the route the applicant chose, as the server has
+ * both.
+ *
+ * `mode` is on this payload because the state stopped being able to answer the
+ * question on its own. Apply records `mode: 'apply'` and leaves the status at
+ * `not_started`; only handing the sheet in moves it. So "has this applicant
+ * pressed Apply" and "has the office got it" are two different reads now, and a
+ * test that can only make the second cannot tell an untouched clearance from one
+ * whose form is sitting half-filled — which is precisely the pair the two-act
+ * split exists to keep apart.
+ */
+async function readClearance(
+  page: Page,
+  appId: number,
+  code: string,
+): Promise<{ state: string; mode: string | null }> {
   return page.evaluate(
     async ({ appId, code }) => {
       const token = localStorage.getItem('biztrack.token.public')
@@ -438,8 +524,10 @@ async function readClearanceState(page: Page, appId: number, code: string): Prom
       const rows = (await res.json()).data as {
         permit_type: { code: string }
         state: string
+        mode: string | null
       }[]
-      return rows.find((row) => row.permit_type.code === code)?.state ?? 'missing'
+      const row = rows.find((r) => r.permit_type.code === code)
+      return { state: row?.state ?? 'missing', mode: row?.mode ?? null }
     },
     { appId, code },
   )
@@ -457,24 +545,78 @@ async function readTotal(page: Page, appId: number): Promise<number> {
 }
 
 /**
- * The six clearance cards, found by the one control every card always has.
+ * The five clearance cards, found by the grid that holds them.
  *
- * This read `.filter({ hasText: /apply/i })`, which is a filter on the FACE of
- * the Apply button — and that button reads "Applied ✓" once the clearance is
- * applied for. "Applied" does not contain the substring "apply", so a card in
- * the state most of these tests are about matched nothing, and a filing with
- * all six applied for produced a grid of zero cards. It survived only because
- * every card the suite happened to look at was untouched.
+ * ── Two rounds of finding these by their buttons, both of which rotted ──────
  *
- * The accessible name is the stable thing: it is "Apply for the ‹clearance›" or
- * "Applied for the ‹clearance› — open its form", never absent, and naming the
- * card by the control that defines it is closer to what these tests mean than
- * matching a word that happens to be printed inside it.
+ * It read `.filter({ hasText: /apply/i })` first — a filter on the FACE of the
+ * Apply button, which reads "Applied ✓" once the clearance is applied for, and
+ * "Applied" does not contain "apply". Then it read
+ * `.filter({ has: … /^appl(y|ied) for the /i })`, on the ACCESSIBLE name, which
+ * was meant to be the stable half. It is not stable either: splitting apply into
+ * two acts gave that control three names ("Apply for the ‹clearance›", "Finish
+ * the ‹clearance› form — you applied but have not submitted it", "View the
+ * ‹clearance› form you submitted"), so a card the applicant had pressed Apply on
+ * matched nothing and the grid came back one short.
+ *
+ * `#clearance-cards` is what does not move. It is an id the page carries for
+ * exactly this purpose, it is on the <ul> rather than on any control inside it,
+ * and it cannot go stale when a button is renamed — which is the failure this
+ * helper has now had twice. Naming the card by a control that changes name with
+ * the card's state was the mistake both times.
  */
 function clearanceCards(page: Page) {
-  return page
-    .locator('ul > li')
-    .filter({ has: page.getByRole('button', { name: /^appl(y|ied) for the /i }) })
+  return page.locator('#clearance-cards > li')
+}
+
+/** The one card for a clearance, by the name printed on it. */
+function clearanceCard(page: Page, name: RegExp) {
+  return clearanceCards(page).filter({ hasText: name })
+}
+
+/**
+ * The Apply control on a card, under any of the three names it now answers to.
+ *
+ * Apply used to be one act with one name. It is two acts now — `startClearance`
+ * records the chosen mode and opens the office form, `submitClearanceForm` hands
+ * it in — so the control reports which of three points the applicant has reached:
+ *
+ *   "Apply for the ‹clearance›"                          nothing chosen yet
+ *   "Finish the ‹clearance› form — you applied but …"    mode recorded, not sent
+ *   "View the ‹clearance› form you submitted"            the office has it
+ *
+ * Matched as a set, because every test here that presses this button is about
+ * what the PRESS does; the name is the subject of exactly one test below, which
+ * pins it exactly rather than through this helper.
+ */
+function applyControl(card: ReturnType<typeof clearanceCards>) {
+  return card.getByRole('button', { name: /^(apply for|finish|view) the /i })
+}
+
+/**
+ * The hand-in-a-copy control, which is no longer named "Submit".
+ *
+ * The client: *"instead of 'Submit' why not 'Upload an existing copy' to avoid
+ * confusion?"* — because the office sheet's own button also read Submit, and one
+ * verb meant both "hand the office my answers" and "hand them a certificate I
+ * already hold". Two names here, one per state, same as Apply above.
+ */
+function uploadControl(card: ReturnType<typeof clearanceCards>) {
+  return card.getByRole('button', {
+    name: /^(upload an existing copy of the|replace the .* copy you uploaded)/i,
+  })
+}
+
+/**
+ * The way off an open office sheet.
+ *
+ * Both of the old controls are gone. "Save & back to clearances" went when
+ * autosave took the saving job away from the footer, and "Back without saving"
+ * went with it — the client called it unnecessary and autosave made it untrue.
+ * One button remains and it is navigation rather than a decision about saving.
+ */
+function backToCards(page: Page) {
+  return page.getByRole('button', { name: /^back to clearances$/i })
 }
 
 test('before the first payment the stage is visible but locked, in the API’s own words', async ({
@@ -483,11 +625,11 @@ test('before the first payment the stage is visible but locked, in the API’s o
   /*
    * The gate, and the direction it now points.
    *
-   * A draft is LOCKED. This test asserted the opposite between 4 and 28 August
-   * — "a draft can still choose its clearances" — because the six were then a
-   * step of the wizard and payment was the last thing that happened. It is not
-   * a weakening to invert it: what is being asserted is the same property in
-   * both cases, that the stage is open exactly when the server says it is and
+   * An unpaid filing is LOCKED. This test asserted the opposite between 4 and 28
+   * August — "a draft can still choose its clearances" — because the six were
+   * then a step of the wizard and payment was the last thing that happened. It
+   * is not a weakening to invert it: what is being asserted is the same property
+   * in both cases, that the stage is open exactly when the server says it is and
    * says why when it is not.
    *
    * Visible-but-locked rather than hidden or 404, deliberately. The cards are
@@ -496,8 +638,14 @@ test('before the first payment the stage is visible but locked, in the API’s o
    * sanitary permit" is the question this page answers even while shut.
    */
   await onDashboard(page)
-  // A draft, unpaid on purpose — that IS the locked state under test.
-  const appId = await makeDraft(page)
+  /*
+   * Submitted, unapproved, unpaid — which is "before the first payment" and is
+   * the earliest point at which there is anything on this stage to look at. It
+   * was a draft, and a draft now draws no cards at all: see
+   * `makeSubmittedApplication` for why the five arrive at submission rather than
+   * being listed from the register.
+   */
+  const appId = await makeSubmittedApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -540,7 +688,7 @@ test('before the first payment the stage is visible but locked, in the API’s o
 
   // And nothing can be pressed. The buttons stay reachable — see the test
   // below for why that is asserted separately and at length.
-  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
+  const apply = applyControl(cards.first())
   await expect(apply).toHaveAttribute('aria-disabled', 'true')
 
   /*
@@ -571,8 +719,16 @@ test('before the first payment the stage is visible but locked, in the API’s o
    * So the rule is asserted in its new form and the old promise is asserted
    * absent — a page that quietly grew "balance reaches zero" back would be
    * telling an applicant to pay their way past an inspection.
+   *
+   * The sentence the page shows depends on which side of the bill the filing is
+   * on, and this one is unpaid: the Tax Order of Payment is raised and nothing
+   * has cleared, so the paragraph is the owes-money branch. What has to survive
+   * on THIS side is that applying is free — an applicant staring at a balance,
+   * about to press five buttons, is the one most likely to believe each press
+   * adds to it. The five-approvals half renders on the settled branch and is
+   * asserted in the test below, where it is what the page actually says.
    */
-  await expect(page.getByText(/released once all of them are approved/i)).toBeVisible()
+  await expect(page.getByText(/applying for the clearances below adds nothing to it/i)).toBeVisible()
   await expect(
     page.getByText(/balance reaches zero/i),
     'the screen still holds the permit against a balance rather than against the five approvals',
@@ -609,26 +765,36 @@ test('once the stage is open, every card states its price and the ledger behind 
 
   // Paid, so open: no reason is shown, because there is nothing to explain.
   await expect(page.locator('#clearances-locked')).toHaveCount(0)
-  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
+  const apply = applyControl(cards.first())
   await expect(apply).toHaveAttribute('aria-disabled', 'false')
 
   /*
-   * The AMOUNT, on the card. This assertion is the exact inverse of what stood
-   * here on 4 August (`not.toContainText(/fee ₱/i)`), and it survives the
-   * reordering: the applicant is entitled to see what each office's permit cost
-   * them on the screen where that office's permit is worked, whether or not the
-   * press itself moves money.
+   * ── The price came off the cards, and this asserts that it stays off ───────
    *
-   * Asserted across the grid rather than on one card, because `fee_preview` is
-   * legitimately null where an office sets the amount case by case, and
-   * legitimately zero — "No fee assessed" — where the permit is already attached
-   * to the filing, which is now every permit here from the moment it is
-   * submitted. All three cases have to say something; none may say nothing.
+   * This looped every card for "Fee ₱… | No fee assessed | Fee set by this
+   * office" and called a card without one "a clearance card quotes no price at
+   * all". That was right while Apply was the moment of commitment: `apply()`
+   * re-ran the assessment, each press moved `balance_due`, and there was nowhere
+   * downstream to read the price before agreeing to it.
+   *
+   * `assessFees()` runs once, at submission, over the business permit and all
+   * five clearances, and `ClearanceService::reassess()` is gone — so the number
+   * on the card was quoting a charge that is never coming, three inches above a
+   * ledger reading ₱0.00. The client, on being shown it: *"Would displaying the
+   * fee still matter because we have already paid it for that beforehand, right?
+   * If not, kindly remove it."*
+   *
+   * So the assertion inverts rather than disappears, because the danger did: a
+   * per-card amount over an Apply button now reads as a threat that the press
+   * costs that much again. The breakdown is not lost — a per-permit figure
+   * belongs on the Tax Order of Payment, which is reachable from the filing —
+   * and the total is asserted on the ledger immediately below.
    */
   for (const card of await cards.all()) {
-    await expect(card, 'a clearance card quotes no price at all').toContainText(
-      /fee ₱|no fee assessed|fee set by this office/i,
-    )
+    await expect(
+      card,
+      'a card quotes a price over Apply on a filing whose Tax Order of Payment is settled',
+    ).not.toContainText(/fee ₱|no fee assessed|fee set by this office/i)
   }
 
   /*
@@ -638,6 +804,17 @@ test('once the stage is open, every card states its price and the ledger behind 
   await expect(page.getByText(/^assessed$/i)).toBeVisible()
   await expect(page.getByText(/^paid$/i)).toBeVisible()
   await expect(page.getByText(/^balance due$/i)).toBeVisible()
+
+  /*
+   * And what actually holds the Business Permit back, which only this side of
+   * the bill states. `WorkflowService::refreshReadiness` releases on five
+   * APPROVED permits, not on a settled balance — the balance is already zero
+   * here — so a page that grew "balance reaches zero" back would be telling an
+   * applicant to pay their way past an inspection. The locked test above asserts
+   * that string absent; this asserts the rule that replaced it, on the filing
+   * whose paragraph is supposed to carry it.
+   */
+  await expect(page.getByText(/released once all of them are approved/i)).toBeVisible()
 
   /*
    * And no badge on a card nobody has touched. "Not requested" used to sit on
@@ -652,9 +829,10 @@ test('the grid never charges for what the Tax Order of Payment already covered',
   page,
 }) => {
   /*
-   * ── LEFT RED DELIBERATELY: the screen contradicts itself about money ───────
+   * ── This was LEFT RED on purpose, and the paragraph has since been fixed ───
    *
-   * These two paragraphs render one above the other on a paid filing:
+   * What stood here was the screen contradicting itself about money. Two
+   * paragraphs rendered one above the other on a paid filing:
    *
    *   ledger  "Nothing is outstanding — your Tax Order of Payment covered every
    *            permit below, so applying for them costs nothing further."
@@ -662,25 +840,20 @@ test('the grid never charges for what the Tax Order of Payment already covered',
    *            to your balance due; Submit a copy of one you already hold costs
    *            nothing."
    *
-   * The ledger sentence is the one that matches the code. `WorkflowService::
-   * assessFees` runs ONCE, at submission, over the business permit and all five
-   * required clearances; `ClearanceService::reassess()` was deleted with the
-   * accrual, and applying for a clearance measurably leaves `total_amount`
-   * where it was. The grid's sentence is the accrual's copy left standing, and
-   * "Choose the ones your business needs" is from the same era — all five are
-   * required (`PermitType::REQUIRED_CLEARANCE_CODES`), so there is nothing to
-   * choose between.
+   * The ledger sentence was the one that matched the code, and the grid's was
+   * the accrual's copy left standing — a button promising a charge the server
+   * will not make, three inches under a sentence saying the opposite. "Choose
+   * the ones your business needs" was from the same era: all five are required
+   * (`PermitType::REQUIRED_CLEARANCE_CODES`), so there was nothing to choose
+   * between.
    *
-   * This is not a test encoding the old flow, so it is not a test to update: it
-   * is the screen telling an applicant that a button will charge them when the
-   * server will not, three inches under a sentence saying the opposite. The fix
-   * is one paragraph in ClearanceStagePage.tsx (the block above
-   * `<ul id="clearance-cards">`), and it is application code, so it is reported
-   * here rather than made green.
-   *
-   * The Apply/Submit asymmetry itself is worth keeping once the copy is right —
-   * Apply starts a request with an office, Submit hands in a permit already
-   * held — so the replacement is a rewording, not a deletion.
+   * The paragraph above `<ul id="clearance-cards">` now reads: every one of
+   * these is required and already covered by the payment made, Apply opens that
+   * office's form, Upload an existing copy hands them a certificate you hold,
+   * and NEITHER costs anything further. So the two absences below are kept —
+   * they are what must not come back in a merge — and the third assertion moves
+   * from the half-truth it was checking ("Submit a copy costs nothing", which
+   * implied Apply did not) to the symmetry that is actually true.
    */
   await onDashboard(page)
   const appId = await makePaidApplication(page)
@@ -709,9 +882,20 @@ test('the grid never charges for what the Tax Order of Payment already covered',
     'the grid offers a choice between five permits that are all required',
   ).toHaveCount(0)
 
-  // The half that is still true either way: handing in a copy you already hold
-  // costs nothing, and the screen has to say so before the press.
-  await expect(page.getByText(/submit a copy.*costs nothing/i)).toBeVisible()
+  /*
+   * What has to be said before either press. It is no longer an asymmetry — one
+   * bill at submission covered both routes — so the sentence names the real
+   * difference (what the office is given to read) and then closes the money
+   * question for both buttons at once. "Neither" is the load-bearing word: drop
+   * it and the paragraph goes back to implying that one of them charges.
+   */
+  await expect(
+    page.getByText(/upload an existing copy.*certificate you already hold/i),
+  ).toBeVisible()
+  await expect(
+    page.getByText(/neither costs anything further/i),
+    'the grid stopped saying that both routes are already paid for',
+  ).toBeVisible()
 })
 
 test('a locked Apply stays reachable, and refuses to do anything', async ({ page }) => {
@@ -721,8 +905,9 @@ test('a locked Apply stays reachable, and refuses to do anything', async ({ page
    * make it invisible to anyone navigating by keyboard or screen reader".
    */
   await onDashboard(page)
-  // Unpaid, so shut. Same reason as the test above.
-  const appId = await makeDraft(page)
+  // Submitted and unpaid, so shut — and with the five on the filing, so there
+  // are buttons to be reachable. Same reason as the test above.
+  const appId = await makeSubmittedApplication(page)
 
   await page.goto(`/applications/${appId}/clearances`)
   await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
@@ -742,7 +927,7 @@ test('a locked Apply stays reachable, and refuses to do anything', async ({ page
    * most screen readers pass over it, so an applicant using one would never
    * learn the button exists or why it does nothing.
    */
-  const apply = cards.first().getByRole('button', { name: /^apply for the/i })
+  const apply = applyControl(cards.first())
   await expect(apply).toHaveAttribute('aria-disabled', 'true')
   await expect(apply).toHaveAttribute('aria-describedby', 'clearances-locked')
   /*
@@ -776,14 +961,54 @@ test('a locked Apply stays reachable, and refuses to do anything', async ({ page
   await apply.dispatchEvent('click')
   await page.waitForTimeout(500)
   await expect(page.getByRole('dialog')).toBeHidden()
-  await expect(page.getByRole('button', { name: /save & back to clearances/i })).toBeHidden()
+  await expect(backToCards(page)).toBeHidden()
 
-  const submit = cards.first().getByRole('button', { name: /submit a copy/i })
-  await submit.dispatchEvent('click')
+  const upload = uploadControl(cards.first())
+  await upload.dispatchEvent('click')
   await page.waitForTimeout(500)
   await expect(page.getByRole('dialog')).toBeHidden()
 })
 
+/*
+ * ── LEFT RED DELIBERATELY: a second Apply opens nothing and says 422 ────────
+ *
+ * Three tests in this file are red for this one defect, and it is the headline
+ * rule of the file: Apply always opens that office's form.
+ *
+ * `applyNow` decides whether to re-post from `clearanceStarted(row.state)`, and
+ * the card's own comment says why it decides at all — *"re-posting would ask the
+ * server to attach what is already attached, and on a screen that commits the
+ * applicant's money 'probably idempotent' is not good enough."* That predicate
+ * was true of Apply while Apply moved the permit to `for_approval`. It does not
+ * any more: `startClearance` returns early for a form-bearing permit, records
+ * `mode` and stops, so the status stays `not_started` and `clearanceStarted`
+ * stays false on a clearance the applicant has demonstrably applied for.
+ *
+ * So the second press re-posts, and the server refuses it. Verified against this
+ * stack, as the applicant's own session:
+ *
+ *     POST …/clearances/ZONING/apply   → 200, state not_started, mode apply
+ *     POST …/clearances/ZONING/apply   → 422, "You have already applied for the
+ *                                       Zoning / Locational Clearance on this
+ *                                       application."
+ *
+ * `ClearanceController::apply` aborts on `ClearanceService::isAppliedFor`, which
+ * was ALREADY patched for exactly this — it reads `status !== NotStarted ||
+ * mode !== null`, and its docblock says in as many words that status alone
+ * "reported 'not applied for' about a permit the applicant had demonstrably
+ * applied for". The screen's copy of the same question never got the second
+ * half. `runAction` then returns false, `applyNow` returns early, and the sheet
+ * never opens.
+ *
+ * What it costs is not a repeated click. The button on that card reads "Finish
+ * form" — it is the control for going back to a half-filled sheet, which is the
+ * ordinary way to finish one, and the applicant who presses it gets an error
+ * banner telling them they have already applied. There is no other way back in.
+ *
+ * Application code, so it is reported rather than made green. The fix is the one
+ * line that brings the screen's predicate level with the server's: `applyNow`
+ * skips the post when the clearance has been started OR a mode is recorded.
+ */
 test('Apply always opens that office’s form, and never un-applies', async ({ page }) => {
   await onDashboard(page)
   const appId = await makePaidApplication(page)
@@ -797,50 +1022,59 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
     timeout: 30_000,
   })
 
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  const card = clearanceCard(page, /sanitary/i)
   await expect(card).toHaveCount(1)
   /*
-   * Located on `appl(y|ied)`, which is the accessible name in EITHER state.
+   * Located through `applyControl`, which matches the name in ANY of its three
+   * states.
    *
-   * It pinned `/^applied for the/i` — the name the card gives the control once
-   * the clearance has been started — and that reads the card's own idea of the
-   * state rather than the server's. The two have come apart (see 'applying is
-   * reported on the button' below, which is the test that owns that defect and
-   * is red for it). Pinning it here as well would make one bug fail two tests
-   * and hide THIS rule, which is about the click and not about the label:
-   * Apply opens the office form, every time, and undoes nothing.
+   * It pinned `/^applied for the/i`, then `/^appl(y|ied) for the /i`, and both
+   * read the card's own idea of the state rather than the server's. The name is
+   * the subject of exactly one test below; pinning it here as well would make a
+   * rename fail two tests and hide THIS rule, which is about the click and not
+   * about the label: Apply opens the office form, every time, and undoes
+   * nothing.
    */
-  const apply = card.getByRole('button', { name: /^appl(y|ied) for the /i })
+  const apply = applyControl(card)
 
   // Under the old toggle this click un-applied it and opened nothing.
   await expect(apply).toBeVisible()
 
-  const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
-  const stateOf = () => readClearanceState(page, appId, 'SANITARY')
-  const before = await stateOf()
+  const back = backToCards(page)
+  /*
+   * Both halves of the row, because "undoes nothing" now has two halves to
+   * undo. Apply records `mode` and leaves the status alone, so a press that
+   * silently cleared the mode would take the applicant's choice off the filing
+   * while leaving `not_started` looking untouched — invisible to a check on the
+   * state by itself.
+   */
+  const rowOf = () => readClearance(page, appId, 'SANITARY')
+  const before = await rowOf()
 
   await apply.click()
-  await expect(backToCards, 'Apply did not open the office form').toBeVisible()
+  await expect(back, 'Apply did not open the office form').toBeVisible()
 
-  await page.getByRole('button', { name: /back without saving/i }).click()
-  await expect(backToCards).toBeHidden()
+  await back.click()
+  await expect(back).toBeHidden()
 
   /*
-   * Still started, read off the server rather than off the button. This is the
+   * Still as it was, read off the server rather than off the button. This is the
    * "never un-applies" half, and it is the half the original bug (aabbf21)
    * broke: the second press silently detached the permit. Asking the API is
    * also what makes it a claim about the FILING rather than about paint.
    */
-  expect(await stateOf(), 'Apply took the clearance back off the filing').toBe(before)
+  expect(await rowOf(), 'Apply took the clearance back off the filing').toEqual(before)
 
   // And again. A toggle would open nothing the second time.
   await apply.click()
-  await expect(backToCards, 'a second Apply did not open the office form').toBeVisible()
-  await page.getByRole('button', { name: /back without saving/i }).click()
-  expect(await stateOf(), 'a second Apply took the clearance back off the filing').toBe(before)
+  await expect(back, 'a second Apply did not open the office form').toBeVisible()
+  await back.click()
+  expect(await rowOf(), 'a second Apply took the clearance back off the filing').toEqual(before)
 })
 
-test('Submit always opens the upload box, and never removes what is there', async ({ page }) => {
+test('Upload an existing copy always opens the upload box, and never removes what is there', async ({
+  page,
+}) => {
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
@@ -849,24 +1083,25 @@ test('Submit always opens the upload box, and never removes what is there', asyn
     timeout: 30_000,
   })
 
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  const card = clearanceCard(page, /sanitary/i)
   const dialog = page.getByRole('dialog')
 
-  await card.getByRole('button', { name: /submit a copy/i }).click()
-  await expect(dialog, 'Submit did not open the upload box').toBeVisible()
+  await uploadControl(card).click()
+  await expect(dialog, 'Upload an existing copy did not open the upload box').toBeVisible()
   await expect(dialog).toContainText(/choose your certificate/i)
   /*
-   * The consequence, on the box itself. Apply and Submit sit side by side and
-   * look alike; one of them spends money and the other does not.
+   * The consequence, on the box itself. The two controls sit side by side and
+   * look alike, and the applicant has to know which one they just pressed
+   * before they pick a file.
    */
   await expect(dialog).toContainText(/nothing is added to your fees/i)
 
   await dialog.getByRole('button', { name: /^cancel$/i }).click()
   await expect(dialog).toBeHidden()
 
-  // Again. Under the old toggle a second Submit DELETED the uploaded file.
-  await card.getByRole('button', { name: /submit a copy/i }).click()
-  await expect(dialog, 'a second Submit did not open the upload box').toBeVisible()
+  // Again. Under the old toggle a second press DELETED the uploaded file.
+  await uploadControl(card).click()
+  await expect(dialog, 'a second press did not open the upload box').toBeVisible()
   await dialog.getByRole('button', { name: /^cancel$/i }).click()
 })
 
@@ -881,7 +1116,7 @@ test('Submit always opens the upload box, and never removes what is there', asyn
  * The file is built in-process rather than read off disk — a fixture file is
  * one more thing to keep, and the bytes are irrelevant to every assertion here.
  */
-async function submitCopy(page: Page, confirm: RegExp): Promise<void> {
+async function uploadCopy(page: Page, confirm: RegExp): Promise<void> {
   const dialog = page.getByRole('dialog')
   await dialog
     .locator('input[type=file]')
@@ -942,26 +1177,21 @@ async function submitCopy(page: Page, confirm: RegExp): Promise<void> {
  * client could not complete now completes with nothing taken back, and that is
  * what is asserted: the same journey, the outcome it should always have had.
  *
- * ── LEFT RED DELIBERATELY: CLR-1 is back, by a different route ─────────────
+ * ── This was LEFT RED, and the deletion it asked for has been made ────────
  *
- * `ClearanceStagePage.onSubmitHeld` still withdraws first when the clearance has
- * been started (`if (switching) await clearances.unapply(...)`), and the dialog
- * still names the confirm "Withdraw & submit". Every one of the five is REQUIRED
- * now, and `ClearanceService::unapply` refuses a required permit with a 422 —
- * verified against this stack: DELETE on a started CEC answers 422, "City
- * Environmental Certificate is required on every application and cannot be
- * withdrawn."
+ * `ClearanceStagePage.onSubmitHeld` used to withdraw first whenever the
+ * clearance had been started (`if (switching) await clearances.unapply(...)`),
+ * and the dialog named its confirm "Withdraw & submit". Every one of the five is
+ * REQUIRED, and `ClearanceService::unapply` refuses a required permit with a
+ * 422 — so the withdrawal threw before the upload was attempted and the
+ * applicant got an error banner instead of a filed certificate. That was the
+ * client's original report reached by the opposite road: the server refusing the
+ * upload became the screen refusing to try.
  *
- * So the withdrawal throws before the upload is attempted and the applicant gets
- * an error banner instead of a filed certificate. That is the client's original
- * report — *"I cannot remove my application on the Zoning/Locational Clearance
- * once I changed my mind to Submit instead of Apply"* — reached by the opposite
- * road: it used to be the server refusing the upload, and it is now the screen
- * refusing to try. The card's own comment forbids this ("offering a control the
- * server will refuse is CLR-4").
- *
- * The fix is in application code and is a deletion: `switching` and the
- * `Withdraw & submit` label both go, because nothing needs withdrawing.
+ * Both are gone. `storeHeld` swaps `mode` in place inside one transaction, so
+ * there is nothing to withdraw, and the confirm reads "Upload this copy". What
+ * the test asserts is unchanged — the journey completes and takes nothing back —
+ * and the names it presses have moved with the fix.
  *
  * ZONING deliberately, which is the card in the client's screenshot.
  */
@@ -978,22 +1208,37 @@ test('changing your mind from Apply to Submit works, and takes nothing back to d
     timeout: 30_000,
   })
 
-  const card = page.locator('ul > li').filter({ hasText: /zoning/i })
-  await card.getByRole('button', { name: /submit a copy of the/i }).click()
+  const card = clearanceCard(page, /zoning/i)
+  await uploadControl(card).click()
 
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText(/choose your certificate/i)
 
-  await submitCopy(page, /^submit$/i)
+  await uploadCopy(page, /^upload this copy$/i)
 
   /*
    * The card is on the other leg, and there is no 422 banner in sight. This is
    * the client's report, inverted into the assertion that it works: the copy is
    * on file, it can be replaced, and it can be taken back off.
+   *
+   * ── What the card offers afterwards, and why it is Remove rather than ─────
+   *    Replace
+   *
+   * This asserted a Replace control, from the days when uploading was a passive
+   * act that left the permit where it was. MODE_UPLOAD submits immediately now —
+   * the file IS the answer, so there is nothing further for the applicant to
+   * give — which puts the permit straight into `for_approval`. `handedIn` is
+   * true from that moment and the upload control is not drawn at all: swapping
+   * the evidence under a permit the office has accepted is refused by
+   * `storeHeld`, and offering a control the server will refuse is CLR-4 by name.
+   *
+   * Remove is the one that survives, and it is the one that matters here. The
+   * client's report was about not being able to take something back; a copy on
+   * file with a named way off it is the answer to it.
    */
-  await expect(card.getByRole('button', { name: /replace the .* copy you submitted/i })).toBeVisible()
   await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
+  await expect(card).toContainText(/certificate\.pdf/i)
   await expect(page.getByText(/withdraw that request first/i)).toHaveCount(0)
 
   // The clearance is still on the filing, and the bill has not moved. Handing
@@ -1029,13 +1274,23 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
     timeout: 30_000,
   })
 
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
-  await card.getByRole('button', { name: /submit a copy of the/i }).click()
-  await submitCopy(page, /^submit$/i)
+  const card = clearanceCard(page, /sanitary/i)
+  await uploadControl(card).click()
+  await uploadCopy(page, /^upload this copy$/i)
   await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
 
-  // Apply, and stop.
-  await card.getByRole('button', { name: /^apply for the/i }).click()
+  /*
+   * Apply, and stop.
+   *
+   * Pressed through `applyControl` rather than by name, because the name on this
+   * card is now "View the ‹clearance› form you submitted" — uploading a copy
+   * hands the permit to the office, `handedIn` goes true, and the control is
+   * relabelled for reading a form. It still runs `onApply`, so the button a
+   * card presents as View is the button that offers to delete the applicant's
+   * certificate. That is part of what is reported below rather than a separate
+   * defect.
+   */
+  await applyControl(card).click()
   const warning = page.getByRole('dialog')
   await expect(warning, 'Apply deleted the uploaded copy without asking').toBeVisible()
   // The file is named. "Your copy" is not what is about to be lost; a specific
@@ -1045,42 +1300,59 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
 
   await expect(warning).toBeHidden()
   await expect(card.getByRole('button', { name: /remove the .* copy/i })).toBeVisible()
-  await expect(card.getByRole('button', { name: /^apply for the/i })).toBeVisible()
+  await expect(applyControl(card)).toBeVisible()
 
   // Now agree to it. The confirm says Delete, because that is what it does.
-  await card.getByRole('button', { name: /^apply for the/i }).click()
+  await applyControl(card).click()
   await page.getByRole('dialog').getByRole('button', { name: /^delete & apply$/i }).click()
 
-  await expect(page.getByRole('button', { name: /back without saving/i })).toBeVisible()
-  await page.getByRole('button', { name: /back without saving/i }).click()
+  /*
+   * ── LEFT RED DELIBERATELY: the file is destroyed and the apply then fails ──
+   *
+   * This test used to be red for a smaller thing — the deletion was silent. It
+   * is red for a worse one now, and the silence is a symptom of it.
+   *
+   * `applyNow` runs the removal, then posts the apply. Verified against this
+   * stack, as the applicant's own session:
+   *
+   *     DELETE …/clearances/SANITARY/held   → 200, the file is gone from disk
+   *     POST   …/clearances/SANITARY/apply  → 422, "You have already applied
+   *                                           for the Sanitary Permit / Health
+   *                                           Certificate on this application."
+   *
+   * The 422 is the same one described above 'Apply always opens that office's
+   * form' — `isAppliedFor` refusing a permit that already carries a mode — but
+   * the route in is its own defect and needs its own fix. `destroyHeld` forgets
+   * the file and leaves the pivot exactly where `storeHeld` put it:
+   * `for_approval`, mode `upload`. So even a screen whose predicate was correct
+   * would find nothing to apply for here. The applicant pressed a button, agreed
+   * to lose their certificate, and got neither the certificate nor the
+   * application form: an error banner, a card with nothing on it, and no way
+   * back without the original file.
+   *
+   * The silence follows from the same failure. `runAction` only writes the live
+   * region on SUCCESS, and the one message covering both halves of the act
+   * ("Applied for your …, and deleted the copy you had uploaded") rides on the
+   * apply that 422s — so the deletion that did happen is announced by nothing.
+   *
+   * Application code, so it is reported rather than made green. The fix is that
+   * taking a held copy back off has to return the permit to a state an apply can
+   * be made from: `destroyHeld` resetting the row to `not_started` with a null
+   * mode, which is what `unapply` already does for the other route. Two smaller
+   * things go with it — a control the card labels "View form" must not be the
+   * one that offers to delete the file, and the removal needs its own sentence
+   * for the case where the apply that would have carried it does not run.
+   */
+  await expect(
+    backToCards(page),
+    'the copy was deleted and the apply behind it failed, so the office form never opened',
+  ).toBeVisible()
+  await backToCards(page).click()
 
   // The copy is gone — which is the whole of what was agreed to. What the
   // button reads afterwards is the subject of 'applying is reported on the
   // button' below.
   await expect(card.getByRole('button', { name: /remove the .* copy/i })).toHaveCount(0)
-  /*
-   * ── LEFT RED DELIBERATELY: this deletion is silent ────────────────────────
-   *
-   * Announced once, for both halves of the act — a live region only holds the
-   * last thing written to it, so two sentences would be one deletion nobody was
-   * told about. `applyNow` is written that way, and on an untouched clearance it
-   * works.
-   *
-   * Not on this path. Uploading a copy is not a passive act any more:
-   * `submitHeld()` goes through the same `startClearance` as `apply()` and puts
-   * the permit into `for_approval`. So by the time Apply is pressed over that
-   * copy the clearance is already started, `applyNow`'s `notStartedYet` branch
-   * is correctly skipped — and the ONLY thing that writes to the live region is
-   * inside it. The removal itself runs as `runAction(code, '', removeHeld)`,
-   * with an empty note on purpose, because the apply below was supposed to say
-   * both things at once.
-   *
-   * The result is a file deleted off disk at the applicant's word with nothing
-   * said about it, which is the exact failure the "announced once" note above it
-   * was written to prevent. Application code, so it is reported rather than
-   * made green: the removal needs its own sentence when the apply that would
-   * have carried it is not going to run.
-   */
   await expect(
     page.getByRole('status').filter({ hasText: /deleted the copy/i }),
     'the uploaded copy was deleted without a word to anyone using a screen reader',
@@ -1123,10 +1395,10 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * part of the test: Apply opens the sheet, and what it did is still being
    * announced when the applicant comes back to the cards.
    */
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
-  await card.getByRole('button', { name: /^apply for the/i }).click()
+  const card = clearanceCard(page, /sanitary/i)
+  await applyControl(card).click()
 
-  const back = page.getByRole('button', { name: /back without saving/i })
+  const back = backToCards(page)
   await expect(back, 'Apply did not open the office sheet').toBeVisible()
   await back.click()
 
@@ -1137,11 +1409,26 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
    * And it really happened, rather than merely being announced. The announcement
    * and the write are separate failures and a test that only reads the live
    * region cannot tell them apart.
+   *
+   * ── What the write IS, now that apply is two acts ─────────────────────────
+   *
+   * This asserted `for_approval`, and asserting it back would be re-asserting
+   * the bug. `startClearance` returns early for MODE_APPLY on a form-bearing
+   * permit — all five are — so the press records `mode` and stops: nothing is
+   * routed, no office has anything to read, and the status stays `not_started`.
+   * The client's words when it did otherwise: *"I still haven't submitted any
+   * applications yet the status says it is For Approval."* CENRO saw the other
+   * half of the same wrong claim — a queue row with no answers on it.
+   *
+   * So both fields are read, and the pair is the assertion. `mode` alone would
+   * pass on a press that also routed the office; `state` alone cannot tell a
+   * press that recorded nothing from one that did. The sentence the live region
+   * says — "fill it in and press Save" — is only true of exactly this pair.
    */
   expect(
-    await readClearanceState(page, appId, 'SANITARY'),
-    'pressing Apply did not start the clearance with its office',
-  ).toBe('for_approval')
+    await readClearance(page, appId, 'SANITARY'),
+    'pressing Apply either recorded nothing, or handed the office a form nobody had filled in',
+  ).toEqual({ state: 'not_started', mode: 'apply' })
 })
 
 /*
@@ -1192,10 +1479,27 @@ test('applying is reported on the button, and never by a second meaning of it', 
   await applyFor(page, appId, 'SANITARY')
 
   await page.goto(`/applications/${appId}/clearances`)
-  const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
+  const card = clearanceCard(page, /sanitary/i)
 
-  // The state is on the control that changed it, not in a separate badge.
-  const apply = card.getByRole('button', { name: /^applied for the/i })
+  /*
+   * The state is on the control that changed it, not in a separate badge — and
+   * the state it has to report has grown a middle.
+   *
+   * It read "Applied ✓", and that was a label for a finished thing worn by a
+   * clearance whose form had never been saved: the applicant HAD applied, the
+   * office had nothing to read, and the tick claimed the opposite. Splitting
+   * apply into two acts made the difference real rather than cosmetic — the
+   * permit genuinely sits at `not_started` with a mode recorded — so the button
+   * names the work that is left instead of the transaction that happened.
+   *
+   * Pinned exactly, not through `applyControl`, because this is the one test
+   * that owns the NAME. The point of the sentence is the second clause: a
+   * control reading only "Applied" is what let two of the five clearances on the
+   * register's filing 5 sit applied-for and empty.
+   */
+  const apply = card.getByRole('button', {
+    name: /^finish the .* form — you applied but have not submitted it$/i,
+  })
   await expect(apply).toBeVisible()
 
   /*
@@ -1224,8 +1528,27 @@ test('applying is reported on the button, and never by a second meaning of it', 
    * named the way the client asked.
    */
   for (const label of await card.getByRole('button').allInnerTexts()) {
+    /*
+     * The rule itself, asserted directly. It was a length budget pegged to
+     * "Submitted ✓" — a proxy, and one that has already rotted twice: the face
+     * of these buttons now reads "Upload a copy" and "Copy uploaded", both
+     * thirteen characters, both perfectly fine, and neither carrying a clearance
+     * name anywhere. A proxy that fails on a two-character rename is a test of
+     * the file rather than of the rule.
+     */
+    expect(
+      label.trim(),
+      `"${label.trim()}" prints its clearance's name on the face of the card`,
+    ).not.toMatch(/sanitary|health certificate/i)
+    /*
+     * And the shape the proxy was reaching for, re-pegged to the longest label
+     * the card actually carries. What wrapped the old control onto two lines was
+     * a button naming its clearance in full; this keeps the ceiling near the
+     * controls that survived, so the next one somebody adds has to earn its
+     * width.
+     */
     expect(label.trim().length, `"${label.trim()}" is too long for this card`).toBeLessThanOrEqual(
-      'Submitted ✓'.length,
+      'Copy uploaded'.length,
     )
   }
   await expect(card.getByRole('button', { name: /don’t apply/i })).toHaveCount(0)
@@ -1236,13 +1559,38 @@ test('applying is reported on the button, and never by a second meaning of it', 
    * only thing telling them apart.
    */
   await expect(apply).toHaveAccessibleName(/sanitary/i)
-  await expect(card.getByRole('button', { name: /^submit a copy of the/i })).toHaveAccessibleName(
-    /sanitary/i,
-  )
+  await expect(uploadControl(card)).toHaveAccessibleName(/sanitary/i)
 
-  // Pressing it again opens the office form. It must NOT un-apply.
+  /*
+   * Pressing it again opens the office form. It must NOT un-apply.
+   *
+   * Asserted on the way back rather than on the press. It read
+   * `toHaveCount(0)` on "Apply for the ‹clearance›" straight after the click,
+   * which is satisfied by anything at all — the sheet REPLACES the grid, so
+   * every control on every card is gone at that moment and the assertion held
+   * for a page that had thrown the filing away. Coming back to the cards is what
+   * makes it a claim about the clearance: the control still reports an
+   * application in progress, which a toggle would have undone.
+   *
+   * ── LEFT RED DELIBERATELY, from here down ─────────────────────────────────
+   *
+   * The press answers 422 and opens nothing. Same defect as the one written out
+   * above 'Apply always opens that office's form, and never un-applies':
+   * `applyNow` re-posts because `clearanceStarted(row.state)` cannot see an
+   * applied-for permit any more, and the server refuses the duplicate. The
+   * assertions above this point pass, so what is red here is precisely the
+   * second press, which is the rule this test exists for.
+   */
   await apply.click()
-  await expect(card.getByRole('button', { name: /^apply for the/i })).toHaveCount(0)
+  const back = backToCards(page)
+  await expect(back, 'a second Apply did not reopen the office form').toBeVisible()
+  await back.click()
+
+  await expect(apply, 'a second Apply took the application back off the card').toBeVisible()
+  await expect(
+    card.getByRole('button', { name: /^apply for the /i }),
+    'the card went back to offering an Apply that had already been made',
+  ).toHaveCount(0)
 })
 
 test('one bill at submission covers all five, and applying adds nothing to it', async ({
@@ -1428,19 +1776,34 @@ test('one bill at submission covers all five, and applying adds nothing to it', 
 
   /* ── 5. Applying adds nothing ──────────────────────────────────────────── */
 
+  /*
+   * The fire card is on the grid and quotes no price, which is the money rule
+   * from the applicant's side. The per-card amount came off at the client's
+   * instruction — *"Would displaying the fee still matter because we have
+   * already paid it for that beforehand, right? If not, kindly remove it."* —
+   * and over an Apply button it read as a threat that the press charges again.
+   * The figure itself is not lost: it is on the Tax Order of Payment, which is
+   * what `atSubmit.labels` above reads it from.
+   */
   const fire = cards.filter({ hasText: /fire/i })
-  await expect(fire).toContainText(/fee ₱|no fee assessed|fee set by this office/i)
+  await expect(fire).toHaveCount(1)
+  await expect(fire).not.toContainText(/fee ₱|no fee assessed|fee set by this office/i)
 
-  // Through the API, because pressing Apply on the card does not currently post
-  // anything — see 'what just happened is announced, not only drawn', which is
-  // the test that owns that defect. What is under test here is the money, and
-  // the money follows the write rather than the click.
+  // Through the API rather than the card, because what is under test here is the
+  // money, and the money follows the write rather than the click.
   await applyFor(page, appId, 'FSIC')
 
   const afterApply = await read()
-  expect(await readClearanceState(page, appId, 'FSIC'), 'applying did not start the clearance').toBe(
-    'for_approval',
-  )
+  /*
+   * Applied, not submitted. This asserted `for_approval`, which `startClearance`
+   * stopped producing for a form-bearing permit when apply became two acts — and
+   * all five carry a form. The money question is unaffected either way, which is
+   * the point: the bill does not move on EITHER act.
+   */
+  expect(
+    await readClearance(page, appId, 'FSIC'),
+    'applying did not record the applicant’s choice',
+  ).toEqual({ state: 'not_started', mode: 'apply' })
   /*
    * The whole of the "no accrual" rule, in one comparison.
    *
@@ -1507,13 +1870,14 @@ test('a required permit cannot be withdrawn from the application', async ({ page
   /*
    * And the card still stands, with no control offering the withdrawal.
    *
-   * ── LEFT RED DELIBERATELY: the card offers a refusal ──────────────────────
+   * ── This was LEFT RED, and the control has since been taken off the card ──
    *
-   * The Withdraw link renders on any started clearance
+   * The Withdraw link used to render on any started clearance
    * (`hasApplied(row.state) && unlocked`), and all five are required, so every
-   * one of them shows a control whose only possible outcome is the 422 asserted
-   * above. That is CLR-4 — offering a control the server will refuse — which the
-   * card's own comment beside that link forbids in as many words.
+   * one of them showed a control whose only possible outcome was the 422
+   * asserted above. That is CLR-4 — offering a control the server will refuse —
+   * which the card's own comment beside that link forbade in as many words. It
+   * is no longer drawn.
    *
    * The rule is the pair, which is why they are asserted together: the server
    * refuses, AND the screen does not invite the refusal.
