@@ -1574,7 +1574,7 @@ interface FilingIdentity {
   prefill: PrefillResult
 }
 
-/** "1 Jan 2025 – 31 Dec 2025", or whichever half of it the register holds. */
+/** "January 1, 2025 – December 31, 2025", or whichever half the register holds. */
 function permitValidity(p: Permit): string {
   if (p.valid_from && p.valid_until) return `${formatDate(p.valid_from)} – ${formatDate(p.valid_until)}`
   if (p.valid_until) return `Valid until ${formatDate(p.valid_until)}`
