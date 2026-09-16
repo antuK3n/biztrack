@@ -6556,8 +6556,41 @@ export function ApplyWizard() {
                 }}
               />
               {form.latitude !== null ? (
-                <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
-                  Pinned at {form.latitude}, {form.longitude}
+                /*
+                 * Item 9 — the line that says the pin landed stops looking like
+                 * the three lines that do not.
+                 *
+                 * It rendered text-xs / ink-secondary on white, which is exactly
+                 * what the two captions nested under it and the "CPDO checks the
+                 * actual site" line beneath render as. Four identical grey
+                 * sentences in a stack, and the only one that is an ANSWER —
+                 * your pin is saved, at these coordinates — had nothing to win
+                 * the glance with. The client's report is that it was
+                 * overlooked, which is the failure mode that costs a wrong
+                 * location on a zoning clearance.
+                 *
+                 * Distinct by three things at once, never by colour alone
+                 * (DESIGN.md): a royal tint band, so the strip separates from
+                 * the white captions under it; one step up in size and weight,
+                 * which is the "a bit bigger" that was asked for; and a tick,
+                 * which survives greyscale and reaches a screen reader user who
+                 * gets none of the rest.
+                 *
+                 * Royal, deliberately not #bd0000 — a placed pin is the step
+                 * going right. Red here would read as a location refused, and
+                 * "Red Means Stop" reserves it for what actually blocks. And
+                 * deliberately not a coloured left border on a card: DESIGN.md
+                 * bans side stripes outright.
+                 *
+                 * The two sub-captions stay text-xs and ink-muted on purpose.
+                 * Promoting them alongside the lead would give the strip three
+                 * headlines and put us back where we started.
+                 */
+                <p className="tnum bg-royal-tint px-4 py-2.5 text-xs text-ink-secondary">
+                  <span className="flex items-center gap-1.5 text-sm font-semibold text-royal">
+                    <CheckCircleFilledIcon size={16} className="shrink-0" />
+                    Pinned at {form.latitude}, {form.longitude}
+                  </span>
                   {/*
                     * Item 7 — a suggested pin says it is a suggestion.
                     *
@@ -7004,6 +7037,27 @@ export function ApplyWizard() {
             Upload each requirement as a PDF or image (max 10 MB). Items marked with{' '}
             <span className="font-semibold text-s-red">*</span> are required. You can change files
             before submitting.
+          </p>
+          {/*
+            * Item 11 — the uploads are checked against the paper.
+            *
+            * Said here, at the moment somebody is choosing which file to attach,
+            * rather than discovered at the counter. An applicant who does not
+            * know this treats the upload as the submission itself, and a blurred
+            * photo or a document they cannot produce in original becomes a
+            * rejection weeks later, after payment, with no way to tell it was
+            * avoidable.
+            *
+            * Its own paragraph, not a fourth clause on the one above: that
+            * sentence is about file mechanics — format, size, what may still be
+            * swapped — and this is about what happens to the file afterwards.
+            * Bolting it on would bury the consequence in housekeeping.
+            *
+            * Stated as a fact and not as a warning. Nothing has gone wrong, so
+            * no red and no alert role — see "Red Means Stop" in DESIGN.md.
+            */}
+          <p className="mt-1.5 text-xs font-medium text-ink-secondary">
+            Documents you upload will be verified against the original during processing.
           </p>
 
           {/* OCR-lite suggestion banner (v2) — dismissible, suggestions only. */}
