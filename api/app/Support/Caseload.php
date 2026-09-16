@@ -2,7 +2,7 @@
 
 namespace App\Support;
 
-use App\Enums\AssignmentStatus;
+use App\Enums\ApplicationStatus;
 use App\Enums\InspectionStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\Inspection;
@@ -40,18 +40,56 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class Caseload
 {
-    /** Assignment states that are finished and therefore not part of a caseload. */
-    private const CLOSED_ASSIGNMENTS = [AssignmentStatus::Completed];
-
     /** Inspection states that are finished and therefore not part of a caseload. */
     private const CLOSED_INSPECTIONS = [InspectionStatus::Completed, InspectionStatus::Cancelled];
 
-    /** Reviews this officer still holds. */
+    /**
+     * Reviews this officer still holds.
+     *
+     * ── Why the line is the FILING, not the assignment's own status ─────────
+     *
+     * This asked `application_assignments.status != completed`, and that
+     * reading froze the Officer in Charge of a live filing.
+     *
+     * `completed` on an assignment does not mean the case is closed. BPLO's row
+     * is completed the moment the main form is approved — the START of the
+     * filing, not the end: the applicant then pays, five offices work their
+     * clearances, inspections are booked, and the filing sits at
+     * `awaiting_other_permits` for weeks with BPLO's assignment already marked
+     * done. On the tester register EVERY BPLO assignment is in that state.
+     *
+     * Both consequences were visible on screen. An officer's "My assigned"
+     * section was empty while they held three live filings, and the super
+     * admin's Reassign dialog refused to move any of them — with the OIC
+     * register three menu items away listing all three under that officer's
+     * name. Three screens, three different answers about one officer.
+     *
+     * So: held while the APPLICATION is live, a record once it is decided. That
+     * is also the sentence the client uses — "officer in charge of the permit"
+     * is about who owns the case, not about who signed one step of it.
+     */
     public static function reviews(User $officer): Builder
     {
         return ApplicationAssignment::query()
             ->where('officer_user_id', $officer->id)
-            ->whereNotIn('status', self::CLOSED_ASSIGNMENTS);
+            ->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses()));
+    }
+
+    /**
+     * The application states that end a case.
+     *
+     * Read off the enum rather than listed here, so a state added later is
+     * classified by `isTerminal()` — the one place that already answers this
+     * question — instead of silently counting as live.
+     *
+     * @return array<int, string>
+     */
+    private static function decidedStatuses(): array
+    {
+        return array_values(array_map(
+            fn (ApplicationStatus $s) => $s->value,
+            array_filter(ApplicationStatus::cases(), fn (ApplicationStatus $s) => $s->isTerminal()),
+        ));
     }
 
     /** Site visits this officer still holds. */
@@ -77,7 +115,7 @@ class Caseload
     {
         return ApplicationAssignment::query()
             ->where('officer_user_id', $officer->id)
-            ->whereIn('status', self::CLOSED_ASSIGNMENTS);
+            ->whereHas('application', fn ($a) => $a->whereIn('status', self::decidedStatuses()));
     }
 
     /**
