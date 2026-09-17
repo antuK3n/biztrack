@@ -68,37 +68,86 @@ test('wrong credentials are refused without leaking which half was wrong', async
   expect(body).not.toContain('user not found')
 })
 
-test('an LGU account is turned away from the citizen portal, and told where to go', async ({
+test('the citizen sign-in gives an LGU account nothing a wrong password would not', async ({
   page,
 }) => {
   /*
-   * The two portals are separated on purpose: the citizen-facing one admits
-   * business owners only. The refusal has to name the other door, or a staff
-   * member reads it as "my password is wrong" and resets a working password.
+   * ── Item #63: no hint that a staff portal exists ──────────────────────────
+   *
+   * This test has been rewritten twice and the history is the argument. It once
+   * asserted the refusal NAMED the other door, so a staff member would not read
+   * it as "my password is wrong" and reset a working one. Then it asserted the
+   * message said nothing — but the STATUS still did: 409 for a City Hall
+   * account against 422 for a wrong password.
+   *
+   * That is an enumeration oracle with or without the sentence. A script over a
+   * list of addresses reads 409 as "this one belongs to staff, keep it", and
+   * the only thing it costs is a password guess that was going to fail anyway.
+   *
+   * So the rule now is the strongest one available: at the citizen door the two
+   * failures are the same reply. Asserted by COMPARING them rather than by
+   * pinning a status, because pinning a literal is how the last version passed
+   * while the difference sat one field away.
    */
   await page.goto('/login')
-  const result = await page.evaluate(
-    async ([email, password]) => {
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email, password, portal: 'public' }),
-      })
-      return { status: res.status, body: await res.json() }
+  const [wrongDoor, wrongPassword] = await page.evaluate(
+    async ([staffEmail, ownerEmail, password]) => {
+      const attempt = async (email: string, pw: string) => {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email, password: pw, portal: 'public' }),
+        })
+        return { status: res.status, body: await res.json() }
+      }
+      return [await attempt(staffEmail, password), await attempt(ownerEmail, 'not-the-password')]
     },
-    [ACCOUNTS.admin, DEMO_PASSWORD] as const,
+    [ACCOUNTS.admin, ACCOUNTS.owner, DEMO_PASSWORD] as const,
   )
 
-  expect(result.status).toBe(409)
+  expect(wrongDoor.status).toBe(wrongPassword.status)
+  expect(wrongDoor.body.message).toBe(wrongPassword.body.message)
+  // And nothing helpful smuggled alongside it. `portal` was a real field once,
+  // shipped so the page could offer a "Go there now" link; it could be added
+  // back tomorrow and nothing else here would notice.
+  expect(wrongDoor.body.portal).toBeUndefined()
+  expect(String(wrongDoor.body.message)).not.toMatch(/staff|portal|admin|officer/i)
+})
+
+test('the super admin signs in at their own door and nowhere else', async ({ page }) => {
   /*
-   * The refusal must not name the other door. It used to ship `portal: 'staff'`
-   * and a message reading "…sign in through the staff portal", which the page
-   * turned into a "Go there now" link. The client asked for a refusal and
-   * nothing more, so the absence is what is asserted — a helpful `portal` key
-   * could be reintroduced tomorrow and nothing else here would catch it.
+   * The third door [item #107]. `admin` was one of AuthController's
+   * STAFF_ROLES, so the person who creates every officer account signed in
+   * beside them and shared their `biztrack.token.staff` key.
    */
-  expect(result.body.portal).toBeUndefined()
-  expect(String(result.body.message)).not.toMatch(/staff|portal|admin/i)
+  await page.goto('/admin/login')
+  await expect(page.getByRole('heading', { name: /administrator sign-in/i })).toBeVisible()
+
+  const statuses = await page.evaluate(
+    async ([adminEmail, officerEmail, password]) => {
+      const attempt = async (email: string, portal: string) => {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email, password, portal }),
+        })
+        return res.status
+      }
+      return {
+        adminAtAdminDoor: await attempt(adminEmail, 'admin'),
+        adminAtStaffDoor: await attempt(adminEmail, 'staff'),
+        officerAtAdminDoor: await attempt(officerEmail, 'admin'),
+      }
+    },
+    [ACCOUNTS.admin, ACCOUNTS.bplo, DEMO_PASSWORD] as const,
+  )
+
+  expect(statuses.adminAtAdminDoor).toBe(200)
+  // Both LGU doors keep the 409: someone already looking at one of them knows
+  // a staff portal exists, so there is no secret for the status to leak, and
+  // the refusal has to be distinguishable from a mistyped password.
+  expect(statuses.adminAtStaffDoor).toBe(409)
+  expect(statuses.officerAtAdminDoor).toBe(409)
 })
 
 test('a business owner is turned away from the staff portal', async ({ page }) => {
@@ -157,7 +206,19 @@ test('an admin tab and an owner tab are signed in at the same time', async ({ br
       .filter((k) => k.startsWith('biztrack.token'))
       .sort(),
   )
-  expect(keys).toEqual(['biztrack.token.public', 'biztrack.token.staff'])
+  /*
+   * `biztrack.token.admin` is here because the super admin has their own portal
+   * now (item #107), and `.staff` because admin.json is written under both keys
+   * while this suite still drives the admin's screens at /staff/admin/… — see
+   * the note on `alsoKeyedAs` in auth.setup.ts. The assertion is exact rather
+   * than a `toContain` so that dropping the transitional key, when the specs
+   * move, has to be a deliberate edit here too.
+   */
+  expect(keys).toEqual([
+    'biztrack.token.admin',
+    'biztrack.token.public',
+    'biztrack.token.staff',
+  ])
 
   await staff.goto('/staff/dashboard')
 

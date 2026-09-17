@@ -53,20 +53,31 @@ export const OFFICES = [
 }>
 
 /**
+ * The three sign-in doors. `admin` is the super admin's and nobody else's.
+ *
+ * It was part of `staff` until checklist item #107 split it out, and the split
+ * is enforced server-side — an administrator posting `portal: 'staff'` is now
+ * answered 409, which is exactly how this suite's setup broke the first time.
+ */
+export type E2EPortal = 'public' | 'staff' | 'admin'
+
+/**
  * Sign in through the API and hand the token to the app.
  *
  * Driving the login form would test the form on every single spec instead of
  * once, and would make a change to the sign-in page fail forty unrelated
  * tests. auth.spec.ts drives the real form; everything else takes this door.
  *
- * The portal argument is not cosmetic: the server rejects an LGU account on
- * the public portal with 409 and vice versa, so passing the wrong one here
- * fails in a way that looks like bad credentials.
+ * The portal argument is not cosmetic: the server refuses an account at a door
+ * it does not belong to, so passing the wrong one here fails in a way that
+ * looks like bad credentials — and at the CITIZEN door it now fails with the
+ * same 422 and the same sentence as a wrong password (item #63), so there is
+ * nothing in the failure to hint that the portal was the problem.
  */
 export async function signIn(
   page: Page,
   account: keyof typeof ACCOUNTS,
-  portal: 'staff' | 'public' = 'staff',
+  portal: E2EPortal = 'staff',
 ) {
   await page.goto('/login')
 
@@ -84,7 +95,7 @@ export async function signIn(
     [ACCOUNTS[account], DEMO_PASSWORD, portal] as const,
   )
 
-  // Keyed by portal: the two sites hold separate sessions (see lib/api.ts).
+  // Keyed by portal: the three sites hold separate sessions (see lib/api.ts).
   await page.evaluate(
     ([t, p]) => {
       localStorage.setItem(`biztrack.token.${p}`, t)
@@ -121,6 +132,13 @@ export function sessionFor(account: keyof typeof ACCOUNTS): string {
  * The merge is only possible because the tokens are keyed by portal. If the
  * two files ever collide on a key, this throws rather than silently letting
  * one win — which is precisely the bug the portal split fixed.
+ *
+ * All three portals share ONE origin — they are path prefixes on the same host
+ * — so every key lands in the same `origins` entry and the collision check is
+ * the only thing keeping two sessions from overwriting each other. It is doing
+ * real work: `admin.json` carries two keys (see auth.setup.ts), so a future
+ * fixture that also writes `biztrack.token.staff` would be caught here rather
+ * than producing a spec that signs in as the wrong person.
  */
 export function mergedStorageState(files: string[]): StorageState {
   const states = files.map(
