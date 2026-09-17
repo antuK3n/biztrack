@@ -664,23 +664,78 @@ const REGISTRATION_TYPES: { value: string; label: string; agency: RegistrationAg
  */
 const REGISTRATION_AGENCIES: Record<
   RegistrationAgency,
-  { label: string; placeholder: string; hint: string }
+  { label: string; placeholder: string; hint: string; shape: RegExp | null; unusual: string }
 > = {
   DTI: {
     label: 'DTI Business Name Registration Number',
     placeholder: 'as printed on your DTI certificate',
     hint: 'Issued by the Department of Trade and Industry. Copy it from your Certificate of Business Name Registration.',
+    /*
+     * No shape, so nothing is ever called unusual. DTI publishes no format —
+     * not in its Citizen's Charter, not in the BNRS FAQ, not in the IRR — so
+     * there is no typical to compare against, and inventing one would flag
+     * correct certificates as odd. Silence is the honest answer here.
+     */
+    shape: null,
+    unusual: '',
   },
   SEC: {
     label: 'SEC Registration Number',
     placeholder: 'e.g. CS201912345',
     hint: 'Issued by the Securities and Exchange Commission. It looks like CS201912345, though older certificates use other prefixes.',
+    /*
+     * The shapes actually present in SEC's published registers: an optional
+     * letter prefix (CS, A, AS, ASO, CEO, CN, PP), 4 to 11 digits, and an
+     * optional trailing suffix like CS200729932-A or the embedded hyphen in
+     * ASO91-195123. Bare numerics are real too — "1074" is the shortest
+     * specimen found anywhere.
+     */
+    shape: /^(?:CS|CN|CEO|ASO|AS|A|PP)?\d{4,11}(?:-[A-Za-z0-9]{1,6})?$/i,
+    unusual: 'That does not look like the usual SEC format (CS201912345, or digits alone).',
   },
   CDA: {
     label: 'CDA Registration Number',
     placeholder: 'e.g. 9520-15005879',
     hint: 'Issued by the Cooperative Development Authority. It looks like 9520-15005879, though the digits after the dash vary in length.',
+    /*
+     * CDA's masterlist runs a 4-to-5 digit series prefix — the 9520- and
+     * 10744- series — then 8, 12 or 16 digits after the dash.
+     */
+    shape: /^\d{4,5}-\d{8,16}$/,
+    unusual: 'That does not look like the usual CDA format (9520-15005879).',
   },
+}
+
+/**
+ * Does this number depart from the agency's usual printed shape?
+ *
+ * ── Why this WARNS and never refuses (checklist items 21 and 26) ───────────
+ *
+ * The client asked twice for validation rules per agency, and the reason there
+ * were none is in `registrationNumberValid` below: SEC's own registers carry
+ * more than twenty distinct shapes, CDA runs four at once, and DTI publishes
+ * none. A regex tight enough to catch a wrong answer also refuses certificates
+ * real businesses are holding — and a refused applicant cannot file at all,
+ * while a mistyped number is caught by the officer who opens the uploaded
+ * certificate a few days later. That asymmetry is the whole argument.
+ *
+ * So there are rules now, and they are advisory. An unusual value gets a note
+ * asking the applicant to check it against their certificate, and the form
+ * still accepts it. This catches the case the client is actually worried about
+ * — a transposed digit or the wrong number copied — without inventing an
+ * authority over the shape of a document three national agencies issue.
+ *
+ * Returns false while the value is empty or already failing the hard rule:
+ * there is no point telling somebody their number is unusual underneath a
+ * message telling them it is not a number.
+ */
+function registrationNumberUnusual(agency: RegistrationAgency | null, raw: string): boolean {
+  const trimmed = raw.trim()
+  if (agency === null || trimmed === '' || !registrationNumberValid(trimmed)) return false
+  const { shape } = REGISTRATION_AGENCIES[agency]
+  if (shape === null) return false
+
+  return !shape.test(trimmed.replace(/[\s.]/g, ''))
 }
 
 /** The agency that registers a structure, or null while none is chosen. */
@@ -5719,6 +5774,22 @@ export function ApplyWizard() {
                   {fieldErrors.registration_number}
                 </p>
               )}
+              {/*
+                * The advisory shape check (items 21 and 26). Not an error, not
+                * red, and it blocks nothing — see registrationNumberUnusual for
+                * why refusing an unusual number would be worse than accepting a
+                * wrong one. Rendered only once the applicant has left the field,
+                * so it does not fire at every keystroke of a number being typed,
+                * and never at the same time as the hard error above it.
+                */}
+              {!fieldErrors.registration_number &&
+                touched.registration_number &&
+                registrationNumberUnusual(registrationAgency, form.registration_number) && (
+                  <p className="mt-1 text-xs text-s-orange" aria-live="polite">
+                    {registrationAgencyInfo?.unusual} Check it against your certificate — we will
+                    accept it either way.
+                  </p>
+                )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               {/*

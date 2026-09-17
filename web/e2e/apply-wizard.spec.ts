@@ -2235,3 +2235,55 @@ test('the four TIN boxes are one named question, not four nameless ones', async 
     .evaluateAll((els) => els.filter((el) => el.getAttribute('aria-describedby')).length)
   expect(perBox, 'the error is described on each box, so it is read four times').toBe(0)
 })
+
+test('an unusual registration number is questioned, never refused', async ({ page }) => {
+  /*
+   * Checklist items 21 and 26 — the client asked twice for validation rules on
+   * DTI / SEC / CDA, and this is the shape the answer had to take.
+   *
+   * There were no per-agency rules because a tight one is not safe: SEC's own
+   * registers carry more than twenty shapes, CDA runs four, and DTI publishes
+   * none at all. A regex strict enough to catch a wrong answer also refuses
+   * certificates real businesses hold, and a refused applicant cannot file —
+   * while a mistyped number is caught by the officer who opens the uploaded
+   * certificate.
+   *
+   * So the rule advises. This pins BOTH halves: that an odd value is called
+   * out, and that Next still accepts it. The second half is the one that would
+   * be quietly lost if somebody later "tightened" this into a blocker.
+   */
+  await goToBusinessStep(page)
+
+  const structure = page.getByRole('radiogroup', { name: /type of registration/i })
+  await structure.getByRole('radio', { name: 'Corporation' }).click()
+
+  const sec = page.getByRole('textbox', { name: /SEC Registration Number/i })
+  const note = page.getByText(/does not look like the usual SEC format/i)
+
+  // A real SEC shape draws nothing.
+  await sec.fill('CS201912345')
+  await sec.blur()
+  await expect(note).toBeHidden()
+
+  // Something that is a plausible reference but not an SEC one is questioned.
+  await sec.fill('ABC/2019/XY-1')
+  await sec.blur()
+  await expect(note).toBeVisible()
+  await expect(note).toContainText(/accept it either way/i)
+
+  /*
+   * And it is not an error: the field is not marked invalid, and nothing on the
+   * step reports the number as still needed. Asserting on `aria-invalid` rather
+   * than on the colour is the point — a later restyle must not be able to turn
+   * this into a refusal without failing here.
+   */
+  await expect(sec).not.toHaveAttribute('aria-invalid', 'true')
+  await expect(page.getByText(/still needed on this part/i)).not.toContainText(/registration number/i)
+
+  // DTI publishes no format, so nothing there is ever unusual.
+  await structure.getByRole('radio', { name: 'Sole Proprietorship' }).click()
+  const dti = page.getByRole('textbox', { name: /DTI Business Name Registration Number/i })
+  await dti.fill('ABC/2019/XY-1')
+  await dti.blur()
+  await expect(page.getByText(/does not look like the usual/i)).toBeHidden()
+})
