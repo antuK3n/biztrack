@@ -148,7 +148,7 @@ const NAV_ITEMS: NavItem[] = [
    * permission table has no other way to express. If an `admin.console`
    * permission is ever added, it belongs here instead.
    */
-  { label: 'Records', icon: ClipboardIcon, to: '/admin/records', permission: 'user.manage' },
+  { label: 'Records', icon: FolderIcon, to: '/admin/records', permission: 'user.manage' },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
    * only way to it was to type the address. Transparency is the thing this

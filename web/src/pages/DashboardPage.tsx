@@ -2,8 +2,11 @@ import { useState, type ComponentType, type SVGProps } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AmendIcon,
+  AuditIcon,
   ChartIcon,
+  ClipboardIcon,
   FilePlusIcon,
+  FolderIcon,
   InboxIcon,
   RenewIcon,
   ShieldCheckIcon,
@@ -210,6 +213,26 @@ function StaffHome({ permissions }: { permissions: string[] }) {
       ],
     },
     { to: '/staff/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
+    /*
+     * The four below were in the rail and not here, and the gap is the bug.
+     *
+     * This screen is the super admin's landing page — it is where the account
+     * arrives and what it reads as the list of things it may do. Officer in
+     * Charge, Owner Status, Records and Audit Logs were all reachable from the
+     * rail and invisible here, so the home screen quietly understated the role
+     * by four screens. Records is the newest and the largest of them, which is
+     * how the omission got noticed.
+     *
+     * Each carries the same permission its rail entry and its route carry, so
+     * the three cannot disagree: nav.ts decides who sees the entry, App.tsx
+     * decides who may reach the address, and this decides what the home screen
+     * offers. A card gated more loosely than its route is a tile that bounces
+     * the reader back to where they started.
+     */
+    { to: '/staff/admin/oic', icon: ClipboardIcon, label: 'Officer in Charge', permission: 'oic.assign' },
+    { to: '/staff/admin/owners', icon: ShieldCheckIcon, label: 'Owner Status', permission: 'owner.manage_status' },
+    { to: '/staff/admin/records', icon: FolderIcon, label: 'Records', permission: 'user.manage' },
+    { to: '/staff/admin/audit-logs', icon: AuditIcon, label: 'Audit Logs', permission: 'audit.view' },
   ]
 
   const visible = cards.flatMap((c) => {
