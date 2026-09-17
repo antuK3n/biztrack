@@ -72,6 +72,23 @@ class OfficeFormController extends Controller
             ->values()
             ->map(fn (string $code) => [
                 'permit_type_code' => $code,
+                /*
+                 * Has the applicant actually saved anything against this sheet?
+                 *
+                 * `form_data` cannot answer that. It is never empty —
+                 * OfficeFormAnswers::derive fills a sheet the applicant has
+                 * never opened with the answers the filing already holds, which
+                 * is the whole point of the block above. So a caller asking
+                 * "which of these did they submit?" reading non-emptiness gets
+                 * every sheet, every time.
+                 *
+                 * ApplicationResource has carried this flag for the officer's
+                 * review screen since that screen was built, for the same
+                 * reason. The applicant's own filing page now asks the same
+                 * question (checklist item 24) and was drawing five blank
+                 * statutory forms under "the forms you submitted" without it.
+                 */
+                'form_saved' => isset($stored[$code]),
                 'form_data' => OfficeFormAnswers::derive($application, $code, $stored[$code]->form_data ?? []),
                 /*
                  * What this office's paper asks the applicant to bring. It
