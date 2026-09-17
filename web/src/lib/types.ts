@@ -1211,6 +1211,95 @@ export interface ProcessingTimeReport {
 }
 
 /*
+ * Office Performance (issue #102) — the six offices on one set of axes.
+ *
+ * Mirrors App\Support\OfficePerformanceAnalytics. Read that class's docblock
+ * before touching the nullable fields below; they are the load-bearing part of
+ * this shape, not an accident of an optional column.
+ */
+
+/** One office's row in the comparison. */
+export interface OfficePerformanceRow {
+  code: string
+  name: string
+
+  /** Reviews finished inside the window. A count of rows, true of every office. */
+  handled: number
+  /** Assigned and unfinished, as of now — deliberately not cut to the window. */
+  open: number
+  /** The longest current wait, or null when nothing is open. */
+  oldest_open_working_days: number | null
+
+  /**
+   * False for an office whose recorded time measures something other than its
+   * own step. One office is in that position — BPLO, whose assignment row is
+   * stamped again at final approval — and when it is, every figure below is
+   * null and `not_comparable_reason` carries the sentence the screen prints.
+   */
+  turnaround_comparable: boolean
+  not_comparable_reason: string | null
+
+  /*
+   * Null means NOT COMPARABLE or NOT MEASURABLE, never zero. Zero working days
+   * is a real value here — an office that finished the same day it received —
+   * so a screen that rendered a missing figure as 0 would print "instant"
+   * where the truth is "we cannot say". Typed nullable so the compiler finds
+   * every place that has to decide which it is.
+   */
+  mean_working_days: number | null
+  median_working_days: number | null
+  slowest_working_days: number | null
+  /** Holds whose filing has a tier set — the denominator of `breach_rate`. */
+  classified_holds: number | null
+  /** Holds where this office alone outran the whole statutory allowance. */
+  breached: number | null
+  /** `breached` as a percentage of `classified_holds`. */
+  breach_rate: number | null
+
+  /** Of `handled`, how many came from a business that looks like test data. */
+  test_holds: number
+}
+
+/** One RA 11032 tier and how the comparable offices' holds sat against it. */
+export interface OfficePerformanceTier {
+  key: string
+  label: string
+  statutory_working_days: number
+  holds: number
+  within: number
+  over: number
+}
+
+export interface OfficePerformanceReport {
+  generated_at: string
+  window_weeks: number
+  window_start: string
+  offices: OfficePerformanceRow[]
+  /** All three, always — a tier with no filings still exists in the statute. */
+  tiers: OfficePerformanceTier[]
+  /** Comparable holds on a filing nobody has classified into a tier. */
+  unclassified_holds: number
+  totals: {
+    offices: number
+    handled: number
+    open: number
+    /** Offices whose figures are in the comparison — fewer than `offices`. */
+    compared_offices: number
+  }
+  /**
+   * What the averages above are carrying. `businesses` has no provenance
+   * column, so `test_businesses` is a guess from the name and `patterns` is the
+   * guess itself, printed so a reader can judge it.
+   */
+  data_quality: {
+    total_businesses: number
+    test_businesses: number
+    test_holds: number
+    patterns: string[]
+  }
+}
+
+/*
  * Analytics Dashboard (docs/r-integration-spec.md §1).
  *
  * Mirrors App\Support\DashboardAnalytics exactly — that class is what the

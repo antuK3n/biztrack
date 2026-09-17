@@ -393,6 +393,23 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/processing-time', [AnalyticsController::class, 'processingTime']);
         Route::get('analytics/processing-time/report', [AnalyticsController::class, 'processingTimeReport']);
         /*
+         * Office Performance (issue #102) — the same six offices, compared
+         * rather than charted one at a time.
+         *
+         * Same permission as its neighbour above, for the same reason and not
+         * merely by proximity: it ranks the departments against each other and
+         * against RA 11032, so BPLO reading it would be reading a league table
+         * it is in. `analytics.view` would have been the wrong door even though
+         * BPLO is the office that most wants this screen.
+         *
+         * No `/report` companion. The other four screens have one because the
+         * client files their PDFs; nobody has asked for this one, and a PDF
+         * route is a Blade view plus a fixture plus a place for the printed
+         * figures to drift from the screen's. Adding it later is this line
+         * plus a view.
+         */
+        Route::get('analytics/office-performance', [AnalyticsController::class, 'officePerformance']);
+        /*
          * No staffing-simulation route. App\Support\Des is a complete, tested
          * discrete-event simulation, but it is out of scope for the delivered
          * flow: the client's paper has six features and DES is not one of them.

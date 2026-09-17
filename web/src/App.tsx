@@ -34,6 +34,7 @@ import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
+import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
 import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
@@ -452,6 +453,30 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/*
+            Office Performance (issue #102): the same six offices Processing Time
+            charts, but compared against each other and against RA 11032 rather
+            than each against its own past.
+
+            Same permission as the route above, and for the same reason rather
+            than by proximity — it ranks the departments, BPLO among them, so it
+            belongs to the office doing the oversight. `analytics.view` would put
+            BPLO in front of a league table it appears in.
+
+            This permission is repeated in three places that must agree: here,
+            the rail entry in lib/nav.ts, and the tab in AnalyticsTabs. Nothing
+            derives one from another, so changing one without the others turns a
+            visible link into a bounce home. e2e/office-performance.spec.ts and
+            e2e/analytics.spec.ts are what catch that.
+          */}
+          <Route
+            path="/staff/analytics/offices"
+            element={
+              <RequirePermission permission="analytics.processing_time">
+                <OfficePerformancePage />
+              </RequirePermission>
+            }
+          />
           <Route
             path="/staff/analytics/business-growth"
             element={
@@ -724,7 +749,6 @@ export default function App() {
         <Route path="/inspections" element={<MovedToStaff path="/inspections" />} />
         <Route path="/inspections/:id" element={<MovedToStaff path="/inspections" />} />
         <Route path="/analytics/*" element={<MovedAnalytics />} />
-        <Route path="/admin/*" element={<Navigate to="/staff/dashboard" replace />} />
 
         <Route path="*" element={<NotFoundRedirect />} />
       </Routes>

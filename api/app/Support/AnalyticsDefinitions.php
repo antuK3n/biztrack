@@ -74,6 +74,7 @@ final class AnalyticsDefinitions
         return match ($dataset) {
             AnalyticsDatasets::DASHBOARD => self::dashboard(),
             AnalyticsDatasets::PROCESSING_TIME => self::processingTime(),
+            AnalyticsDatasets::OFFICE_PERFORMANCE => self::officePerformance(),
             AnalyticsDatasets::RENEWAL_RISK => self::renewalRisk(),
             AnalyticsDatasets::RENEWAL_MODEL => self::renewalModel(),
             AnalyticsDatasets::BUSINESS_GROWTH => self::businessGrowth(),
@@ -364,6 +365,75 @@ final class AnalyticsDefinitions
                 'formula' => 'Every departmental review finished inside the window.',
                 'covers' => 'All finished reviews, including weeks with too few to chart. It is larger than the number the chart draws.',
                 'why' => 'How much work the screen rests on. A chart drawn from a few dozen reviews describes those reviews, not the office.',
+            ],
+        ];
+    }
+
+    /**
+     * Keys are dot paths into the office-performance payload.
+     *
+     * This screen puts six offices in one table, so its definitions carry a duty
+     * the other screens' do not: every column has to say whether it means the
+     * same thing in all six rows. Two of them do not, and both say so in
+     * `covers` rather than in a footnote — the reader comparing two numbers is
+     * looking at the number, not at the bottom of the page.
+     *
+     * The tone rule from the class docblock applies hardest here. "Held" and
+     * "handed on" are what an office does; "turnaround", "throughput" and
+     * "SLA breach" are what a consultant calls it.
+     *
+     * @return array<string, array{label: string, formula: string, covers: string, why: string}>
+     */
+    private static function officePerformance(): array
+    {
+        return [
+            'offices' => [
+                'label' => 'Office Performance',
+                'formula' => 'One row per office: reviews finished in the window, filings sitting with it now, and how long it held the ones it finished.',
+                'covers' => 'All six offices, whether or not they finished anything. Finished reviews only in the time columns; open work is counted separately because it has no end date yet.',
+                'why' => 'The only screen that puts the offices side by side. A queue building at one desk is invisible on a screen that shows one office at a time.',
+            ],
+
+            'offices.mean_working_days' => [
+                'label' => 'Working days held',
+                'formula' => 'Working days from a filing reaching the office to that office finishing with it. The average and the middle value are both shown, because a few long waits pull an average up while the middle value stays where most of the work lands.',
+                'covers' => 'BPLO is blank here, and that is not missing data. Its record is stamped a second time when it approves the finished filing, so the time recorded against it is the whole filing rather than BPLO\'s own step. Weekends are not counted; public holidays are.',
+                'why' => 'This is time an applicant spends waiting at one desk, in the unit RA 11032 uses, so it can be read straight against the 3, 7 and 20 day allowances.',
+            ],
+
+            'offices.turnaround_comparable' => [
+                'label' => 'Comparable',
+                'formula' => 'Whether the time recorded against an office measures that office\'s own step.',
+                'covers' => 'Five of the six offices. BPLO is the exception and the row says why in full.',
+                'why' => 'A blank cell in a comparison reads as zero or as an oversight. Naming the one office whose clock measures something else is the difference between a gap and a lie.',
+            ],
+
+            'offices.open' => [
+                'label' => 'Open now',
+                'formula' => 'Filings assigned to the office and not yet finished, counted at this moment, with the longest wait beside the count.',
+                'covers' => 'Everything still open, including filings assigned before the window opened. Deliberately not cut to the window: the filing that has sat longest is usually the oldest one.',
+                'why' => 'The count says how much is waiting; the longest wait says whether anything has been forgotten. A small queue with a nine-day head is worse than a large one that keeps moving.',
+            ],
+
+            'offices.breached' => [
+                'label' => 'Past the allowance alone',
+                'formula' => 'Filings where one office on its own took more working days than RA 11032 allows for the whole transaction — 3 simple, 7 complex, 20 highly technical.',
+                'covers' => 'Filings with a tier set. Ones nobody has classified are left out rather than assumed into a tier, and the number left out is shown under the table.',
+                'why' => 'The statute gives the City one allowance for the whole filing and does not divide it between offices, so no office can be charged a share of it. What can be said is that an office which alone outran the full allowance put that filing past its deadline whatever anyone else did.',
+            ],
+
+            'tiers' => [
+                'label' => 'RA 11032 tiers',
+                'formula' => 'Each tier\'s statutory allowance, and how many office holds finished inside it.',
+                'covers' => 'Holds by the five offices whose recorded time is their own step. BPLO\'s are left out because its figure already contains the other five.',
+                'why' => 'Shows which tier the pressure is in. Twenty days is generous and three is not, so the same office can look comfortable on one and stretched on the other.',
+            ],
+
+            'data_quality' => [
+                'label' => 'Test data inside these averages',
+                'formula' => 'Businesses whose names match the shapes the automated test suite creates, counted against the whole register.',
+                'covers' => 'A guess from the name, because nothing records where a row came from. It will miss a test business named like a real one and could catch a real one named like a test.',
+                'why' => 'Filings from test businesses are inside every average on this screen. An average that cannot be cleaned should at least say what it is carrying.',
             ],
         ];
     }
