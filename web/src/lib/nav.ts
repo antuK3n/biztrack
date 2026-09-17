@@ -4,11 +4,13 @@ import {
   ChartIcon,
   ClipboardIcon,
   DraftsIcon,
+  FileTextIcon,
   FolderIcon,
   HistoryIcon,
   HomeIcon,
   InboxIcon,
   MailIcon,
+  MapPinIcon,
   ShieldCheckIcon,
   TrackIcon,
   UsersIcon,
@@ -149,6 +151,45 @@ const NAV_ITEMS: NavItem[] = [
    * permission is ever added, it belongs here instead.
    */
   { label: 'Records', icon: FolderIcon, to: '/admin/records', permission: 'user.manage' },
+  /*
+   * Permits — every certificate the City has issued, as one table (issue #103).
+   *
+   * `permit.view_all`, which is what the endpoint behind the screen is already
+   * read through (PermitController::scopeToReader), and the same permission
+   * App.tsx puts on the route. The two must agree or one of them lies.
+   *
+   * That permission is held by BPLO, the five clearance offices AND the super
+   * admin, so this entry appears on seven rails — which is the outcome Records
+   * above rejected for itself, and the difference is worth being explicit
+   * about rather than letting the next reader think one of the two is a
+   * mistake. Records' three tabs reach whole registers (every filing, every
+   * business, every owner account) that an office has no business browsing.
+   * This screen shows an office only the certificates it issued itself, scoped
+   * server-side by the same office boundary their queue already runs on — so a
+   * clearance officer landing here sees their own office's permits in one
+   * place, which is useful, and cannot see one row they could not already open
+   * from a filing. If the client says the table is the super admin's alone,
+   * narrow it to `user.manage` HERE and in App.tsx together.
+   */
+  { label: 'Permits', icon: FileTextIcon, to: '/admin/permits', permission: 'permit.view_all' },
+  /*
+   * Business Map — the register plotted, coloured by permit state (issue #104).
+   *
+   * `user.manage`, the same gate Records carries and for the same reason: it is
+   * standing in for a "this is the super admin" check the permission table
+   * cannot otherwise express. See the Records note above for the full argument.
+   *
+   * Worth being explicit about why this does NOT follow Permits directly above,
+   * which sits on `permit.view_all` and therefore appears on all seven rails.
+   * That table is scoped per office — a fire inspector sees the FSICs their
+   * office issued — so widening it hands nobody a read they did not have. A map
+   * cannot be scoped that way and stay a map: the whole of it is the point, and
+   * a per-office version would be a scatter of unrelated dots over a city. So
+   * this is the cross-office read that `ApplicationVisibility` exists to refuse
+   * everyone but the admin (AGENTS.md §10), and the narrower permission is the
+   * honest one even though its name fits worse.
+   */
+  { label: 'Business Map', icon: MapPinIcon, to: '/admin/business-map', permission: 'user.manage' },
   /*
    * Audit Logs was built, routed and permissioned, and then never linked: the
    * only way to it was to type the address. Transparency is the thing this

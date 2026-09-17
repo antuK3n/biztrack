@@ -41,6 +41,8 @@ import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
 import { OwnersPage } from './pages/admin/OwnersPage'
 import { RecordsPage } from './pages/admin/RecordsPage'
+import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
+import { BusinessMapPage } from './pages/admin/BusinessMapPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -500,6 +502,57 @@ export default function App() {
             element={
               <RequirePermission permission="user.manage">
                 <RecordsPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            Every issued certificate, as one table (issue #103).
+
+            `permit.view_all` is the permission the endpoint behind this screen
+            is already read through — PermitController::scopeToReader — so the
+            route asks for exactly the power the page exercises, and the rail
+            entry in nav.ts carries the same claim. The route and the rail must
+            never disagree: a rail that hides the entry while the route still
+            admits a typed URL is a screen nobody can find and anybody can
+            reach.
+
+            Unlike Records next door, this is deliberately NOT narrowed to the
+            super admin. `permit.view_all` is held by BPLO and the five
+            clearance offices too, and each of them lands on a table scoped to
+            the certificates their own office issued — which is a screen those
+            offices have a real use for, not a console they were handed by
+            accident. The Records comment argues the opposite for Records, and
+            the difference is the payload: that screen's three tabs reach
+            registers an office has no business browsing, whereas this one
+            cannot show a reader a permit they could not already open.
+          */}
+          <Route
+            path="/staff/admin/permits"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <AdminPermitsPage />
+              </RequirePermission>
+            }
+          />
+          {/*
+            The register on a map, coloured by permit state (issue #104).
+
+            `user.manage` — the same claim its rail entry in nav.ts carries, and
+            the same stand-in Records next door makes for "this is the super
+            admin". `permit.view_all` reads like the better fit and is the wrong
+            gate here for the reason the Permits route above is right to use it
+            and this one is not: that table shows a reader only certificates
+            they could already open, scoped to their own office, while this map
+            plots EVERY business in the city at once. There is no per-office
+            version of a city-wide plot, so the office-separability boundary
+            (AGENTS.md §10) says it belongs to the one role that is allowed to
+            see across all of them.
+          */}
+          <Route
+            path="/staff/admin/business-map"
+            element={
+              <RequirePermission permission="user.manage">
+                <BusinessMapPage />
               </RequirePermission>
             }
           />
