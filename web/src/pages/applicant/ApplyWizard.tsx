@@ -5742,14 +5742,23 @@ export function ApplyWizard() {
                 {fieldErrors.name && <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.name}</p>}
               </div>
             </div>
-            <div>
+            {/*
+              * Half width, in the same two-column grid as every pair around it.
+              *
+              * This was a full-bleed row for one optional short answer, so the
+              * widest input on the step was the one nobody has to fill, and the
+              * column rhythm broke between Business Name above and Telephone
+              * below. The empty second cell is the point: the eye keeps the
+              * left edge it has been following.
+              */}
+            <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
-              <FieldLabel>Trade Name / Franchise</FieldLabel>
-              <input
-                value={form.trade_name}
-                onChange={(e) => update('trade_name', e.target.value)}
-                className={inputCls}
-              />
+                <FieldLabel>Trade Name / Franchise</FieldLabel>
+                <input
+                  value={form.trade_name}
+                  onChange={(e) => update('trade_name', e.target.value)}
+                  className={inputCls}
+                />
               </label>
             </div>
 
