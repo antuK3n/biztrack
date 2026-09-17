@@ -1,7 +1,9 @@
 <?php
 
+use App\Enums\AssignmentStatus;
 use App\Enums\InspectionStatus;
 use App\Models\Application;
+use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
 use App\Models\AuditLog;
 use App\Models\Department;
@@ -23,6 +25,11 @@ use App\Models\User;
  *  2. `data` is still a plain array, so unwrapping callers keep working;
  *  3. the order puts the useful rows first — `/inspections` was ascending by
  *     `scheduled_at`, so page one opened on 2023.
+ *
+ * "Useful first" is not "newest first", and one list now goes the other way:
+ * `/assignments` is a work queue under an RA 11032 clock, so its top row is the
+ * longest-waiting filing. Read each block's own direction rather than the one
+ * above it.
  */
 
 /**
@@ -143,19 +150,55 @@ it('opens each list on the rows that are worth seeing first', function () {
     rsort($sorted);
     expect($created)->toBe($sorted, 'applications are not newest-first');
 
-    // Assignments: newest routing first — an officer wants the work that just
-    // arrived, not the first thing the office was ever sent.
+    /*
+     * Assignments: OLDEST routing first, and this assertion used to say the
+     * opposite.
+     *
+     * It read "newest routing first — an officer wants the work that just
+     * arrived, not the first thing the office was ever sent", and that reason
+     * was wrong rather than merely outdated. RA 11032 puts a 3 / 7 / 20
+     * working-day clock on the filing, so the case nearest a breach is always
+     * the one that has waited longest, and newest-first pushed it further down
+     * the queue every time somebody else filed. Issue #91, from the client:
+     * "The OLDEST application should appear at the top, not the latest."
+     *
+     * Kept apart from the two `rsort` checks either side of it on purpose — a
+     * reader skimming three near-identical blocks should trip over the one that
+     * sorts the other way.
+     *
+     * The rows are made here, and that is not tidiness. The seeded database
+     * gives BPLO exactly ONE assignment, so this block was sorting a
+     * single-element array and agreeing with itself: it passed against
+     * newest-first and against oldest-first alike, and had done since it was
+     * written — the same "fixture that asserts nothing" that had the inspections
+     * block below reading an empty array. Measured before changing it: count 1,
+     * distinct `assigned_at` 1. Three rows spanning years, inserted out of
+     * chronological order, is the minimum that can tell the two directions
+     * apart, and it fails against `orderByDesc` as it should.
+     */
     $bplo = authAs('bplo@biztrack.local');
+    $bploDepartmentId = Department::where('code', 'BPLO')->value('id');
+    $queueApplicationId = Application::query()->value('id');
+    foreach (['2026-03-09', '2024-07-01', '2025-11-22'] as $day) {
+        ApplicationAssignment::create([
+            'application_id' => $queueApplicationId,
+            'department_id' => $bploDepartmentId,
+            'status' => AssignmentStatus::Pending,
+            'assigned_at' => $day.' 08:00:00',
+        ]);
+    }
+
     $assigned = array_filter(array_column(
         test()->withHeaders($bplo)->getJson('/api/v1/assignments')->assertOk()->json('data'),
         'assigned_at',
     ));
-    // An empty list would satisfy the sort trivially, which is how this test
-    // would quietly stop testing anything if the account lost its scope.
-    expect($assigned)->not->toBeEmpty('BPLO has no assignments to order');
+    // Below four and the three planted rows could be telling us only that the
+    // seeded one sorts; the count is asserted so a scoping change that hides
+    // them cannot look like a pass.
+    expect($assigned)->toHaveCount(4, 'BPLO cannot see the assignments routed to it');
     $sortedAssigned = $assigned;
-    rsort($sortedAssigned);
-    expect(array_values($assigned))->toBe(array_values($sortedAssigned), 'assignments are not newest-first');
+    sort($sortedAssigned);
+    expect(array_values($assigned))->toBe(array_values($sortedAssigned), 'assignments are not oldest-first');
 
     /*
      * Inspections: the visit just done or about to be, not one from 2023 — the
