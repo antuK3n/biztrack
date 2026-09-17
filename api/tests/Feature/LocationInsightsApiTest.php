@@ -420,13 +420,31 @@ describe('the dairy applicant who read a correct 0 as a bug', function () {
          * This asserts the exact key set rather than just `not->toHaveKey`, so a
          * SIXTH key cannot be added without someone reading this comment and the
          * decision behind it.
+         *
+         * ── `zoning` was added, and here is the reading ────────────────────
+         *
+         * It is not a fifth FIGURE. What the client refused was another row in
+         * this panel's table — another count, on another width of PSIC, sitting
+         * beside the two that already invite arithmetic that does not hold.
+         * `zoning` is a different question answered in a different section of
+         * the step: what City Ordinance 24-2018 lists for the barangay's zones
+         * (checklist item 20). It shares the request because it shares the
+         * request's inputs — a pin, a trade — and splitting it into a second
+         * round trip would make the conformity sentence lag the figures above
+         * it by a network hop for no gain.
+         *
+         * The guard keeps its teeth: the key set is still exact, so a SEVENTH
+         * key still stops here.
          */
         dairyNeighbourhood();
 
         $body = insightsFor(['psic_code_id' => PsicCode::where('code', '10500')->value('id')]);
 
         expect(array_keys($body['data']))
-            ->toBe(['radius_m', 'concentration', 'similar', 'common_type']);
+            ->toBe(['radius_m', 'concentration', 'similar', 'common_type', 'zoning']);
+
+        // The thing that was actually removed is still gone.
+        expect($body['data'])->not->toHaveKey('your_line');
     });
 
     it('still separates the catch-all Other from a line never chosen', function () {
