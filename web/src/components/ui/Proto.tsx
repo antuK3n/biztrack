@@ -661,12 +661,28 @@ export function StatusCard({
 export const inputCls =
   'w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal'
 
-/** Field label above an input. */
+/**
+ * Field label above an input.
+ *
+ * The asterisk is drawn red and hidden from assistive tech, with the word
+ * "required" carried beside it in a visually-hidden span. Colour and a glyph
+ * are the whole of the signal on screen (DESIGN.md, "Never Color Alone"), and
+ * a bare `*` is read by screen readers as "star", "asterisk" or nothing at all
+ * depending on the reader and its punctuation setting — so the one group who
+ * cannot see the red is also the group most likely to hear nothing. The
+ * sentence at the foot of each wizard step explains the convention for sighted
+ * readers; this is the same sentence for everyone else.
+ */
 export function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
   return (
     <span className="mb-1.5 block text-[13px] font-semibold text-ink">
       {children}
-      {required && <span className="text-s-red"> *</span>}
+      {required && (
+        <>
+          <span className="text-s-red" aria-hidden="true"> *</span>
+          <span className="sr-only"> (required)</span>
+        </>
+      )}
     </span>
   )
 }

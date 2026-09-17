@@ -5875,7 +5875,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                  <FieldLabel>E-mail Address</FieldLabel>
+                  <FieldLabel required>E-mail Address</FieldLabel>
                   <input
                     inputMode="email"
                     value={form.email}
@@ -5915,7 +5915,7 @@ export function ApplyWizard() {
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <FieldLabel>Surname</FieldLabel>
+                  <FieldLabel required>Surname</FieldLabel>
                   <input
                     value={form.owner_surname}
                     onChange={(e) => update('owner_surname', e.target.value)}
@@ -5923,7 +5923,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block">
-                  <FieldLabel>Given Name</FieldLabel>
+                  <FieldLabel required>Given Name</FieldLabel>
                   <input
                     value={form.owner_given_name}
                     onChange={(e) => update('owner_given_name', e.target.value)}
@@ -5949,7 +5949,7 @@ export function ApplyWizard() {
                 </label>
               </div>
               <div className="mt-4">
-                <FieldLabel>Gender</FieldLabel>
+                <FieldLabel required>Gender</FieldLabel>
                 {/*
                   Two options, as the paper's M / F boxes print. A radiogroup
                   rather than toggles, so a screen reader announces that picking
@@ -6015,7 +6015,7 @@ export function ApplyWizard() {
                   </p>
                   <div>
                     <label className="block">
-                    <FieldLabel>Name of President / Officer in Charge</FieldLabel>
+                    <FieldLabel required>Name of President / Officer in Charge</FieldLabel>
                     <input
                       value={form.president_officer_name}
                       onChange={(e) => update('president_officer_name', e.target.value)}
@@ -6035,7 +6035,7 @@ export function ApplyWizard() {
                         in a place the eye reaches after the input. On the label
                         it is read before the field it qualifies.
                       */}
-                      <FieldLabel>Citizenship (of President/OIC)</FieldLabel>
+                      <FieldLabel required>Citizenship (of President/OIC)</FieldLabel>
                       <input
                         value={form.citizenship}
                         onChange={(e) => update('citizenship', e.target.value)}
@@ -6046,7 +6046,7 @@ export function ApplyWizard() {
                     </div>
                     <div>
                       <label className="block">
-                      <FieldLabel>Capital Participation (% Filipino)</FieldLabel>
+                      <FieldLabel required>Capital Participation (% Filipino)</FieldLabel>
                       <input
                         inputMode="decimal"
                         value={form.capital_participation_filipino}
@@ -6132,7 +6132,7 @@ export function ApplyWizard() {
               * this asks what this PREMISES is to it.
               */}
             <div>
-              <FieldLabel>Economic Organization</FieldLabel>
+              <FieldLabel required>Economic Organization</FieldLabel>
               <p className="mb-2 text-xs text-ink-secondary">
                 What this place of business is to your business — not how your business is
                 registered, which you answered above.
