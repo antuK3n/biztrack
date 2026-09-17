@@ -1120,7 +1120,17 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
   // The right sheet for the barangay picked, loaded rather than 404ing.
   const img = card.getByRole('img')
   await expect(img).toHaveAttribute('src', '/zoning-maps/dampalit.png')
-  expect(await img.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0)
+  /*
+   * Polled, because `src` being right and the picture being THERE are two
+   * different moments. Sampling naturalWidth the instant after the attribute
+   * assertion read 0 whenever Dampalit's sheet was cold — it is a real PNG over
+   * the network, and whether it had arrived depended on which barangay the
+   * previous test happened to warm. The assertion is unchanged; only the
+   * waiting is. A 404 or a broken file still fails, on the timeout.
+   */
+  await expect
+    .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 15_000 })
+    .toBeGreaterThan(0)
 
   /*
    * Read off Dampalit's own sheet: the fishpond belt is what the barangay is,
@@ -2154,7 +2164,7 @@ test('a TIN pasted into the first box spreads across all four', async ({ page, c
   await page.keyboard.press('ControlOrMeta+v')
   await expect(boxes[2]).toHaveValue('111')
   await expect(boxes[3]).toHaveValue('')
-  await page.getByLabel(/^business name/i).click()
+  await page.getByLabel(/^\d+\. business name/i).click()
   await expect(page.locator('#tin-error')).toHaveCount(0)
 })
 
@@ -2187,7 +2197,7 @@ test('a TIN already on file reads back into the four boxes', async ({ page }) =>
   await expect(boxes[3]).toHaveValue(/^\d*$/)
 
   // A value that arrived correctly does not complain about itself.
-  await page.getByLabel(/^business name/i).click()
+  await page.getByLabel(/^\d+\. business name/i).click()
   await expect(page.locator('#tin-error')).toHaveCount(0)
 })
 
@@ -2225,7 +2235,7 @@ test('the four TIN boxes are one named question, not four nameless ones', async 
   // for the eleven digits it takes to reach a right answer.
   await expect(page.locator('#tin-error')).toHaveCount(0)
 
-  await page.getByLabel(/^business name/i).click()
+  await page.getByLabel(/^\d+\. business name/i).click()
   await expect(page.locator('#tin-error')).toBeVisible()
 
   const describedBy = await group.getAttribute('aria-describedby')
@@ -2287,3 +2297,60 @@ test('an unusual registration number is questioned, never refused', async ({ pag
   await dti.blur()
   await expect(page.getByText(/does not look like the usual/i)).toBeHidden()
 })
+
+test('the numbers on a step run in the order the fields are read', async ({ page }) => {
+  /*
+   * Checklist item 23 — "Implement numbering so that the user can easily see
+   * which number they are missing if they look at the missing fields list at
+   * the bottom near the Next button."
+   *
+   * The numbers come from STEP_FIELDS in ApplyWizard, a hand-kept list in
+   * render order, and the risk is exactly that: somebody moves a field in the
+   * JSX and the list stays where it was, so the numbers beside the questions
+   * stop ascending and the "still needed" line points at the wrong ones.
+   *
+   * This walks the rendered step and fails on that. It asserts ORDER, not the
+   * labels — pinning the labels here would be a second copy of the list to keep
+   * in step, which is the thing being guarded against.
+   */
+  await goToBusinessStep(page)
+
+  const numbers = await page
+    .locator('main')
+    .locator('span.tnum')
+    .evaluateAll((els) =>
+      els
+        .map((e) => (e.textContent ?? '').trim())
+        .filter((t) => /^\d+\.$/.test(t))
+        .map((t) => Number(t.replace('.', ''))),
+    )
+
+  expect(numbers.length, 'the step draws no numbered fields at all').toBeGreaterThan(5)
+  expect(numbers, `numbers are out of order: ${numbers.join(', ')}`).toEqual(
+    [...numbers].sort((a, b) => a - b),
+  )
+  // Conditional fields keep their number, so gaps are legitimate; repeats never are.
+  expect(new Set(numbers).size, 'two fields share a number').toBe(numbers.length)
+
+  /*
+   * And the list at the foot cites the same numbers. This is the half the
+   * client actually asked for — a number beside a field is only useful if the
+   * sentence sending them there uses it.
+   */
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).toContainText(/\d+\.\s/)
+
+  /*
+   * And it lists them in field order. `missingFor` builds the list in the order
+   * the CHECKS run, which is not the order the questions are asked — this step
+   * reported "4. Business Name, 1. Type of Registration, 2. …, 3. …" before it
+   * was sorted, which is a worse sentence than the unnumbered one it replaced.
+   */
+  const listed = (await still.textContent()) ?? ''
+  const cited = [...listed.matchAll(/(?:^|[\s,:])(\d+)\. /g)].map((m) => Number(m[1]))
+  expect(cited.length, 'the list cites no numbers').toBeGreaterThan(1)
+  expect(cited, `the list is out of field order: ${cited.join(', ')}`).toEqual(
+    [...cited].sort((a, b) => a - b),
+  )
+})
+

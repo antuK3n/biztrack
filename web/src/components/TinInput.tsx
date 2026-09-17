@@ -93,6 +93,7 @@ export function TinInput({
   error,
   hintId,
   errorId,
+  number,
 }: {
   /** The dash-joined TIN the form holds — unchanged from the single-field days. */
   value: string
@@ -102,6 +103,8 @@ export function TinInput({
   error?: string
   hintId?: string
   errorId?: string
+  /** The field's position on its step (checklist item 23), inside the legend. */
+  number?: number
 }) {
   const groupId = useId()
 
@@ -287,6 +290,7 @@ export function TinInput({
       className="min-w-0 border-0 p-0"
     >
       <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
+        {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
         <span className="text-s-red" aria-hidden="true"> *</span>
