@@ -61,6 +61,31 @@ class AnalyticsController extends Controller
         return $this->serve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);
     }
 
+    /**
+     * Office Performance — the six offices on one set of axes (issue #102).
+     *
+     * Sits beside processingTime() on `analytics.processing_time` rather than on
+     * `analytics.view`, and the reason is the one already written over the route
+     * group: this screen measures the DEPARTMENTS, BPLO among them, so it
+     * belongs to the office doing the oversight and not to one of the offices
+     * being overseen. Putting it on `analytics.view` would hand BPLO a ranking
+     * of its peers against itself.
+     *
+     * Nothing is spliced on at serve time here. Every figure the screen shows is
+     * in the stored snapshot, which is what lets `computed_at` describe the
+     * whole screen — including the test-data count, which is the one figure that
+     * would have been tempting to read live. It must not be: a live count printed
+     * over snapshot averages would tell the reader how much test data is in the
+     * register NOW while the averages beside it carry however much was in it at
+     * three in the morning, and nothing on the page would distinguish the two
+     * vintages. See the opposite call on businessGrowth(), where the caption can
+     * only come from the live fact table and the inconsistency is the lesser one.
+     */
+    public function officePerformance(Request $request): JsonResponse
+    {
+        return $this->serve(AnalyticsDatasets::OFFICE_PERFORMANCE, ['weeks' => $this->weeks($request)]);
+    }
+
     public function processingTimeReport(Request $request): Response
     {
         $resolved = $this->resolve(AnalyticsDatasets::PROCESSING_TIME, ['weeks' => $this->weeks($request)]);

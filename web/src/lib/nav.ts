@@ -121,9 +121,25 @@ const NAV_ITEMS: NavItem[] = [
     icon: ChartIcon,
     to: '/analytics',
     anyPermission: ['analytics.view', 'analytics.processing_time'],
+    /*
+     * The super admin now lands on Office Performance rather than Processing
+     * Time (issue #102), and the destination moved rather than a seventh rail
+     * row being added.
+     *
+     * Two reasons. A rail entry per analytics screen would give BPLO one row
+     * and the super admin two for a feature the client asks for as "Analytics";
+     * and of the super admin's two screens, this is the one that answers the
+     * question a reader arrives with. Office Performance says which office is
+     * slow; Processing Time says what that office has been doing week by week,
+     * which is the second question and is one tab away.
+     *
+     * The permission is unchanged and must stay `analytics.processing_time` —
+     * the same claim the route in App.tsx makes. If these two ever disagree the
+     * rail draws a link that RequirePermission bounces, which fails nothing.
+     */
     toByPermission: {
       'analytics.view': '/analytics',
-      'analytics.processing_time': '/analytics/processing-time',
+      'analytics.processing_time': '/analytics/offices',
     },
   },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },

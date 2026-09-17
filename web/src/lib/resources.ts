@@ -41,6 +41,7 @@ import type {
   Notification,
   OfficeForm,
   OfficeFormRequirement,
+  OfficePerformanceReport,
   OfficerRequest,
   PageMeta,
   PageParams,
@@ -1102,6 +1103,22 @@ export const analytics = {
     unwrapComputed<ProcessingTimeReport>(
       api.get('/analytics/processing-time', { params: { weeks } }),
     ),
+  /**
+   * Issue #102: the six offices compared, rather than charted one at a time.
+   *
+   * Same permission and the same window options as processingTime above, which
+   * is not a coincidence to be tidied away — the two screens are read one after
+   * the other by one person, and a window on one that does not exist on the
+   * other invites comparing figures over different spans without noticing.
+   *
+   * No report companion: nobody has asked for a PDF of this one, and an export
+   * is a second place for the printed figures to drift from the screen's.
+   */
+  officePerformance: (weeks: number) =>
+    unwrapComputed<OfficePerformanceReport>(
+      api.get('/analytics/office-performance', { params: { weeks } }),
+    ),
+
   processingTimeReport: (weeks: number) =>
     downloadBlob(`/analytics/processing-time/report?weeks=${weeks}`, 'processing-time-monitoring.pdf'),
 

@@ -76,6 +76,27 @@ const TABS = [
     end: false,
     permission: 'analytics.view',
   },
+  /*
+   * The super admin's two screens, in the order the question is asked.
+   *
+   * Office Performance comes first because it answers "which office" and
+   * Processing Time answers "what has that office been doing" — a reader who
+   * has not yet picked an office has nothing to do on a control chart.
+   *
+   * Note what this pair does to the strip: until issue #102 the super admin
+   * held exactly one analytics screen, so `tabs.length < 2` below hid the strip
+   * from them entirely. It now appears for the first time, which is why the
+   * two-tab guard is load-bearing rather than defensive.
+   */
+  {
+    to: '/staff/analytics/offices',
+    // The dataset's own label, and the h1 on the screen it leads to. All three
+    // are asserted equal in e2e/office-performance.spec.ts, because a
+    // half-applied rename is how a screen and its payload drift apart.
+    label: 'Office Performance',
+    end: false,
+    permission: 'analytics.processing_time',
+  },
   {
     to: '/staff/analytics/processing-time',
     label: 'Processing Time',

@@ -4,6 +4,7 @@ use App\Support\AnalyticsDatasets;
 use App\Support\AnalyticsDefinitions;
 use App\Support\BusinessGrowthAnalytics;
 use App\Support\DashboardAnalytics;
+use App\Support\OfficePerformanceAnalytics;
 use App\Support\ProcessingTimeAnalytics;
 use App\Support\RenewalModelAnalytics;
 use App\Support\RenewalRiskAnalytics;
@@ -77,6 +78,19 @@ function analyticsDefinitionSubjects(): array
         AnalyticsDatasets::PROCESSING_TIME => [
             'payload' => ProcessingTimeAnalytics::build(),
             'panels' => ['departments', 'completed_reviews'],
+        ],
+
+        /*
+         * `totals`, `unclassified_holds`, `window_weeks` and `window_start` are
+         * on the payload and are deliberately not panels. Each is a label for
+         * the window or a restatement of a column already defined — the count of
+         * unclassified holds is printed as the footnote to `offices.breached`
+         * and is explained there, and demanding a second definition for it would
+         * give one figure two accounts of itself.
+         */
+        AnalyticsDatasets::OFFICE_PERFORMANCE => [
+            'payload' => OfficePerformanceAnalytics::build(),
+            'panels' => ['offices', 'tiers', 'data_quality'],
         ],
 
         /*
