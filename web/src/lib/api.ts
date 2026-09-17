@@ -10,10 +10,22 @@ import type { ApiError } from './types'
  */
 export const SESSION_EXPIRED_KEY = 'biztrack.session_expired'
 
-export type Portal = 'public' | 'staff'
+export type Portal = 'public' | 'staff' | 'admin'
 
-/** Everything under here is the LGU site. Everything else is the citizen one. */
+/** Everything under here is the officers' site. */
 export const STAFF_PREFIX = '/staff'
+
+/**
+ * And everything under here is the super admin's [checklist item #107].
+ *
+ * The third door. `admin` used to be one of AuthController's STAFF_ROLES, so
+ * the super admin signed in at /staff/login beside all six offices and shared
+ * their `biztrack.token.staff` key — which meant an administrator tab and an
+ * officer tab could not be open at once, the exact collision the two-portal
+ * split was built to end. A third portal needs a third prefix and a third key
+ * or it is not a third portal at all.
+ */
+export const ADMIN_PREFIX = '/admin'
 
 /*
  * ── Two sites, two sessions, one browser ──────────────────────────────────
@@ -37,18 +49,30 @@ export const STAFF_PREFIX = '/staff'
  * `activePortal()` reads it per request, and each tab consequently signs its
  * requests with its own token.
  *
- * The consequence worth remembering: crossing between the two sites must be a
- * real navigation (`<a href>`), never a client-side `<Link>`. A router push
- * changes the path without remounting, so the store would still be holding the
- * other portal's user. Every cross-portal link in this app is an anchor.
+ * The consequence worth remembering: crossing between the sites must be a real
+ * navigation (`<a href>`), never a client-side `<Link>`. A router push changes
+ * the path without remounting, so the store would still be holding the other
+ * portal's user. Every cross-portal link in this app is an anchor.
+ *
+ * There are THREE sites now, not two — the super admin was split out of the
+ * staff portal (item #107) and keys its session at `biztrack.token.admin`.
+ * Nothing above changes: the reasoning was never about the number of doors,
+ * only about a stored "current portal" being global to a browser that can have
+ * one tab open on each.
  */
 export function tokenKeyFor(portal: Portal): string {
   return `biztrack.token.${portal}`
 }
 
+function isUnder(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`)
+}
+
 /** Which site a path belongs to. */
 export function portalForPath(pathname: string): Portal {
-  return pathname === STAFF_PREFIX || pathname.startsWith(`${STAFF_PREFIX}/`) ? 'staff' : 'public'
+  if (isUnder(pathname, ADMIN_PREFIX)) return 'admin'
+  if (isUnder(pathname, STAFF_PREFIX)) return 'staff'
+  return 'public'
 }
 
 /** Which site THIS TAB is on. Read fresh: it is the only per-tab signal. */
@@ -60,9 +84,26 @@ export function storedToken(portal: Portal = activePortal()): string | null {
   return localStorage.getItem(tokenKeyFor(portal))
 }
 
-/** A path inside a portal: '/queue' is '/staff/queue' on the LGU site. */
+/**
+ * A path inside a portal: '/queue' is '/staff/queue' on the officers' site.
+ *
+ * The admin branch guards against double-prefixing, and that is not defensive
+ * tidiness — it is required. The super-admin entries in `nav.ts` are written
+ * '/admin/users', '/admin/records', '/admin/audit-logs' and so on, because
+ * those screens lived at '/staff/admin/…' when the rail was built. Prefixing
+ * them blindly would send the administrator to '/admin/admin/users', which no
+ * route matches, so every entry on their own rail would land on the sign-in
+ * page as though their session had died.
+ *
+ * The alternative was renaming those entries in nav.ts. That file is shared
+ * with the officer and citizen rails and is being edited alongside this change,
+ * so the narrower fix is here. If the '/admin/…' entries are ever renamed to
+ * bare '/users', '/records', this branch can become a plain concatenation.
+ */
 export function portalPath(portal: Portal, path: string): string {
-  return portal === 'staff' ? `${STAFF_PREFIX}${path}` : path
+  if (portal === 'staff') return `${STAFF_PREFIX}${path}`
+  if (portal === 'admin') return isUnder(path, ADMIN_PREFIX) ? path : `${ADMIN_PREFIX}${path}`
+  return path
 }
 
 /** Sign-in page for a portal, used for redirects after a session ends. */

@@ -225,7 +225,17 @@ function notificationHref(link: string, portal: Portal): string {
    */
   const filing = /^(?:\/staff\/queue|\/applications)\/(\d+)/.exec(path)
   if (filing) {
-    return portal === 'staff' ? `${STAFF_PREFIX}/queue/${filing[1]}` : `/applications/${filing[1]}`
+    if (portal === 'public') return `/applications/${filing[1]}`
+    if (portal === 'staff') return `${STAFF_PREFIX}/queue/${filing[1]}`
+    /*
+     * The super admin's portal has neither screen, and that is not an oversight
+     * in this function [item #107 added the third portal]. They hold no
+     * `application.view_own` and no `application.review` — Track is not their
+     * job — so there is no filing screen on their site to re-address this to.
+     * Home, like any other news with no equivalent, rather than a path whose
+     * token lives on somebody else's site.
+     */
+    return homePathFor(portal)
   }
 
   const shared = SHARED_SCREENS.find((screen) => path === screen || path === `${STAFF_PREFIX}${screen}`)

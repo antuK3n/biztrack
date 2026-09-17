@@ -252,12 +252,29 @@ export default function App() {
             </RedirectIfAuthed>
           }
         />
-        {/* Staff and super admin sign in through their own door (see AuthController). */}
+        {/* The six offices and BPLO sign in here (see AuthController). */}
         <Route
           path="/staff/login"
           element={
             <RedirectIfAuthed>
               <LoginPage portal="staff" />
+            </RedirectIfAuthed>
+          }
+        />
+        {/*
+          And the super admin here — the third door [checklist item #107].
+
+          `admin` used to be one of AuthController::STAFF_ROLES, so the person
+          who creates every officer account signed in at the same address as the
+          officers and shared their `biztrack.token.staff` key. The API now
+          answers 409 to an administrator at /staff/login and to an officer
+          here, and each door mints its own token under its own key.
+        */}
+        <Route
+          path="/admin/login"
+          element={
+            <RedirectIfAuthed>
+              <LoginPage portal="admin" />
             </RedirectIfAuthed>
           }
         />
@@ -558,6 +575,131 @@ export default function App() {
           />
           <Route
             path="/staff/admin/audit-logs"
+            element={
+              <RequirePermission permission="audit.view">
+                <AuditLogsPage />
+              </RequirePermission>
+            }
+          />
+        </Route>
+
+        {/*
+          ── The super admin's site [checklist item #107] ────────────────────
+          The third portal, at /admin. Its own sign-in door above, its own
+          token key (`biztrack.token.admin`), its own tree here — so an
+          administrator tab and an officer tab can be open at once in one
+          browser, which sharing the staff key made impossible.
+
+          `/admin/*` used to be a shim redirecting to /staff/dashboard, for
+          links made before the portal split. It is gone: every address it
+          caught — /admin/users, /admin/records, /admin/audit-logs — is now a
+          real screen at that exact path, so an old link lands on the screen it
+          named rather than on the dashboard.
+
+          ── Why the /staff/admin/* routes above are NOT removed ─────────────
+
+          They are not all the super admin's. /staff/admin/permits is gated on
+          `permit.view_all`, which BPLO and the five clearance offices hold, and
+          it shows each of them their own office's certificates — a staff screen
+          that happens to sit under an "admin" segment of the path. Deleting the
+          branch would take that screen away from six offices to tidy a prefix.
+
+          The consequence, stated so it is not discovered: a screen only the
+          super admin can reach needs a route in BOTH trees until the
+          /staff/admin/* segment is renamed. A new one added only above is
+          invisible to the administrator — their rail addresses /admin/… and
+          nothing would match. `navItemsFor` builds those hrefs from the same
+          list for all three portals, so the rail is the thing to check.
+        */}
+        <Route
+          element={
+            <RequireAuth>
+              <AppShell />
+            </RequireAuth>
+          }
+        >
+          {/* The chrome every portal carries: the rail's Home, the bell, and
+              the avatar flyout's two entries. Mounted per-prefix for the reason
+              given on the staff tree — a single shared copy would have to sit
+              outside the prefix, which the portal split cannot allow. */}
+          <Route path="/admin/dashboard" element={<DashboardPage />} />
+          <Route path="/admin/messages" element={<MessagesPage />} />
+          <Route path="/admin/notifications" element={<NotificationsPage />} />
+          <Route path="/admin/profile" element={<ProfilePage />} />
+          <Route path="/admin/settings" element={<SettingsPage />} />
+          {/*
+            Processing Time and nothing else under /admin/analytics.
+
+            The super admin holds `analytics.processing_time` and not
+            `analytics.view` — the split is deliberate (AGENTS.md §10): that
+            screen measures the departments, BPLO among them, so the office
+            being measured does not hold it and the measurer does not hold
+            BPLO's three dashboards. Mounting /admin/analytics as well would be
+            a screen this portal's only occupant is forbidden from opening.
+          */}
+          <Route
+            path="/admin/analytics/processing-time"
+            element={
+              <RequirePermission permission="analytics.processing_time">
+                <ProcessingTimePage />
+              </RequirePermission>
+            }
+          />
+          {/* Each route carries the SAME permission as its twin in the staff
+              tree above, and the same one as its rail entry in nav.ts. See the
+              notes there for why each is the permission it is — they are not
+              obvious, and Records in particular is `user.manage` standing in
+              for a "this is the super admin" check the table cannot express. */}
+          <Route
+            path="/admin/users"
+            element={
+              <RequirePermission permission="user.manage">
+                <UsersPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/owners"
+            element={
+              <RequirePermission permission="owner.manage_status">
+                <OwnersPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/oic"
+            element={
+              <RequirePermission permission="oic.assign">
+                <OicPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/records"
+            element={
+              <RequirePermission permission="user.manage">
+                <RecordsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/permits"
+            element={
+              <RequirePermission permission="permit.view_all">
+                <AdminPermitsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/business-map"
+            element={
+              <RequirePermission permission="user.manage">
+                <BusinessMapPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/audit-logs"
             element={
               <RequirePermission permission="audit.view">
                 <AuditLogsPage />

@@ -14,7 +14,28 @@ Route::prefix('auth')->group(function () {
     Route::post('login', [AuthController::class, 'login'])->middleware('throttle:login');
     Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
     Route::post('reset-password', [AuthController::class, 'resetPassword']);
-    Route::post('email/verify', [AuthController::class, 'verifyEmail']);
+
+    /*
+     * The address printed in the verification email.
+     *
+     * GET, because a mail client can only follow a link, and named because
+     * `App\Notifications\VerifyEmailAddress` builds the URL with
+     * `URL::temporarySignedRoute('verification.verify', …)` — the name is the
+     * contract between the two.
+     *
+     * No `signed` middleware on purpose: the controller checks the signature
+     * itself so an expired link ends on the app's own screen rather than on
+     * Laravel's 403 page. See the note on `verifyEmailLink`.
+     *
+     * This replaced an UNSIGNED `POST email/verify` taking `{id, hash}`, which
+     * let anyone mark any account's address confirmed from public knowledge.
+     * If something still calls that address it is out of date and should be
+     * pointed at the link in the email instead — there is no supported way to
+     * confirm an address without holding a link we sent.
+     */
+    Route::get('email/verify/{id}/{hash}', [AuthController::class, 'verifyEmailLink'])
+        ->middleware('throttle:6,1')
+        ->name('verification.verify');
 
     Route::middleware('auth:sanctum')->group(function () {
         Route::post('logout', [AuthController::class, 'logout']);
@@ -31,7 +52,10 @@ Route::prefix('auth')->group(function () {
         Route::get('profile/photo', [AuthController::class, 'showPhoto']);
         Route::delete('profile/photo', [AuthController::class, 'destroyPhoto']);
         Route::put('password', [AuthController::class, 'updatePassword']);
-        Route::post('email/resend', [AuthController::class, 'resendVerification']);
+        // Laravel's own convention for this endpoint. The per-account limiter
+        // inside the method is the tighter of the two — see the note there.
+        Route::post('email/resend', [AuthController::class, 'resendVerification'])
+            ->middleware('throttle:6,1');
     });
 });
 
