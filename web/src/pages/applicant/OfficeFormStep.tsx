@@ -945,7 +945,14 @@ function SanitaryFields({
             value={get(data, 'workers_requiring_health_certs')}
             hint="From the employee count on your Business & Tax Profile — the same number the health certificate fee is charged on."
           />
-          <div>
+          {/*
+            * A <label>, not a <div>. FieldLabel renders a <span>, so outside a
+            * label element it is text near a control rather than the control's
+            * name — this <select> reached a screen reader as an unnamed combo
+            * box offering four values with nothing to say what they answered.
+            * Every other field on this sheet is already wrapped this way.
+            */}
+          <label className="block">
             <FieldLabel>Water Source</FieldLabel>
             <select
               value={get(data, 'water_source')}
@@ -961,7 +968,7 @@ function SanitaryFields({
                 </option>
               ))}
             </select>
-          </div>
+          </label>
         </div>
       </section>
     </div>

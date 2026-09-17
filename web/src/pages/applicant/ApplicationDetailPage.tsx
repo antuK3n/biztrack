@@ -14,11 +14,14 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { applications } from '../../lib/resources'
+import { applications, officeForms } from '../../lib/resources'
 import { applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
+import { OfficeFormSheet, OFFICE_FORM_META, hasOfficeForm } from './OfficeFormStep'
+import { carriedOverBusiness } from './carriedOver'
+import type { OfficeForm } from '../../lib/types'
 
 /*
  * Application status page (PDF p50/p52/p54–55/p57–58): centered serif
@@ -351,6 +354,19 @@ export function ApplicationDetailPage() {
     [appId],
   )
   const { data: timeline } = useAsync<TimelineEntry[]>(() => applications.timeline(appId), [appId])
+  /*
+   * The sheets the applicant handed to the five offices (checklist item 24).
+   *
+   * Fetched unconditionally rather than behind the section's `status !==
+   * 'draft'` guard: a hook cannot be called conditionally, and a draft simply
+   * comes back with nothing saved. `officeForms.list` carries `form_data` and
+   * the zoning checklist together, which is everything OfficeFormSheet needs to
+   * render what was submitted.
+   */
+  const { data: submittedForms } = useAsync<OfficeForm[]>(
+    () => officeForms.list(appId),
+    [appId],
+  )
 
   const [confirmCancel, setConfirmCancel] = useState(false)
   const [showFees, setShowFees] = useState(false)
@@ -835,6 +851,66 @@ export function ApplicationDetailPage() {
             >
               See your LGU Clearances
             </Link>
+
+            {/*
+              ── The other permits' forms, on the filing (checklist item 24) ──
+              *
+              * "View application form for the other permits are missing. Return
+              * it." They were sheets of this wizard once, so the filing's own
+              * page showed them; they moved onto the clearance stage and this
+              * page kept only a link to it. A `View form` button does exist
+              * there — but it is two screens from the page an applicant opens
+              * to read their application, and what they asked for is to see
+              * their application.
+              *
+              * Read-only and collapsed. The same OfficeFormSheet the applicant
+              * filled in, not a summary of it: a second rendering of the same
+              * answers is a second thing to keep in step with the paper, and
+              * the paper is the point of these sheets.
+              *
+              * Only the sheets with answers on them. An office the applicant
+              * has not applied to yet has an empty form_data, and drawing a
+              * blank statutory form under "what you submitted" would be
+              * claiming they submitted a blank one.
+              */}
+            {(submittedForms ?? [])
+              /*
+               * `form_saved`, never `form_data` being non-empty. The server
+               * derives answers onto every form-bearing sheet whether or not
+               * the applicant has opened it — so emptiness cannot distinguish
+               * "not started" from "started", and filtering on it drew five
+               * blank statutory forms under a heading saying they were
+               * submitted.
+               */
+              .filter((f) => hasOfficeForm(f.permit_type_code) && f.form_saved === true)
+              .map((f) => {
+                // Narrowed by the filter above; repeated for the type, not the logic.
+                if (!hasOfficeForm(f.permit_type_code)) return null
+                const meta = OFFICE_FORM_META[f.permit_type_code]
+                return (
+                  <details
+                    key={f.permit_type_code}
+                    className="mt-4 rounded-xl border border-line bg-paper/40 px-4 py-3"
+                  >
+                    <summary className="cursor-pointer text-sm font-semibold text-ink">
+                      {meta.title}
+                    </summary>
+                    <p className="mt-1 text-xs text-ink-muted">
+                      {meta.kicker} · {meta.ref}
+                    </p>
+                    <div className="mt-4">
+                      <OfficeFormSheet
+                        code={f.permit_type_code}
+                        data={f.form_data as Record<string, string>}
+                        business={carriedOverBusiness(app)}
+                        requirements={f.requirements ?? undefined}
+                        onChange={() => {}}
+                        readOnly
+                      />
+                    </div>
+                  </details>
+                )
+              })}
           </section>
         )}
 

@@ -1890,3 +1890,69 @@ test('a required permit cannot be withdrawn from the application', async ({ page
     'the card offers a Withdraw that the API refuses on every one of the five',
   ).toHaveCount(0)
 })
+
+test('the filing shows the forms the applicant handed to the other offices', async ({ page }) => {
+  /*
+   * Checklist item 24 — "View application form for the other permits are
+   * missing. Return it."
+   *
+   * They were sheets of the apply wizard once, so the filing's own page showed
+   * them; they moved onto the clearance stage and this page kept only a link.
+   * A `View form` control does exist over there, and the client filed this
+   * anyway a week after it shipped — because what they asked for is to read
+   * their APPLICATION, and two screens away is not on it.
+   *
+   * Asserts the sheet itself is there, read-only, and that a sheet the
+   * applicant never started is NOT drawn — a blank statutory form under "what
+   * you submitted" would claim they submitted a blank one.
+   */
+  await onDashboard(page)
+  const appId = await makePaidApplication(page)
+
+  await applyFor(page, appId, 'SANITARY')
+  await page.evaluate(
+    async ({ appId }) => {
+      const token = localStorage.getItem('biztrack.token.public')
+      await fetch(`/api/v1/applications/${appId}/office-forms/SANITARY`, {
+        method: 'PUT',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ form_data: { water_source: 'Deep Well' }, submit: false }),
+      })
+    },
+    { appId },
+  )
+
+  await page.goto(`/applications/${appId}`)
+
+  const sanitary = page.getByText(/sanitary permit|health certificate/i).first()
+  await expect(sanitary).toBeVisible({ timeout: 15_000 })
+
+  // The sheet opens on the filing itself, and what it shows cannot be typed into.
+  const sheet = page.locator('details', { hasText: /sanitary|health/i }).first()
+  await sheet.locator('summary').click()
+  // The applicant's OWN answer, not one the server derived onto the sheet.
+  const answered = sheet.getByRole('combobox', { name: /water source/i })
+  await expect(answered).toHaveValue('Deep Well')
+
+  /*
+   * And it cannot be changed from here. A <select> is the one control that
+   * takes `disabled` rather than `readOnly` — HTML gives it no readOnly — which
+   * OfficeFormSheet documents; the text inputs beside it stay readOnly so a
+   * screen reader still reads them out.
+   */
+  await expect(answered).toBeDisabled()
+  await expect(sheet.getByRole('textbox').first()).toHaveAttribute('readonly', '')
+
+  /*
+   * An office the applicant never started draws nothing. This is the assertion
+   * that caught the real bug: `form_data` is never empty — the server derives
+   * answers onto every sheet — so an earlier filter on emptiness rendered all
+   * five statutory forms, blank, under a heading saying they were submitted.
+   */
+  await expect(page.locator('details', { hasText: /locational clearance/i })).toHaveCount(0)
+  await expect(page.locator('details', { hasText: /fire safety/i })).toHaveCount(0)
+})
