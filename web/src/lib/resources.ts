@@ -947,6 +947,24 @@ export const inspections = {
 
 /* ── Permits ──────────────────────────────────────────────────────────── */
 
+/**
+ * What `GET /permits` narrows on, beyond the page.
+ *
+ * Both are matched by the server INSIDE the reader's own scope, so neither can
+ * widen what a session may see — see PermitController::index. `q` matches the
+ * permit number, the business name and the filing's tracking ID; nothing else,
+ * which is what the search field's label has to say out loud.
+ *
+ * `status` is a single permit status (`active`, `expired`, `superseded`,
+ * `revoked`, `suspended`), not the comma-separated list /applications takes.
+ * The server validates it against the PermitStatus enum, so an unknown value is
+ * a 422 rather than a filter that silently matches nothing.
+ */
+export interface PermitFilters extends PageParams {
+  q?: string
+  status?: string
+}
+
 export const permits = {
   /**
    * Permits the caller may see, newest issuance first.
@@ -956,7 +974,7 @@ export const permits = {
    */
   list: (params: PageParams = {}) => unwrap<Permit[]>(api.get('/permits', { params })),
   /** Same list, keeping the page meta. */
-  page: (params: PageParams = {}) => unwrapPaged<Permit>(api.get('/permits', { params })),
+  page: (params: PermitFilters = {}) => unwrapPaged<Permit>(api.get('/permits', { params })),
   get: (id: number) => unwrap<Permit>(api.get(`/permits/${id}`)),
   /**
    * The clearances this applicant submitted a COPY of, across every filing.
@@ -975,6 +993,25 @@ export const permits = {
     unwrap<import('./types').VerifyResult>(api.get(`/verify/${permitNumber}`)),
   /** Download the rendered permit certificate PDF (Bearer blob; v2). */
   pdf: (id: number, filename: string) => downloadBlob(`/permits/${id}/pdf`, filename),
+  /**
+   * Open the same certificate in a tab instead of saving it.
+   *
+   * Issue #103 asks the admin permit table for a "view a permit" action, and
+   * this is what it means: the certificate the City actually issued, not a
+   * second detail screen restating the row. `/permits/{id}/pdf` already renders
+   * the full face — owner, address, line of business, signature block, QR — and
+   * a screen rebuilt from PermitResource would carry none of it while looking
+   * authoritative.
+   *
+   * Same endpoint as `pdf` above, same authorisation (PermitController::
+   * authorizeView), different disposition: the blob is pointed at rather than
+   * downloaded. Checking one permit should not leave a PDF in Downloads —
+   * PaymentsPage reached this conclusion first for receipts.
+   *
+   * `target` is a tab opened synchronously inside the click handler; see
+   * `viewBlob` for why the popup blocker requires that.
+   */
+  viewPdf: (id: number, target?: Window | null) => viewBlob(`/permits/${id}/pdf`, target),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */

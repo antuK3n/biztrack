@@ -45,3 +45,8 @@ if (file_exists(__DIR__.'/workflow.php')) {
 if (file_exists(__DIR__.'/location.php')) {
     require __DIR__.'/location.php';
 }
+
+// The GIS surface — the super admin's business map (issue #104).
+if (file_exists(__DIR__.'/gis.php')) {
+    require __DIR__.'/gis.php';
+}
