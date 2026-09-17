@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PermitResource;
 use App\Models\ApplicationDocument;
@@ -13,6 +14,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -37,16 +39,59 @@ class PermitController extends Controller
      * already got in checklist item 56 — "filings other than my own, in the
      * offices I am routed to" — because the alternative is that the office
      * boundary holds on the filing and falls over on its outcome.
+     *
+     * ── `q` and `status`, added for the register-wide permit table ───────────
+     *
+     * Issue #103 asks for "a page listing ALL approved permits as a table". On
+     * the live register that is 2,182 active rows inside 5,475 issued ones, and
+     * a pager alone does not make that findable: an administrator holding a
+     * permit number is 40 pages away from it and has no way to ask.
+     *
+     * Both filters are applied AFTER `scopeToReader`, never instead of it. A
+     * search that reached outside the reader's scope would turn the office
+     * boundary into a query string — the same leak §10 of AGENTS.md records
+     * ("a sanitary officer saw 115 filings of which 38 were theirs"), reached
+     * by typing rather than by a bug.
+     *
+     * `q` matches the permit number, the business name and the filing's
+     * tracking ID, and the browser's label says so in those words. The three
+     * identifiers are the three things an administrator is ever handed over a
+     * counter (AGENTS.md §11 on renewal identification), and a search box that
+     * silently matched only one of them would read as missing data.
+     *
+     * `status` takes one value, not a comma-separated list the way
+     * /applications does. A permit has five states and they are not stages of
+     * one flow, so there is no "a stage is more than one status" case here to
+     * answer; when one appears, copy that endpoint's parser rather than
+     * inventing a second syntax.
      */
     public function index(Request $request): JsonResponse
     {
         $request->validate([
+            'q' => ['sometimes', 'nullable', 'string', 'max:120'],
+            // Validated against the enum rather than a hand-written `in:` list:
+            // PermitStatus gained Superseded on 9 September 2026 and a literal
+            // list here would have started rejecting a status the register was
+            // already writing.
+            'status' => ['sometimes', 'nullable', Rule::enum(PermitStatus::class)],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
         $query = Permit::with($this->eager);
         $this->scopeToReader($request, $query);
+
+        if ($status = $request->query('status')) {
+            $query->where('status', $status);
+        }
+
+        if ($q = $request->query('q')) {
+            $query->where(function ($sub) use ($q) {
+                $sub->where('permit_number', 'like', "%{$q}%")
+                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"))
+                    ->orWhereHas('application', fn ($a) => $a->where('tracking_id', 'like', "%{$q}%"));
+            });
+        }
 
         // issued_at is nullable on legacy rows; the id tiebreak keeps the page
         // boundary stable instead of letting equal keys shuffle between pages.
