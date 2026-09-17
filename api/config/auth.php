@@ -114,4 +114,35 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Email Verification
+    |--------------------------------------------------------------------------
+    |
+    | `expire` is read by Laravel's own VerifyEmail notification and by
+    | AuthController::verifyEmailLink: how many minutes a signed verification
+    | link stays good for. An hour matches the password reset window above, and
+    | for the same reason — a link sitting in an inbox is a credential.
+    |
+    | `required_at_login` is the POLICY switch, and it is OFF deliberately.
+    |
+    | The capability is built (a real notification on register, a throttled
+    | resend, a signed route). Turning ENFORCEMENT on is a separate decision
+    | because of the register we already have: of the accounts in the live
+    | SQLite file, the large majority have `email_verified_at` NULL — they were
+    | seeded, or they registered while `resendVerification` was a stub that
+    | answered "Verification email sent." having sent nothing. Flipping this to
+    | true locks every one of those people out of a system they are mid-test in,
+    | for a message that was never delivered to them.
+    |
+    | Before turning it on: send verification to the existing unverified
+    | accounts (or backfill `email_verified_at` for the ones City Hall vouches
+    | for), and make sure MAIL_MAILER is something other than `log`. Until then
+    | the flag documents the gate rather than springing it.
+    */
+    'verification' => [
+        'expire' => (int) env('AUTH_VERIFICATION_EXPIRE', 60),
+        'required_at_login' => (bool) env('AUTH_REQUIRE_VERIFIED_EMAIL', false),
+    ],
+
 ];

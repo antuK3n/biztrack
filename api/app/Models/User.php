@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Notifications\VerifyEmailAddress;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,7 +12,22 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-class User extends Authenticatable
+/**
+ * `MustVerifyEmail` is a CONTRACT, not a gate.
+ *
+ * Declaring it gives the model `hasVerifiedEmail()`, `markEmailAsVerified()`
+ * and `sendEmailVerificationNotification()` — the trait is already mixed in by
+ * Illuminate\Foundation\Auth\User — and it is what makes the framework's
+ * `verified` middleware and the `Verified` event mean something here. It does
+ * NOT by itself stop an unverified account from signing in: nothing in this
+ * app is wrapped in `verified`, and login enforcement is a config switch that
+ * ships off (config/auth.php → auth.verification.required_at_login, and the
+ * note there explains why).
+ *
+ * The column has existed since the first migration; what was missing until
+ * item #61 was anything that ever set it honestly.
+ */
+class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, Notifiable, SoftDeletes;
 
@@ -85,6 +102,20 @@ class User extends Authenticatable
     public function hasRole(string $name): bool
     {
         return in_array($name, $this->roleNames(), true);
+    }
+
+    /**
+     * Send OUR verification email rather than Laravel's stock one.
+     *
+     * Overriding here instead of in a service provider's `VerifyEmail::toMailUsing`
+     * keeps the choice next to the model that owns the address: anything that
+     * calls `$user->sendEmailVerificationNotification()` — registration, the
+     * resend endpoint, a future admin action — gets the same message without
+     * having to know a closure was registered somewhere at boot.
+     */
+    public function sendEmailVerificationNotification(): void
+    {
+        $this->notify(new VerifyEmailAddress);
     }
 
     public function fullName(): string

@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ACCOUNTS, DEMO_PASSWORD } from './helpers'
+import type { E2EPortal } from './helpers'
 
 /*
  * Sign in once per run and hand the saved session to every other spec.
@@ -42,8 +43,27 @@ const AUTH_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '.auth'
 async function saveSession(
   page: import('@playwright/test').Page,
   account: keyof typeof ACCOUNTS,
-  portal: 'staff' | 'public',
+  portal: E2EPortal,
   file: string,
+  /*
+   * Extra token keys this saved state should also carry.
+   *
+   * Only the super admin uses it, and only because their screens currently
+   * answer at TWO prefixes. Checklist item #107 gave them their own portal at
+   * /admin/…, and the /staff/admin/… routes stayed — they are not all the
+   * administrator's (/staff/admin/permits is gated on `permit.view_all`, which
+   * BPLO and the five clearance offices hold). Most of this suite drives the
+   * admin's screens at the staff prefix, and those specs belong to other work
+   * in flight, so the session is written under both keys rather than rewriting
+   * a dozen files' addresses from underneath their owners.
+   *
+   * State it plainly: this is a TRANSITIONAL fixture, and it describes a
+   * browser state the product can no longer produce on its own — the admin
+   * cannot sign in at /staff/login any more, so nothing but this line would put
+   * their token under the staff key. When the specs move to /admin/…, drop the
+   * extra key and this argument with it.
+   */
+  alsoKeyedAs: E2EPortal[] = [],
 ) {
   /*
    * Long enough to outlast the limiter window this step may have to wait on.
@@ -119,23 +139,35 @@ async function saveSession(
   )
 
   /*
-   * Keyed by portal, which is what lets the staff and owner storage states sit
-   * in one browser without either evicting the other — the same property the
-   * product needs for an admin tab and a citizen tab open at once.
+   * Keyed by portal, which is what lets the three portals' storage states sit
+   * in one browser without any of them evicting the others — the same property
+   * the product needs for an admin tab and a citizen tab open at once.
    */
   await page.evaluate(
-    ([t, p]) => {
-      localStorage.setItem(`biztrack.token.${p}`, t)
+    ([t, keys]) => {
+      for (const key of keys) localStorage.setItem(`biztrack.token.${key}`, t)
     },
-    [token, portal] as const,
+    [token, [portal, ...alsoKeyedAs]] as const,
   )
 
   fs.mkdirSync(AUTH_DIR, { recursive: true })
   await page.context().storageState({ path: path.join(AUTH_DIR, file) })
 }
 
+/*
+ * The super admin, through their own door [checklist item #107].
+ *
+ * This said `portal: 'staff'` until `admin` was split out of
+ * AuthController::STAFF_ROLES. The API answers that 409 now, so this step
+ * failed — and because the default `chromium` project depends on it and takes
+ * admin.json as its storage state, EVERY spec in the suite was blocked before
+ * it ran. A one-word fixture mistake reading as total product failure is worth
+ * the paragraph.
+ *
+ * The staff key is written too; see the note on `alsoKeyedAs`.
+ */
 setup('authenticate as admin', async ({ page }) => {
-  await saveSession(page, 'admin', 'staff', 'admin.json')
+  await saveSession(page, 'admin', 'admin', 'admin.json', ['staff'])
 })
 
 setup('authenticate as business owner', async ({ page }) => {

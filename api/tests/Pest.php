@@ -22,9 +22,9 @@ pest()->extend(TestCase::class)->in('Unit');
 /**
  * Log in a seeded demo account and return its bearer token.
  *
- * Staff and business owners sign in through separate portals, so the portal is
- * inferred from the account's roles unless a caller pins it deliberately (which
- * is how the wrong-door rejection gets tested).
+ * The three portals sign in through separate doors, so the portal is inferred
+ * from the account's roles unless a caller pins it deliberately (which is how
+ * the wrong-door rejection gets tested).
  */
 function loginToken(string $email, string $password = 'biztrack1', ?string $portal = null): string
 {
@@ -38,14 +38,30 @@ function loginToken(string $email, string $password = 'biztrack1', ?string $port
     return $res->json('data.token');
 }
 
-/** Which sign-in door a seeded account belongs to. */
+/**
+ * Which sign-in door a seeded account belongs to.
+ *
+ * Three answers since item #107 gave the super admin its own door. `admin` is
+ * tested first and by name: it used to fall into the staff branch below along
+ * with the six offices, and a helper that still said 'staff' for it would fail
+ * every admin-driven test on the wrong-door 409 — a failure that reads as a
+ * permission problem and is nothing of the kind.
+ */
 function portalFor(string $email): string
 {
     $user = User::where('email', $email)->first();
 
-    return $user && $user->roles->pluck('name')->contains(fn ($r) => $r !== 'business_owner')
-        ? 'staff'
-        : 'public';
+    if (! $user) {
+        return 'public';
+    }
+
+    $roles = $user->roles->pluck('name');
+
+    if ($roles->contains('admin')) {
+        return 'admin';
+    }
+
+    return $roles->contains(fn ($r) => $r !== 'business_owner') ? 'staff' : 'public';
 }
 
 /**

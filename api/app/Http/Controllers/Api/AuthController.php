@@ -7,9 +7,12 @@ use App\Http\Resources\UserResource;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -26,10 +29,12 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 class AuthController extends Controller
 {
     /**
-     * The citizen-facing portal admits business owners only; the staff portal
-     * admits LGU officers and the super admin. Keeping the two doors separate
-     * means a leaked staff credential is useless at the public sign-in, and an
-     * applicant can never land on an officer dashboard by accident.
+     * Three doors, and an account belongs to exactly one.
+     *
+     * `public` admits business owners, `staff` the six LGU clearance offices
+     * and BPLO, `admin` the super admin alone. Keeping them separate means a
+     * leaked credential is useless at the other two sign-ins, and an applicant
+     * can never land on an officer dashboard by accident.
      */
     /*
      * `market_admin` was on this list and is gone [client, 2026-09-06], with the
@@ -41,17 +46,52 @@ class AuthController extends Controller
      */
     private const STAFF_ROLES = [
         'bplo_staff', 'sanitary_officer', 'fire_inspector', 'zoning_officer',
-        'obo_staff', 'cenro_officer', 'admin',
+        'obo_staff', 'cenro_officer',
     ];
+
+    /*
+     * `admin` has its own door now [checklist item #107].
+     *
+     * It used to sit in STAFF_ROLES above, so the super admin signed in at
+     * /staff/login alongside all six offices. The two are not the same job: an
+     * office reviews filings within its own department, and the super admin
+     * creates the accounts that do the reviewing, reassigns cases, and reads
+     * the whole register and the audit trail. One door for both meant a leaked
+     * office credential and a leaked administrator credential were tried at the
+     * same address, and it meant the citizen/staff split could not say which of
+     * the two an account belonged to.
+     *
+     * Three doors, three token keys (web/src/lib/api.ts), one predicate below.
+     * Adding a fourth is a matter of adding a list and a case to `portalFor`;
+     * the wrong-door check is written against the answer, not against a pair.
+     */
+    private const ADMIN_ROLES = ['admin'];
 
     private function withRelations(User $user): User
     {
         return $user->load('department', 'roles.permissions');
     }
 
-    private function isStaff(User $user): bool
+    /**
+     * Which of the three doors this account belongs to. Exactly one.
+     *
+     * Admin is tested first: if a role were ever granted to an account that
+     * also holds an office role, the narrower answer is the one to give — the
+     * administrator's screens are the ones that need the separate session.
+     */
+    private function portalFor(User $user): string
     {
-        return $user->roles->pluck('name')->intersect(self::STAFF_ROLES)->isNotEmpty();
+        $roles = $user->roles->pluck('name');
+
+        if ($roles->intersect(self::ADMIN_ROLES)->isNotEmpty()) {
+            return 'admin';
+        }
+
+        if ($roles->intersect(self::STAFF_ROLES)->isNotEmpty()) {
+            return 'staff';
+        }
+
+        return 'public';
     }
 
     /**
@@ -119,6 +159,32 @@ class AuthController extends Controller
 
         Audit::log('user.registered', $user);
 
+        /*
+         * Send the verification email, and never let it fail the registration
+         * [checklist item #61].
+         *
+         * The account is already written and the token is already minted by the
+         * time this runs, so a mailer that throws — a misconfigured SMTP host, a
+         * provider rejecting the key — must not turn a successful sign-up into a
+         * 500 that leaves the person unable to register again (the address is
+         * taken) and unable to sign in (they never got a response carrying a
+         * token). The log line is how that outage becomes visible; the reader
+         * gets in either way and can ask for a fresh link from their profile.
+         *
+         * MAIL_MAILER is `log` by default (config/mail.php), so locally this
+         * writes the whole message, link and all, to storage/logs/laravel.log —
+         * verifiable without a single credential. Point MAIL_MAILER at a real
+         * transport in the deployed environment and nothing here changes.
+         */
+        try {
+            $user->sendEmailVerificationNotification();
+        } catch (\Throwable $e) {
+            Log::error('Verification email failed to send on registration.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+        }
+
         return $this->authPayload($user)->setStatusCode(201);
     }
 
@@ -127,9 +193,40 @@ class AuthController extends Controller
         $data = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required', 'string'],
-            'portal' => ['sometimes', 'in:public,staff'],
+            // Three doors [#107]. Absent means the citizen one, which is what
+            // every pre-portal client sent and what a bare curl still means.
+            'portal' => ['sometimes', 'in:public,staff,admin'],
+            // Cloudflare Turnstile's token [#62]. `sometimes` because the
+            // widget is a no-op when no site key is configured, so local dev,
+            // the e2e suite and the mock never send one — Turnstile::passes()
+            // is what decides whether its absence matters.
+            'captcha_token' => ['sometimes', 'nullable', 'string', 'max:2048'],
         ]);
         $portal = $data['portal'] ?? 'public';
+
+        /*
+         * The captcha is checked BEFORE the password, and before the rate
+         * limiter is touched [#62].
+         *
+         * Before the password because the point of a captcha is to make the
+         * guess cost something, and a guess that gets as far as a hash
+         * comparison has already cost us the expensive part. Before the
+         * limiter because a bot that cannot solve the challenge should not be
+         * able to spend a real person's five attempts on their behalf — the
+         * per-account lockout would otherwise become a denial-of-service tool
+         * aimed at any address an attacker knows.
+         *
+         * It answers 422 on the field rather than 403, so the sign-in page
+         * shows it next to the widget like any other validation failure. And
+         * it says nothing about the account: the check happens before we have
+         * looked one up, so this reply is identical for an address that exists
+         * and one that does not.
+         */
+        if (! Turnstile::passes($data['captcha_token'] ?? null, $request->ip())) {
+            throw ValidationException::withMessages([
+                'captcha_token' => ['That security check did not complete. Try again.'],
+            ]);
+        }
 
         $key = 'login:'.Str::lower($data['email']).'|'.$request->ip();
 
@@ -154,20 +251,45 @@ class AuthController extends Controller
             ], 429);
         }
 
-        if (! $user || ! Hash::check($data['password'], $user->password)) {
+        /*
+         * One refusal, used by two different failures on purpose — see the
+         * wrong-door block below. It hits the limiter, advances the persisted
+         * attempt count, and answers the single sentence that says nothing.
+         */
+        $refuse = function (?User $account) use ($key): JsonResponse {
             RateLimiter::hit($key, 15 * 60); // 15-minute decay
 
-            if ($user) {
-                $attempts = $user->failed_login_attempts + 1;
-                $user->forceFill([
+            if ($account) {
+                $attempts = $account->failed_login_attempts + 1;
+                $account->forceFill([
                     'failed_login_attempts' => $attempts,
-                    'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $user->locked_until,
+                    'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $account->locked_until,
                 ])->save();
             }
 
             return response()->json(['message' => 'Invalid credentials.'], 422);
+        };
+
+        if (! $user || ! Hash::check($data['password'], $user->password)) {
+            return $refuse($user);
         }
 
+        /*
+         * Deliberately left ABOVE the wrong-door check, and it is worth saying
+         * why it is not the leak item #63 closed.
+         *
+         * This 403 is reached only with the correct password, and it answers
+         * the same for a deactivated business owner as for a deactivated
+         * officer — so it says "this account is switched off", never "this
+         * account belongs to City Hall". It distinguishes nothing the citizen
+         * door is meant to keep to itself.
+         *
+         * Moving it below the door check would be worse: a deactivated officer
+         * at the wrong door would be told their credentials are invalid, go
+         * round to /staff/login, and be told the real reason there — two
+         * different answers to one question, which is what the door check is
+         * being careful about in the first place.
+         */
         if (! $user->is_active) {
             return response()->json(['message' => 'Your account is deactivated. Contact the City BPLO.'], 403);
         }
@@ -179,28 +301,82 @@ class AuthController extends Controller
          * This used to name the other portal and ship a `portal` field so the
          * sign-in page could offer a "Go there now" link. The client asked for
          * that to stop: a refusal should be a refusal, not an invitation to the
-         * other site.
+         * other site. Then both directions were given one shared sentence, so
+         * the WORDING stopped saying which kind of account had been typed.
          *
-         * The same wording answers both directions, which also closes a small
-         * disclosure. Two different sentences told an unauthenticated visitor
-         * on the citizen page that the address they had just typed belongs to
-         * an LGU staff account — a fact about somebody else's account, handed
-         * over for the price of one guess at a password that then failed to
-         * matter. One sentence says only "not here", which is all the person
-         * typing needs and all a stranger should get.
+         * ── Why the citizen door now gives nothing at all [item #63] ────────
          *
-         * Still 409 rather than 422: the credentials are correct, so this is a
-         * conflict with where they were used, not a bad password. The status
-         * carries that distinction for the API's own consumers without the
-         * response body spelling it out on screen.
+         * Identical wording was not enough. The status still differed: 409 for
+         * a staff or admin credential, 422 for a wrong password. So a stranger
+         * on the business-owner sign-in page, holding a leaked password, learned
+         * from the status code alone that the address belongs to City Hall —
+         * and a scripted run over a list of addresses reads 409 as "staff
+         * account, keep this one". That is an enumeration oracle regardless of
+         * what the sentence says, and it is the whole reason the citizen side
+         * must not hint that a staff portal exists.
+         *
+         * The side effects were an oracle too. The old code cleared the rate
+         * limiter on a wrong-door attempt and left `failed_login_attempts`
+         * alone, while a bad password hit both — so even against a client that
+         * ignores the body, a staff address was the one that never accumulated
+         * a lockout.
+         *
+         * So at the PUBLIC door a wrong-door attempt now goes through exactly
+         * the same `$refuse` as a wrong password: same 422, same sentence, same
+         * limiter hit, same attempt count. There is nothing left to tell apart.
+         *
+         * The cost, stated plainly: an officer who signs in at the citizen page
+         * by mistake is told their credentials are invalid, and five such
+         * mistakes lock their account for fifteen minutes. That is the price of
+         * the citizen side keeping the staff portal's existence to itself, and
+         * it is paid by people who have been given the right address.
+         *
+         * The STAFF and ADMIN doors keep the 409. Someone standing at
+         * /staff/login already knows a staff portal exists — the page they are
+         * looking at is one — so there is no secret left for the status to
+         * leak, and an officer who typed the wrong one of the two LGU doors is
+         * owed a refusal they can distinguish from a mistyped password. 409
+         * rather than 422 because the credentials were right and the conflict
+         * is with WHERE they were used.
          */
         $user->loadMissing('roles');
-        if ($this->isStaff($user) !== ($portal === 'staff')) {
+        if ($this->portalFor($user) !== $portal) {
+            if ($portal === 'public') {
+                return $refuse($user);
+            }
+
             RateLimiter::clear($key);
 
             return response()->json([
                 'message' => 'This account cannot sign in here.',
             ], 409);
+        }
+
+        /*
+         * Unverified email, when the LGU has asked for that to be a gate.
+         *
+         * OFF by default, and the flag is the point — see the note on
+         * `auth.verification` in config/auth.php. Most accounts in the live
+         * register have `email_verified_at` NULL because the resend endpoint
+         * used to answer "sent" without sending, so switching this on today
+         * would lock the client's testers out over mail they never received.
+         *
+         * Placed after the door check so the citizen door's refusal cannot
+         * start depending on an account's verification state — that would be a
+         * new oracle in the shape of the one item #63 just closed. Placed
+         * before the token is minted, because a gate that issues a session
+         * first is not a gate.
+         *
+         * 403 with a message the sign-in page can act on: this one names a real
+         * condition of the reader's OWN account, reached only with the correct
+         * password, so it tells a stranger nothing they did not already have.
+         */
+        if (config('auth.verification.required_at_login') && ! $user->hasVerifiedEmail()) {
+            RateLimiter::clear($key);
+
+            return response()->json([
+                'message' => 'Confirm your email address before signing in. Check your inbox for the link we sent when you registered.',
+            ], 403);
         }
 
         RateLimiter::clear($key);
@@ -374,32 +550,133 @@ class AuthController extends Controller
         return response()->json(['message' => 'Your password has been reset.']);
     }
 
-    public function verifyEmail(Request $request): JsonResponse
+    /**
+     * The link in the verification email [checklist item #61].
+     *
+     * ── What this replaced, and why it had to go ────────────────────────────
+     *
+     * There was a `POST /auth/email/verify` here taking `{id, hash}`, no auth
+     * and no signature, that marked an account verified when the hash matched
+     * sha1 of its own email address. Both halves are public knowledge: ids run
+     * in sequence and the address is the thing being "proved". Anyone could
+     * therefore mark anyone's address confirmed, including an address they had
+     * never been able to read. It was the verification equivalent of the stub
+     * below it — a check that looked like one and asserted nothing.
+     *
+     * This route is signed instead. Laravel's `hasValidSignature()` verifies an
+     * HMAC over the whole URL using APP_KEY, so the link cannot be constructed
+     * without the application's own secret, and it carries an expiry
+     * (auth.verification.expire) so a link left in an inbox stops working.
+     *
+     * ── Why the signature is checked here rather than by `signed` middleware ─
+     *
+     * This address is opened by a person clicking a link in their mail client,
+     * not by the SPA. The `signed` middleware aborts 403 with Laravel's JSON or
+     * error page, which is a dead end for someone who simply took too long to
+     * open their email. Checking it in the method lets every outcome end on the
+     * app's own screen, with wording that says which of the three things
+     * happened. GET with a side effect is deliberate for the same reason: a
+     * mail client cannot POST.
+     */
+    public function verifyEmailLink(Request $request, string $id, string $hash): RedirectResponse
     {
-        $data = $request->validate([
-            'id' => ['required'],
-            'hash' => ['required', 'string'],
-        ]);
+        $app = rtrim((string) config('app.frontend_url'), '/');
 
-        $user = User::find($data['id']);
+        if (! $request->hasValidSignature()) {
+            return redirect()->away($app.'/verify-email?status=expired');
+        }
 
-        if (! $user || ! hash_equals(sha1($user->email), $data['hash'])) {
-            throw ValidationException::withMessages([
-                'hash' => ['This verification link is invalid or has expired.'],
+        $user = User::find($id);
+
+        // Constant-time, and not because the hash is a secret — it is sha1 of a
+        // published address. It is the convention Laravel's own controller
+        // uses, and a timing-safe compare is never the wrong one to reach for.
+        if (! $user || ! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
+            return redirect()->away($app.'/verify-email?status=invalid');
+        }
+
+        if ($user->hasVerifiedEmail()) {
+            // Not an error. Clicking the same link twice, or having it
+            // prefetched by a mail scanner and then clicking it, is ordinary.
+            return redirect()->away($app.'/verify-email?status=already');
+        }
+
+        $user->markEmailAsVerified();
+        Audit::log('user.email_verified', $user);
+
+        return redirect()->away($app.'/verify-email?status=verified');
+    }
+
+    /**
+     * Send the verification email again, for real this time [item #61].
+     *
+     * What was here returned `{"message": "Verification email sent."}` and sent
+     * nothing, under a comment calling verification "simulated for the
+     * prototype". A tester pressing the button got a green success and an empty
+     * inbox, and had no way to tell that apart from a message caught by a spam
+     * filter. A feature that is not built is a gap; one that reports success is
+     * a lie, and it cost somebody an afternoon of looking in the wrong place.
+     *
+     * ── Throttled twice, for two different reasons ──────────────────────────
+     *
+     * The route carries `throttle:6,1` (routes/api.php) — that is the framework
+     * convention and it guards the ENDPOINT. The limiter below is per ACCOUNT
+     * and much tighter, because the thing being rationed is not requests, it is
+     * mail: an unthrottled resend turns this app into a way to post messages
+     * into somebody's inbox from a City Hall address, which costs the LGU its
+     * sender reputation and the recipient their patience.
+     *
+     * Three in fifteen minutes, keyed on the user rather than the IP: the point
+     * is to protect the address, and the address does not change when the
+     * attacker's does.
+     */
+    public function resendVerification(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'Your email address is already confirmed.',
             ]);
         }
 
-        if (! $user->email_verified_at) {
-            $user->forceFill(['email_verified_at' => now()])->save();
+        $key = 'verify-resend:'.$user->id;
+
+        if (RateLimiter::tooManyAttempts($key, 3)) {
+            $minutes = max(1, (int) ceil(RateLimiter::availableIn($key) / 60));
+
+            return response()->json([
+                'message' => "We've already sent a few. Try again in {$minutes} minute".($minutes === 1 ? '' : 's').'.',
+            ], 429);
         }
 
-        return response()->json(['message' => 'Email verified.']);
-    }
+        RateLimiter::hit($key, 15 * 60);
 
-    public function resendVerification(Request $request): JsonResponse
-    {
-        // Verification is simulated for the prototype (no live SMTP required).
-        return response()->json(['message' => 'Verification email sent.']);
+        /*
+         * Same swallow-and-log as registration, and for the same reason: a
+         * mailer outage must not answer this button with a 500 the reader
+         * cannot act on. It must not answer with a cheerful "sent" either —
+         * that is the bug this method exists to fix — so the failure gets its
+         * own 502 and its own sentence.
+         */
+        try {
+            $user->sendEmailVerificationNotification();
+        } catch (\Throwable $e) {
+            Log::error('Verification email failed to resend.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send that email just now. Try again in a few minutes.",
+            ], 502);
+        }
+
+        Audit::log('user.verification_resent', $user);
+
+        return response()->json([
+            'message' => 'Verification email sent. Check your inbox — it can take a minute.',
+        ]);
     }
 
     /**

@@ -17,26 +17,43 @@ import type { Portal } from '../../lib/api'
 import type { User } from '../../lib/types'
 import { validateEmail } from '../../lib/validation'
 import { useAuth } from '../../stores/auth'
+import { TurnstileWidget } from './TurnstileWidget'
+import { captchaEnabled } from './turnstile'
 
 interface FormErrors {
   email?: string
   password?: string
+  captcha?: string
 }
 
 /**
- * One form, two doors. Business owners sign in at /login; LGU officers and the
- * super admin sign in at /staff/login. The API enforces the split (a staff
- * credential is rejected at the public door and vice versa), so this is not
- * merely cosmetic — see AuthController::login.
+ * One form, three doors. Business owners sign in at /login, the six clearance
+ * offices and BPLO at /staff/login, and the super admin at /admin/login
+ * [checklist item #107]. The API enforces the split — a credential is refused
+ * at the two doors it does not belong to — so this is not merely cosmetic; see
+ * AuthController::login.
+ *
+ * `admin` was part of the staff door until item #107. It was split out because
+ * the person who creates every officer account is not one of the officers, and
+ * because sharing a door meant sharing `biztrack.token.staff`: an administrator
+ * tab and an officer tab could not be open at the same time.
  */
 export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
   const navigate = useNavigate()
   const location = useLocation()
   const setSession = useAuth((s) => s.setSession)
   const staff = portal === 'staff'
+  const admin = portal === 'admin'
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  /*
+   * Empty until the widget solves the challenge, and empty again the moment it
+   * expires. It is '' rather than undefined so the submit handler has one thing
+   * to test; `captchaEnabled()` decides whether an empty one matters.
+   */
+  const [captchaToken, setCaptchaToken] = useState('')
+  const [captchaResets, setCaptchaResets] = useState(0)
   const [errors, setErrors] = useState<FormErrors>({})
   const [formError, setFormError] = useState<{ variant: 'error' | 'warning'; title: string; body: string } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -70,6 +87,12 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     return {
       email: validateEmail(email),
       password: password ? undefined : 'Enter your password.',
+      /*
+       * Only a real condition when a site key is configured. With no key the
+       * widget renders nothing and there is nothing to complete, which is what
+       * lets local development and the e2e suite sign in — see TurnstileWidget.
+       */
+      captcha: !captchaEnabled() || captchaToken ? undefined : 'Complete the security check to continue.',
     }
   }
 
@@ -77,7 +100,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
     event.preventDefault()
     const next = validate()
     setErrors(next)
-    if (next.email || next.password) {
+    if (next.email || next.password || next.captcha) {
       requestAnimationFrame(() => {
         formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus()
       })
@@ -92,6 +115,10 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
         email: email.trim(),
         password,
         portal,
+        // Omitted rather than sent empty when there is no captcha: the endpoint
+        // takes it `sometimes`, and a blank string is a token it would have to
+        // reject once a key IS configured.
+        ...(captchaToken ? { captcha_token: captchaToken } : {}),
       })
       setSession(data.data.token, data.data.user, portal)
       /*
@@ -106,6 +133,24 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
       navigate(target, { replace: true })
     } catch (error) {
       const apiError = toApiError(error)
+      /*
+       * Draw a fresh challenge on every failure. A Turnstile token is
+       * single-use, so retrying with the one already spent fails on the captcha
+       * rather than on whatever was actually wrong — which leaves someone who
+       * simply mistyped a password looking at a security message instead.
+       */
+      setCaptchaToken('')
+      setCaptchaResets((n) => n + 1)
+
+      const captchaFailed = apiError.errors?.captcha_token?.[0]
+      if (captchaFailed) {
+        // 422 on the field, from the server-side siteverify call. Shown beside
+        // the widget like any other field error, not as a form-wide alert.
+        setErrors((prev) => ({ ...prev, captcha: captchaFailed }))
+        setLoading(false)
+        return
+      }
+
       if (apiError.status === 409) {
         /*
          * Right credentials, wrong door — refused, and left there.
@@ -129,10 +174,28 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
           body: apiError.message + ' You can also reset your password below.',
         })
       } else if (apiError.status === 403) {
+        /*
+         * Two things answer 403 now, and they are not the same news.
+         *
+         * A deactivated account is a decision City Hall made about this person,
+         * and the only way forward is to ask BPLO. An unconfirmed email address
+         * is something they can fix themselves in a minute — and only reaches
+         * this page at all if the LGU has turned
+         * `auth.verification.required_at_login` on, which ships off (see
+         * config/auth.php). Printing the deactivation copy over the
+         * verification case would send somebody to the counter over a link
+         * sitting unread in their inbox.
+         *
+         * The server's sentence is used as-is for the verification case because
+         * it is the one that knows which of the two happened.
+         */
+        const unverified = /confirm your email/i.test(apiError.message)
         setFormError({
           variant: 'error',
-          title: 'This account is deactivated',
-          body: 'Contact the Business Permits and Licensing Office if you think this is a mistake.',
+          title: unverified ? 'Confirm your email address first' : 'This account is deactivated',
+          body: unverified
+            ? apiError.message
+            : 'Contact the Business Permits and Licensing Office if you think this is a mistake.',
         })
       } else if (apiError.status === 422) {
         setFormError({
@@ -149,11 +212,25 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
 
   return (
     <AuthLayout
-      title={staff ? 'LGU staff sign-in' : 'Sign in to BizTrack'}
-      lede={staff ? 'For City of Malabon permit officers and administrators.' : undefined}
-      titleHidden={!staff}
+      title={admin ? 'Administrator sign-in' : staff ? 'LGU staff sign-in' : 'Sign in to BizTrack'}
+      lede={
+        admin
+          ? 'For the BizTrack system administrator.'
+          : staff
+            ? 'For City of Malabon permit officers.'
+            : undefined
+      }
+      titleHidden={!staff && !admin}
       footer={
-        staff ? (
+        /*
+         * The administrator's door offers nothing below the form, and that is
+         * the point rather than an omission. The staff page can say "are you a
+         * business owner?" because a citizen arriving there has typed a public
+         * address and learned nothing they could not read off the page. This
+         * one has a single occupant; a footer here could only point at doors
+         * whose existence is not this page's to announce.
+         */
+        admin ? undefined : staff ? (
           <>
             Are you a business owner?{' '}
             <Link to="/login" className="font-bold text-royal hover:underline">
@@ -201,13 +278,13 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             A real label wrapper fixes the association (WCAG 2.1 AA 3.3.2).
           */}
           <label className="block">
-          <FieldLabel>{staff ? 'Work email' : 'Email or number'}</FieldLabel>
+          <FieldLabel>{staff || admin ? 'Work email' : 'Email or number'}</FieldLabel>
           <input
             type="email"
             name="email"
             autoComplete="email"
             inputMode="email"
-            placeholder={staff ? 'Work email' : 'Email or number'}
+            placeholder={staff || admin ? 'Work email' : 'Email or number'}
             value={email}
             onChange={(e) => {
               setEmail(e.target.value)
@@ -255,6 +332,20 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
               Forgot Password?
             </Link>
           </div>
+        </div>
+
+        {/*
+          Renders nothing at all when VITE_TURNSTILE_SITE_KEY is unset, which is
+          how local development, the mock API and the Playwright suite keep
+          signing in without a Cloudflare account. See TurnstileWidget.
+        */}
+        <div>
+          <TurnstileWidget onToken={setCaptchaToken} resetKey={captchaResets} />
+          {errors.captcha && (
+            <p id="login-captcha-error" role="alert" className="mt-1.5 text-sm font-medium text-s-red">
+              {errors.captcha}
+            </p>
+          )}
         </div>
 
         <PillButton type="submit" disabled={loading} className="w-full">
