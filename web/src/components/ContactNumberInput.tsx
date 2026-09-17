@@ -261,6 +261,7 @@ const MOBILE_LABELS = [
 
 export function MobileNumberInput({
   legend,
+  number,
   value,
   onChange,
   onBlur,
@@ -270,6 +271,15 @@ export function MobileNumberInput({
 }: {
   /** The visible question. Rendered as a real <legend>, not a floating label. */
   legend: string
+  /**
+   * The field's position on its step (checklist item 23).
+   *
+   * Printed inside the legend, so it is part of the group's accessible name —
+   * the "still needed" list says "6. Telephone (Landline)" and a screen reader
+   * hears the same six here. A number that only sighted readers can match is
+   * half a fix.
+   */
+  number?: number
   /** Whatever the form holds — canonical +63, or a prefilled 09 form. */
   value: string
   /** Always emits the canonical +63 form, or '' for an empty field. */
@@ -311,7 +321,10 @@ export function MobileNumberInput({
       aria-describedby={[hintId, error ? errorId : null].filter(Boolean).join(' ') || undefined}
       className="min-w-0 border-0 p-0"
     >
-      <legend className={legendCls}>{legend}</legend>
+      <legend className={legendCls}>
+        {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
+        {legend}
+      </legend>
       <div className="flex items-center gap-2">
         {/*
           * `+63` is shown, not typed, and that is the item: the prefix is a
@@ -384,6 +397,7 @@ function splitLandline(value: string): string[] {
 
 export function LandlineInput({
   legend,
+  number,
   value,
   onChange,
   onBlur,
@@ -392,6 +406,8 @@ export function LandlineInput({
   errorId,
 }: {
   legend: string
+  /** The field's position on its step — see the mobile fieldset above. */
+  number?: number
   value: string
   onChange: (value: string) => void
   onBlur?: () => void
@@ -418,7 +434,10 @@ export function LandlineInput({
       aria-describedby={[hintId, error ? errorId : null].filter(Boolean).join(' ') || undefined}
       className="min-w-0 border-0 p-0"
     >
-      <legend className={legendCls}>{legend}</legend>
+      <legend className={legendCls}>
+        {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
+        {legend}
+      </legend>
       <SegmentedDigits
         sizes={LANDLINE_SIZES}
         labels={LANDLINE_LABELS}
