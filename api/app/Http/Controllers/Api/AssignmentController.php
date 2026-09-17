@@ -30,10 +30,12 @@ class AssignmentController extends Controller
     /**
      * The officer review queue.
      *
-     * Paginated, newest assignment first. Unpaged this answered 4,620 rows and
-     * 2.2 MB to the super admin and 1,293 rows to a single office — every
-     * assignment ever routed, including years of completed ones, on the request
-     * that renders "what is waiting for me".
+     * Paginated, OLDEST assignment first — the ordering note on the query below
+     * says why that direction, and why it is the same on every tab.
+     *
+     * Unpaged this answered 4,620 rows and 2.2 MB to the super admin and 1,293
+     * rows to a single office — every assignment ever routed, including years
+     * of completed ones, on the request that renders "what is waiting for me".
      *
      * `application_status` is the other half of the fix and it is not optional.
      * The queue screen splits its two tabs by the *application's* status
@@ -191,9 +193,70 @@ class AssignmentController extends Controller
          */
         $counts = $this->statusCounts($request);
 
+        /*
+         * Oldest routing first — the longest-waiting filing is the top row.
+         *
+         * Issue #91, client's words: "The OLDEST application should appear at
+         * the top, not the latest." The reason is RA 11032: the Act puts a
+         * processing clock on every filing (3 / 7 / 20 working days by tier,
+         * `App\Support\Ra11032`), and the filing closest to breaching it is
+         * always the one that has been waiting longest. Newest-first sorted the
+         * queue by the one thing that does NOT matter to the deadline, and it
+         * did it in the direction that buries the breach: an office with more
+         * arrivals than throughput pushes its oldest case further down every
+         * time somebody files, so the row most at risk is the row least likely
+         * to be seen. That is a service-standard failure the screen was causing.
+         *
+         * ── Every tab, or only the actionable ones? Every tab. ──────────────
+         *
+         * The tempting rule is "oldest-first where work is outstanding,
+         * newest-first where it is decided" — nobody works a finished filing,
+         * and what you want from a decided list is the one you just decided.
+         * That rule is right in general and has nothing to apply to here:
+         *
+         *  - This feed has no decided tab. `QueuePage` reads it for For
+         *    Approval, For Inspection and Final Approval, all three outstanding
+         *    work; Pending Payment reads `/applications` instead. A "completed"
+         *    tab existed in effect — approved filings sat in For Inspection —
+         *    and the client had it removed, in the same breath as this issue:
+         *    "Those who are already done with the whole application process
+         *    (accepted and all) is still displayed in the For inspection tab".
+         *    The register holds ~1,400 approved filings against a handful in
+         *    flight, so a decided list here is not a tab, it is the tab.
+         *  - Looking a decided filing up is a different question with its own
+         *    answer, and neither answer is an ordering: `q` searches the whole
+         *    scoped queue by tracking ID or business name, server-side, and the
+         *    permit itself hangs off the business.
+         *  - Splitting the order on the filters would mean inferring intent
+         *    from `status`/`application_status`, which are set independently and
+         *    combine freely (`status=completed` with an outstanding
+         *    `clearance_status` is a real, common request — see the
+         *    `clearance_status` note above). An endpoint whose sort direction
+         *    flips on a filter combination is one nobody can predict from the
+         *    call site.
+         *
+         * So: uniform, and deliberately so. What would make this wrong is a
+         * caller that genuinely wants decided work newest-first — a Completed
+         * tab, or a records screen built on this feed. The fix then is an
+         * explicit `sort` parameter that the caller states, not a direction
+         * guessed from the status filters.
+         *
+         * `id` ascending breaks the tie, so a page boundary is stable when a
+         * batch shares an `assigned_at` to the second — which routing does,
+         * since `WorkflowService` writes every office's assignment in one pass.
+         *
+         * The `is null` term keeps un-routed rows last instead of first.
+         * `assigned_at` is nullable and there are none today (0 of 6,209), but
+         * DESC used to hide that: ascending, SQLite sorts NULL FIRST, so one
+         * row written without a timestamp would pin itself to the top of every
+         * office's queue permanently. Postgres — the prod runbook's database —
+         * defaults the other way, NULLS LAST, so stating it also stops the two
+         * engines disagreeing about what the top of the queue is.
+         */
         $assignments = $query
-            ->orderByDesc('assigned_at')
-            ->orderByDesc('id')
+            ->orderByRaw('assigned_at is null')
+            ->orderBy('assigned_at')
+            ->orderBy('id')
             ->paginate($this->perPage($request));
 
         return response()->json([
