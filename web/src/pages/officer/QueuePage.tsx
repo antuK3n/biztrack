@@ -15,7 +15,13 @@ import { formatDateTime } from '../../lib/format'
 import { applicationStatusMeta } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { ApplicationListItem, ApplicationStatus, Assignment, PageMeta } from '../../lib/types'
+import type {
+  ApplicationListItem,
+  ApplicationStatus,
+  ApplicationType,
+  Assignment,
+  PageMeta,
+} from '../../lib/types'
 
 /*
  * Application Verification (PDF p61/p80) — the officer queue restyled to the
@@ -66,6 +72,41 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'inspection', label: 'For Inspection' },
   { value: 'final', label: 'Final Approval' },
 ]
+
+/**
+ * What KIND of filing this is (item 97) — the third narrowing on this screen.
+ *
+ * A genuinely different question from the two pill rows above it, which is why
+ * it is a third row rather than more tabs or a second `SortFilter` menu. The
+ * tabs ask where the filing is, the holder pills ask whose it is, and this asks
+ * what it is; all three cross, and "my assigned renewals awaiting approval" is
+ * one officer's working list rather than three separate ones. `SortFilter`
+ * carries exactly one `filter` menu and that one is already spent on the tab's
+ * statuses, so pills are also the only control here that does not mean altering
+ * a shared component.
+ *
+ * "All filings" rather than plain "All", because the holder row directly above
+ * already offers an "All" and two unlabelled pill rows each opening with the
+ * same word is two controls the officer cannot tell apart at a glance.
+ *
+ * Kept when the tab changes, unlike the status filter. A status belongs to the
+ * tab it was chosen in — For Approval is not one of the inspection tab's
+ * statuses — but a renewal is a renewal in every tab, so carrying it across is
+ * what the officer means by having set it.
+ */
+const TYPE_PILLS: { value: '' | ApplicationType; label: string }[] = [
+  { value: '', label: 'All filings' },
+  { value: 'new', label: 'New' },
+  { value: 'renewal', label: 'Renewal' },
+  { value: 'amendment', label: 'Amendment' },
+]
+
+/** The same three, as a plural noun, for the sentences that count what is on screen. */
+const TYPE_PLURAL: Record<ApplicationType, string> = {
+  new: 'new applications',
+  renewal: 'renewals',
+  amendment: 'amendments',
+}
 
 
 /**
@@ -318,25 +359,48 @@ const PAGE_SIZE = 25
  * same endpoint. Filtering a page in the browser is precisely the bug the tab
  * split already had (see the class comment on QueuePage).
  *
- *  - Filter → server, on every tab. Both endpoints take a status list, so
- *    narrowing a tab to one status is a query change and the totals stay exact.
+ *  - Filter (status) → server, on every tab. Both endpoints take a status list,
+ *    so narrowing a tab to one status is a query change and the totals stay
+ *    exact.
+ *  - Filter (filing type) → server on Pending Payment, browser on the other
+ *    three, and the split is the endpoints' and not a preference. `/applications`
+ *    takes `type` (ApplicationController::index validates it and applies
+ *    `where('application_type', …)`), so the Pending Payment tab sends it and
+ *    `meta.total` keeps counting the rows beside it. `/assignments` takes
+ *    nothing of the kind — `AssignmentController::index` validates exactly
+ *    `status`, `application_status`, `clearance_status`, `q`, `oic`, `per_page`
+ *    and `page`, and an unlisted parameter is ignored rather than refused, which
+ *    would be a narrowing that silently did not happen. So those three tabs
+ *    match `item.type` over the rows in hand, exactly as the sort below does,
+ *    and the status line says "of the N loaded" whenever they are the ones
+ *    doing it. The fix for that half is a `type` filter on the assignment feed,
+ *    at which point this bullet collapses into the one above it.
+ *    NOTE the key is `type`, not `application_type`: on `/applications` the
+ *    latter is the request BODY's field on create, and the query parameter that
+ *    narrows the list is `type`.
  *  - Search → server, on every tab. This note used to read "server on Pending
  *    Payment, browser on the other two", because `/applications` took `q` and
  *    `/assignments` took nothing of the kind. It takes one now, over the same
  *    two columns (tracking ID and business name, two LIKEs in SQL) and applied
  *    inside the department scoping, so all three tabs search the whole queue
  *    rather than the rows that happen to be loaded. See `searchesOnServer`.
- *  - Sort → browser on every tab, because neither endpoint accepts an ordering
- *    parameter (`/assignments` orders assigned_at DESC and `/applications`
- *    created_at DESC, both unconditionally).
+ *  - Sort → browser, EXCEPT for the one order the tab's endpoint already
+ *    returns. Neither takes an ordering parameter, but each has a fixed order
+ *    and they no longer agree: `/assignments` orders `assigned_at is null`,
+ *    then `assigned_at` ASC, then `id` — oldest routing first, un-routed last
+ *    (issue #91) — and `/applications` orders `created_at` DESC then `id` DESC.
+ *    So the free sort is "Waiting longest" on the three assignment tabs and
+ *    "Newest first" on Pending Payment; see `serverSort`, which is what decides
+ *    whether a sort costs a deep page or nothing at all.
  *
- * Sort is therefore the only one left in the browser, and where it is doing the
- * work the page asks for the API's ceiling instead of a screenful, so it usually
- * covers the whole queue in one request: an office's "For Approval" tab is tens
- * of rows, not thousands. `maxPerPage` is 200 (PaginatesLists) and asking for
- * more is clamped, not obeyed. Where the SERVER is doing the work no deep page
- * is needed, and the status line says "Showing 3 of 3" rather than "3 of the 200
- * loaded" because for once that is the whole truth.
+ * Sort and the filing type are what is left in the browser, and wherever the
+ * browser is doing the work the page asks for the API's ceiling instead of a
+ * screenful, so it usually covers the whole queue in one request: an office's
+ * "For Approval" tab is tens of rows, not thousands. `maxPerPage` is 200
+ * (PaginatesLists) and asking for more is clamped, not obeyed. Where the SERVER
+ * is doing the work no deep page is needed, and the status line says "Showing 3
+ * of 3" rather than "3 of the 200 loaded" because for once that is the whole
+ * truth.
  */
 const DEEP_PAGE_SIZE = 200
 
@@ -352,11 +416,52 @@ const SEARCH_DEBOUNCE_MS = 250
 
 type SortKey = 'newest' | 'waiting' | 'business'
 
+/**
+ * "Waiting longest" moved to the head of the list because it is now the order
+ * the screen opens in (DEFAULT_SORT), and a menu whose first entry is not the
+ * one in force reads as though the screen is sorted some fourth way.
+ *
+ * Its label is not marked "(default)". `SortFilterMenuPanel` already renders the
+ * option in force as `aria-selected` and tinted, so the word would be a second
+ * claim about the same thing — and the label is quoted verbatim in the status
+ * line below ("Showing 12 of 12, waiting longest."), where a parenthesis about
+ * defaults is noise in the middle of a sentence.
+ *
+ * "Waiting longest" and not "Oldest first", which is the client's phrasing: an
+ * officer sorting a queue is asking whose case has been outstanding longest, and
+ * the oldest FILING and the longest-waiting one are the same row here only
+ * because the clock on the row is the routing date.
+ */
 const SORTS: SortFilterOption[] = [
-  { value: 'newest', label: 'Newest first' },
   { value: 'waiting', label: 'Waiting longest' },
+  { value: 'newest', label: 'Newest first' },
   { value: 'business', label: 'Business name (A–Z)' },
 ]
+
+/**
+ * The oldest filing is the top row (issue #91). DO NOT flip this back.
+ *
+ * Client's words: "The OLDEST application should appear at the top, not the
+ * latest." It reads as a preference and it is not one — it is RA 11032, the Ease
+ * of Doing Business Act, which puts a statutory processing clock on every filing
+ * (3 / 7 / 20 working days by tier; `App\Support\Ra11032` holds the counts and
+ * `deadline_at` is computed from them). The filing nearest to breaching that
+ * clock is always the one that has waited longest, so newest-first ordered the
+ * queue by the one fact the deadline does not care about — and in the direction
+ * that hides the breach. An office taking in more than it clears pushes its
+ * oldest case further down every time somebody files, which makes the row most
+ * at risk the row least likely to be seen. Sorting a statutory queue by arrival
+ * is a service-standard failure, not a display choice.
+ *
+ * It is also now the order `/assignments` returns (oldest `assigned_at` first,
+ * un-routed last, `id` breaking ties), so on three of the four tabs this default
+ * costs nothing: the server already sorted it, `serverSort` says so, and the
+ * page keeps its 25-row first request. Defaulting to `newest` against that feed
+ * was actively wrong rather than merely unhelpful — it fetched the 25 OLDEST
+ * rows and re-sorted those newest-first, so the top row was "the newest of the
+ * oldest 25", which is not a queue order anybody asked for.
+ */
+const DEFAULT_SORT: SortKey = 'waiting'
 
 /**
  * One row of the queue, whichever feed it came from.
@@ -391,6 +496,16 @@ interface QueueItem {
   /** `at` in milliseconds, for the browser-side sorts. Missing sorts as brand new. */
   atMs: number
   unpaid: boolean
+  /**
+   * New / renewal / amendment, for the filing-type pills (item 97).
+   *
+   * Carried on the row rather than re-fetched because three of the four tabs
+   * match it here: `/assignments` has no `type` parameter, and
+   * `AssignmentResource` has sent `application.application_type` all along —
+   * `AssignmentController::index` names the column in its eager `select`, so it
+   * is on the wire on every tab and costs this page nothing.
+   */
+  type: ApplicationType
   /**
    * This office's own permit on the filing, when the row came from an
    * assignment. Null on the Pending Payment tab, whose rows are applications and
@@ -453,6 +568,7 @@ function fromAssignment(item: Assignment): QueueItem {
     at: item.assigned_at,
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
+    type: app.application_type,
     clearance: item.clearance,
     assignmentId: item.id,
     officer: item.officer,
@@ -488,6 +604,13 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     at: app.submitted_at,
     atMs: app.submitted_at ? new Date(app.submitted_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
+    /*
+     * Set even though this tab narrows by type on the server, so that one row
+     * shape means one thing on every tab. A field that is only populated where
+     * it happens to be read is the kind that goes missing the first time
+     * something else reads it.
+     */
+    type: app.application_type,
     // No office holds this filing yet, so there is no "your permit" to report.
     clearance: null,
   }
@@ -508,6 +631,13 @@ async function loadPage(args: {
   clearanceStatuses?: string
   /** Server-side search term. '' means no search. */
   query: string
+  /**
+   * Server-side filing type. '' means every type — and it is ALWAYS '' on the
+   * three assignment tabs, whose endpoint has no such parameter; see the note on
+   * `typeOnServer`. `ApplicationFilters` spells this `type`, not
+   * `application_type`.
+   */
+  type: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
   page: number
@@ -517,6 +647,7 @@ async function loadPage(args: {
     const res = await applications.page({
       status: args.statuses,
       ...(args.query ? { q: args.query } : {}),
+      ...(args.type ? { type: args.type } : {}),
       page: args.page,
       per_page: args.perPage,
     })
@@ -537,9 +668,17 @@ async function loadPage(args: {
   return { items: res.data.map(fromAssignment), meta: res.meta }
 }
 
-/** Is the browser being asked to do work the current page of rows cannot answer? */
-function isDeep(query: string, sort: SortKey): boolean {
-  return query.trim() !== '' || sort !== 'newest'
+/**
+ * Is the browser being asked to do work the current page of rows cannot answer?
+ *
+ * `serverSort` is a parameter rather than the literal 'newest' it used to be:
+ * the free ordering is whatever the tab's own endpoint already returns, and
+ * since issue #91 the two endpoints behind this screen return different ones.
+ * Hard-coding 'newest' here would have said a Pending Payment sort was free on
+ * the assignment tabs, where it is the one that costs a 200-row page.
+ */
+function isDeep(query: string, sort: SortKey, serverSort: SortKey): boolean {
+  return query.trim() !== '' || sort !== serverSort
 }
 
 /**
@@ -659,13 +798,41 @@ function QueueRow({
         * "Unpaid" says the one thing this chip knows. The stage is the tab's job
         * and the permit line's, and no two of the three now use the same words
         * for different things.
+        *
+        * ── Why "Paid" is gone and "Unpaid" stayed (item 92) ──────────────────
+        *
+        * The client asked for the chip removed outright: "every filing there is
+        * already paid." That is true of two tabs and false of the other two, and
+        * the two it is false of include the one this screen opens on.
+        *
+        * `UNPAID_STATUSES` and the tab status lists above decide it between
+        * them, and they overlap:
+        *
+        *   For Approval   for_approval + returned are unpaid; awaiting_other_permits is paid → MIXED
+        *   Pending Payment  pending_payment                                                  → ALL unpaid
+        *   For Inspection   awaiting_other_permits                                           → all paid
+        *   Final Approval   for_final_approval                                               → all paid
+        *
+        * Not theoretical. Counted against this register on 17 September 2026:
+        * 13 assignments sit on a filing at `for_approval` or `returned`, and 4
+        * filings sit at `pending_payment`. So an officer on the default tab can
+        * have a paid row and an unpaid row side by side, and the chip is the only
+        * thing on either that tells them apart — BPLO reading a form nobody has
+        * been billed for is different work from an office reading a clearance on
+        * a filing that has settled.
+        *
+        * So the noise the client is seeing is real but it is the GREEN chip: on
+        * the two tabs where nothing can be unpaid it printed "Paid" on every row,
+        * down the whole page, saying the same thing about all of them. Rendering
+        * only the exception removes it from those two tabs entirely and leaves
+        * the one case that carries information. Absence now means paid, which is
+        * the ordinary state and the one that needs no words.
         */}
-      <StatusChip
-        tone={item.unpaid ? 'orange' : 'green'}
-        className="w-28 shrink-0 rounded-none! px-4 py-3 text-sm"
-      >
-        {item.unpaid ? 'Unpaid' : 'Paid'}
-      </StatusChip>
+      {item.unpaid && (
+        <StatusChip tone="orange" className="w-28 shrink-0 rounded-none! px-4 py-3 text-sm">
+          Unpaid
+        </StatusChip>
+      )}
     </>
   )
 
@@ -735,9 +902,11 @@ export function QueuePage() {
   const [page, setPage] = useState(1)
   const [rows, setRows] = useState<QueueItem[]>([])
   const [search, setSearch] = useState('')
-  const [sort, setSort] = useState<SortKey>('newest')
+  const [sort, setSort] = useState<SortKey>(DEFAULT_SORT)
   /** '' means the whole tab; otherwise one status inside it. */
   const [statusFilter, setStatusFilter] = useState('')
+  /** '' means every kind of filing; otherwise new, renewal or amendment (item 97). */
+  const [filingType, setFilingType] = useState<'' | ApplicationType>('')
   /** The search the SERVER has been asked for. Pending Payment only; see below. */
   const [serverQuery, setServerQuery] = useState('')
   /*
@@ -825,9 +994,40 @@ export function QueuePage() {
    */
   const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
   const clearanceStatuses = tab === 'inspection' ? INSPECTION_CLEARANCE_STATUSES : undefined
-  // A deep page buys nothing where the server is doing the searching; only the
-  // browser-side sorts still need more rows than fit on a screen.
-  const deep = searchesOnServer ? sort !== 'newest' : isDeep(search, sort)
+  /*
+   * Which end of the wire narrows by filing type, decided by which endpoint the
+   * tab reads and nothing else.
+   *
+   * `/applications` takes `type` and `/assignments` does not, so Pending Payment
+   * gets an exact `meta.total` and the other three get a browser-side match over
+   * the rows in hand. Written as one flag read in four places rather than
+   * `tab === 'payment'` repeated, because the day the assignment feed grows a
+   * `type` filter this becomes `false` and every consequence follows from it.
+   */
+  const typeOnServer = tab === 'payment'
+  const serverType = typeOnServer ? filingType : ''
+  /*
+   * The order the endpoint behind THIS tab already returns rows in.
+   *
+   * Neither takes a `sort` parameter, so this is not a request — it is what the
+   * page knows about each feed, and the only reason to know it is that asking
+   * for that same order costs nothing: no re-sort matters and no deep page is
+   * needed, because page 1 really is the first 25 rows of the order on screen.
+   *
+   * The two disagree, which is why this cannot be a constant. `/assignments`
+   * orders oldest routing first (issue #91, see DEFAULT_SORT) and
+   * `/applications` orders `created_at` DESC — so the free sort is "Waiting
+   * longest" on the three assignment tabs and "Newest first" on Pending Payment.
+   */
+  const serverSort: SortKey = tab === 'payment' ? 'newest' : 'waiting'
+  /*
+   * A deep page buys nothing where the server is doing the searching or the
+   * narrowing; it is the browser-side work — the sorts, and the filing type on
+   * the three assignment tabs — that needs more rows than fit on a screen,
+   * because it can only ever answer over what has been fetched.
+   */
+  const browserType = typeOnServer ? '' : filingType
+  const deep = (searchesOnServer ? sort !== serverSort : isDeep(search, sort, serverSort)) || browserType !== ''
   const perPage = deep ? DEEP_PAGE_SIZE : PAGE_SIZE
 
   const { data, loading, error, reload } = useAsync(
@@ -838,6 +1038,7 @@ export function QueuePage() {
         assignmentStatuses,
         clearanceStatuses,
         query: serverQuery,
+        type: serverType,
         // Pending Payment reads `/applications`, which has no assignment to
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
@@ -845,7 +1046,20 @@ export function QueuePage() {
         page,
         perPage,
       }),
-    [tab, statuses, assignmentStatuses, clearanceStatuses, serverQuery, holder, page, perPage],
+    [
+      tab,
+      statuses,
+      assignmentStatuses,
+      clearanceStatuses,
+      serverQuery,
+      // `serverType` and not `filingType`: on the three browser-filtered tabs it
+      // is '' whatever the pills say, so changing the type there does not refire
+      // a request that would come back with exactly the same rows.
+      serverType,
+      holder,
+      page,
+      perPage,
+    ],
   )
 
   // Paging in extends the list being read; a new tab starts its own list. Merged
@@ -957,6 +1171,31 @@ export function QueuePage() {
   }
 
   /**
+   * The filing type, restarting the list only when the REQUEST changes (item 97).
+   *
+   * `restart()` empties `rows` and sets the page to 1, and it is `useAsync`'s
+   * dependencies that then refill them. So restarting when nothing in those
+   * dependencies moved does not reload the list — it blanks it, permanently,
+   * until some other control happens to fire a request. That is the hazard
+   * `changeSort` is already written around, and it bites harder here: on the
+   * three browser-filtered tabs `serverType` stays '' whatever is pressed, so
+   * three of the four tabs are exactly the case where nothing moved.
+   *
+   * Two things can move. On Pending Payment the type goes into the query, so
+   * every press is a new request. Everywhere else only the DEPTH moves, and only
+   * as the filter switches on or off: renewal → amendment is the same 200 rows
+   * re-matched in the browser, and throwing them away to ask for them again
+   * would be a blank list and a round trip for a filter that is already local.
+   */
+  function selectFilingType(next: '' | ApplicationType) {
+    if (next === filingType) return
+    const wasDeep = !typeOnServer && filingType !== ''
+    const nowDeep = !typeOnServer && next !== ''
+    setFilingType(next)
+    if (typeOnServer || wasDeep !== nowDeep) restart()
+  }
+
+  /**
    * Search and sort only restart the list when they change how deep it is
    * fetched. On the server-searched tab the search's restart is the debounce's,
    * above — restarting here as well would throw away the rows on screen a
@@ -964,13 +1203,16 @@ export function QueuePage() {
    */
   function changeSearch(next: string) {
     setSearch(next)
-    if (!searchesOnServer && isDeep(next, sort) !== isDeep(search, sort)) restart()
+    if (!searchesOnServer && isDeep(next, sort, serverSort) !== isDeep(search, sort, serverSort)) restart()
   }
 
   function changeSort(next: SortKey) {
     setSort(next)
-    const was = searchesOnServer ? sort !== 'newest' : isDeep(search, sort)
-    const now = searchesOnServer ? next !== 'newest' : isDeep(search, next)
+    // Against `serverSort`, not a fixed 'newest': what makes a sort free is the
+    // tab's own feed already being in it, and the two feeds are in different
+    // orders since issue #91.
+    const was = searchesOnServer ? sort !== serverSort : isDeep(search, sort, serverSort)
+    const now = searchesOnServer ? next !== serverSort : isDeep(search, next, serverSort)
     if (was !== now) restart()
   }
 
@@ -1020,20 +1262,40 @@ export function QueuePage() {
   const browserNeedle = searchesOnServer ? '' : needle
   const visible = rows
     .filter((item) => matchesSearch(item, browserNeedle))
+    // Empty on Pending Payment, where `/applications?type=` has already done it
+    // — matching the same rule twice would only re-apply it over fewer rows.
+    .filter((item) => !browserType || item.type === browserType)
     // Copied before sorting: `rows` is state, and Array.prototype.sort is in
     // place — sorting it directly would rewrite the accumulated pages.
     .slice()
     .sort((a, b) => {
-      if (sort === 'waiting') return a.atMs - b.atMs
+      /*
+       * A row with no timestamp goes LAST here, not first.
+       *
+       * `atMs` is 0 when the row has no clock, which under an ascending compare
+       * sorts it to the very top — and the top of this queue now means "closest
+       * to breaching RA 11032". `AssignmentController` states the same rule in
+       * SQL (`orderByRaw('assigned_at is null')`, whose note explains that
+       * SQLite sorts NULL first and Postgres last, so neither default could be
+       * relied on); a browser comparator that disagreed with it would reorder
+       * the page it was handed and put an un-routed row above every real one.
+       * There are none today — 0 of 6,209 — which is exactly why this would go
+       * unnoticed until the one that fixes itself to the top of every office's
+       * queue appears.
+       */
+      if (sort === 'waiting') {
+        if (a.atMs === 0 || b.atMs === 0) return a.atMs === b.atMs ? 0 : a.atMs === 0 ? 1 : -1
+        return a.atMs - b.atMs
+      }
       // Rows whose business is gone are keyed by tracking ID on screen, so that
       // is what they sort by too — `name` already holds the fallback.
       if (sort === 'business') return a.name.localeCompare(b.name)
       return b.atMs - a.atMs
     })
 
-  const sortLabel = SORTS.find((s) => s.value === sort)?.label.toLowerCase() ?? 'newest first'
+  const sortLabel = SORTS.find((s) => s.value === sort)?.label.toLowerCase() ?? 'waiting longest'
   const partial = rows.length < total
-  const narrowed = Boolean(needle || statusFilter)
+  const narrowed = Boolean(needle || statusFilter || filingType)
 
   /*
    * What this screen is actually showing, in one sentence, announced.
@@ -1048,31 +1310,57 @@ export function QueuePage() {
    * page, so "Showing 1 of 1" is exactly true and saying "of the 25 loaded"
    * would understate a search that really did cover the register. The sort is
    * still the browser's, so a non-default sort keeps its caveat.
+   *
+   * ── And so does the filing type, on the three tabs that match it here ─────
+   *
+   * That branch comes FIRST because it is the only one of the three that can be
+   * wrong about its own numerator. Everywhere else `rows.length` is what is on
+   * screen; where the browser is filtering, `rows` holds the fetched page and
+   * `visible` holds what survived it, and quoting the first would announce 200
+   * rows above a list of six. `meta.total` is no better as a denominator there —
+   * the server counted a query that never heard of the filter — so the count is
+   * stated against the rows LOADED, with the queue total beside it, which is the
+   * same hedge the browser-search branch below already carries and for the same
+   * reason. Pending Payment does not take this branch: `browserType` is '' there
+   * because the server did the narrowing, and "Showing 2 of 2" is exactly true.
    */
   const summary = firstLoad
     ? 'Loading the queue…'
     : error
       ? ''
-      : searchesOnServer
-        ? rows.length === 0
-          ? needle
-            ? `Nothing in this queue matches “${search.trim()}”.`
-            : 'Nothing in this queue right now.'
-          : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}` +
-            `${needle ? ` matching “${search.trim()}”` : ''}, ${sortLabel}.` +
-            `${sort !== 'newest' && partial ? ' Load more to sort the rest.' : ''}`
-        : rows.length === 0
-          ? 'Nothing in this queue right now.'
-          : needle || sort !== 'newest'
-            ? `Showing ${visible.length.toLocaleString()} of the ${rows.length.toLocaleString()} loaded` +
-              `${partial ? ` (${total.toLocaleString()} in this queue)` : ''}, ${sortLabel}.` +
-              `${partial ? ' Load more to reach the rest.' : ''}`
-            : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}, newest first.`
+      : browserType
+        ? visible.length === 0
+          ? `No ${TYPE_PLURAL[browserType]} in this queue` +
+            `${needle ? ` match “${search.trim()}”` : ''}.`
+          : `Showing ${visible.length.toLocaleString()} ${TYPE_PLURAL[browserType]} of the ` +
+            `${rows.length.toLocaleString()} loaded` +
+            `${partial ? ` (${total.toLocaleString()} in this queue)` : ''}, ${sortLabel}.` +
+            `${partial ? ' Load more to reach the rest.' : ''}`
+        : searchesOnServer
+          ? rows.length === 0
+            ? needle
+              ? `Nothing in this queue matches “${search.trim()}”.`
+              : 'Nothing in this queue right now.'
+            : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}` +
+              `${needle ? ` matching “${search.trim()}”` : ''}, ${sortLabel}.` +
+              // Only a sort the SERVER did not already do leaves the rest
+              // unsorted; asking for the order the feed arrives in sorts nothing.
+              `${sort !== serverSort && partial ? ' Load more to sort the rest.' : ''}`
+          : rows.length === 0
+            ? 'Nothing in this queue right now.'
+            : needle || sort !== serverSort
+              ? `Showing ${visible.length.toLocaleString()} of the ${rows.length.toLocaleString()} loaded` +
+                `${partial ? ` (${total.toLocaleString()} in this queue)` : ''}, ${sortLabel}.` +
+                `${partial ? ' Load more to reach the rest.' : ''}`
+              : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}, ${sortLabel}.`
 
   function clearSearchAndFilter() {
     setSearch('')
     if (statusFilter) selectStatus('')
-    if (!searchesOnServer && isDeep('', sort) !== isDeep(search, sort)) restart()
+    // Through the handler, not `setFilingType`, so the restart-only-when-the-
+    // request-changes rule is applied here too rather than restated.
+    if (filingType) selectFilingType('')
+    if (!searchesOnServer && isDeep('', sort, serverSort) !== isDeep(search, sort, serverSort)) restart()
   }
 
   /*
@@ -1139,6 +1427,20 @@ export function QueuePage() {
         </div>
       )}
 
+      {/*
+        * What kind of filing (item 97) — offered on every tab, including Pending
+        * Payment, where it is the one narrowing that endpoint can honour.
+        *
+        * Named as a group because it is the third row of pills on this screen
+        * and they are drawn identically: sighted readers tell them apart by the
+        * words on the pills, and a reader who meets them one button at a time
+        * has nothing to tell them apart by at all. The label is what says which
+        * question this row is answering.
+        */}
+      <div className="mb-5" role="group" aria-label="Filter by filing type">
+        <FilterPills options={TYPE_PILLS} value={filingType} onChange={selectFilingType} />
+      </div>
+
       {claimError && (
         <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-sm font-medium text-s-red">
           {claimError}
@@ -1165,7 +1467,12 @@ export function QueuePage() {
           title={narrowed ? 'Nothing matches these filters' : 'Your queue is clear'}
           description={
             narrowed
-              ? 'No application in this queue has that status. Try a different filter.'
+              ? // Both narrowings, not just the status one. A filing type is as
+                // able to empty this list as a status is — "amendments awaiting
+                // inspection" is routinely none — and naming only the status
+                // would send an officer to re-check a control that was not the
+                // one holding the rows back.
+                'No application in this queue matches every filter set above. Try widening one.'
               : tab === 'payment'
                 ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
