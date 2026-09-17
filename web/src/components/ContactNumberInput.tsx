@@ -200,7 +200,17 @@ function SegmentedDigits({
       }}
     >
       {sizes.map((size, index) => (
-        <div key={index} className="flex min-w-0 flex-1 items-center gap-1.5">
+        /*
+         * Each group is as wide as the digits it accepts, and no wider.
+         *
+         * `flex-1` made every group the same width whatever it held, so the
+         * landline's four-digit area code was drawn the size of its
+         * eight-digit number, and the whole question stretched to fill its
+         * column — the complaint the client raised against the TIN, which is
+         * the same control with different group sizes. Width now follows
+         * `size`, so the boxes are proportioned like the number they spell.
+         */
+        <div key={index} className="flex items-center gap-1.5">
           {index > 0 && separator && (
             <span aria-hidden="true" className="shrink-0 text-ink-muted">
               {separator}
@@ -224,6 +234,12 @@ function SegmentedDigits({
             maxLength={size}
             aria-label={labels[index]}
             aria-invalid={Boolean(invalid)}
+            /*
+             * `ch` is the width of a figure in `tnum`, which is exactly what
+             * this box holds, plus the horizontal padding. An arbitrary Tailwind
+             * step would have to be re-guessed every time a group size changes.
+             */
+            style={{ width: `calc(${size}ch + 1.75rem)` }}
             className={`${boxCls} ${invalid ? 'ring-2 ring-s-red' : ''}`}
           />
         </div>
@@ -430,4 +446,4 @@ const legendCls = 'mb-1.5 block text-[13px] font-semibold text-ink'
  * each box.
  */
 const boxCls =
-  'tnum w-full min-w-0 rounded-lg border border-input-border bg-input px-2 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+  'tnum shrink-0 rounded-lg border border-input-border bg-input px-2 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'

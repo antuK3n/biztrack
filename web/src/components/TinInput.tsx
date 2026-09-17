@@ -288,7 +288,9 @@ export function TinInput({
     >
       <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
         Tax Identification Number (TIN)
-        <span className="text-s-red"> *</span>
+        {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
+        <span className="text-s-red" aria-hidden="true"> *</span>
+        <span className="sr-only"> (required)</span>
       </legend>
 
       <div
@@ -303,7 +305,19 @@ export function TinInput({
         }}
       >
         {groups.map((group, index) => (
-          <div key={index} className="flex min-w-0 flex-1 items-center gap-1.5">
+          /*
+           * The group takes the width of the three digits in it and no more.
+           *
+           * This was `flex-1`, so four boxes holding three characters each
+           * stretched to fill whatever column the question landed in — on a
+           * desktop half-column that is roughly a hundred pixels per digit,
+           * and the question read as the widest thing on the step while being
+           * one of the shortest answers on it. The client named this field by
+           * name. `min-w-0` went with it: it exists to let a flex child shrink
+           * below its content, which is the opposite of what a fixed-width box
+           * should ever do.
+           */
+          <div key={index} className="flex items-center gap-1.5">
             {index > 0 && (
               // Decorative: the separator a screen reader must not read as
               // "minus" four times. The group's name already says it is a TIN.
@@ -348,4 +362,4 @@ export function TinInput({
  * figures make three of them look like a different width in each box.
  */
 const inputBoxCls =
-  'tnum w-full min-w-0 rounded-lg border border-input-border bg-input px-1 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+  'tnum w-12 shrink-0 rounded-lg border border-input-border bg-input px-1 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
