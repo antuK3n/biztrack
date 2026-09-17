@@ -87,6 +87,63 @@ final class ApplicationVisibility
      * filing needs them to work — CENRO reviews the PSIC line, CPDO's fee is per
      * square metre, and an inspector who cannot read the address cannot find the
      * premises.
+     *
+     * ── Issue #95 wants LESS than this predicate is able to give, and taking
+     *    it off ANY_OFFICE here is the wrong lever. Measured. ────────────────
+     *
+     * "The initial-approval view already shows answers for the other offices'
+     * forms. Remove them." True, and this line is why: BPLO holds ANY_OFFICE,
+     * so the review sheet's Section D handed the initial approver every other
+     * office's questionnaire — on a seven-office filing that included CENRO's
+     * `owner_birthday`, the date of birth the item-111 fix took away from the
+     * CHO officer and went on serving to the seat next door.
+     *
+     * The obvious fix is to let only the DEPARTMENTLESS ANY_OFFICE seat through
+     * — the super admin — and drop BPLO into the office comparison below,
+     * exactly the line OfficerRequestController::index draws for requirements
+     * on the client's own words, "sa fire ganon, sa kanya lang din dapat, di
+     * dapat mag-reflect sa BPLO". That was written and run, and it is wrong,
+     * because this predicate stopped answering ONE question some time ago. Five
+     * surfaces call it and only the first is the one the client is looking at:
+     *
+     *  1. ApplicationResource `office_forms` — the questionnaires. Issue #95.
+     *  2. ApplicationResource `permit_types[].remarks` / `rejection_reason` —
+     *     WHY an office returned or refused its clearance. BPLO signs the
+     *     mayor's permit off against exactly that, and PerPermitOfficeScopingTest
+     *     pins it ("still lets BPLO and the super admin read every office's
+     *     words").
+     *  3. ApplicationResource `documents` and DocumentController::show, for an
+     *     attachment carrying a `permit_type_id` — a clearance the applicant
+     *     ALREADY HOLDS, filed instead of applying for it (SEP-8). Narrowing
+     *     this orphans the evidence outright: a held sanitary permit creates no
+     *     sanitary assignment and no sanitary form, so if BPLO may not open it
+     *     then no officer in the product may, and initial approval is decided
+     *     on a certificate nobody is allowed to read. HeldPermitSubmissionTest
+     *     is that case.
+     *  4. AssignmentResource `remarks` / `officer` — one office's prose about
+     *     this applicant's premises, and who signed it.
+     *  5. OfficeFormController::readableCode — the `/office-forms` door, which
+     *     gates the write as well as the read.
+     *
+     * Surfaces 2, 3 and 4 are the OTHER half of the same client instruction —
+     * "The whole initial-approval form should stay visible to BPLO" (issue #99)
+     * — so a change made here to satisfy #95 breaks #99 in the same stroke. Six
+     * Pest cases went red when it was tried; two of them were that breakage
+     * rather than the old rule.
+     *
+     * What #95 actually needs is a predicate of its own for the questionnaire,
+     * adopted by surfaces 1 and 5 TOGETHER. Never one without the other: the
+     * assignment payload and the `/office-forms` endpoint answering differently
+     * about the same sheet is SEP-1, the defect this class was extracted to
+     * end. Its body is this one with the ANY_OFFICE branch narrowed to
+     * `$user->department_id === null`, and the note above is its reasoning.
+     *
+     * Until that lands, #95 is honoured on the screen it was reported against:
+     * ReviewPage.tsx renders no office's answers but the reader's own, for
+     * every seat including BPLO. That is a rendering decision about the
+     * coordinator's own page and NOT a boundary being enforced in a browser —
+     * the five clearance offices' separability is enforced here, server-side,
+     * and nothing below has moved.
      */
     public static function readsOfficeSheet(?User $user, ?int $issuingDepartmentId): bool
     {

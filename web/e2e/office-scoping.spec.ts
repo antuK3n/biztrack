@@ -1037,3 +1037,180 @@ test('offices on one filing do not read each other’s conversation with the app
     ).toEqual([])
   }
 })
+
+/*
+ * ── 9. The coordinator's own screen (issues #95 and #99) ────────────────────
+ *
+ * The only claims in this file made against a SCREEN rather than an endpoint,
+ * and the exception is deliberate rather than a lapse from §"Why this is fought
+ * at the API and not on the screen" above.
+ *
+ * Everything before this point is a boundary between two of the six offices,
+ * and a boundary that only exists in a browser is not one — `/permits/8324/pdf`
+ * is a typeable URL. These two are about what BPLO, which holds
+ * `application.view_any_office` and is MEANT to reach the whole filing, is
+ * shown when it opens one. The payload deliberately still carries every sheet
+ * (see ApplicationVisibility::readsOfficeSheet — the same predicate carries
+ * BPLO's held certificates and the other offices' clearance remarks, which
+ * issue #99 keeps), so the endpoint is the wrong place to ask the question and
+ * the rendered page is the only place it can be answered.
+ *
+ * Both are differential in the way the rest of this file is: the fixture is
+ * chosen by reading the API FIRST and requiring that it hands BPLO something,
+ * so neither test can pass because there was nothing there.
+ */
+test.describe('what BPLO is shown on a filing it coordinates', () => {
+  test.use({ storageState: sessionFor('bplo') })
+
+  test('the other offices’ form answers are not rendered on the initial-approval view', async ({
+    page,
+    request,
+  }) => {
+    /*
+     * "The initial-approval view already shows answers for the other offices'
+     * forms. Remove them." (#95) Section D used to print every one of them to
+     * this seat — on a seven-office filing that included CENRO's
+     * `owner_birthday`, a date of birth eight sections below an RA 10173
+     * consent notice.
+     */
+    const queue = await getAs(request, 'bplo', '/api/v1/assignments?per_page=50')
+    expect(queue.status, 'BPLO’s own queue is readable').toBe(200)
+
+    let target: { assignment: number; label: string; value: string } | null = null
+    for (const row of ((queue.body.data as AssignmentRow[]) ?? []).slice(0, 25)) {
+      const full = await getAs(request, 'bplo', `/api/v1/assignments/${row.id}`)
+      if (full.status !== 200) continue
+      const sheets =
+        (
+          full.body.data as {
+            application?: {
+              office_forms?: {
+                department_code: string | null
+                form_data: Record<string, unknown> | null
+              }[]
+            }
+          }
+        ).application?.office_forms ?? []
+
+      for (const sheet of sheets) {
+        if (sheet.department_code === 'BPLO') continue
+        // A long, distinctive answer: a short one ("Yes", "5") would be found
+        // somewhere on any page and the absence assertion would be worthless.
+        const answer = Object.entries(sheet.form_data ?? {}).find(
+          ([, v]) => typeof v === 'string' && v.trim().length >= 8,
+        )
+        if (!answer) continue
+        target = { assignment: row.id, label: answer[0], value: String(answer[1]) }
+        break
+      }
+      if (target) break
+    }
+
+    test.skip(
+      target === null,
+      'no filing on BPLO’s queue carries another office’s answered sheet — nothing to hide',
+    )
+
+    await page.goto(`/staff/queue/${target!.assignment}`)
+
+    /*
+     * ── The positive anchor is not optional here ──────────────────────────────
+     *
+     * `toHaveCount(0)` is satisfied the instant it is true, and on a route that
+     * has not finished mounting EVERYTHING has a count of zero. Written without
+     * the two lines below, both absence assertions passed against the very
+     * build that still printed CENRO's answers — verified, not feared: the
+     * leaked value was in the DOM of this same assignment at the same moment.
+     *
+     * So the sheet is proved to be on the page first, and the filed sheet is
+     * OPENED — Section D lived inside that disclosure, and a hidden leak is
+     * still a leak but a lazily-rendered one would slip a bare count.
+     */
+    await expect(
+      page.getByRole('button', { name: /Show the application as filed/ }),
+      `assignment ${target!.assignment} never rendered the review sheet — nothing was proved`,
+    ).toBeVisible()
+    await page.getByRole('button', { name: /Show the application as filed/ }).click()
+    await expect(page.getByRole('heading', { name: 'Documentary Requirements' })).toBeVisible()
+
+    await expect(page.getByRole('heading', { name: /Other Offices/i })).toHaveCount(0)
+    await expect(
+      page.getByText(target!.value, { exact: false }),
+      `assignment ${target!.assignment} printed ${target!.label} off another office’s sheet`,
+    ).toHaveCount(0)
+  })
+
+  test('the whole filed form stays open to BPLO while the other offices work', async ({
+    page,
+    request,
+  }) => {
+    /*
+     * "The whole initial-approval form should stay visible to BPLO; hide it
+     * only from the other five offices." (#99)
+     *
+     * The compact "Application Status" box replaces the sheet for an office
+     * that has finished its review, which the five asked for twice. BPLO's own
+     * assignment is completed by `approveMainForm` at initial approval, so the
+     * same rule closed the form on the office that signs it — for the whole
+     * `awaiting_other_permits` stage, which is most of a filing's life.
+     *
+     * The five offices' half of this rule is asserted in inspection-review.spec
+     * ("an office that has FINISHED its review opens on the decision box"), and
+     * that test must stay green: the asymmetry is the point, and a change that
+     * hands everybody the form back would satisfy this test alone.
+     */
+    const queue = await getAs(
+      request,
+      'bplo',
+      '/api/v1/assignments?per_page=50&application_status=awaiting_other_permits',
+    )
+    expect(queue.status, 'BPLO’s own queue is readable').toBe(200)
+
+    let target: number | null = null
+    for (const row of ((queue.body.data as AssignmentRow[]) ?? []).slice(0, 25)) {
+      const full = await getAs(request, 'bplo', `/api/v1/assignments/${row.id}`)
+      if (full.status !== 200) continue
+      const detail = full.body.data as {
+        completed_at: string | null
+        application?: { status?: string }
+      }
+      // Finished here, unfinished overall: the seat the box used to take over.
+      if (detail.completed_at && detail.application?.status === 'awaiting_other_permits') {
+        target = row.id
+        break
+      }
+    }
+
+    test.skip(target === null, 'no filing is waiting on the other offices right now')
+
+    await page.goto(`/staff/queue/${target}`)
+    await expect(
+      page.getByRole('heading', { name: 'Application Status' }),
+      `BPLO got the compact box on assignment ${target} instead of the form it signed`,
+    ).toHaveCount(0)
+
+    /*
+     * Folded, not gone, and the difference is the whole point of the assertion
+     * being a CLICK rather than a DOM query. A decided review opens in view
+     * mode with the filed sheet behind a disclosure — that is true for every
+     * office and is not what #99 is about. What #99 is about is whether the
+     * sheet is on the page at all, so the test opens it and reads two sections
+     * out of it. `toBeVisible` on the collapsed markup would fail here for the
+     * right reason and the wrong one at once.
+     */
+    await page.getByRole('button', { name: /Show the application as filed/ }).click()
+    // By ROLE: the disclosure's own description names these sections in prose
+    // ("…the fee declaration…"), so a bare text match resolves to two elements
+    // and fails on strictness rather than on the rule.
+    await expect(page.getByRole('heading', { name: 'Documentary Requirements' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Fee Declaration' })).toBeVisible()
+
+    /*
+     * And the disclosure's own description, which lists what is behind it, no
+     * longer offers "the other offices' form answers" to this seat (#95). A
+     * control that names a section the sheet does not have is the leak report
+     * restated as copy.
+     */
+    await expect(page.getByText(/other offices’ form answers/i)).toHaveCount(0)
+  })
+})

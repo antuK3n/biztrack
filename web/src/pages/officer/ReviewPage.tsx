@@ -849,38 +849,46 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const officerName = data.officer?.name ?? data.department.name
 
   /*
-   * Submitted per-office form answers, split by whose sheet each one is.
+   * Submitted per-office form answers — this office's, and no other's.
    *
-   * ── Read what arrives; do not filter again here ───────────────────────────
+   * ── The server is still the boundary; this is not a second copy of it ─────
    *
-   * The server filters `office_forms` on the assignment payload down to the
-   * sheets this reader may see — ApplicationResource applying the same rule
-   * OfficeFormController::readableCode has always applied to
-   * `/applications/{id}/office-forms`: the applicant sees all,
-   * `application.view_any_office` (BPLO, admin) sees all, and every other
-   * reviewer sees only the permit types its own department issues. Repeating
-   * that test in the browser would be a second copy of a confidentiality rule
-   * that can drift from the first, and the browser is the wrong place to
-   * enforce one regardless. Everything below therefore only SORTS and GROUPS.
-   * Whatever is absent is absent on purpose.
+   * `office_forms` arrives already filtered to the sheets this reader MAY see:
+   * ApplicationResource applies `ApplicationVisibility::readsOfficeSheet`, the
+   * same rule OfficeFormController::readableCode applies to
+   * `/applications/{id}/office-forms`. A sanitary officer on a seven-office
+   * filing is sent ONE sheet, not seven, and that is where confidentiality is
+   * decided — not here, and never here.
+   *
+   * ── Why this filter exists anyway (issue #95) ─────────────────────────────
+   *
+   * The client: "The initial-approval view already shows answers for the other
+   * offices' forms. Remove them." One reader is still sent more than its own —
+   * BPLO, which holds `application.view_any_office` and was therefore handed
+   * every office's questionnaire, `owner_birthday` and all, in a Section D that
+   * no longer exists. The payload has not changed, because that predicate also
+   * carries BPLO's held certificates, the other offices' clearance remarks and
+   * their assignment prose, all of which issue #99 says BPLO keeps ("the whole
+   * initial-approval form should stay visible to BPLO"); the reasoning and the
+   * predicate the API half still needs are written out in
+   * `ApplicationVisibility::readsOfficeSheet`.
+   *
+   * So what this line does is decide what the SCREEN is about: the clearance
+   * the reader is deciding. Anything else that arrives is dropped rather than
+   * drawn, because the only place left that renders a sheet labels it "Your
+   * office" — and a foreign sheet under that heading would be worse than the
+   * leak it came from.
    *
    * ── So the array is short, and sometimes empty ────────────────────────────
    *
-   * A sanitary officer on a seven-office filing receives ONE sheet, not seven.
    * BPLO's own BUSINESS permit type carries no office form at all, so BPLO
-   * receives every sheet and none of them is its own — `ownOfficeForms` is
-   * legitimately empty there. Nothing below may assume a one-to-one with
-   * `app.permit_types`, which is the filing's list and is shared by every
-   * office on it.
+   * legitimately has none of these and goes straight to the record it
+   * coordinates. Nothing below may assume a one-to-one with `app.permit_types`,
+   * which is the filing's list and is shared by every office on it.
    */
-  const ownOfficeForms = (app.office_forms ?? []).filter(
+  const officeForms = (app.office_forms ?? []).filter(
     (f) => f.department_code === data.department.code,
   )
-  const otherOfficeForms = (app.office_forms ?? []).filter(
-    (f) => f.department_code !== data.department.code,
-  )
-  /** Every sheet this reader holds, own office first. */
-  const officeForms = [...ownOfficeForms, ...otherOfficeForms]
   const feeProfile = app.fee_profile ?? null
   const feeFacts = feeProfile ? feeProfileFacts(feeProfile) : []
   const feeLines = feeProfile?.lines ?? []
@@ -1304,13 +1312,38 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * process. The exception is keyed on the ASSIGNMENT's department, not on the
    * reader's permissions, because that is what `approveAssignment` itself
    * branches on.
+   *
+   * ── The exception is now BPLO at EVERY stage, not only the last (issue #99) ─
+   *
+   * "The whole initial-approval form should stay visible to BPLO; hide it only
+   * from the other five offices." That sentence is this branch, read as an
+   * asymmetry: the five are the ones the box was built for — they asked for it
+   * twice, "why is the entire application form showing it should just be like
+   * the other ones where its just a box" and then "I can still see the
+   * application details. Please remove this" — and BPLO is the one seat that
+   * never asked, because coordinating is reading.
+   *
+   * It was keyed on `for_final_approval` alone, which left BPLO a hole exactly
+   * one stage wide. `approveMainForm` completes BPLO's assignment at initial
+   * approval, so from the moment BPLO approves until the last clearance lands,
+   * the filing sits at `awaiting_other_permits` with `owesReview` false — and
+   * BPLO, the office that signed the form and is fielding the applicant's
+   * questions about it, could not open the form it had signed. That is
+   * checklist item 8 as the office admin experiences it, "the application
+   * disappears from the admin's view", and it is the half of #99 that was
+   * missing rather than the half that was working.
+   *
+   * Nothing is handed back except the READING. `decided` is still true for BPLO
+   * at `awaiting_other_permits`, so the sheet opens in view mode with its
+   * decision already recorded and no Approve — the controls are settled by
+   * `decided` and `canAct`, which have not moved, and the API is unchanged
+   * either way.
    */
-  const bploSignsOffHere =
-    data.department.code === 'BPLO' && app.status === 'for_final_approval'
+  const bploCoordinatesThroughout = data.department.code === 'BPLO'
   const nothingLeftForThisOffice =
     (app.status === 'awaiting_other_permits' || app.status === 'for_final_approval') &&
     !owesReview &&
-    !bploSignsOffHere
+    !bploCoordinatesThroughout
 
   if (nothingLeftForThisOffice) {
     return (
@@ -1435,9 +1468,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * Driving the panel off the office forms that ARRIVED puts it exactly where
    * the Save will be accepted, because the two are the same rule read from two
    * ends: `readableCode` decides both which sheets are serialised onto this
-   * payload and whether the PUT is allowed. BPLO holds
-   * `application.view_any_office`, so it keeps the panel on every sheet — that
-   * is coordination, and the server agrees with it rather than 403ing.
+   * payload and whether the PUT is allowed.
+   *
+   * Since issue #95 that list is the reader's OWN sheets, which costs one thing
+   * and it is named here rather than discovered: BPLO no longer gets this panel
+   * on OCCUPANCY, so it cannot type "Building Permit Date Issued" on OBO's
+   * behalf. The server would still take the write — `view_any_office` has not
+   * moved — so this is the screen declining to offer one office another
+   * office's paperwork, not a refusal. OBO gets the panel on its own sheet,
+   * which is whose date it is. Put it back by restoring the sheet, above.
    *
    * It also fixes SEP-3's other half in passing. Once the payload is filtered,
    * a foreign office reading `app.permit_types` would have found no saved sheet
@@ -1726,13 +1765,11 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
         ? '1 uploaded requirement'
         : `${app.documents.length} uploaded requirements`,
     /*
-     * Only when the payload actually carried somebody else's sheet. For a
-     * clearance office the server now filters Section D down to nothing
-     * (the `owner_birthday` fix), so promising "other offices' answers" to a
-     * sanitary officer would advertise a section that opens empty — and read
-     * as a leak to a client who has already reported one here.
+     * "The other offices' form answers" used to be listed here, on the one
+     * filing shape that still carried them. Nothing does now (issue #95), and a
+     * summary that named a section the sheet no longer has would read as a leak
+     * to a client who has already reported one here twice.
      */
-    otherOfficeForms.length > 0 ? 'the other offices’ form answers' : null,
     'the fee declaration',
     'the signed data-privacy consent',
   ].filter((part): part is string => part !== null)
@@ -2016,11 +2053,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * my office, stop showing me other offices' files", which is this
            * block plus the server-side filter on `office_forms`.
            *
+           * Issue #99 — "the whole initial-approval form should stay visible to
+           * BPLO; hide it only from the other five offices" — is not an
+           * instruction to delete A, B, C and E for a clearance office while it
+           * is still working. WHEN the five stop seeing the form is settled
+           * below, at `nothingLeftForThisOffice`, and it is the moment their own
+           * review is in: an office cannot review a filing it is not allowed to
+           * read.
+           *
            * Absent for BPLO and admin, and correctly so: the BUSINESS permit
            * type carries no office form, so BPLO has no sheet of its own to
            * lead with and goes straight to the record it coordinates.
            */}
-          {ownOfficeForms.map((form) => {
+          {officeForms.map((form) => {
             /*
              * `form_saved` is the server saying whether the applicant has
              * actually answered anything here.
@@ -2460,83 +2505,34 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           </section>
 
           {/*
-           * D — office-form answers other than the reader's own.
+           * Section D is GONE, and the sheet still runs A, B, C, E.
            *
-           * Still lettered D so the sheet keeps matching the paper BPLO form it
-           * is a rendering of; renumbering A–E to close a gap would make every
-           * section reference in the office wrong.
+           * It rendered "Other Offices' Form Answers" — every questionnaire on
+           * the filing that was not the reader's own. For the five clearance
+           * offices the server had already emptied it (checklist item 111, the
+           * `owner_birthday` leak), which left a permanent heading over a
+           * permanent apology, and the client asked for that much back then:
+           * "can you remove this part since this is highly unnecessary." It
+           * survived as a conditional because BPLO and the super admin were
+           * still sent every sheet and that was called coordination.
            *
-           * The reader's own sheet is NOT repeated here — it is the lead panel
-           * above. What is left is whatever else the payload carried, and for
-           * most readers that is now nothing at all: the server serialises only
-           * the sheets they may read, so a sanitary officer sees an empty
-           * Section D where they used to read CENRO's `owner_birthday` off
-           * another office's file, eight sections above a notice about RA 10173.
+           * The client has now ruled on the remaining seat too — "The
+           * initial-approval view already shows answers for the other offices'
+           * forms. Remove them" (issue #95) — so there is no reader left for
+           * whom this section has contents, and a section with no reader is
+           * deletion rather than another conditional.
            *
-           * Empty is therefore the ordinary case, not a fault, and the copy has
-           * to say which of the two it is — "the applicant did not fill any
-           * forms" would be a flat untruth on a six-clearance filing. BPLO and
-           * admin, who hold `application.view_any_office`, still get every
-           * sheet here, which is the coordination they need.
+           * The letter is not reused and A–E are NOT renumbered: the screen is
+           * a rendering of the paper BPLO form (MCG-BPLO-FO-001) and every
+           * section reference spoken aloud in the office is to that paper. A
+           * gap is cheaper than four wrong letters.
+           *
+           * What would bring it back: the client asking BPLO to read another
+           * office's questionnaire again. It is `otherOfficeForms` in the
+           * history — the same filter as the lead panel with `!==` for `===` —
+           * and the payload still carries the rows to fill it.
            */}
-          {/*
-           * ── Section D is DRAWN ONLY WHEN IT HAS SOMETHING IN IT ────────────
-           *
-           * The client, seeing its empty state: "can you remove this part since
-           * this is highly unnecessary."
-           *
-           * They are right, and the reason is structural rather than a matter
-           * of taste. Office separability means a clearance office can never
-           * have anything here — every other office's sheet is withheld from it
-           * by design — so for five of the six seats this section was a
-           * permanent heading over a permanent apology. A section that can only
-           * ever be empty is not information; it is a promise the screen cannot
-           * keep, and it pushed the officer's own work further down the page to
-           * make room for it.
-           *
-           * It still renders, populated, for BPLO and the super admin, who hold
-           * `application.view_any_office` and coordinate across offices. That is
-           * the one seat where "other offices' answers" is a real category with
-           * real contents, and it is why this is a conditional rather than a
-           * deletion.
-           */}
-          {otherOfficeForms.length > 0 && (
-          <section className="mt-9">
-            <SectionHeading letter="D">Other Offices’ Form Answers</SectionHeading>
-            {(
-              otherOfficeForms.map((form, formIndex) => {
-                const entries = Object.entries(form.form_data ?? {})
-                return (
-                  <div key={form.permit_type_code ?? formIndex}>
-                    <div className={`mb-3 flex items-center gap-2 ${formIndex === 0 ? 'mt-1' : 'mt-6'}`}>
-                      <span className="h-4 w-1 rounded-full bg-royal" aria-hidden="true" />
-                      <h3 className="text-sm font-bold text-ink">
-                        {form.permit_type_name ?? form.permit_type_code}
-                      </h3>
-                      {form.department_code && (
-                        <span className="rounded-md bg-canvas px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-ink-secondary">
-                          {form.department_code}
-                        </span>
-                      )}
-                    </div>
-                    {entries.length === 0 ? (
-                      <p className="text-sm text-ink-muted">No answers were recorded on this form.</p>
-                    ) : (
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        {entries.map(([key, value]) => (
-                          <Field key={key} label={humanizeKey(key)} value={formValueText(value)} />
-                        ))}
-                      </div>
-                    )}
-                    {form.requirements && form.requirements.length > 0 && (
-                      <RequirementsRead code={form.permit_type_code} rows={form.requirements} />
-                    )}
-                  </div>
-                )
-              })
-            )}
-          </section>
-          )}
+
 
           {/* E — Applicant-declared fee inputs (revenue-code profile) */}
           <section className="mt-9">
