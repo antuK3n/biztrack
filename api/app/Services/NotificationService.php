@@ -23,6 +23,19 @@ use Illuminate\Support\Facades\Mail;
  * Link targets must be real routes in web/src/App.tsx. `/track/{id}` and
  * `/review/{id}` were never routes, so every notification bounced the reader
  * to the sign-in redirect instead of the thing it was about.
+ *
+ * And a route is not enough: it has to be a route on the READER'S OWN SITE.
+ * The SPA is two sites on one origin — the citizen one at the root, the LGU one
+ * under `/staff` — and lib/api.ts keys the session token by which of the two the
+ * address bar is on. So a citizen path handed to an officer is not merely the
+ * wrong screen: the officer arrives where their token is not sent, the first
+ * request comes back 401, and the app puts them on the citizen sign-in page.
+ * Nothing has actually ended their session, but there is no way to tell that
+ * from the screen, which is how this reads as "clicking a notification logs me
+ * out" (issue #98).
+ *
+ * Hence filingLink(): the one filing has two addresses, and which one is right
+ * depends on who is being told about it, never on which method is telling them.
  */
 class NotificationService
 {
@@ -120,7 +133,12 @@ class NotificationService
             'message',
             'New message',
             "You have a new message on {$app->tracking_id}.",
-            "/applications/{$app->id}",
+            // The one notification here whose recipient can be EITHER side:
+            // MessageController::counterparty() answers with the applicant when
+            // an officer wrote, and with the office's assigned officer when the
+            // applicant did. Hard-coding the citizen path sent every officer
+            // reply-notification to a screen their token does not reach.
+            $this->filingLink($recipient, $app),
         );
         $this->fanOut($recipient, "BizTrack: new message on {$app->tracking_id}.");
     }
@@ -147,10 +165,12 @@ class NotificationService
             'request',
             'Requirement response received',
             "The applicant responded to “{$request->title}” on {$app->tracking_id}.",
-            // The one notification in this file addressed to an OFFICER rather
-            // than to the applicant, so the one that points into the LGU site.
-            // Everything else here links to a citizen screen at the root.
-            "/staff/queue/{$app->id}",
+            // Addressed to the officer who asked for the requirement, so it
+            // points into the LGU site. Through the helper rather than written
+            // out, so the address is decided by who is being TOLD — the same
+            // question everywhere — instead of by a literal this method happened
+            // to get right and newMessage() happened to get wrong.
+            $this->filingLink($recipient, $app),
         );
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }
@@ -180,7 +200,14 @@ class NotificationService
             'fee',
             'Fee assessment updated',
             "Your fee for {$app->tracking_id} was adjusted. Please review before paying.",
-            "/pay/{$app->id}",
+            /*
+             * `/applications/{id}/pay`, which is what App.tsx actually mounts
+             * PayPage at. `/pay/{id}` has never been a route — the same class of
+             * mistake as the `/track` and `/review` prefixes named at the top of
+             * this file, and it survived the fix that retired those because no
+             * fee had been adjusted yet, so no row existed to fail the test.
+             */
+            "/applications/{$app->id}/pay",
         );
         $this->fanOut($app->applicant, "BizTrack: fee for {$app->tracking_id} adjusted.");
     }
@@ -376,6 +403,33 @@ class NotificationService
         if ($user->mobile_number) {
             $this->sms->send($user->mobile_number, $message);
         }
+    }
+
+    /**
+     * The address of a filing ON THE SITE THIS READER IS SIGNED INTO.
+     *
+     * A filing has two screens, not one: the applicant reads it at
+     * `/applications/{id}` on the citizen site, a reviewer reads it at
+     * `/staff/queue/{id}` on the LGU one. They are not interchangeable — see the
+     * note at the top of this file for what handing over the wrong one does.
+     *
+     * `application.review` is the discriminator because it is what App.tsx gates
+     * the queue route on; asking the same question the router asks is what keeps
+     * the answer true when roles change. Anyone without it is a business owner,
+     * and the citizen path is the only one they could open anyway.
+     *
+     * The officer link carries an APPLICATION id into a route that binds an
+     * ASSIGNMENT. That is deliberate and long-standing (commit c922a8a):
+     * ReviewPage resolves a stray id against the office's own queue and replaces
+     * the URL, so the link self-corrects. An assignment id is not available here
+     * — a filing routed to six offices has six of them, and which one is meant
+     * depends on the reader, not on the filing.
+     */
+    private function filingLink(User $reader, Application $app): string
+    {
+        return $reader->hasPermission('application.review')
+            ? "/staff/queue/{$app->id}"
+            : "/applications/{$app->id}";
     }
 
     private function permitOwner(Permit $permit): ?User

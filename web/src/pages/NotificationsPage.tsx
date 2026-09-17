@@ -18,6 +18,8 @@ import {
 } from '../components/icons'
 import { PageTitle } from '../components/ui/Proto'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
+import { STAFF_PREFIX, homePathFor, portalForPath, portalPath } from '../lib/api'
+import type { Portal } from '../lib/api'
 import { formatDateTime } from '../lib/format'
 import { BPLO_ENQUIRY } from '../lib/nav'
 import { notifications } from '../lib/resources'
@@ -153,6 +155,88 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
 }
 
 /*
+ * ── Where a stored link actually takes THIS reader (issue #98) ──────────────
+ *
+ * A notification link is a string written months ago by a server that did not
+ * know who would click it, and the app it lands in is TWO sites on one origin:
+ * the citizen one at the root, the LGU one under `/staff`. lib/api.ts keys the
+ * session token by which of the two the address bar is on, so a `/`-rooted path
+ * followed by a signed-in officer lands somewhere their token is never sent —
+ * the first request 401s and the interceptor drops them on the citizen sign-in
+ * page. A path that matches no route at all is worse and quicker: App.tsx's
+ * catch-all is `NotFoundRedirect`, which goes straight to a sign-in page.
+ *
+ * Either way the officer sees a login screen, which is indistinguishable from
+ * having been logged out. Their staff session is untouched and still valid.
+ *
+ * NotificationService writes portal-correct links now, but that only helps rows
+ * written from here on. The database holds thousands of links from before the
+ * portal split and from before `/track` and `/review` were retired, and they
+ * are the ones testers are clicking today. Rewriting them in a migration would
+ * fix one database — the tunnel's — and leave every other copy, so the reader
+ * resolves them instead. This is the same trade `statusLabelIn` above makes,
+ * and for the same reason.
+ */
+
+/** Prefixes that were written into rows before the routes they named existed. */
+const RETIRED_PREFIXES: ReadonlyArray<readonly [string, string]> = [
+  ['/track', '/applications'],   // citizen filing detail, never a route
+  ['/review', '/staff/queue'],   // officer review screen, never a route
+  ['/queue', '/staff/queue'],    // officer review screen, before the portal split
+]
+
+/** Screens both sites mount, which differ only by the prefix. */
+const SHARED_SCREENS = ['/dashboard', '/messages', '/notifications', '/profile', '/settings', '/requests']
+
+/**
+ * The address of whatever a stored link is ABOUT, on the site this reader is on.
+ *
+ * Deliberately total: every input returns somewhere this reader can actually
+ * open, falling back to their own home rather than to a path that would sign
+ * them out. A notification that lands on the wrong screen is a nuisance; one
+ * that lands on a login form costs the reader their place and their trust in
+ * the rest of the list.
+ */
+function notificationHref(link: string, portal: Portal): string {
+  // Only our own absolute paths. `//host` is a path to React Router and an
+  // origin to the browser, and nothing here should ever leave the app.
+  if (!link.startsWith('/') || link.startsWith('//')) return homePathFor(portal)
+
+  let path = link
+  for (const [retired, current] of RETIRED_PREFIXES) {
+    if (path === retired || path.startsWith(`${retired}/`)) {
+      path = current + path.slice(retired.length)
+      break
+    }
+  }
+
+  // Already on the reader's site: leave it whole, subpaths and all. Only the
+  // citizen tree has those (`/applications/{id}/pay`, `/…/clearances`) and
+  // collapsing them would land the reader one screen short of the news.
+  if (portalForPath(path) === portal) return path
+
+  /*
+   * Crossing over, so the SUBJECT has to be re-addressed rather than re-prefixed
+   * — `/staff/applications/{id}` is nobody's route. One filing has two screens:
+   * the applicant's detail page and the reviewer's queue entry. The officer form
+   * carries an application id into a route that binds an assignment, which
+   * ReviewPage resolves against the office's own queue (see the note there); it
+   * is what NotificationService has written for officers since commit c922a8a.
+   */
+  const filing = /^(?:\/staff\/queue|\/applications)\/(\d+)/.exec(path)
+  if (filing) {
+    return portal === 'staff' ? `${STAFF_PREFIX}/queue/${filing[1]}` : `/applications/${filing[1]}`
+  }
+
+  const shared = SHARED_SCREENS.find((screen) => path === screen || path === `${STAFF_PREFIX}${screen}`)
+  if (shared) return portalPath(portal, shared)
+
+  // Citizen-only news reaching a staff account, or the reverse: there is no
+  // equivalent screen to send them to, so send them somewhere real.
+  return homePathFor(portal)
+}
+
+/*
  * A restriction notice is the one row that has to carry an action.
  *
  * Its body ends "If you believe this is a mistake, message the City BPLO", and
@@ -201,6 +285,9 @@ export function NotificationsPage() {
   const { data, loading, error, reload, setData } = useAsync(() => notifications.list(), [])
   const [markingAll, setMarkingAll] = useState(false)
   const user = useAuth((s) => s.user)
+  // Which of the two sites this tab is on, and therefore which token its
+  // requests carry. Every link below is resolved against it.
+  const portal = useAuth((s) => s.portal)
   const emptyDescription = emptyStateFor(user)
   const items: Notification[] = data?.data ?? []
   const unread = data?.unread ?? 0
@@ -355,7 +442,7 @@ export function NotificationsPage() {
             return (
               <li key={n.id} onClick={() => markOne(n)} className={shell}>
                 {n.link ? (
-                  <Link to={n.link} className="block transition-shadow hover:shadow-raised">
+                  <Link to={notificationHref(n.link, portal)} className="block transition-shadow hover:shadow-raised">
                     {row}
                   </Link>
                 ) : (
