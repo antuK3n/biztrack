@@ -112,6 +112,28 @@ interface LocationInsightsData {
     count: number | null
     of_total: number
   }
+  /**
+   * What City Ordinance 24-2018 LISTS for the zones on this barangay's CPDO
+   * sheet (checklist item 20).
+   *
+   * A lookup, never a determination — `ZoningConformance` in the API carries
+   * the four reasons the ordinance cannot be automated into a verdict. Hence
+   * `listed` / `not_listed` / `undetermined` rather than conforming and
+   * prohibited, and hence `matched_use`: quoting the clause that matched makes
+   * a bad match visible to the applicant instead of hiding it behind a word.
+   */
+  zoning: {
+    verdict: 'listed' | 'not_listed' | 'undetermined'
+    reason: string
+    trade: string | null
+    zones: {
+      code: string
+      name: string
+      use_count: number
+      listed: boolean
+      matched_use: string | null
+    }[]
+  }
 }
 
 export interface LocationInsightsQuery {
@@ -119,15 +141,18 @@ export interface LocationInsightsQuery {
   longitude: number
   psicCodeId: number | null
   businessId: number | null
+  /** The barangay the applicant chose; the zoning answer is keyed on it. */
+  barangayId: number | null
 }
 
 /** Reads the insights for one pinned point. Computed per request — see LocationInsights.php. */
 export function useLocationInsights(query: LocationInsightsQuery | null) {
-  const { latitude, longitude, psicCodeId, businessId } = query ?? {
+  const { latitude, longitude, psicCodeId, businessId, barangayId } = query ?? {
     latitude: 0,
     longitude: 0,
     psicCodeId: null,
     businessId: null,
+    barangayId: null,
   }
 
   return useAsync<LocationInsightsData | null>(async () => {
@@ -138,10 +163,11 @@ export function useLocationInsights(query: LocationInsightsQuery | null) {
         longitude,
         ...(psicCodeId !== null ? { psic_code_id: psicCodeId } : {}),
         ...(businessId !== null ? { business_id: businessId } : {}),
+        ...(barangayId !== null ? { barangay_id: barangayId } : {}),
       },
     })
     return data.data
-  }, [query === null, latitude, longitude, psicCodeId, businessId])
+  }, [query === null, latitude, longitude, psicCodeId, businessId, barangayId])
 }
 
 /*
@@ -589,4 +615,113 @@ export function LocationInsightsPanel({
       )}
     </section>
   )
+}
+
+/**
+ * What the ordinance lists for this barangay's zones, as the applicant types.
+ *
+ * ── Why this is not a verdict, and does not look like one ──────────────────
+ *
+ * The client asked for the conforming / non-conforming message to appear live
+ * rather than after Next (checklist item 20). It now does, and it is anchored
+ * to the 695 uses read off City Ordinance 24-2018 instead of to the
+ * `?zoning=deny` query parameter it used to come from.
+ *
+ * It is still a LOOKUP. `ZoningConformance` in the API sets out the four
+ * reasons the ordinance cannot be automated into an answer — an empty Fishpond
+ * section, broken inheritance chains, the same activity carrying different
+ * conditions in different zones, and conditionality buried in "provided that"
+ * prose — and Annex A makes the enumeration explicitly open, so absence from
+ * the list is not prohibition. Every word below is chosen so that a reader who
+ * takes it at face value is not misled: the ordinance *lists*, or it does not,
+ * and CPDO decides either way.
+ *
+ * `matched_use` is quoted rather than summarised on purpose. The match is a
+ * text heuristic and it can be wrong — a dairy MANUFACTURER can match a clause
+ * about dairy SHOPS — so the clause is put in front of the applicant, who knows
+ * their own trade and can see the mismatch. A bare "conforming" would hide it.
+ *
+ * ── Colour ────────────────────────────────────────────────────────────────
+ *
+ * `not_listed` is amber, never `#bd0000`. It is not an error and not a refusal:
+ * the applicant has done nothing wrong and the filing is not blocked. Red here
+ * would say "stop", which is the one thing this screen has no authority to say
+ * (DESIGN.md, Red Means Stop). Tone never carries the meaning alone — the
+ * sentence says it in words in all three states.
+ */
+export function ZoningConformanceNote({
+  zoning,
+  barangayName,
+}: {
+  zoning: LocationInsightsData['zoning'] | null
+  barangayName: string | null
+}) {
+  if (!zoning || zoning.verdict === 'undetermined') return null
+
+  const listed = zoning.verdict === 'listed'
+  const matched = zoning.zones.find((z) => z.listed)
+  const where = barangayName ?? 'this barangay'
+
+  return (
+    <section
+      /*
+       * Announced, not only drawn. The verdict changes under the applicant's
+       * hands as they change barangay or trade, and a change nobody is told
+       * about is a change a screen-reader user never learns happened.
+       */
+      aria-live="polite"
+      className={`rounded-xl border p-4 ${
+        listed ? 'border-royal/30 bg-royal/5' : 'border-s-yellow bg-s-yellow/10'
+      }`}
+    >
+      <p className="text-sm font-semibold text-ink">
+        {listed
+          ? `The zoning ordinance lists this use for ${where}.`
+          : `This use is not on the ordinance’s list for ${where}.`}
+      </p>
+
+      {listed && matched?.matched_use && (
+        /*
+         * The clause, cut to its first breath. The ordinance writes its uses as
+         * single sentences that run for a paragraph — R-1's home-occupation
+         * entry is 600 characters of provisos — and quoted whole it was the
+         * largest block on the step, which buried the figures above it and the
+         * address fields beside it. `title` keeps the full text one hover away
+         * for anyone who wants to read the provisos, and the clause is still
+         * verbatim up to the cut, so it cannot mislead by paraphrase.
+         */
+        <p className="mt-1.5 text-xs text-ink-secondary" title={matched.matched_use}>
+          <span className="font-semibold">{matched.name}</span> — “{firstClause(matched.matched_use)}”
+        </p>
+      )}
+
+      {!listed && zoning.zones.length > 0 && (
+        <p className="mt-1.5 text-xs text-ink-secondary">
+          {where} is zoned {zoning.zones.map((z) => z.name).join(', ')}. The ordinance’s list is
+          open — a use it does not name is referred to other laws, not refused.
+        </p>
+      )}
+
+      <p className="mt-2 text-xs text-ink-muted">
+        The Zoning Office (CPDO) makes the final determination on your locational clearance.
+      </p>
+    </section>
+  )
+}
+
+/**
+ * The head of an ordinance clause — everything before its first proviso.
+ *
+ * The ordinance's uses are single sentences carrying their conditions inline
+ * ("…, provided that the number of persons engaged shall not exceed five (5),
+ * inclusive of owner; there shall be no change in…"). The head names the
+ * activity, which is what the applicant is checking; the tail is CPDO's to
+ * apply. Cut at the first proviso marker, then hard-capped, then trimmed back
+ * to a word boundary so the quote never ends mid-word.
+ */
+function firstClause(use: string): string {
+  const head = use.split(/,?\s*provided\s+that\b|;/i)[0]?.trim() ?? use
+  if (head.length <= 150) return head === use ? head : `${head}…`
+  const cut = head.slice(0, 150)
+  return `${cut.slice(0, cut.lastIndexOf(' '))}…`
 }

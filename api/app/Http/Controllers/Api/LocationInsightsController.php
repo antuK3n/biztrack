@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\PsicCode;
 use App\Support\LocationInsights;
+use App\Support\ZoningConformance;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -38,6 +40,18 @@ class LocationInsightsController extends Controller
             // map is picked before the line further down the step, so absent is normal.
             'psic_code_id' => ['nullable', 'integer', 'exists:psic_codes,id'],
             'business_id' => ['nullable', 'integer'],
+            /*
+             * The barangay the applicant CHOSE, not one derived from the pin.
+             *
+             * The zoning answer below is keyed on a barangay because that is how
+             * CPDO's sheets are drawn — one sheet per barangay, no geometry
+             * inside it. Deriving it from the point instead would be deriving it
+             * from `malabonGeo`, whose own docblock says an individual point
+             * near an edge may be on the wrong side by ~100 m. The wizard already
+             * refuses a pin that contradicts the chosen barangay, so by the time
+             * this is asked the two agree and the chosen one is the honest key.
+             */
+            'barangay_id' => ['nullable', 'integer', 'exists:barangays,id'],
         ]);
 
         $psic = isset($data['psic_code_id'])
@@ -65,6 +79,22 @@ class LocationInsightsController extends Controller
         );
 
         $insights['similar']['psic_title'] = $psic?->title;
+
+        /*
+         * What the ordinance LISTS for this barangay's zones (checklist item 20).
+         *
+         * The conformity sentence used to appear only after Next was pressed,
+         * and its verdict came from a `?zoning=deny` query parameter — a
+         * presentational stand-in from the prototype. It is answered here so the
+         * step can show it as the barangay and the line of business change, and
+         * it is now anchored to the 695 uses read off City Ordinance 24-2018.
+         *
+         * Still a lookup, still not a determination: see ZoningConformance.
+         */
+        $insights['zoning'] = ZoningConformance::forBarangay(
+            isset($data['barangay_id']) ? Barangay::with('zoningClassifications')->find($data['barangay_id']) : null,
+            $psic,
+        );
 
         return response()->json([
             'data' => $insights,

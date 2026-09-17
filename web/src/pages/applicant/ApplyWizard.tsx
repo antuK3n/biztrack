@@ -49,6 +49,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import BarangayZoningMap from './BarangayZoningMap'
 import {
   LocationInsightsPanel,
+  ZoningConformanceNote,
   useLocationInsights,
   type LocationInsightsQuery,
 } from './LocationInsightsPanel'
@@ -2319,7 +2320,6 @@ export function ApplyWizard() {
    * default modal only confirms the pin was recorded. The red non-conforming
    * modal (p031) is reachable with a `?zoning=deny` debug query param.
    */
-  const zoningDenied = searchParams.get('zoning') === 'deny'
 
   const [step, setStep] = useState(0)
   /*
@@ -3034,9 +3034,17 @@ export function ApplyWizard() {
             longitude: form.longitude,
             psicCodeId: insightsPsicCodeId,
             businessId,
+            /*
+             * The chosen barangay, not one derived from the pin — the zoning
+             * answer is keyed on CPDO's per-barangay sheet. Included as a
+             * dependency so changing the dropdown re-asks, which is the other
+             * half of item 20: the verdict follows the barangay as well as the
+             * trade, live, instead of waiting for Next.
+             */
+            barangayId: form.barangay_id ? Number(form.barangay_id) : null,
           }
         : null,
-    [form.latitude, form.longitude, insightsPsicCodeId, businessId],
+    [form.latitude, form.longitude, insightsPsicCodeId, businessId, form.barangay_id],
   )
 
   /*
@@ -3068,6 +3076,22 @@ export function ApplyWizard() {
   }, [livePin])
 
   const insights = useLocationInsights(insightsQuery)
+
+  /*
+   * The conformity verdict, from the ordinance rather than from the address bar.
+   *
+   * This read `searchParams.get('zoning') === 'deny'` and nothing else: the
+   * modal's two faces were a prototype toggle, so every real applicant saw the
+   * conforming one whatever they had declared and wherever they had pinned.
+   * It now follows ZoningConformance, which answers from the 695 uses City
+   * Ordinance 24-2018 lists for the zones on the chosen barangay's CPDO sheet.
+   *
+   * `?zoning=deny` still forces the red face, because the client demonstrates
+   * this screen from a script and a demo that cannot reach its own second state
+   * is not a demo. It is an override now, not the source.
+   */
+  const zoningDenied =
+    searchParams.get('zoning') === 'deny' || insights.data?.zoning.verdict === 'not_listed'
 
   /*
    * True while the answer on screen belongs to a point that is no longer pinned.
@@ -6723,6 +6747,23 @@ export function ApplyWizard() {
                 insights={insights.data}
                 loading={insights.loading || insightsStale}
                 error={insights.error}
+              />
+            )}
+            {/*
+              * Item 20 — the conformity sentence, live.
+              *
+              * Not gated on `insightsStale`: a stale answer here is the answer
+              * for a pin a few hundred milliseconds old and the same barangay,
+              * and blanking it on every keystroke would make the one sentence
+              * the applicant is reading flicker. It is gated on the response
+              * instead, and renders nothing at all while the verdict is
+              * undetermined — which is its state until both a barangay and a
+              * line of business exist.
+              */}
+            {!insights.loading && (
+              <ZoningConformanceNote
+                zoning={insights.data?.zoning ?? null}
+                barangayName={barangayName ?? null}
               />
             )}
             </div>
