@@ -296,6 +296,27 @@ amendments are *simple*; a new registration is *complex*; a new registration is
 manufacturing, contracting or an amusement place **and** the declared capital
 is ₱1,000,000 or more.
 
+## A10b. Does the RA 11032 clock belong to the City as a whole, or is it shared out between the offices?
+
+The statute gives *the LGU* 3, 7 or 20 working days for a transaction. A
+business permit passes through six offices on the way, and RA 11032 does not say
+how much of that allowance each of them may spend.
+
+**Why it matters.** Office Performance ranks the six offices against each other
+and against the statute, so the question is the whole of its last column. If the
+City has a rule — three days each, or a published split in the Citizen's Charter
+— the screen should report each office against its own share, and would then be
+able to name the office that caused a breach in the common case where several
+offices were merely unhurried.
+
+**What we assumed meanwhile:** nothing is apportioned, because inventing a split
+would charge an office against a deadline the law never gave it. The screen
+counts only the one-sided case it can defend — a filing where a SINGLE office on
+its own took longer than the whole transaction was allowed, which puts that
+filing past its deadline whatever every other office did. A filing that went
+over because four offices each took a reasonable time is counted against no
+office at all. If the City answers with a split, that column changes.
+
 ## A11. What is the city's official list of non-working days?
 
 **Why it matters.** RA 11032 counts in working days. Our calculation excludes
@@ -585,6 +606,60 @@ goods rate and the general rate: verified against filing BIZ-2026-00468, whose t
 ₱10,801 to ₱20,481. That would convert a ₱2,750 shortfall into an ₱8,800 overcharge, which is the
 worse of the two errors and lands on the applicant rather than the city. The fields are built and
 held (`scratchpad/goods-class-wip.patch`) pending your answer.
+
+## A26. Who may revoke a permit, on what grounds, and what happens to the certificate already in the owner's hands?
+
+BizTrack has never taken a permit away. `PermitStatus` carries `revoked` and
+`suspended` cases and the `permits` table carries `revoked_at` and
+`revoked_reason` columns, but nothing in the system writes any of them: the
+register holds 2,182 active, 3,162 expired and 131 superseded permits, and zero
+in either enforcement state. A screen listing every issued permit now exists
+(`/staff/admin/permits`), and the obvious next control on it is Revoke. It is
+deliberately not built, because five things have to be settled first and none of
+them is ours to decide.
+
+1. **Who may do it.** Revocation is a real-world enforcement act: a revoked
+   permit means a business is trading unlawfully. Is it the BPLO officer who
+   would otherwise renew it, the department that issued that particular
+   clearance (BFP revokes its own fire safety certificate, CHO its own sanitary
+   permit), the City Legal Office, or the Mayor by order? Today's permission
+   table has `permit.issue` and nothing else — no `permit.revoke` exists.
+2. **On what grounds, and after what process.** Is there a notice, a hearing, a
+   right of reply, an appeal? A system that takes a permit away in one click
+   when the ordinance requires a show-cause letter first would be documenting an
+   act the city did not lawfully perform.
+3. **Revoked versus suspended.** Both cases exist in the code and nothing
+   distinguishes them. Is a suspension time-bound and self-lifting, or lifted by
+   hand? Can a revocation be reversed at all, or is the remedy a fresh
+   application?
+4. **What the owner is told, and when.** Every other status change on a filing
+   raises a notification. A revocation is the one the owner most needs and the
+   one most likely to be contested, so the wording, the timing and whether a
+   reason is disclosed all matter.
+5. **The certificate already printed.** A permit PDF is downloaded, printed and
+   displayed on the premises. Nothing the system does can recall the paper on the
+   wall. `/verify/{permit_number}` is the only mechanism that could contradict
+   it — does the city want the public verify page to say REVOKED, and is that
+   page's existence known to enforcement officers in the field?
+
+**Why it matters.** Every one of these is a policy answer with a consequence
+outside the software. Guessing at them and shipping a Revoke button would put
+an enforcement action behind a control nobody authorised, recorded in a way
+nobody agreed, with an audit trail we invented.
+
+**What we assumed meanwhile.** Nothing — the action is not built and the screen
+says so rather than offering a disabled control. The three statuses the register
+actually holds are the only ones the permit table filters on, so the UI makes no
+claim to a capability the system does not have. When the answers arrive, the
+work is: a `permit.revoke` permission in `RbacSeeder`, a writer that sets the
+status with `revoked_at` / `revoked_reason` and an `Audit` entry naming the
+officer, a `NotificationService` message to the owner, and a `revoked` branch on
+the public verify endpoint. The table's Revoke control is the last and smallest
+part of it.
+
+**Related.** **A2** asks the same kind of question one step earlier — what
+happens when an office refuses to issue a clearance at all. An answer to one
+probably constrains the other.
 
 ---
 
