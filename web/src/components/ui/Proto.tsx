@@ -673,9 +673,28 @@ export const inputCls =
  * sentence at the foot of each wizard step explains the convention for sighted
  * readers; this is the same sentence for everyone else.
  */
-export function FieldLabel({ children, required }: { children: ReactNode; required?: boolean }) {
+export function FieldLabel({
+  children,
+  required,
+  number,
+}: {
+  children: ReactNode
+  required?: boolean
+  /**
+   * The field's position on its step, printed before the label.
+   *
+   * The "still needed" list at the foot of each wizard step names the fields
+   * the applicant has not answered, and naming was all it did: on a step with
+   * seventeen questions, "Type of Registration, Your registration number, Tax
+   * Identification Number (TIN)" sent them hunting. Numbering both ends of that
+   * sentence is the client's ask, and the numbers come from one ordered list
+   * per step so the two cannot disagree.
+   */
+  number?: number
+}) {
   return (
     <span className="mb-1.5 block text-[13px] font-semibold text-ink">
+      {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
       {children}
       {required && (
         <>

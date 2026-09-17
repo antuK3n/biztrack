@@ -240,6 +240,94 @@ const BASE_LABELS: Record<BasePhase, string> = {
  * clearance and the clearance is not applied for here any more.
  */
 
+
+/*
+ * ── Field numbering (checklist item 23) ───────────────────────────────────
+ *
+ * The order the questions appear on each step, and the ONLY source of the
+ * numbers printed beside them. The "still needed" line at the foot of a step
+ * reads its numbers from here too, which is the whole point: the client's
+ * complaint was that the list named fields without saying which ones, on a
+ * step that asks seventeen questions.
+ *
+ * Only the three steps that ask for data in quantity. Data Privacy Consent is
+ * one tick, Documentary Requirements is a list of uploads that already names
+ * each document, and Review & Submit asks nothing — numbering a single control
+ * is furniture.
+ *
+ * Conditional fields keep their number whether or not they are drawn. A sole
+ * proprietor never sees 15 to 17 and the numbers above them do not shift, so
+ * the number beside a field is stable for one applicant through one filing —
+ * which is what makes it usable as a reference at all.
+ *
+ * KEEP IN RENDER ORDER. `numbers on the step run 1..n in the order they are
+ * read` in apply-wizard.spec.ts walks the rendered DOM and fails if this list
+ * and the JSX disagree, so a reordering cannot land silently.
+ */
+const STEP_FIELDS: Partial<Record<BasePhase, string[]>> = {
+  business: [
+    'Type of Registration',
+    'Registration Number',
+    'Tax Identification Number (TIN)',
+    'Business Name',
+    'Trade Name / Franchise',
+    'Telephone (Landline)',
+    'Website Address',
+    'Mobile Number',
+    'E-mail Address',
+    'Surname',
+    'Given Name',
+    'Middle Name',
+    'Suffix',
+    'Gender',
+    'Name of President / Officer in Charge',
+    'Citizenship (of President/OIC)',
+    'Capital Participation (% Filipino)',
+  ],
+  operation: [
+    'Economic Organization',
+    'Others — what kind of establishment is it?',
+    'Do you have tax incentives from any Government Entity?',
+    'Capital Investment (₱)',
+  ],
+  address: [
+    'Line of Business',
+    'House No. & Street Name',
+    'Barangay Name',
+    'Locational Group/Landmark',
+    'Are the premises rented?',
+    "Lessor's Name",
+    "Lessor's Address",
+    "Lessor's Contact Number",
+    'Monthly Rental (₱)',
+    'Emergency Contact Person',
+    'Emergency Contact Number',
+  ],
+}
+
+/** The number printed beside a field, or undefined on an unnumbered step. */
+function fieldNo(phase: BasePhase, label: string): number | undefined {
+  const index = STEP_FIELDS[phase]?.indexOf(label) ?? -1
+
+  return index < 0 ? undefined : index + 1
+}
+
+/**
+ * One entry for the "still needed" line, numbered to match the field.
+ *
+ * The label must be the one printed on the field. It was not, in eight places —
+ * the validator said "Owner’s Family Name" at a field labelled "Surname" — and
+ * that mismatch is half of what sent applicants hunting. `fieldNo` returning
+ * undefined for an unknown label is deliberate: an entry that names something
+ * which is not a numbered field (a pin on the map, a validation message) still
+ * reads correctly, just without a number.
+ */
+function need(phase: BasePhase, label: string): string {
+  const n = fieldNo(phase, label)
+
+  return n === undefined ? label : `${n}. ${label}`
+}
+
 /** Document-type code for the repeatable "Other Requirements" uploads. */
 const OTHER_DOC_CODE = 'OTHER'
 
@@ -3435,7 +3523,7 @@ export function ApplyWizard() {
               'What is being amended (ownership, location, nature of business, or other) — press Change above',
             )
           }
-          if (!form.name.trim()) missing.push('Business Name')
+          if (!form.name.trim()) missing.push(need('business', 'Business Name'))
           /*
            * Items 11/12 — the named person the filing is in.
            *
@@ -3450,9 +3538,9 @@ export function ApplyWizard() {
            * one. Gender is required because CENRO's paper prints a SEX box and
            * nothing else on the filing answers it.
            */
-          if (!form.owner_surname.trim()) missing.push('Owner’s Family Name')
-          if (!form.owner_given_name.trim()) missing.push('Owner’s First Name')
-          if (!form.owner_gender.trim()) missing.push('Owner’s Sex')
+          if (!form.owner_surname.trim()) missing.push(need('business', 'Surname'))
+          if (!form.owner_given_name.trim()) missing.push(need('business', 'Given Name'))
+          if (!form.owner_gender.trim()) missing.push(need('business', 'Gender'))
           /*
            * Item 94 — the structure is listed FIRST, and the number is named
            * after the agency that structure implies.
@@ -3468,15 +3556,15 @@ export function ApplyWizard() {
            * Asking the mapping instead means only a real structure counts.
            */
           const agency = agencyFor(form.registration_type)
-          if (agency === null) missing.push('Type of Registration')
+          if (agency === null) missing.push(need('business', 'Type of Registration'))
           const numberLabel = agency
             ? REGISTRATION_AGENCIES[agency].label
-            : 'Your registration number'
-          if (!form.registration_number.trim()) missing.push(numberLabel)
+            : 'Registration Number'
+          if (!form.registration_number.trim()) missing.push(`${fieldNo('business', 'Registration Number')}. ${numberLabel}`)
           else if (!registrationNumberValid(form.registration_number)) {
             missing.push(`A valid ${numberLabel}`)
           }
-          if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
+          if (!form.tin.trim()) missing.push(need('business', 'Tax Identification Number (TIN)'))
           else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
           /*
            * ── The blanket "paper fields are optional" rule ended here ────────
@@ -3507,9 +3595,9 @@ export function ApplyWizard() {
            * when blank, which is what these three checks were doing for
            * everything.
            */
-          if (!form.mobile_number.trim()) missing.push('Mobile Number')
+          if (!form.mobile_number.trim()) missing.push(need('business', 'Mobile Number'))
           else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
-          if (!form.email.trim()) missing.push('E-mail Address')
+          if (!form.email.trim()) missing.push(need('business', 'E-mail Address'))
           else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
@@ -3536,11 +3624,11 @@ export function ApplyWizard() {
            */
           if (hasPresidentOrOfficer(form.registration_type)) {
             if (!form.president_officer_name.trim()) {
-              missing.push('Name of President / OIC')
+              missing.push(need('business', 'Name of President / Officer in Charge'))
             }
-            if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
+            if (!form.citizenship.trim()) missing.push(need('business', 'Citizenship (of President/OIC)'))
             if (!form.capital_participation_filipino.trim()) {
-              missing.push('Capital Participation (Filipino)')
+              missing.push(need('business', 'Capital Participation (% Filipino)'))
             }
           }
           if (!percentValid(form.capital_participation_filipino)) {
@@ -3571,7 +3659,7 @@ export function ApplyWizard() {
            * than an inapplicable one, which is the test the whole reversal turns
            * on.
            */
-          if (!form.economic_organization) missing.push('Economic Organization')
+          if (!form.economic_organization) missing.push(need('operation', 'Economic Organization'))
           if (
             form.economic_organization === 'others' &&
             !form.economic_organization_others.trim()
@@ -3604,7 +3692,7 @@ export function ApplyWizard() {
            * into announces conformity *for a named trade*, and CPDO's locational
            * clearance is a judgment about a use, not about a coordinate.
            */
-          if (form.lines.length === 0) missing.push('Line of Business')
+          if (form.lines.length === 0) missing.push(need('address', 'Line of Business'))
           /*
            * Any line still filed under "Other" blocks the step, not just an
            * empty one. Other is no longer offered, but a renewal or a reopened
@@ -3646,8 +3734,8 @@ export function ApplyWizard() {
            * → `line:<id>:capitalization`). Blocking on it twice would be the
            * duplicate wearing a different hat.
            */
-          if (!form.line1.trim()) missing.push('House No. & Street Name')
-          if (!form.barangay_id) missing.push('Barangay')
+          if (!form.line1.trim()) missing.push(need('address', 'House No. & Street Name'))
+          if (!form.barangay_id) missing.push(need('address', 'Barangay Name'))
           // CPDO rules on the zoning clearance from where the business actually
           // is, so the pin is part of the answer, not a nicety.
           if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
@@ -3709,9 +3797,9 @@ export function ApplyWizard() {
           }
           // Only when renting: the API enforces the same three with required_if.
           if (form.is_rented) {
-            if (!form.lessor_name.trim()) missing.push("Lessor's Name")
-            if (!form.lessor_address.trim()) missing.push("Lessor's Address")
-            if (!form.monthly_rental.trim()) missing.push('Monthly Rental')
+            if (!form.lessor_name.trim()) missing.push(need('address', "Lessor's Name"))
+            if (!form.lessor_address.trim()) missing.push(need('address', "Lessor's Address"))
+            if (!form.monthly_rental.trim()) missing.push(need('address', 'Monthly Rental (₱)'))
             else if (!Number.isFinite(Number(plainAmount(form.monthly_rental)))) {
               missing.push('A monthly rental in pesos')
             }
@@ -3720,8 +3808,8 @@ export function ApplyWizard() {
             }
           }
           // Inspectors turn up unannounced; somebody has to be reachable.
-          if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
-          if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
+          if (!form.emergency_contact_name.trim()) missing.push(need('address', 'Emergency Contact Person'))
+          if (!form.emergency_contact_number.trim()) missing.push(need('address', 'Emergency Contact Number'))
           else if (!phoneValid(form.emergency_contact_number)) {
             missing.push('A valid Emergency Contact Number')
           }
@@ -3834,7 +3922,33 @@ export function ApplyWizard() {
   )
 
   /** What is still missing on the step being displayed. */
-  const stepMissing: string[] = useMemo(() => missingFor(phase), [missingFor, phase])
+  /*
+   * The "still needed" list, in the order the fields appear (checklist item 23).
+   *
+   * `missingFor` builds this in the order the CHECKS run, which is not the
+   * order the questions are asked — the business step reported "4. Business
+   * Name, 1. Type of Registration, 2. Registration Number, 3. TIN" because the
+   * name is validated before the registration block. Numbering the entries and
+   * then listing them out of sequence would have been a worse sentence than the
+   * unnumbered one it replaced.
+   *
+   * Entries with no number sort last and keep their relative order: they are
+   * the things that are not a numbered field — a pin on the map, "A valid TIN"
+   * — and they read as a tail of caveats rather than interleaved among the
+   * fields they qualify.
+   */
+  const stepMissing: string[] = useMemo(() => {
+    const leading = (entry: string): number => {
+      const m = /^(\d+)\. /.exec(entry)
+
+      return m === null ? Number.POSITIVE_INFINITY : Number(m[1])
+    }
+
+    return missingFor(phase)
+      .map((text, index) => ({ text, index }))
+      .sort((a, b) => leading(a.text) - leading(b.text) || a.index - b.index)
+      .map((e) => e.text)
+  }, [missingFor, phase])
 
   /*
    * Which sections are finished, asked of every section rather than inferred
@@ -5668,7 +5782,7 @@ export function ApplyWizard() {
               * corporation, CDA for a cooperative.
               */}
             <div>
-              <FieldLabel required>Type of Registration</FieldLabel>
+              <FieldLabel required number={fieldNo('business', 'Type of Registration')}>Type of Registration</FieldLabel>
               <p className="mb-2 text-xs text-ink-secondary">
                 Choose this first — it decides which agency’s registration number we ask for
                 next.
@@ -5717,7 +5831,7 @@ export function ApplyWizard() {
                 * Because this is a wrapping <label>, the name follows the text
                 * automatically — there is no stale `aria-label` to forget.
                 */}
-              <FieldLabel required>{registrationNumberLabel}</FieldLabel>
+              <FieldLabel required number={fieldNo('business', 'Registration Number')}>{registrationNumberLabel}</FieldLabel>
               <input
                 value={form.registration_number}
                 onChange={(e) => update('registration_number', e.target.value)}
@@ -5806,6 +5920,7 @@ export function ApplyWizard() {
                 */}
               <div>
                 <TinInput
+                  number={fieldNo('business', 'Tax Identification Number (TIN)')}
                   value={form.tin}
                   onChange={(tin) => update('tin', tin)}
                   onBlur={() => touch('tin')}
@@ -5825,7 +5940,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                <FieldLabel required>Business Name</FieldLabel>
+                <FieldLabel required number={fieldNo('business', 'Business Name')}>Business Name</FieldLabel>
                 <input
                   value={form.name}
                   onChange={(e) => update('name', e.target.value)}
@@ -5848,7 +5963,7 @@ export function ApplyWizard() {
               */}
             <div className="grid gap-4 sm:grid-cols-2">
               <label className="block">
-                <FieldLabel>Trade Name / Franchise</FieldLabel>
+                <FieldLabel number={fieldNo('business', 'Trade Name / Franchise')}>Trade Name / Franchise</FieldLabel>
                 <input
                   value={form.trade_name}
                   onChange={(e) => update('trade_name', e.target.value)}
@@ -5892,6 +6007,7 @@ export function ApplyWizard() {
                   */}
                 <LandlineInput
                   legend="Telephone (Landline)"
+                  number={fieldNo('business', 'Telephone (Landline)')}
                   value={form.telephone}
                   onChange={(v) => update('telephone', v)}
                   onBlur={() => touch('telephone')}
@@ -5906,7 +6022,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                <FieldLabel>Website Address</FieldLabel>
+                <FieldLabel number={fieldNo('business', 'Website Address')}>Website Address</FieldLabel>
                 <input
                   inputMode="url"
                   value={form.website}
@@ -5957,6 +6073,7 @@ export function ApplyWizard() {
                   */}
                 <MobileNumberInput
                   legend="Mobile Number"
+                  number={fieldNo('business', 'Mobile Number')}
                   value={form.mobile_number}
                   onChange={(v) => update('mobile_number', v)}
                   onBlur={() => touch('mobile_number')}
@@ -5979,7 +6096,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                  <FieldLabel required>E-mail Address</FieldLabel>
+                  <FieldLabel required number={fieldNo('business', 'E-mail Address')}>E-mail Address</FieldLabel>
                   <input
                     inputMode="email"
                     value={form.email}
@@ -6019,7 +6136,7 @@ export function ApplyWizard() {
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="block">
-                  <FieldLabel required>Surname</FieldLabel>
+                  <FieldLabel required number={fieldNo('business', 'Surname')}>Surname</FieldLabel>
                   <input
                     value={form.owner_surname}
                     onChange={(e) => update('owner_surname', e.target.value)}
@@ -6027,7 +6144,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block">
-                  <FieldLabel required>Given Name</FieldLabel>
+                  <FieldLabel required number={fieldNo('business', 'Given Name')}>Given Name</FieldLabel>
                   <input
                     value={form.owner_given_name}
                     onChange={(e) => update('owner_given_name', e.target.value)}
@@ -6035,7 +6152,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block">
-                  <FieldLabel>Middle Name</FieldLabel>
+                  <FieldLabel number={fieldNo('business', 'Middle Name')}>Middle Name</FieldLabel>
                   <input
                     value={form.owner_middle_name}
                     onChange={(e) => update('owner_middle_name', e.target.value)}
@@ -6043,7 +6160,7 @@ export function ApplyWizard() {
                   />
                 </label>
                 <label className="block">
-                  <FieldLabel>Suffix</FieldLabel>
+                  <FieldLabel number={fieldNo('business', 'Suffix')}>Suffix</FieldLabel>
                   <input
                     value={form.owner_suffix}
                     onChange={(e) => update('owner_suffix', e.target.value)}
@@ -6053,7 +6170,7 @@ export function ApplyWizard() {
                 </label>
               </div>
               <div className="mt-4">
-                <FieldLabel required>Gender</FieldLabel>
+                <FieldLabel required number={fieldNo('business', 'Gender')}>Gender</FieldLabel>
                 {/*
                   Two options, as the paper's M / F boxes print. A radiogroup
                   rather than toggles, so a screen reader announces that picking
@@ -6119,7 +6236,7 @@ export function ApplyWizard() {
                   </p>
                   <div>
                     <label className="block">
-                    <FieldLabel required>Name of President / Officer in Charge</FieldLabel>
+                    <FieldLabel required number={fieldNo('business', 'Name of President / Officer in Charge')}>Name of President / Officer in Charge</FieldLabel>
                     <input
                       value={form.president_officer_name}
                       onChange={(e) => update('president_officer_name', e.target.value)}
@@ -6139,7 +6256,7 @@ export function ApplyWizard() {
                         in a place the eye reaches after the input. On the label
                         it is read before the field it qualifies.
                       */}
-                      <FieldLabel required>Citizenship (of President/OIC)</FieldLabel>
+                      <FieldLabel required number={fieldNo('business', 'Citizenship (of President/OIC)')}>Citizenship (of President/OIC)</FieldLabel>
                       <input
                         value={form.citizenship}
                         onChange={(e) => update('citizenship', e.target.value)}
@@ -6150,7 +6267,7 @@ export function ApplyWizard() {
                     </div>
                     <div>
                       <label className="block">
-                      <FieldLabel required>Capital Participation (% Filipino)</FieldLabel>
+                      <FieldLabel required number={fieldNo('business', 'Capital Participation (% Filipino)')}>Capital Participation (% Filipino)</FieldLabel>
                       <input
                         inputMode="decimal"
                         value={form.capital_participation_filipino}
@@ -6236,7 +6353,7 @@ export function ApplyWizard() {
               * this asks what this PREMISES is to it.
               */}
             <div>
-              <FieldLabel required>Economic Organization</FieldLabel>
+              <FieldLabel required number={fieldNo('operation', 'Economic Organization')}>Economic Organization</FieldLabel>
               <p className="mb-2 text-xs text-ink-secondary">
                 What this place of business is to your business — not how your business is
                 registered, which you answered above.
@@ -6283,7 +6400,7 @@ export function ApplyWizard() {
               {form.economic_organization === 'others' && (
                 <div className="mt-3">
                   <label className="block">
-                  <FieldLabel required>Others — what kind of establishment is it?</FieldLabel>
+                  <FieldLabel required number={fieldNo('operation', 'Others — what kind of establishment is it?')}>Others — what kind of establishment is it?</FieldLabel>
                   <input
                     value={form.economic_organization_others}
                     onChange={(e) => update('economic_organization_others', e.target.value)}
@@ -6328,7 +6445,7 @@ export function ApplyWizard() {
               * could equally mean the applicant skipped the question.
               */}
             <div>
-              <FieldLabel>Do you have tax incentives from any Government Entity?</FieldLabel>
+              <FieldLabel number={fieldNo('operation', 'Do you have tax incentives from any Government Entity?')}>Do you have tax incentives from any Government Entity?</FieldLabel>
               <div
                 role="radiogroup"
                 aria-label="Do you have tax incentives from any Government Entity?"
@@ -6383,7 +6500,7 @@ export function ApplyWizard() {
           */}
           <div className="mt-6 max-w-sm">
             <label className="block">
-              <FieldLabel required={applicationType === 'new'}>Capital Investment (₱)</FieldLabel>
+              <FieldLabel required={applicationType === 'new'} number={fieldNo('operation', 'Capital Investment (₱)')}>Capital Investment (₱)</FieldLabel>
               <input
                 inputMode="decimal"
                 value={form.capital_investment}
@@ -6533,7 +6650,7 @@ export function ApplyWizard() {
               * The heading loses its plural too: "Line of Business", not
               * "Lines". Keep both singular if this is ever reworded.
               */}
-            <FieldLabel required>Line of Business</FieldLabel>
+            <FieldLabel required number={fieldNo('address', 'Line of Business')}>Line of Business</FieldLabel>
             <p className="mb-3 text-xs text-ink-secondary">
               What this location will be used for. Choose one trade — the zoning verdict is given
               against a single line of business, so a filing declares one.
@@ -6841,7 +6958,7 @@ export function ApplyWizard() {
             <div className="space-y-4">
               <div>
                 <label className="block">
-                <FieldLabel required>House No. &amp; Street Name</FieldLabel>
+                <FieldLabel required number={fieldNo('address', 'House No. & Street Name')}>House No. &amp; Street Name</FieldLabel>
                 <input
                   value={form.line1}
                   onChange={(e) => update('line1', e.target.value)}
@@ -6855,7 +6972,7 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                <FieldLabel required>Barangay Name</FieldLabel>
+                <FieldLabel required number={fieldNo('address', 'Barangay Name')}>Barangay Name</FieldLabel>
                 <select
                   value={form.barangay_id}
                   /*
@@ -6967,7 +7084,7 @@ export function ApplyWizard() {
 
               <div>
                 <label className="block">
-                <FieldLabel>Locational Group/Landmark</FieldLabel>
+                <FieldLabel number={fieldNo('address', 'Locational Group/Landmark')}>Locational Group/Landmark</FieldLabel>
                 <input
                   value={form.line2}
                   onChange={(e) => update('line2', e.target.value)}
@@ -6983,7 +7100,7 @@ export function ApplyWizard() {
                 * than showing four fields most applicants must leave blank.
                 */}
               <div>
-                <FieldLabel>Are the premises rented?</FieldLabel>
+                <FieldLabel number={fieldNo('address', 'Are the premises rented?')}>Are the premises rented?</FieldLabel>
                 <div className="flex flex-wrap gap-2">
                   {[
                     { rented: false, label: 'Owned or occupied by me' },
@@ -7018,7 +7135,7 @@ export function ApplyWizard() {
                 <div className="flex flex-col gap-4 rounded-xl border border-line p-4">
                   <div>
                     <label className="block">
-                    <FieldLabel required>Lessor's Name</FieldLabel>
+                    <FieldLabel required number={fieldNo('address', "Lessor's Name")}>Lessor's Name</FieldLabel>
                     <input
                       value={form.lessor_name}
                       onChange={(e) => update('lessor_name', e.target.value)}
@@ -7034,7 +7151,7 @@ export function ApplyWizard() {
                   </div>
                   <div>
                     <label className="block">
-                    <FieldLabel required>Lessor's Address</FieldLabel>
+                    <FieldLabel required number={fieldNo('address', "Lessor's Address")}>Lessor's Address</FieldLabel>
                     {/*
                       * Item 70 — this example named "Poblacion", which is not a
                       * Malabon barangay at all. Catmon is one of the 21 the
@@ -7059,7 +7176,7 @@ export function ApplyWizard() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div>
                       <label className="block">
-                      <FieldLabel>Lessor's Contact Number</FieldLabel>
+                      <FieldLabel number={fieldNo('address', "Lessor's Contact Number")}>Lessor's Contact Number</FieldLabel>
                       <input
                         inputMode="tel"
                         value={form.lessor_contact}
@@ -7078,7 +7195,7 @@ export function ApplyWizard() {
                     </div>
                     <div>
                       <label className="block">
-                      <FieldLabel required>Monthly Rental (₱)</FieldLabel>
+                      <FieldLabel required number={fieldNo('address', 'Monthly Rental (₱)')}>Monthly Rental (₱)</FieldLabel>
                       <input
                         inputMode="decimal"
                         value={form.monthly_rental}
@@ -7102,7 +7219,7 @@ export function ApplyWizard() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block">
-                  <FieldLabel required>Emergency Contact Person</FieldLabel>
+                  <FieldLabel required number={fieldNo('address', 'Emergency Contact Person')}>Emergency Contact Person</FieldLabel>
                   <input
                     value={form.emergency_contact_name}
                     onChange={(e) => update('emergency_contact_name', e.target.value)}
@@ -7120,7 +7237,7 @@ export function ApplyWizard() {
                 </div>
                 <div>
                   <label className="block">
-                  <FieldLabel required>Emergency Contact Number</FieldLabel>
+                  <FieldLabel required number={fieldNo('address', 'Emergency Contact Number')}>Emergency Contact Number</FieldLabel>
                   <input
                     inputMode="tel"
                     value={form.emergency_contact_number}
