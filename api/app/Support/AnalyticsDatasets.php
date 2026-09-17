@@ -30,6 +30,19 @@ final class AnalyticsDatasets
 
     public const PROCESSING_TIME = 'processing_time';
 
+    /**
+     * The six offices side by side, rather than one office at a time.
+     *
+     * Its own dataset and not more keys on PROCESSING_TIME, for the reason that
+     * keeps RENEWAL_MODEL apart from RENEWAL_RISK: the two are different KINDS
+     * of claim. Processing Time asks whether an office is behaving the way that
+     * office normally behaves, which every office answers in its own fitted
+     * units; this asks how the offices compare, which needs one unit for all of
+     * them. Sharing a payload would put two answers to two questions under one
+     * heading and one `computed_at`.
+     */
+    public const OFFICE_PERFORMANCE = 'office_performance';
+
     public const RENEWAL_RISK = 'renewal_risk';
 
     public const BUSINESS_GROWTH = 'business_growth';
@@ -77,6 +90,24 @@ final class AnalyticsDatasets
                     $p['weeks'] ?? ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS,
                 ),
                 'defaults' => ['weeks' => ProcessingTimeAnalytics::DEFAULT_WINDOW_WEEKS],
+            ],
+
+            self::OFFICE_PERFORMANCE => [
+                /*
+                 * "Office Performance" rather than "Department Performance": the
+                 * client, the RA 11032 literature and every screen in this
+                 * product say office, and `departments` is a table name. The
+                 * heading on the screen is this string — e2e/office-performance
+                 * asserts the two match, the same guard Business Growth carries.
+                 */
+                'label' => 'Office Performance',
+                'dataset' => static fn (array $p): array => OfficePerformanceAnalytics::dataset(
+                    $p['weeks'] ?? OfficePerformanceAnalytics::DEFAULT_WINDOW_WEEKS,
+                ),
+                'build' => static fn (array $p): array => OfficePerformanceAnalytics::build(
+                    $p['weeks'] ?? OfficePerformanceAnalytics::DEFAULT_WINDOW_WEEKS,
+                ),
+                'defaults' => ['weeks' => OfficePerformanceAnalytics::DEFAULT_WINDOW_WEEKS],
             ],
 
             self::RENEWAL_RISK => [

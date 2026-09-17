@@ -55,6 +55,20 @@ const SUPER_ADMIN_SCREEN = {
 } as const
 
 /**
+ * The super admin's second screen (issue #102) — the same six offices, compared
+ * rather than charted one at a time.
+ *
+ * It is the rail's destination for this reader now, because it answers the
+ * question they arrive with ("which office") while Processing Time answers the
+ * one after it. Both sit on `analytics.processing_time`, so the two-screen split
+ * is still along the line the client drew and BPLO still holds neither.
+ */
+const SUPER_ADMIN_SCREENS = [
+  { path: '/staff/analytics/offices', title: 'Office Performance' },
+  SUPER_ADMIN_SCREEN,
+] as const
+
+/**
  * One entry in the left rail, by its label.
  *
  * Scoped to the <aside>, not to the "Main" landmark: the mobile tab bar carries
@@ -772,12 +786,14 @@ test.describe('the three BPLO analytics screens', () => {
   })
 })
 
-test.describe("the super admin's one analytics screen", () => {
+test.describe("the super admin's analytics screens", () => {
   test.use({ storageState: SUPER_ADMIN_SESSION })
 
-  test(`${SUPER_ADMIN_SCREEN.title} renders and explains its figures`, async ({ page }) => {
-    await assertExplainsItsFigures(page, SUPER_ADMIN_SCREEN)
-  })
+  for (const screen of SUPER_ADMIN_SCREENS) {
+    test(`${screen.title} renders and explains its figures`, async ({ page }) => {
+      await assertExplainsItsFigures(page, screen)
+    })
+  }
 
   test('it states where its numbers came from', async ({ page }) => {
     await page.goto(SUPER_ADMIN_SCREEN.path)
@@ -785,36 +801,66 @@ test.describe("the super admin's one analytics screen", () => {
     await expect(page.getByText(/computed|updated|as of/i).first()).toBeVisible()
   })
 
-  test('no tab strip is drawn for a reader with one screen', async ({ page }) => {
+  test('the tab strip offers this reader their own screens and no dead ends', async ({ page }) => {
     /*
-     * A tab strip offering one tab is a control with nothing to control: the
-     * only destination is the page already open. Worse, the strip's other three
-     * tabs would all be dead ends for this reader, which is the shape the
-     * client objected to.
+     * ── WHAT THIS TEST USED TO ASSERT, AND WHY IT CHANGED ───────────────────
      *
-     * Asserted through the strip's own landmark rather than by counting links,
-     * because the rail and the page body have links of their own.
+     * It read "no tab strip is drawn for a reader with one screen", and that was
+     * right while the super admin held exactly one: a strip offering one tab is
+     * a control with nothing to control, and the strip's other three tabs were
+     * all dead ends for this reader, which is the shape the client objected to.
+     *
+     * Issue #102 gave them a second screen. The RULE has not moved — a tab may
+     * never point somewhere its reader will be bounced off, and a strip may
+     * never draw a single tab — so what is asserted is the rule rather than the
+     * count it happened to produce: the strip is present, it offers exactly the
+     * two screens this permission opens, and it offers neither of BPLO's.
+     *
+     * The guard in AnalyticsTabs that hid it at fewer than two tabs is what
+     * makes this the first time this reader has seen the strip at all, so it is
+     * doing more work now, not less.
      */
     await page.goto(SUPER_ADMIN_SCREEN.path)
     await waitForAnalytics(page, SUPER_ADMIN_SCREEN.title)
-    await expect(page.getByRole('navigation', { name: 'Analytics sections' })).toHaveCount(0)
+
+    const strip = page.getByRole('navigation', { name: 'Analytics sections' })
+    await expect(strip).toHaveCount(1)
+
+    const hrefs = await strip.getByRole('link').evaluateAll((links) =>
+      links.map((link) => link.getAttribute('href') ?? ''),
+    )
+    expect(hrefs.sort()).toEqual(['/staff/analytics/offices', '/staff/analytics/processing-time'])
+
+    // Every BPLO screen stays off it. A tab RequirePermission would bounce is a
+    // link to a dead end dressed up as navigation.
+    for (const screen of BPLO_SCREENS) {
+      expect(hrefs, `${screen.path} is on the super admin's tab strip`).not.toContain(screen.path)
+    }
   })
 
-  test('the rail sends the super admin to the one screen they may open', async ({ page }) => {
+  test('the rail sends the super admin to a screen they may open', async ({ page }) => {
     /*
      * The whole reason nav.ts grew a per-permission destination. The rail entry
      * is shared, and its shared `to` is /staff/analytics — a screen this user
      * is forbidden. Pointing them at it would have produced a rail button that
      * flashed the dashboard and bounced back to Home, which reads as a bug in
      * the rail rather than a permission boundary.
+     *
+     * The destination moved to Office Performance with issue #102, because of
+     * the super admin's two screens that is the one answering the question a
+     * reader arrives with. The rule being held here is unchanged and is not the
+     * address: whatever the rail points this reader at, they must be allowed
+     * through it. The literal path is asserted as well, because the rail and
+     * App.tsx carry the permission separately and nothing derives one from the
+     * other — a route regated without the rail fails nowhere else.
      */
     await page.goto('/staff/dashboard')
     const analytics = railLink(page, 'Analytics')
     await expect(analytics, 'the super admin lost the Analytics rail entry').toHaveCount(1)
-    await expect(analytics).toHaveAttribute('href', '/staff/analytics/processing-time')
+    await expect(analytics).toHaveAttribute('href', '/staff/analytics/offices')
 
     await analytics.click()
-    await waitForAnalytics(page, SUPER_ADMIN_SCREEN.title)
+    await waitForAnalytics(page, 'Office Performance')
   })
 })
 

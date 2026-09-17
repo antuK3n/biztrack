@@ -73,6 +73,18 @@ return [
             ['weeks' => 104],
         ],
 
+        'office_performance' => [
+            // weeks — mirrors OfficePerformancePage WINDOW_OPTIONS, which are
+            // deliberately the same four Processing Time offers. The two screens
+            // are read one after the other by one person and a window on one
+            // that does not exist on the other invites the reader to compare
+            // figures over different spans without noticing.
+            ['weeks' => 13],
+            ['weeks' => 26],
+            ['weeks' => 52],
+            ['weeks' => 104],
+        ],
+
         'business_growth' => [
             // months — mirrors BusinessGrowthPage PERIOD_OPTIONS.
             ['months' => 3],
