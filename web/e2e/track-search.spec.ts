@@ -426,8 +426,18 @@ test.describe('officer queue', () => {
      * slice of the page — and the wording drops "loaded", because the count is
      * no longer hedged against what happened to be in the browser.
      */
+    /*
+      * "waiting longest", not "newest first" — issue #91, and it is the whole
+      * point rather than a wording change. The client: "The OLDEST application
+      * should appear at the top, not the latest." RA 11032 puts a statutory
+      * clock on every filing, so the longest-waiting row is the one nearest to
+      * breaching it, and `/assignments` now returns oldest-routing-first to
+      * match. If this assertion is ever failing back to "newest first", the
+      * default has been flipped and the queue is burying its own deadlines —
+      * read QueuePage's DEFAULT_SORT before changing this line.
+      */
     const status = page.getByRole('status').filter({ hasText: 'Showing' })
-    await expect(status).toHaveText('Showing 3 of 3, newest first.')
+    await expect(status).toHaveText('Showing 3 of 3, waiting longest.')
 
     await page
       .getByRole('searchbox', { name: 'Search this queue by tracking ID or business name' })
@@ -504,8 +514,11 @@ test.describe('officer queue', () => {
       .poll(() => applicationQueries.at(-1))
       .toContain('status=pending_payment')
 
+    // Pending Payment reads `/applications`, which still orders newest-first —
+    // but the SORT is the officer's and carries across the tabs, so the default
+    // from issue #91 holds here too and the browser does the ordering.
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toHaveText(
-      'Showing 2 of 2, newest first.',
+      'Showing 2 of 2, waiting longest.',
     )
     await expect(page.getByText('Roberto’s Laundry Shop')).toBeVisible()
 
@@ -530,7 +543,7 @@ test.describe('officer queue', () => {
     // "of the N loaded" hedge, is the assertion that would fail the moment this
     // tab started filtering rows it had already fetched.
     await expect(page.getByRole('status').filter({ hasText: 'Showing' })).toHaveText(
-      'Showing 1 of 1 matching “roberto”, newest first.',
+      'Showing 1 of 1 matching “roberto”, waiting longest.',
     )
     await expect(page.getByText('Kalayaan Water Refilling')).toBeHidden()
   })
