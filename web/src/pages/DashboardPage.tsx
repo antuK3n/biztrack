@@ -15,17 +15,63 @@ import { AccountRestrictedModal, StatusChip } from '../components/ui/Proto'
 import { businessName } from '../lib/format'
 import { businesses, requests } from '../lib/resources'
 import { REQUIREMENT_CHIP_TONE } from '../lib/status'
+import type { OfficerRequest } from '../lib/types'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 
-/** White shadow tile + royal label beneath, per the prototype home (PDF p5). */
-function HomeCard({ to, icon: Icon, label }: { to: string; icon: IconType; label: string }) {
+/**
+ * White shadow tile + royal label beneath, per the prototype home (PDF p5).
+ *
+ * `count` draws the same badge the notification bell draws — the red disc with
+ * the number in it, capped at 99+, from `UnreadBadge` in components/AppShell.
+ * Deliberately copied rather than imported: `UnreadBadge` is private to
+ * AppShell, and exporting it would mean editing a file two other people were
+ * writing to at the time. If this is touched again, lift ONE badge into
+ * components/ui and let both call it — two copies of a badge drift, and a home
+ * tile whose count looks unlike the bell's reads as a different kind of thing.
+ *
+ * `countLabel` is what the badge means in words. The bell says "Notifications,
+ * 3 unread" for the same reason: a screen reader announcing a link called
+ * "Other Requirements" followed by a bare "3" sounds like a position in a list,
+ * not a number of documents owed.
+ */
+function HomeCard({
+  to,
+  icon: Icon,
+  label,
+  count = 0,
+  countLabel,
+}: {
+  to: string
+  icon: IconType
+  label: string
+  count?: number
+  countLabel?: (count: number) => string
+}) {
+  const badged = count > 0
   return (
-    <Link to={to} className="group flex w-40 flex-col items-center gap-4 sm:w-48">
-      <span className="flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised">
+    <Link
+      to={to}
+      aria-label={badged && countLabel ? countLabel(count) : undefined}
+      className="group flex w-40 flex-col items-center gap-4 sm:w-48"
+    >
+      {/* relative: the badge pins itself to this tile's corner. */}
+      <span className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised">
         <Icon size={64} strokeWidth={1.5} />
+        {/*
+          No badge at zero. Nothing is owed, and a "0" on a tile is a thing to
+          read and dismiss every single visit.
+        */}
+        {badged && (
+          <span
+            aria-hidden="true"
+            className="absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-s-red px-1 text-[10px] font-bold leading-none text-white ring-2 ring-canvas"
+          >
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
       </span>
       <span className="text-center text-lg font-semibold leading-snug text-royal-deep">{label}</span>
     </Link>
@@ -44,6 +90,23 @@ function OwnerHome() {
   )
   const showModal = !dismissed && Boolean(restricted)
 
+  /*
+   * One fetch, two readers: the count on the tile and the list below it.
+   *
+   * The panel used to fetch this itself. The tile now carries the same number,
+   * and a second `requests.list` would have loaded the page with two identical
+   * calls in flight — and, worse, two answers that can disagree, so the tile
+   * could read 3 above a list of 2. `awaits_applicant` is the API's own
+   * judgement of whose move it is (see the panel's note below); it is not
+   * re-derived here, and it does not fall to zero until the document is
+   * actually submitted, which is what the count promises.
+   */
+  const { data: requestData, loading: requestsLoading } = useAsync(
+    () => requests.list({ per_page: 100 }),
+    [],
+  )
+  const waiting = (requestData ?? []).filter((r) => r.awaits_applicant)
+
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
       {showModal && restricted && (
@@ -61,10 +124,20 @@ function OwnerHome() {
         <HomeCard to="/apply?type=new" icon={FilePlusIcon} label="New Business Permit" />
         <HomeCard to="/apply?type=renewal" icon={RenewIcon} label="Renew Business Permit" />
         <HomeCard to="/apply?type=amendment" icon={AmendIcon} label="Amendment Form" />
-        <HomeCard to="/requests" icon={ShieldCheckIcon} label="Other Requirements" />
+        <HomeCard
+          to="/requests"
+          icon={ShieldCheckIcon}
+          label="Other Requirements"
+          count={requestsLoading ? 0 : waiting.length}
+          countLabel={(n) =>
+            n === 1
+              ? 'Other Requirements, one document waiting on you'
+              : `Other Requirements, ${n} documents waiting on you`
+          }
+        />
       </div>
 
-      <OtherRequirementsPanel />
+      <OtherRequirementsPanel waiting={waiting} loading={requestsLoading} />
     </div>
   )
 }
@@ -82,11 +155,17 @@ function OwnerHome() {
  * document those are one situation. Anything with the office is deliberately
  * absent: a home page that lists work you cannot act on teaches people to
  * ignore it.
+ *
+ * The rows arrive from OwnerHome rather than being fetched here, because the
+ * tile above now shows the same count and the two must not be able to disagree.
  */
-function OtherRequirementsPanel() {
-  const { data, loading } = useAsync(() => requests.list({ per_page: 100 }), [])
-
-  const waiting = (data ?? []).filter((r) => r.awaits_applicant)
+function OtherRequirementsPanel({
+  waiting,
+  loading,
+}: {
+  waiting: OfficerRequest[]
+  loading: boolean
+}) {
   if (loading || waiting.length === 0) return null
 
   return (
