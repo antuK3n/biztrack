@@ -398,7 +398,7 @@ function ApplicationRow({
   const pending = app.status === 'pending_payment'
   const rejected = app.status === 'rejected'
   /*
-   * ── The payment block has three states now, not two ───────────────────────
+   * ── The payment block has four states now, not two ────────────────────────
    *
    * It was `pending ? "Pay Online" : "Paid"`, and that was sound while
    * submission led straight to `pending_payment`: a filing was either being
@@ -408,16 +408,44 @@ function ApplicationRow({
    * peso had been charged. A false claim about money, on the applicant's main
    * screen, in the strongest colour the palette has.
    *
-   * `draft`, `for_approval` and `returned` are all before the bill and say so.
+   * The else-branch is everything on the near side of the bill. Exactly two
+   * statuses reach it: `for_approval` and `returned`. `draft` is a third status
+   * before the bill and this comment used to list it, but it cannot arrive here
+   * — `submitted` below filters drafts off this screen entirely, because drafts
+   * have their own page. A reader who trusted the old list would have written
+   * wording for a row that never renders.
    *
    * A terminal filing gets NO block, and that is deliberate rather than a
-   * fourth label. Status alone cannot say whether a rejected filing had already
+   * fifth label. Status alone cannot say whether a rejected filing had already
    * paid — the list payload carries no payment — so any wording here would be a
    * guess dressed as a fact. The row already carries its rejection note, which
    * is what that filing is actually about.
    */
   const ended = app.status === 'rejected' || app.status === 'cancelled'
   const settled = isPaidStatus(app.status)
+  /*
+   * ── What the unbilled block says, and why it is not one sentence ──────────
+   *
+   * "For Initial Approval" is the client's own wording, from testing-checklist
+   * §"Business owner — Track applications" item 3, which asked that "Not billed
+   * yet" read this instead. "Not billed yet" named the absence of a bill and
+   * left the applicant with nothing to do about it; the client's words name the
+   * stage the filing is actually at.
+   *
+   * `returned` does NOT get that label, and the difference is whose desk the
+   * filing is on. A returned filing is not queued for anyone's initial approval
+   * — BPLO has read it, sent it back, and is waiting on the applicant. Printing
+   * "For Initial Approval" there would tell someone whose filing is stalled on
+   * their own correction that an office is working it, which is the same shape
+   * of falsehood as the green "Paid" this block was fixed for once already.
+   *
+   * "Back to you" is the whole message: it points at the person reading it.
+   * The chip wording in `lib/status.ts` ("Returned") is a mirror of the PHP
+   * enum, kept character-for-character by StatusLabelParityTest, so it names
+   * the state; this block is free to say what the state means for them, and
+   * should not be changed into a second copy of "Returned".
+   */
+  const unbilledLabel = app.status === 'returned' ? 'Back to you' : 'For Initial Approval'
   const payBlockCls =
     'flex w-28 shrink-0 items-center justify-center self-stretch px-3 text-center text-base font-semibold leading-tight text-white'
 
@@ -518,8 +546,8 @@ function ApplicationRow({
           <Triangle open={open} />
           <span className="truncate text-lg font-bold text-ink">{businessName(app.business)}</span>
         </button>
-        {/* The four states, and why the terminal one is blank, are set out
-            above `ended`. */}
+        {/* The four states, why the terminal one is blank, and why the unbilled
+            one has two wordings, are all set out above `ended`. */}
         {pending ? (
           <Link to={`/applications/${app.id}/pay`} className={`${payBlockCls} bg-s-orange hover:brightness-95`}>
             Pay Online
@@ -527,7 +555,7 @@ function ApplicationRow({
         ) : settled ? (
           <span className={`${payBlockCls} bg-s-green`}>Paid</span>
         ) : ended ? null : (
-          <span className={`${payBlockCls} bg-shell-deep !text-ink-secondary`}>Not billed yet</span>
+          <span className={`${payBlockCls} bg-shell-deep !text-ink-secondary`}>{unbilledLabel}</span>
         )}
       </div>
 
