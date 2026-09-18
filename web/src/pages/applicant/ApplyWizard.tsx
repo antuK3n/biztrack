@@ -3923,6 +3923,175 @@ export function ApplyWizard() {
 
   /** What is still missing on the step being displayed. */
   /*
+   * ── The whole form, read back (checklist item 14) ─────────────────────────
+   *
+   * "In the last part/section of the application process, there should be an
+   * editable preview of the WHOLE FORM (from starting to end section)."
+   *
+   * Every section in the order the applicant filled it — `sequence`, not the
+   * order the JSX happens to be written in — each with the way back to the step
+   * that owns it. "From starting to end section" is the phrase the order comes
+   * from, and it is the half that would be easiest to get wrong: the blocks
+   * below render business before address, while the wizard asks address first.
+   *
+   * ── Why a read-back with Edit, rather than the live controls stacked ───────
+   *
+   * Stacking the real sections here would be less code and genuinely editable
+   * in place. It was not done because the only way to get them into filing
+   * order would be to move seven 500-line blocks, or to reorder them in CSS —
+   * and CSS `order` reorders what is seen without reordering what is focused,
+   * which breaks tab order and WCAG 1.3.2 for the people this screen matters
+   * most to. A summary that is right beats a live form that reads out of order.
+   *
+   * Answers come from the same STEP_FIELDS list the numbers come from, so a
+   * field added to a step appears here without anybody remembering to add it.
+   */
+  const reviewSections = useMemo(() => {
+    const shown = (v: string) => (v.trim() === '' ? '—' : v.trim())
+    const agency = agencyFor(form.registration_type)
+    const presidentShown = hasPresidentOrOfficer(form.registration_type)
+
+    const valueFor: Record<string, string> = {
+      'Type of Registration':
+        REGISTRATION_TYPES.find((rt) => rt.value === form.registration_type)?.label ?? '',
+      'Registration Number': form.registration_number,
+      'Tax Identification Number (TIN)': form.tin,
+      'Business Name': form.name,
+      'Trade Name / Franchise': form.trade_name,
+      'Telephone (Landline)': form.telephone,
+      'Website Address': form.website,
+      'Mobile Number': form.mobile_number,
+      'E-mail Address': form.email,
+      Surname: form.owner_surname,
+      'Given Name': form.owner_given_name,
+      'Middle Name': form.owner_middle_name,
+      Suffix: form.owner_suffix,
+      // The word on the button, not the letter under it — 'F' is what the
+      // register stores and not what the applicant chose.
+      Gender: form.owner_gender === 'M' ? 'Male' : form.owner_gender === 'F' ? 'Female' : '',
+      'Name of President / Officer in Charge': form.president_officer_name,
+      'Citizenship (of President/OIC)': form.citizenship,
+      'Capital Participation (% Filipino)': form.capital_participation_filipino,
+      'Economic Organization':
+        ECONOMIC_ORGANIZATIONS.find((e) => e.value === form.economic_organization)?.label ?? '',
+      'Others — what kind of establishment is it?': form.economic_organization_others,
+      'Do you have tax incentives from any Government Entity?': form.has_tax_incentives ? 'Yes' : 'No',
+      'Capital Investment (₱)': form.capital_investment,
+      'Line of Business': form.lines
+        .map((l) => psic.find((c) => c.id === l.psic_code_id)?.title ?? '')
+        .filter(Boolean)
+        .join('; '),
+      'House No. & Street Name': form.line1,
+      'Barangay Name': barangayName ?? '',
+      'Locational Group/Landmark': form.line2,
+      'Are the premises rented?': form.is_rented ? 'Rented' : 'Owned or occupied by me',
+      "Lessor's Name": form.lessor_name,
+      "Lessor's Address": form.lessor_address,
+      "Lessor's Contact Number": form.lessor_contact,
+      'Monthly Rental (₱)': form.monthly_rental,
+      'Emergency Contact Person': form.emergency_contact_name,
+      'Emergency Contact Number': form.emergency_contact_number,
+    }
+
+    /** Fields that are not asked of this filing are not read back to it either. */
+    const asked = (label: string): boolean => {
+      if (!presidentShown) {
+        if (
+          label === 'Name of President / Officer in Charge' ||
+          label === 'Citizenship (of President/OIC)' ||
+          label === 'Capital Participation (% Filipino)'
+        ) {
+          return false
+        }
+      }
+      if (!form.is_rented && label.startsWith("Lessor's")) return false
+      if (!form.is_rented && label === 'Monthly Rental (₱)') return false
+      if (form.economic_organization !== 'others' && label.startsWith('Others —')) return false
+
+      return true
+    }
+
+    const answersFor = (p: BasePhase): { label: string; value: string }[] => {
+      const fields = STEP_FIELDS[p]
+      if (fields) {
+        return fields
+          .filter(asked)
+          .map((label) => ({
+            // The registration number's label names its agency once one is known.
+            label: label === 'Registration Number' && agency ? REGISTRATION_AGENCIES[agency].label : label,
+            value: shown(valueFor[label] ?? ''),
+          }))
+      }
+      if (p === 'privacy') {
+        return [{ label: 'Data Privacy Consent', value: consent ? 'Given' : 'Not given yet' }]
+      }
+      if (p === 'amendments') {
+        const kinds = [
+          ...AMENDMENT_KINDS.filter((k) => amendment[k.key]).map((k) => k.label),
+          ...(amendment.other.trim() ? [`Others: ${amendment.other.trim()}`] : []),
+        ]
+
+        return [{ label: 'Changes since the last permit', value: shown(kinds.join(' · ')) }]
+      }
+      if (p === 'documents') {
+        return requiredDocs.map((dt) => {
+          const count = (uploaded[dt.id] ?? []).length
+
+          return {
+            label: dt.name,
+            value: count === 0 ? '—' : count === 1 ? '1 file' : `${count} files`,
+          }
+        })
+      }
+
+      if (p === 'fees') {
+        /*
+         * Fees & Tax Computation asks its own questions — the figures the
+         * assessment is worked out FROM. It was falling through to an empty
+         * list and being dropped, so the "whole form" stopped one part short
+         * of the end, which is the one thing item 14 names.
+         *
+         * The computed fee itself is deliberately not repeated here. It is
+         * BPLO's to assess and the Tax Order of Payment is where it becomes a
+         * figure the applicant owes; printing a total on the review step would
+         * read as a bill this screen has no authority to issue.
+         */
+        return [
+          { label: 'Floor area (sqm)', value: shown(feeDraft.floor_area_sqm) },
+          { label: 'Storeys', value: shown(feeDraft.storeys) },
+          { label: 'Employees', value: shown(feeDraft.employees) },
+          { label: 'Male employees', value: shown(feeDraft.male_employees) },
+          { label: 'Female employees', value: shown(feeDraft.female_employees) },
+          { label: 'Employees living in Malabon', value: shown(feeDraft.employees_in_lgu) },
+        ]
+      }
+
+      return []
+    }
+
+    return sequence
+      .filter((p) => p !== 'review')
+      .map((p, index) => ({
+        phase: p,
+        title: BASE_LABELS[p],
+        step: sequence.indexOf(p),
+        part: index + 1,
+        answers: answersFor(p),
+      }))
+      .filter((sectionEntry) => sectionEntry.answers.length > 0)
+  }, [
+    form,
+    psic,
+    barangayName,
+    consent,
+    amendment,
+    requiredDocs,
+    uploaded,
+    sequence,
+    feeDraft,
+  ])
+
+  /*
    * The "still needed" list, in the order the fields appear (checklist item 23).
    *
    * `missingFor` builds this in the order the CHECKS run, which is not the
@@ -7822,6 +7991,57 @@ export function ApplyWizard() {
         <div>
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">Review & Submit</h1>
           <div className="mb-6 h-px bg-ink/40" />
+
+          {/*
+            ── The whole form, read back, in filing order (checklist item 14) ──
+            *
+            * Each section says which part it was and offers the way back to it.
+            * Edit is a real control rather than a link because it does not
+            * navigate anywhere the address bar knows about — `goTo` persists
+            * the step being left before it moves, which is the same guarantee
+            * every other route out of a step gives.
+            */}
+          <section aria-labelledby="review-summary-heading" className="mb-8">
+            <h2 id="review-summary-heading" className="sr-only">
+              Everything you have entered
+            </h2>
+            <div className="space-y-4">
+              {reviewSections.map((entry) => (
+                <div key={entry.phase} className="rounded-2xl bg-white px-5 py-4 shadow-card">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                        Part {entry.part} of {totalParts}
+                      </p>
+                      <h3 className="text-[15px] font-bold text-ink">{entry.title}</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void goTo(entry.step)}
+                      /*
+                       * Named for its section. Seven buttons reading "Edit" is
+                       * seven identical stops for somebody tabbing the page,
+                       * with nothing to say which one they are on — the same
+                       * rule the clearance cards follow.
+                       */
+                      aria-label={`Edit ${entry.title}`}
+                      className="shrink-0 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                    >
+                      Edit
+                    </button>
+                  </div>
+                  <dl className="mt-3 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+                    {entry.answers.map((answer) => (
+                      <div key={answer.label} className="min-w-0">
+                        <dt className="text-xs text-ink-muted">{answer.label}</dt>
+                        <dd className="break-words text-sm text-ink">{answer.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </div>
+              ))}
+            </div>
+          </section>
           <div className="flex min-h-64 flex-col items-center justify-center gap-2 py-10 text-center">
             <p className="text-lg font-medium text-royal">
               Your Business Permit application is ready to submit
@@ -8057,8 +8277,15 @@ export function ApplyWizard() {
       {showConfirm && (
         <ProtoModal
           title="CONFIRMATION"
-          cancelLabel="Cancel"
-          confirmLabel="Proceed"
+          /*
+           * The two answers are the two things the applicant can actually do,
+           * named. "Cancel" and "Proceed" describe the dialog; these describe
+           * the filing — and the cancel side is the one that needed it, because
+           * on a question about reviewing, "Cancel" reads as "cancel my
+           * application" to somebody who has just spent an hour on it.
+           */
+          cancelLabel="Keep reviewing"
+          confirmLabel="Yes, submit"
           confirmDisabled={saving}
           onCancel={() => setShowConfirm(false)}
           onConfirm={() => {
@@ -8067,14 +8294,26 @@ export function ApplyWizard() {
           }}
         >
           {/*
-            * Back to naming one action, because the press takes one. It named a
-            * payment method while it also charged; a confirmation that
+            * Checklist item 14 — "a modal stating if the applicant is already
+            * done reviewing his/her information".
+            *
+            * It asked "Submit this application to BPLO for approval?", which is
+            * a question about the NEXT step and one the Submit button has
+            * already answered. The client asked for a question about the step
+            * just finished, and the difference is the point of having the
+            * dialog at all: the last chance to go back is worth nothing if the
+            * prompt does not mention going back.
+            *
+            * What happens next stays underneath, because a confirmation that
             * over-describes what it confirms is as misleading as one that
-            * under-describes it, and this one would have promised a debit that
-            * the API now refuses at this stage.
+            * under-describes it — but it no longer names a payment, which the
+            * API refuses at this stage.
             */}
           <p className="py-4 text-center text-lg">
-            Submit this application to BPLO for approval?
+            Have you finished reviewing your information?
+          </p>
+          <p className="-mt-2 pb-4 text-center text-sm text-ink-secondary">
+            Once submitted, BPLO reviews this application and you cannot change it yourself.
           </p>
         </ProtoModal>
       )}
