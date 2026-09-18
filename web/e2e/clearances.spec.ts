@@ -1690,7 +1690,9 @@ test('one bill at submission covers all five, and applying adds nothing to it', 
    * taken, filing unmoved, and BPLO's approval asking for it again.
    */
   await page.getByRole('button', { name: /^submit$/i }).click()
-  await page.getByRole('button', { name: /^proceed$/i }).click()
+  // The confirmation names what it confirms — "Proceed" until item 14 asked it
+  // to be a question about the reviewing just finished.
+  await page.getByRole('button', { name: /^yes, submit$/i }).click()
   await expect(page.getByText(/tracking/i).first()).toBeVisible({ timeout: 30_000 })
 
   const read = async () =>
@@ -1956,3 +1958,77 @@ test('the filing shows the forms the applicant handed to the other offices', asy
   await expect(page.locator('details', { hasText: /locational clearance/i })).toHaveCount(0)
   await expect(page.locator('details', { hasText: /fire safety/i })).toHaveCount(0)
 })
+
+test('the last step reads the whole form back, in the order it was filled', async ({ page }) => {
+  /*
+   * Checklist item 14 — "an editable preview of the WHOLE FORM (from starting
+   * to end section)", plus the modal on Submit.
+   *
+   * This lives in clearances.spec.ts rather than apply-wizard.spec.ts for one
+   * reason: `makeCompleteDraft` is here, and it is 130 lines of filling every
+   * section through the API. Reaching Review & Submit needs a draft with
+   * nothing outstanding — the wizard resumes a complete one at its last step —
+   * and a second copy of that helper would be the worse trade.
+   *
+   * The ORDER is the assertion. The section blocks are written business-first
+   * in the JSX while the wizard asks address first, so a summary built from the
+   * JSX rather than from `sequence` would read out of order and still look
+   * fine.
+   */
+  await onDashboard(page)
+  const appId = await makeCompleteDraft(page)
+  // Documents are a step of their own and the helper above does not fill it;
+  // the wizard resumes at the first UNFINISHED step, so without this it opens
+  // on Documentary Requirements rather than on the last one.
+  await uploadRequiredDocuments(page, appId)
+
+  await page.goto(`/apply?draft=${appId}`)
+  await expect(page.getByRole('heading', { name: /review & submit/i })).toBeVisible({
+    timeout: 20_000,
+  })
+
+  const summary = page.getByRole('region', { name: /everything you have entered/i })
+  await expect(summary).toBeVisible()
+
+  // Every part is read back, numbered as the wizard numbers them.
+  const parts = await summary.locator('p', { hasText: /^part \d+ of \d+$/i }).allTextContents()
+  const numbers = parts.map((t) => Number(/part (\d+) of/i.exec(t)?.[1] ?? 0))
+  expect(numbers.length, 'no sections were read back').toBeGreaterThan(3)
+  expect(numbers, `parts are out of filing order: ${numbers.join(', ')}`).toEqual(
+    [...numbers].sort((a, b) => a - b),
+  )
+
+  /*
+   * Location & Zoning is asked BEFORE Business Information, and the JSX writes
+   * them the other way round — so this pair is what a summary built from the
+   * wrong source gets wrong.
+   */
+  const titles = await summary.getByRole('heading', { level: 3 }).allTextContents()
+  expect(titles.indexOf('Location & Zoning')).toBeLessThan(
+    titles.indexOf('Business Information & Registration'),
+  )
+
+  // And each section offers the way back to itself, named for itself.
+  await expect(summary.getByRole('button', { name: /edit location & zoning/i })).toBeVisible()
+  await summary.getByRole('button', { name: /edit business information/i }).click()
+  await expect(page.getByRole('heading', { name: /business information/i }).first()).toBeVisible()
+
+  /*
+   * The modal asks about the step just finished, not the one about to start.
+   * "Submit this application to BPLO for approval?" was a question the Submit
+   * button had already answered.
+   */
+  await page.goto(`/apply?draft=${appId}`)
+  await expect(page.getByRole('heading', { name: /review & submit/i })).toBeVisible({
+    timeout: 20_000,
+  })
+  await page.getByRole('button', { name: /^submit$/i }).click()
+  const modal = page.getByRole('dialog')
+  await expect(modal).toContainText(/have you finished reviewing your information/i)
+  await expect(modal.getByRole('button', { name: /keep reviewing/i })).toBeVisible()
+
+  // Backing out of the dialog leaves the filing exactly where it was.
+  await modal.getByRole('button', { name: /keep reviewing/i }).click()
+  await expect(page.getByRole('heading', { name: /review & submit/i })).toBeVisible()
+})
+
