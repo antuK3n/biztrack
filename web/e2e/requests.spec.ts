@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
@@ -169,4 +169,157 @@ test('the composer names who the request is going to, readably', async ({ page }
    * than go blank, and it still has to say which business.
    */
   await expect(recipient).toHaveValue(/business owner on file · applicant for Dela Cruz Trading/i)
+})
+
+/*
+ * Issue 88 — "the Other Requirements icon on Home should carry a count, like
+ * notifications, which does not reduce until the requirement is submitted".
+ *
+ * Two claims, and they fail in different ways.
+ *
+ * The count itself is `awaits_applicant`, the API's own answer to whose move it
+ * is. Pending and Needs Resubmission are one situation to the owner — you owe
+ * us a document — so both count, and neither stops counting until a response is
+ * actually filed. A count derived in the browser from `status` would have to
+ * re-guess that, and the two screens would eventually disagree.
+ *
+ * The badge is also the ONLY place the number appears before the owner scrolls,
+ * so it has to be announced. A bare "3" after a link called "Other
+ * Requirements" is read as a position in a list.
+ *
+ * Stubbed, not seeded: the owner's real register has whatever it has, and a
+ * test that asserted "3" against it would pass today and fail the first time an
+ * office raises a fourth request.
+ */
+test.describe('the Other Requirements tile carries a count', () => {
+  test.use({ storageState: sessionFor('owner') })
+
+  const ownerRequirement = (id: number, subject: string, status: string, label: string) => ({
+    id,
+    subject,
+    status,
+    status_label: label,
+    remarks: status === 'needs_resubmission' ? 'The scan is unreadable.' : null,
+    accepts_response: status !== 'fulfilled',
+    // The API decides this; the stub mirrors what it emits rather than what the
+    // page would like. Submitted is with the office, so it is NOT owed.
+    awaits_applicant: status === 'pending' || status === 'needs_resubmission',
+    awaits_office: status === 'submitted',
+    is_closed: status === 'fulfilled',
+    additional_remarks: null,
+    reference: null,
+    due_date: null,
+    reviewed_at: null,
+    created_at: '2026-08-01T00:00:00.000000Z',
+    created_by: { id: 5, name: 'CHO Officer', department: 'City Health Office' },
+    from_office: { id: 2, code: 'CHO', name: 'City Health Office' },
+    recipient: null,
+    application: {
+      id: 90101,
+      business_id: 1,
+      tracking_id: 'BIZ-2026-00101',
+      business_name: 'Aling Nena Sari-Sari Store',
+    },
+    responses: [],
+  })
+
+  /** Stub /requests with these rows, and report every call the page made. */
+  async function serve(page: Page, rows: unknown[]) {
+    const calls: string[] = []
+    await page.route('**/api/v1/requests*', async (route) => {
+      calls.push(route.request().url())
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: rows,
+          meta: {
+            current_page: 1,
+            last_page: 1,
+            per_page: 100,
+            total: rows.length,
+            office_statuses: [],
+            statuses: [],
+          },
+        }),
+      })
+    })
+    return calls
+  }
+
+  test('the badge counts what is owed, and says so out loud', async ({ page }) => {
+    const calls = await serve(page, [
+      ownerRequirement(70001, 'Health certificate', 'pending', 'Pending'),
+      ownerRequirement(70002, 'Water potability test', 'needs_resubmission', 'Needs Resubmission'),
+      // Already answered — it is with the office, so it must NOT be counted.
+      ownerRequirement(70003, 'Fire safety plan', 'submitted', 'For Review'),
+      ownerRequirement(70004, 'Barangay clearance', 'fulfilled', 'Fulfilled'),
+    ])
+
+    await page.goto('/')
+
+    /*
+     * By accessible name, because the name IS the feature. Asserting on the
+     * "2" alone would pass for a badge that announces nothing.
+     */
+    const tile = page.getByRole('link', { name: 'Other Requirements, 2 documents waiting on you' })
+    await expect(tile).toBeVisible({ timeout: 15_000 })
+    await expect(tile).toContainText('2')
+
+    /*
+     * Needs Resubmission still counts. If it were ever dropped from
+     * `awaits_applicant` this reads 1 and the owner is told they owe nothing
+     * for a document that was handed back to them.
+     */
+    await expect(page.getByText('2 documents are waiting on you.')).toBeVisible()
+
+    /*
+     * One fetch for two readers. The tile and the panel below it show the same
+     * number; fetching separately would put two answers on one screen that can
+     * differ by whatever happened between the calls.
+     *
+     * Counted as "at most two", not "exactly one", because `<StrictMode>` in
+     * main.tsx double-invokes every effect in development and the e2e stack
+     * serves the dev build — so ONE `useAsync` is one call in production and
+     * two here. Two readers each fetching for themselves would be four either
+     * way, which is what this catches.
+     *
+     * It was never four: the panel's fetch was LIFTED to feed the tile, not
+     * duplicated. This guards the next edit, where adding a count somewhere
+     * else on this page by giving it its own `requests.list` is the obvious
+     * and wrong move.
+     */
+    expect(
+      calls.length,
+      `the page asked for /requests ${calls.length} times: ${calls.join(' | ')}`,
+    ).toBeLessThanOrEqual(2)
+  })
+
+  test('one waiting document is counted in words, not as "1 documents"', async ({ page }) => {
+    await serve(page, [ownerRequirement(70005, 'Health certificate', 'pending', 'Pending')])
+
+    await page.goto('/')
+
+    const tile = page.getByRole('link', { name: 'Other Requirements, one document waiting on you' })
+    await expect(tile).toBeVisible({ timeout: 15_000 })
+    await expect(tile).toContainText('1')
+  })
+
+  test('nothing owed draws no badge at all', async ({ page }) => {
+    await serve(page, [
+      ownerRequirement(70006, 'Fire safety plan', 'submitted', 'For Review'),
+      ownerRequirement(70007, 'Barangay clearance', 'fulfilled', 'Fulfilled'),
+    ])
+
+    await page.goto('/')
+
+    /*
+     * The plain name, and no digit anywhere on the tile. A "0" badge is a thing
+     * to read and dismiss on every visit, which is how a badge stops meaning
+     * anything.
+     */
+    const tile = page.getByRole('link', { name: 'Other Requirements', exact: true })
+    await expect(tile).toBeVisible({ timeout: 15_000 })
+    await expect(tile).not.toContainText(/\d/)
+  })
 })
