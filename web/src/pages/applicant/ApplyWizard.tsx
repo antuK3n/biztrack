@@ -2040,8 +2040,45 @@ function IdentifyFilingModal({
       {businessId !== null && (
         <div className="mt-5">
           <FieldLabel required>Which permits are you {verb}?</FieldLabel>
+          {/*
+            One bill, said where the ticking happens.
+
+            Item #79: nothing in this picker said what a second tick costs, so
+            the applicant had no way to know whether renewing three permits
+            meant three trips to the cashier. It does not, and that is worth
+            stating here rather than three screens later on PayPage, because
+            the fear of a second bill is what makes someone untick a permit
+            that is genuinely due.
+
+            Why it is true, so a later reader can re-check it rather than
+            trust this line: a tick lands in `priorPermitIds`, the effect above
+            derives `form.permit_type_ids` from it, and
+            `WorkflowService::assessFees()` then loops `$app->permitTypes`
+            into a SINGLE `FeeAssessment` — one `total_amount`, written by an
+            `updateOrCreate` keyed on `application_id` so a filing can only
+            ever hold one assessment row. `PermitFees::balance()` reads that
+            one row. There is no per-permit accrual anywhere in the path.
+
+            It deliberately does not say "on your business permit renewal",
+            which is how #79 phrased it. A renewal is of whichever permits are
+            actually due (see the effect that derives `permit_type_ids`), so a
+            shop renewing only its Sanitary Permit has no business permit on
+            the filing at all and that sentence would be false for them. "This
+            filing" is true in every case, including the paper-permit escape.
+
+            It names no amount and no date on purpose — both belong to the Tax
+            Order of Payment, which BPLO raises after reading the form, and
+            neither is knowable here.
+
+            If a second `FeeAssessment` row per permit is ever introduced, or
+            an accrual returns the way `ClearanceService::reassess()` once
+            worked, this sentence becomes a lie about money and must go with
+            it.
+          */}
           <p className="mb-2 text-xs text-ink-secondary">
-            Tick every permit this filing covers. You can choose more than one.
+            Tick every permit this filing covers. You can choose more than one, and they are all
+            priced on a single Tax Order of Payment — one payment for this filing, not one per
+            permit.
           </p>
           {loadingPermits ? (
             <p className="text-xs text-ink-secondary">Loading this business’s permits…</p>
