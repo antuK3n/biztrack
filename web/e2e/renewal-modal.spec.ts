@@ -403,6 +403,41 @@ test('a renewal covers every permit ticked, and the first tick is the primary', 
   await expect(page.getByText(permits[1].permit_number)).toBeVisible()
 })
 
+test('the picker says the ticked permits are one payment, not one per permit', async ({
+  page,
+}) => {
+  /*
+   * Issue #79. The picker invites a shop to tick three permits and used to say
+   * nothing about what the third tick costs, so the only safe reading was the
+   * expensive one — three permits, three bills — and the cautious answer to
+   * that is to untick a permit that is genuinely due.
+   *
+   * It is one bill: `WorkflowService::assessFees()` loops the filing's permit
+   * types into a single `FeeAssessment` row, keyed on `application_id`. This
+   * pins the sentence that says so, because the sentence is a claim about
+   * money and nothing else in the suite would notice it going missing.
+   */
+  await page.goto('/apply?type=renewal')
+  await expect(dialog(page)).toBeVisible({ timeout: 30_000 })
+
+  await chooseBusiness(page, TWO_PERMIT_BUSINESS_ID)
+  await expect(permitRows(page)).toHaveCount(2, { timeout: 20_000 })
+
+  const line = dialog(page).getByText(/single Tax Order of Payment/i)
+  await expect(line).toBeVisible()
+
+  const text = (await line.innerText()).replace(/\s+/g, ' ')
+  // The point of it: not one bill per permit.
+  expect(text, 'the line no longer rules out a bill per permit').toMatch(/not one per permit/i)
+  /*
+   * And it promises no figure and no date. What the filing costs is BPLO's to
+   * assess after they have read the form, so any number here would be a
+   * quotation the wizard is in no position to make — a digit appearing in this
+   * sentence is the failure, not a formatting change.
+   */
+  expect(text, 'the line quotes a figure the wizard cannot know').not.toMatch(/\d/)
+})
+
 test('Continue is never disabled — it says what is still missing', async ({ page }) => {
   /*
    * WCAG 3.3.1 / 3.3.3. A disabled Continue is skipped by the tab order, so the
