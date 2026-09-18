@@ -795,11 +795,20 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
    *
    * All three are asserted, not just the one that should be there. A row
    * drawing two of them is the failure nobody looks for, and "Paid is absent"
-   * is a different statement from "Not billed yet is present".
+   * is a different statement from "For Initial Approval is present".
+   *
+   * That block used to read "Not billed yet", and this assertion used to hold
+   * it to naming the absence of a bill. The client asked for the stage instead
+   * (testing-checklist, Track applications item 3), so the rule this line
+   * enforces is now the stronger one: the row names where the filing IS, not
+   * what has not happened to it. The narrative has the filing at `for_approval`
+   * here, which is the status that earns those words — a `returned` filing is
+   * also unbilled and deliberately says something else, because it is waiting
+   * on the applicant rather than on BPLO.
    */
   await expect(
-    row.getByText('Not billed yet', { exact: true }),
-    'a filing BPLO has not approved should say the bill has not been raised',
+    row.getByText('For Initial Approval', { exact: true }),
+    'a filing waiting on BPLO’s first read should say that is the stage it is at',
   ).toBeVisible()
   await expect(
     row.getByRole('link', { name: 'Pay Online' }),
