@@ -868,6 +868,14 @@ export const assignments = {
    * timing. The screen prints who holds it and stops offering the button.
    */
   claim: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/claim`)),
+  /**
+   * Put it back in the office pool — stop being its Officer in Charge.
+   *
+   * Never "hand it to X": choosing somebody else's workload is `oic.assign`,
+   * the super admin's. This returns the case to Unassigned, where any officer
+   * of the office can take it.
+   */
+  release: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/release`)),
   /** Assign a specific officer to this assignment (permission oic.assign; v2). */
   assign: (id: number, officer_user_id: number, reason?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/assign`, { officer_user_id, reason })),

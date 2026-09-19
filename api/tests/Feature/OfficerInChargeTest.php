@@ -175,6 +175,82 @@ it('still lets an unclaimed filing be worked, and records who worked it', functi
         ->and($row->assigned_at)->not->toBeNull();
 });
 
+/* ── Giving it back ──────────────────────────────────────────────────────── */
+
+/*
+ * An officer who has taken a case must be able to put it down.
+ *
+ * Claiming is one click and, until now, irreversible without the super admin:
+ * a mis-click, a case that turns out to belong to a colleague's area, or an
+ * officer going on leave all needed an admin to unpick. That makes the cheap
+ * action expensive to undo, which is the shape that stops people using it —
+ * and an office whose officers will not claim is an office back where it
+ * started, with every case belonging to nobody.
+ *
+ * Released to the office pool rather than handed to a named person: choosing
+ * somebody else's workload for them is the super admin's call (`oic.assign`),
+ * and an unheld case is the ordinary state a filing starts in.
+ */
+it('lets the officer holding a filing give it back to the office', function () {
+    $appId = scopedAssignmentFiling('OIC Release Cafe');
+    $id = choAssignmentId($appId);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/claim")->assertOk();
+
+    $released = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/release")
+        ->assertOk()->json('data');
+
+    expect($released['officer'])->toBeNull()
+        ->and($released['assigned_at'])->toBeNull()
+        ->and($released['can_claim'])->toBeTrue();
+
+    // And it is back in the office's unassigned list, for anyone to take.
+    $free = collect(test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->getJson('/api/v1/assignments?oic=unassigned&per_page=200')->assertOk()->json('data'))
+        ->pluck('id');
+    expect($free)->toContain($id);
+});
+
+it('refuses to let one officer put down another officer’s filing', function () {
+    $appId = scopedAssignmentFiling('OIC Release Theirs Cafe');
+    $id = choAssignmentId($appId);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/claim")->assertOk();
+
+    $second = colleagueIn('CHO', 'sanitary_officer', 'Releaser Health');
+    actAs($second);
+    test()->postJson("/api/v1/assignments/{$id}/release")->assertForbidden();
+
+    $carlos = User::where('email', 'sanitary@biztrack.local')->value('id');
+    expect(ApplicationAssignment::find($id)->officer_user_id)->toBe($carlos);
+});
+
+it('says plainly that an unheld filing was already unheld', function () {
+    // Not an error. Two tabs, or a release the admin got to first, and the
+    // officer's intent — "this should not be mine" — is already true.
+    $appId = scopedAssignmentFiling('OIC Release Twice Cafe');
+    $id = choAssignmentId($appId);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/release")->assertOk();
+
+    expect(ApplicationAssignment::find($id)->officer_user_id)->toBeNull();
+});
+
+it('refuses a release from an officer of another office', function () {
+    $appId = scopedAssignmentFiling('OIC Release Outsider Cafe');
+    $id = choAssignmentId($appId);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/claim")->assertOk();
+
+    test()->withHeaders(authAs('fire@biztrack.local'))
+        ->postJson("/api/v1/assignments/{$id}/release")->assertForbidden();
+});
+
 /* ── §9 the offices are independent ──────────────────────────────────────── */
 
 it('leaves every other office’s holder untouched when one office claims', function () {
