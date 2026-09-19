@@ -10,23 +10,68 @@ import {
   UsersIcon,
 } from '../components/icons'
 import { Logo } from '../components/Logo'
-import { AccountRestrictedModal, StatusChip } from '../components/ui/Proto'
-import { businessName } from '../lib/format'
+import { AccountRestrictedModal } from '../components/ui/Proto'
 import { businesses, requests } from '../lib/resources'
-import { REQUIREMENT_CHIP_TONE } from '../lib/status'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 
-/** White shadow tile + royal label beneath, per the prototype home (PDF p5). */
-function HomeCard({ to, icon: Icon, label }: { to: string; icon: IconType; label: string }) {
+/**
+ * White shadow tile + royal label beneath, per the prototype home (PDF p5).
+ *
+ * `waiting` puts a warning on the tile: a count, and a line under the label
+ * saying what it is. It replaces the list that used to sit at the foot of this
+ * page — see OwnerHome — and it has to carry both, because a bare dot on an
+ * icon is a decoration until something says what it means.
+ */
+function HomeCard({
+  to,
+  icon: Icon,
+  label,
+  waiting = 0,
+}: {
+  to: string
+  icon: IconType
+  label: string
+  /** How many things behind this tile are waiting on the owner. 0 = nothing. */
+  waiting?: number
+}) {
+  const note =
+    waiting === 1 ? 'One document waiting on you' : `${waiting} documents waiting on you`
+
   return (
-    <Link to={to} className="group flex w-40 flex-col items-center gap-4 sm:w-48">
-      <span className="flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised">
+    <Link
+      to={to}
+      className="group flex w-40 flex-col items-center gap-4 sm:w-48"
+      /*
+       * The count belongs in the link's own name, not only in a badge beside
+       * it. A screen reader announcing "Other Requirements" over a tile that
+       * visually shouts would be the same failure as colour-only meaning.
+       */
+      aria-label={waiting > 0 ? `${label} — ${note}` : undefined}
+    >
+      <span
+        className={`relative flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised ${
+          waiting > 0 ? 'ring-2 ring-s-orange' : ''
+        }`}
+      >
         <Icon size={64} strokeWidth={1.5} />
+        {waiting > 0 && (
+          <span
+            aria-hidden="true"
+            className="tnum absolute -right-2 -top-2 flex h-8 min-w-8 items-center justify-center rounded-full bg-s-orange px-2 text-sm font-bold text-white shadow-card"
+          >
+            {waiting > 99 ? '99+' : waiting}
+          </span>
+        )}
       </span>
       <span className="text-center text-lg font-semibold leading-snug text-royal-deep">{label}</span>
+      {waiting > 0 && (
+        <span aria-hidden="true" className="-mt-2 text-center text-sm font-semibold text-s-orange-ink">
+          {note}
+        </span>
+      )}
     </Link>
   )
 }
@@ -42,6 +87,28 @@ function OwnerHome() {
     (b) => b.status === 'blacklisted' || b.status === 'suspended',
   )
   const showModal = !dismissed && Boolean(restricted)
+
+  /*
+   * ── The list moved onto the tile ─────────────────────────────────────────
+   *
+   * This page used to end with a panel repeating every waiting requirement in
+   * full — subject, business, tracking number, the office that asked, a status
+   * chip and a View link. The client asked for it gone and for the tile to
+   * carry a warning instead, beside the Amendment Form tile.
+   *
+   * It is the right trade. The home page is four large buttons and one thing
+   * to decide — where am I going — and the panel answered a question the
+   * requirements page answers better, in the place the tile already points at.
+   * What the home page owes the reader is that there IS something waiting, and
+   * a count says that in a glance.
+   *
+   * Only what is waiting on the OWNER counts: `awaits_applicant` is Pending and
+   * Needs Resubmission together, because to the person who owes a document
+   * those are one situation. Anything with the office is deliberately excluded
+   * — a badge counting work you cannot act on teaches people to ignore it.
+   */
+  const { data: openRequests } = useAsync(() => requests.list({ per_page: 100 }), [])
+  const waiting = (openRequests ?? []).filter((r) => r.awaits_applicant).length
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
@@ -60,109 +127,14 @@ function OwnerHome() {
         <HomeCard to="/apply?type=new" icon={FilePlusIcon} label="New Business Permit" />
         <HomeCard to="/apply?type=renewal" icon={RenewIcon} label="Renew Business Permit" />
         <HomeCard to="/apply?type=amendment" icon={AmendIcon} label="Amendment Form" />
-        <HomeCard to="/requests" icon={ShieldCheckIcon} label="Other Requirements" />
+        <HomeCard
+          to="/requests"
+          icon={ShieldCheckIcon}
+          label="Other Requirements"
+          waiting={waiting}
+        />
       </div>
-
-      <OtherRequirementsPanel />
     </div>
-  )
-}
-
-/**
- * "Other Requirements" on the owner's home page.
- *
- * The tile above has always LINKED to the requirements page; nothing said there
- * was anything waiting behind it. An office asking for a health certificate had
- * no way of reaching the owner except a notification they might have already
- * dismissed, so the document sat unasked-for and the filing sat blocked.
- *
- * Only what is waiting on the OWNER is listed — `awaits_applicant`, which is
- * Pending and Needs Resubmission together, because to the person who owes a
- * document those are one situation. Anything with the office is deliberately
- * absent: a home page that lists work you cannot act on teaches people to
- * ignore it.
- */
-function OtherRequirementsPanel() {
-  const { data, loading } = useAsync(() => requests.list({ per_page: 100 }), [])
-
-  const waiting = (data ?? []).filter((r) => r.awaits_applicant)
-  if (loading || waiting.length === 0) return null
-
-  return (
-    <section className="mt-14 w-full max-w-3xl" aria-labelledby="other-requirements-heading">
-      <div className="mb-3 flex items-baseline justify-between gap-3 border-b-2 border-ink/40 pb-2">
-        <h2 id="other-requirements-heading" className="text-xl font-bold text-ink">
-          Other Requirements
-        </h2>
-        <Link to="/requests" className="text-sm font-semibold text-royal underline hover:text-royal-hover">
-          See all
-        </Link>
-      </div>
-      <p className="mb-4 text-sm text-ink-secondary">
-        {waiting.length === 1
-          ? 'One document is waiting on you.'
-          : `${waiting.length} documents are waiting on you.`}
-      </p>
-
-      <ul className="flex flex-col gap-3">
-        {waiting.map((r) => (
-          <li key={r.id} className="rounded-xl bg-white px-5 py-4 shadow-card">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-base font-bold text-ink">{r.subject}</p>
-                {/*
-                  Business name AND number. One owner can hold two shops, and a
-                  "Health Certificate" with neither on it is a request they
-                  cannot act on without opening every one to find out which.
-                */}
-                <p className="text-sm text-ink-secondary">
-                  {businessName(r.application?.business_name ? { name: r.application.business_name } : null)}
-                </p>
-                <p className="tnum text-xs text-ink-muted">
-                  {r.application?.tracking_id || 'Draft — not yet filed'}
-                </p>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  Requested by:{' '}
-                  <span className="font-semibold text-ink">
-                    {r.from_office?.name ?? r.created_by?.department ?? 'the LGU'}
-                  </span>
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                {/*
-                  The same tone map the Other Requirements page uses, not a
-                  hard-coded orange. Every row here is waiting on the owner, so
-                  amber was nearly always right — but a REJECTED document is
-                  also waiting on them, and drawing a refusal in the waiting
-                  colour told them to expect a form to fill rather than a
-                  decision to answer. The page one click away said red.
-
-                  The fallback stays orange rather than the requirements page's
-                  grey: everything on THIS panel is waiting on the owner by
-                  construction, so a status the API adds later is still
-                  something they owe, and grey would read as "nothing to do".
-                */}
-                <StatusChip tone={REQUIREMENT_CHIP_TONE[r.status] ?? 'orange'}>
-                  {r.status_label}
-                </StatusChip>
-                <Link
-                  to="/requests"
-                  className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-                >
-                  View requirement
-                </Link>
-              </div>
-            </div>
-            {/* The reason it came back, where the owner decides what to do next. */}
-            {r.status === 'needs_resubmission' && r.remarks && (
-              <p className="mt-3 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-xs font-medium text-s-red">
-                {r.remarks}
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
   )
 }
 
