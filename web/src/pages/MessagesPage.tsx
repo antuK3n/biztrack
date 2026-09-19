@@ -138,10 +138,42 @@ function ThreadCard({
    *    already says so.
    */
   const office = thread.kind === 'general' ? null : officeLine(thread)
+
+  /*
+   * ── What names the row, and for whom ─────────────────────────────────────
+   *
+   * An APPLICANT is looking for their business. Their inbox holds one row per
+   * filing, and the counterparty of every one of them is an office — so a card
+   * titled by the office read "Business Permits and Licensing Office" five
+   * times down the page, with the thing the reader was actually looking for
+   * demoted to a suffix. The business is what they recognise; the office is a
+   * fact about the row, and it has a line of its own below.
+   *
+   * An OFFICER is looking for a person. Their counterparty IS the applicant,
+   * which is already the right title, and the business sits under it.
+   *
+   * A general enquiry has no business, so it keeps the office as its title —
+   * there is nothing else it could honestly be called.
+   */
+  const isApplicant = readerOffice === null
+  const businessTitle =
+    isApplicant && thread.kind === 'application'
+      ? (thread.business_name ?? thread.tracking_id)
+      : null
+  const title = businessTitle ?? thread.counterparty.name
+
   const handledBy =
-    office && office !== thread.counterparty.name && office !== readerOffice ? office : null
+    office && office !== title && office !== readerOffice ? office : null
+
+  /*
+   * The suffix beside the title. Suppressed when the title is already the
+   * business: the subtitle carries the business name too, and printing it
+   * twice on one line is how the old card read.
+   */
   const subtitle =
-    thread.counterparty.subtitle && thread.counterparty.subtitle !== thread.responsible_office?.name
+    !businessTitle &&
+    thread.counterparty.subtitle &&
+    thread.counterparty.subtitle !== thread.responsible_office?.name
       ? thread.counterparty.subtitle
       : null
 
@@ -179,7 +211,9 @@ function ThreadCard({
   const identity =
     thread.kind === 'application' && thread.tracking_id
       ? [
-          thread.business_name && thread.business_name !== subtitle ? thread.business_name : null,
+          thread.business_name && thread.business_name !== subtitle && !businessTitle
+            ? thread.business_name
+            : null,
           thread.tracking_id,
         ]
           .filter(Boolean)
@@ -200,7 +234,7 @@ function ThreadCard({
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="min-w-0 flex-1 truncate text-[15px] font-bold text-ink">
-              {thread.counterparty.name}
+              {title}
               {subtitle && (
                 <span className="font-semibold italic text-ink-secondary"> · {subtitle}</span>
               )}
@@ -588,17 +622,27 @@ export function MessagesPage() {
       aria-label={`Messages about ${paneTitle}`}
       className="flex min-h-[32rem] flex-col overflow-hidden rounded-xl bg-white shadow-card lg:h-[calc(100dvh-9rem)]"
     >
-      <header className="flex items-center gap-3 bg-royal-tint px-5 py-4">
+      {/*
+        * Two lines, not three.
+        *
+        * The header sat above a fixed-height transcript, so every line in it
+        * was a line of the conversation the reader could not see. "Handled by"
+        * and the tracking id are both short and both secondary; they belong on
+        * one row, separated the way the cards separate them. The title keeps
+        * its own line because it is what the pane is about.
+        */}
+      <header className="flex items-center gap-3 bg-royal-tint px-5 py-3">
         <Avatar size={38} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-bold text-ink">{paneTitle}</p>
-          {handledElsewhere && (
-            <p className="truncate text-xs font-semibold text-royal">
-              Handled by {handledElsewhere}
+          {(handledElsewhere || paneSubtitle) && (
+            <p className="truncate text-xs text-ink-secondary">
+              {handledElsewhere && (
+                <span className="font-semibold text-royal">Handled by {handledElsewhere}</span>
+              )}
+              {handledElsewhere && paneSubtitle && <span className="text-ink-muted"> · </span>}
+              {paneSubtitle && <span className="italic">{paneSubtitle}</span>}
             </p>
-          )}
-          {paneSubtitle && (
-            <p className="truncate text-sm italic text-ink-secondary">{paneSubtitle}</p>
           )}
         </div>
         <button
