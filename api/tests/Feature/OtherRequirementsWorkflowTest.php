@@ -1,12 +1,18 @@
 <?php
 
+use App\Enums\ApplicationStatus;
+use App\Enums\ClearanceStatus;
+use App\Enums\OfficerRequestStatus;
+use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\OfficerRequest;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Services\WorkflowService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 /*
@@ -589,4 +595,172 @@ it('sends the filter its options, including the statuses no office can set', fun
         // The words come from the enum, so the filter and the chips agree.
         ->and(collect($meta['statuses'])->firstWhere('value', 'submitted')['label'])->toBe('For Review')
         ->and(collect($meta['statuses'])->firstWhere('value', 'fulfilled')['label'])->toBe('Approved');
+});
+
+/* ── Other Requirements hold the filing back ─────────────────────────────── */
+
+/**
+ * A filing whose CLEARANCES are all settled, so the only thing that can hold it
+ * out of Final Approval is an Other Requirement.
+ *
+ * `submit()` attaches the required clearances, which is why a bare
+ * `requirementFiling` never reaches Final Approval and why a test that skipped
+ * this step would pass for the wrong reason — blocked by a permit while
+ * claiming to be blocked by a requirement.
+ */
+function filingWithClearancesSettled(string $name, string $registrationNumber): int
+{
+    $appId = requirementFiling($name, $registrationNumber, ['CHO']);
+
+    $app = Application::findOrFail($appId);
+    DB::table('application_permit_types')
+        ->where('application_id', $appId)
+        ->update(['status' => ClearanceStatus::Approved->value]);
+    $app->update(['status' => ApplicationStatus::AwaitingOtherPermits]);
+
+    return $appId;
+}
+
+/*
+ * A filing does not reach BPLO's final approval while an Other Requirement is
+ * still open on it.
+ *
+ * `refreshReadiness()` counted CLEARANCES and nothing else, so a filing whose
+ * permits were approved walked into Final Approval with a document an office
+ * had asked for still outstanding — and BPLO could issue the business permit
+ * without it. The office asked for that document for a reason; issuing the
+ * permit first is the system quietly overruling the reason.
+ *
+ * "Open" is anything not FULFILLED, which is wider than the client's words
+ * ("the other requirements the business owner needs to submit") and
+ * deliberately so. A requirement the owner has answered but the office has not
+ * accepted is still a question nobody has closed, and approving the permit on
+ * top of it wastes the request as completely as approving before the answer.
+ *
+ * CONSEQUENCE, said out loud: an office that raises a requirement and never
+ * rules on it now blocks the filing. A requirement has no `cancelled` state —
+ * noted before this change and still true — so an office that asked for the
+ * wrong thing has to close it by approving it. That is a real cost, and the
+ * alternative is a permit issued over an unanswered question.
+ */
+it('holds a filing out of Final Approval while a requirement is still open', function () {
+    // Clearances settled, so the requirement is the only thing left that can
+    // hold it — otherwise this passes for the wrong reason.
+    $appId = filingWithClearancesSettled('ABC Store', 'DTI-94030');
+
+    $requirementId = test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Water potability result'])
+        ->assertCreated()->json('data.id');
+
+    app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+
+    // The applicant answers — and it STILL waits, because the office has not
+    // accepted the answer yet.
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->post("/api/v1/requests/{$requirementId}/respond", [
+            'body' => 'Attached.', 'document' => requirementUpload(),
+        ])->assertOk();
+
+    app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+
+    // The office accepts it, and the filing is free to move.
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/requests/{$requirementId}/close", ['outcome' => 'fulfilled'])
+        ->assertOk();
+
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::ForFinalApproval);
+});
+
+it('pulls a filing back out of Final Approval when a new requirement is raised', function () {
+    /*
+     * The reverse path, which `refreshReadiness` already had for clearances: a
+     * permit going outstanding again returns the filing to the offices. A
+     * requirement raised after the filing reached BPLO has to do the same, or
+     * an office asking for a document would be asking into a queue BPLO is
+     * about to approve past.
+     */
+    $appId = filingWithClearancesSettled('ABC Store', 'DTI-94031');
+    Application::findOrFail($appId)->update(['status' => ApplicationStatus::ForFinalApproval]);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'One more document'])
+        ->assertCreated();
+
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+});
+
+it('says on the filing how many requirements are holding it', function () {
+    // The screens have to be able to explain the wait. A filing that stops
+    // moving with nothing on it saying why is the defect this rule would
+    // otherwise introduce.
+    $appId = filingWithClearancesSettled('ABC Store', 'DTI-94032');
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Water potability result'])
+        ->assertCreated();
+
+    $payload = test()->withHeaders(authAs('owner@biztrack.local'))
+        ->getJson("/api/v1/applications/{$appId}")->assertOk()->json('data');
+
+    expect($payload['open_requirements'])->toBe(1);
+});
+
+it('does not let a post-issuance obligation hold the filing', function () {
+    /*
+     * The case the blocking rule gets wrong if it is written as "any open
+     * requirement".
+     *
+     * When CENRO issues a City Environmental Certificate, the system raises the
+     * DENR documents the business must hold — and they are due SIX MONTHS FROM
+     * ISSUANCE, by the text of the requirement itself. They are an obligation
+     * that follows the permit, not a condition of it. A rule that counted them
+     * would freeze every filing that touches a CEC for half a year, which the
+     * full-lifecycle test caught: five clearances approved, and the filing
+     * still sitting at `awaiting_other_permits`.
+     *
+     * The line is WHO ASKED. A requirement raised by an officer is an office
+     * asking this applicant for something before it will sign; one raised by
+     * the system — `requested_by_user_id` null, which the register allows
+     * precisely for these — is a compliance clock that starts after issuance.
+     */
+    $appId = filingWithClearancesSettled('ABC Store', 'DTI-94033');
+
+    OfficerRequest::create([
+        'application_id' => $appId,
+        'requested_by_user_id' => null,
+        'department_id' => Department::where('code', 'CENRO')->value('id'),
+        'request_type' => 'document',
+        'status' => OfficerRequestStatus::Pending,
+        'due_date' => now()->addMonths(6),
+        'title' => 'DENR PTO — Permit to Operate',
+    ]);
+
+    app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
+
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::ForFinalApproval);
+});
+
+it('still lets an office’s own request hold it, beside a system one', function () {
+    // Both on one filing, because that is the combination the rule has to tell
+    // apart rather than a choice between two whole behaviours.
+    $appId = filingWithClearancesSettled('ABC Store', 'DTI-94034');
+
+    OfficerRequest::create([
+        'application_id' => $appId,
+        'requested_by_user_id' => null,
+        'department_id' => Department::where('code', 'CENRO')->value('id'),
+        'request_type' => 'document',
+        'status' => OfficerRequestStatus::Pending,
+        'title' => 'DENR PTO — Permit to Operate',
+    ]);
+
+    test()->withHeaders(authAs('sanitary@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/requests", ['title' => 'Water potability result'])
+        ->assertCreated();
+
+    app(WorkflowService::class)->refreshReadiness(Application::findOrFail($appId));
+
+    expect(Application::findOrFail($appId)->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });

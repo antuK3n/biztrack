@@ -213,6 +213,10 @@ Route::middleware('auth:sanctum')->group(function () {
          * claim anything.
          */
         Route::post('assignments/{assignment}/claim', [AssignmentController::class, 'claim']);
+        // Give it back to the office. Same group and the same reasoning as
+        // claim: putting down your own case is ordinary review work, and the
+        // power it needs is the office's, not the super admin's.
+        Route::post('assignments/{assignment}/release', [AssignmentController::class, 'release']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);

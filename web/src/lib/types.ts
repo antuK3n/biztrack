@@ -872,6 +872,18 @@ export interface Ra11032Standing {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /**
+   * Other Requirements still open on this filing — anything not Fulfilled.
+   *
+   * A filing does not reach BPLO's final approval while one is open
+   * (WorkflowService::refreshReadiness), so the screens that show the stage
+   * need this to explain the wait. A filing that stops moving with nothing on
+   * it saying why is the defect that rule would otherwise introduce.
+   *
+   * Optional: a payload from before this shipped carries no key, and a screen
+   * must read `undefined` as "no information" rather than as zero.
+   */
+  open_requirements?: number
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
   payment_mode?: 'annual' | 'quarterly'
   /**

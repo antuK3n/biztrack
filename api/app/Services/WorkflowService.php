@@ -964,7 +964,52 @@ class WorkflowService
             ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
             ->filter(fn (PermitType $pt) => $pt->pivot->status?->isOutstanding() ?? true);
 
-        $ready = $outstanding->isEmpty();
+        /*
+         * ── An open Other Requirement holds the filing back ──────────────────
+         *
+         * This counted CLEARANCES and nothing else, so a filing whose permits
+         * were all approved walked into Final Approval with a document an
+         * office had asked for still outstanding, and BPLO could issue the
+         * business permit without it. The office asked for that document for a
+         * reason; issuing the permit over it is the system overruling the
+         * reason quietly.
+         *
+         * Not FULFILLED is the test, which is wider than "waiting on the
+         * applicant" and deliberately so. A requirement the owner has answered
+         * but the office has not accepted is still a question nobody has
+         * closed, and approving on top of it wastes the request as completely
+         * as approving before the answer.
+         *
+         * The cost, stated: an office that raises a requirement and never rules
+         * on it blocks the filing, and a requirement has no `cancelled` state —
+         * so an office that asked for the wrong thing closes it by approving
+         * it. The alternative is a permit issued over an unanswered question.
+         *
+         * ── Why an officer has to have asked ─────────────────────────────────
+         *
+         * `whereNotNull('requested_by_user_id')` is the whole difference
+         * between a condition and an obligation, and leaving it out froze the
+         * product for six months at a time.
+         *
+         * When CENRO issues a City Environmental Certificate, THIS SERVICE
+         * raises the DENR documents the business must hold — due six months
+         * from issuance, by the text of the requirement itself. They follow the
+         * permit; they are not a condition of it. Counting them meant a filing
+         * whose five clearances were all approved sat at
+         * `awaiting_other_permits` with nothing anybody could do about it,
+         * which the full-lifecycle test caught on the first run.
+         *
+         * So the line is WHO ASKED. An officer asking this applicant for
+         * something before the office will sign blocks; a compliance clock the
+         * system started after issuance does not. `requested_by_user_id` is
+         * nullable precisely for the system-raised kind.
+         */
+        $openRequirements = $app->officerRequests()
+            ->whereNotNull('requested_by_user_id')
+            ->where('status', '!=', OfficerRequestStatus::Fulfilled->value)
+            ->count();
+
+        $ready = $outstanding->isEmpty() && $openRequirements === 0;
 
         if ($ready && $app->status === ApplicationStatus::AwaitingOtherPermits) {
             $this->transition(
@@ -980,7 +1025,11 @@ class WorkflowService
             $this->transition(
                 $app,
                 ApplicationStatus::AwaitingOtherPermits,
-                'A permit is outstanding again, so the application is not ready for final approval.',
+                // Which of the two it is, because "not ready" with no reason is
+                // a filing that stops moving and says nothing about why.
+                $outstanding->isEmpty()
+                    ? 'An office is waiting on a requirement, so the application is not ready for final approval.'
+                    : 'A permit is outstanding again, so the application is not ready for final approval.',
             );
         }
     }
