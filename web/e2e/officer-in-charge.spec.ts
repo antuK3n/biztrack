@@ -77,10 +77,22 @@ test.describe('the office Track page', () => {
   let asked: string[]
   /** Assignment ids the page tried to claim. */
   let claimed: number[]
+  /** Assignment ids the page tried to give back. */
+  let released: number[]
 
   test.beforeEach(async ({ page }) => {
     asked = []
     claimed = []
+    released = []
+
+    await page.route('**/api/v1/assignments/*/release', async (route) => {
+      released.push(Number(new URL(route.request().url()).pathname.split('/').at(-2)))
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { ...MINE, officer: null, can_claim: true, can_act: true } }),
+      })
+    })
 
     await page.route('**/api/v1/assignments/*/claim', async (route) => {
       claimed.push(Number(new URL(route.request().url()).pathname.split('/').at(-2)))
@@ -167,6 +179,100 @@ test.describe('the office Track page', () => {
      * that no longer describes it.
      */
     await expect.poll(() => asked.length).toBeGreaterThan(1)
+  })
+
+  test('offers the holder a way to put it back, and asks the server for it', async ({ page }) => {
+    /*
+     * Claiming is one click and was irreversible without the super admin. A
+     * cheap action that is expensive to undo is one people stop using, and an
+     * office whose officers will not claim is an office where every case
+     * belongs to nobody.
+     */
+    const mine = page.getByRole('listitem').filter({ hasText: 'Malabon Hardware' })
+    const give = mine.getByRole('button', { name: /unassign from me/i })
+    await expect(give).toBeVisible()
+
+    // Never on a colleague's case, and never on one nobody holds: releasing
+    // either would be deciding somebody else's workload, or undoing nothing.
+    const theirs = page.getByRole('listitem').filter({ hasText: 'Riverside Carinderia' })
+    await expect(theirs.getByRole('button', { name: /unassign from me/i })).toHaveCount(0)
+    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
+    await expect(free.getByRole('button', { name: /unassign from me/i })).toHaveCount(0)
+
+    await give.click()
+    await expect.poll(() => released).toContain(MINE.id)
+    // Re-read, not patched: under "My assigned" the row has to LEAVE the list.
+    await expect.poll(() => asked.length).toBeGreaterThan(1)
+  })
+
+  test('the stage tabs stay put when a holder section is chosen', async ({ page }) => {
+    /*
+     * They were briefly exclusive — choosing a section hid the stage row — and
+     * that was a fix aimed at the wrong thing. "My assigned" came back empty
+     * for an officer holding four live filings, and the cause was not the two
+     * filters stacking: a paid filing at `awaiting_other_permits` appeared in
+     * no tab BPLO could see at all, so its own work was invisible whatever
+     * section was chosen. The stage row is honest again (FINAL_STATUSES carries
+     * the paid stage), so the two narrow together — which is the useful
+     * question: the filings I hold that are waiting on my review.
+     */
+    const stages = ['For Approval', 'Pending Payment', 'For Inspection', 'Final Approval']
+
+    const hints: Record<string, RegExp> = {
+      Unassigned: /for approval — filings nobody has taken yet/i,
+      'My assigned': /for approval — the filings you are officer in charge of/i,
+      'Assigned to others': /for approval — filings a colleague is holding/i,
+    }
+
+    for (const section of Object.keys(hints)) {
+      await page.getByRole('button', { name: section, exact: true }).click()
+
+      for (const stage of stages) {
+        await expect(
+          page.getByRole('button', { name: stage, exact: true }),
+          `${stage} vanished when ${section} was chosen`,
+        ).toBeVisible()
+      }
+
+      /*
+       * Checked per section rather than once at the end, which is where this
+       * first went wrong: after the loop the live section is the LAST one, so
+       * a single assertion about "My assigned" was reading a screen showing
+       * "Assigned to others". The line names both halves of the pair in force,
+       * so the reader is not left inferring it from two highlighted pills.
+       */
+      await expect(page.getByText(hints[section])).toBeVisible()
+    }
+  })
+
+  test('says what the press did, and names the filing it did it to', async ({ page }) => {
+    /*
+     * Taking a filing changes a row the reader is often not looking at: under
+     * "Unassigned" it LEAVES the list, so the only feedback was a list that
+     * silently got shorter — and nothing at all for a screen reader.
+     *
+     * A live region rather than a dialog. This is the most frequent act on the
+     * screen and a modal would put a dismissal between an officer and every
+     * case they take. `role="status"` is what makes it reach a reader who
+     * cannot see the list reorder itself.
+     */
+    const free = page.getByRole('listitem').filter({ hasText: 'Aling Nena Bakery' })
+    await free.getByRole('button', { name: /assign to me/i }).click()
+
+    const said = page.getByRole('status').filter({ hasText: /officer in charge/i })
+    await expect(said).toBeVisible()
+    // The business, not just "done": a tick says something happened, a name
+    // says what.
+    await expect(said).toContainText('Aling Nena Bakery')
+  })
+
+  test('says so when a filing goes back to the office', async ({ page }) => {
+    const mine = page.getByRole('listitem').filter({ hasText: 'Malabon Hardware' })
+    await mine.getByRole('button', { name: /unassign from me/i }).click()
+
+    const said = page.getByRole('status').filter({ hasText: /back with the office/i })
+    await expect(said).toBeVisible()
+    await expect(said).toContainText('Malabon Hardware')
   })
 
   test('the four sections narrow on the server, because the queue is paged', async ({ page }) => {

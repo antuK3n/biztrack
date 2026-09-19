@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
+use App\Enums\OfficerRequestStatus;
 use App\Support\ApplicationVisibility;
 use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
@@ -279,6 +280,29 @@ class ApplicationResource extends JsonResource
             'payments' => $this->relationLoaded('payments')
                 ? PaymentResource::collection($this->payments)
                 : [],
+            /*
+             * How many Other Requirements are still open on this filing.
+             *
+             * A filing does not reach BPLO's final approval while one is
+             * (WorkflowService::refreshReadiness), so every screen that shows
+             * the stage needs to be able to explain the wait. A filing that
+             * stops moving with nothing on it saying why is the defect that
+             * rule would otherwise introduce.
+             *
+             * A COUNT, not the rows: who may read a requirement is the office
+             * boundary's question and OfficerRequestController answers it. The
+             * number is safe for anyone who may see the filing at all — it says
+             * something is outstanding, not what or from whom.
+             */
+            'open_requirements' => $this->officerRequests()
+                // The same two conditions readiness applies, so the number a
+                // screen prints and the rule that holds the filing cannot
+                // disagree: an OFFICER asked, and it is not settled. A
+                // system-raised DENR obligation is due after issuance and
+                // belongs in neither.
+                ->whereNotNull('requested_by_user_id')
+                ->where('status', '!=', OfficerRequestStatus::Fulfilled->value)
+                ->count(),
             'assignments' => $this->relationLoaded('assignments')
                 ? AssignmentResource::collection($this->assignments)
                 : [],

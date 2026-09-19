@@ -17,6 +17,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import { otherPermitProgress } from '../../lib/status'
 import { admin, applications, assignments, officeForms as officeFormsApi } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
@@ -912,8 +913,64 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    */
   const owesFinalApproval = app.status === 'for_final_approval'
   const decided = !owesFinalApproval && (rejected || approvedHere || Boolean(data.completed_at))
+
+  /*
+   * ── Somebody else's case is read-only, and the sheet has to say so ────────
+   *
+   * The Officer-in-Charge rule is enforced on the server: approve, return,
+   * checks and classify are all refused to anyone but the holder. This screen
+   * did not know about it. An officer opening a colleague's filing was handed
+   * the full sheet — Approve, Return to applicant, Reject, the compliance
+   * checklist, the RA 11032 category picker — and every one of them answered
+   * 403 on press. A control that exists only to refuse is worse than no
+   * control: it reads as the product being broken rather than as the case
+   * being somebody else's.
+   *
+   * `can_act` is the server's own answer, not an id comparison repeated here,
+   * and it is true on an UNHELD case too — acting on one claims it, which is
+   * the rule AssignmentController::authorizeHolder applies. So the sheet stays
+   * fully workable for a case nobody has taken, exactly as before.
+   *
+   * Undefined means an older payload; treated as allowed, because refusing
+   * every officer on a stale response would be a worse failure than the one
+   * this prevents.
+   */
+  const heldByAnother = data.can_act === false
+  const holderName = data.officer?.name ?? null
+
+  /*
+   * What is still outstanding on a paid filing that has not qualified for final
+   * approval, as a phrase, or null when nothing is.
+   *
+   * Both halves come from the payload — the clearances from `permit_types`, the
+   * requirements from the count the API now sends — so the sentence cannot
+   * drift from the rule `refreshReadiness` applies. `open_requirements` is
+   * optional on the wire; an older payload omits the clause rather than
+   * claiming zero.
+   */
+  const notReadyToSign = (() => {
+    if (app.status !== 'awaiting_other_permits') return null
+
+    const permits = otherPermitProgress(app.permit_types)
+    const openPermits = permits.total - permits.approved
+    const openRequirements = app.open_requirements ?? 0
+
+    const parts: string[] = []
+    if (openPermits > 0) {
+      parts.push(`${openPermits} of ${permits.total} other permit${permits.total === 1 ? '' : 's'} still open`)
+    }
+    if (openRequirements > 0) {
+      parts.push(`${openRequirements} Other Requirement${openRequirements === 1 ? '' : 's'} still open`)
+    }
+
+    // A filing at this status with nothing outstanding is a state readiness
+    // would have moved on; saying "waiting on nothing" would be worse than
+    // saying nothing, so the banner stays away.
+    return parts.length > 0 ? parts.join(' and ') : null
+  })()
+
   // A decided review is a record for good: there is nothing left to change.
-  const editing = mode === 'edit' && !decided
+  const editing = mode === 'edit' && !decided && !heldByAnother
 
   /*
    * Does THIS OFFICE still owe a paperwork review on this filing?
@@ -1780,6 +1837,27 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           >
             {rejected ? 'Rejected' : 'Approved'}
           </span>
+        ) : heldByAnother ? (
+          /*
+           * Named, not merely disabled.
+           *
+           * "Read only" on its own tells an officer the screen is broken. The
+           * one fact that makes it make sense is WHOSE case it is, and the one
+           * thing they can do about it — ask the super admin — belongs in the
+           * same sentence. The Mode control goes with the buttons: offering
+           * "Edit" on a sheet that cannot be edited is the same false promise
+           * one level up.
+           */
+          <p className="rounded-lg bg-s-orange-tint px-4 py-2.5 text-sm font-medium text-s-orange-ink">
+            {holderName ? (
+              <>
+                Officer in charge: <span className="font-bold">{holderName}</span>. Read-only for
+                you — the system administrator can reassign it.
+              </>
+            ) : (
+              <>This filing is with another officer, so it is read-only for you.</>
+            )}
+          </p>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2.5">
@@ -1869,6 +1947,27 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           </div>
         )}
       </div>
+
+      {/*
+        * ── Why this one cannot be signed yet ────────────────────────────────
+        *
+        * A paid filing sits at `awaiting_other_permits` until every clearance
+        * is approved AND every Other Requirement is closed, and it now appears
+        * in BPLO's Final Approval tab for that whole stretch — which is the
+        * point: somebody has to be able to notice a filing that has stopped
+        * moving. What they need on opening it is the reason, itemised. Without
+        * this the sheet shows a filing with no Approve button and no
+        * explanation, which reads as the product being broken.
+        *
+        * Counted from the payload rather than described in prose: "two permits
+        * and one document" is actionable, "not ready" is not.
+        */}
+      {notReadyToSign && (
+        <p className="mb-4 rounded-lg bg-s-orange-tint px-4 py-3 text-sm font-medium text-s-orange-ink">
+          Not ready for final approval — {notReadyToSign}. It moves here on its own once the last
+          one is settled.
+        </p>
+      )}
 
       {/* What each mode means, said plainly so nobody has to infer it (item 54). */}
       <p
