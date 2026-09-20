@@ -1,8 +1,26 @@
+import type { ComponentType, SVGProps } from 'react'
 import { CheckIcon, DotIcon, XCircleIcon } from './icons'
 import { StatusBadge } from './ui/StatusBadge'
 import { formatDateTime } from '../lib/format'
-import { TONE_CLASSES, applicationStatusMeta, genericStatusTone, otherPermitProgress } from '../lib/status'
-import type { Application, ApplicationStatus, Assignment, TimelineEntry } from '../lib/types'
+import {
+  TONE_CLASSES,
+  applicationStatusMeta,
+  clearanceStatusMeta,
+  genericStatusTone,
+  otherPermitProgress,
+} from '../lib/status'
+import type { StatusTone } from '../lib/status'
+import type {
+  Application,
+  ApplicationPermitType,
+  ApplicationStatus,
+  Assignment,
+  ServerClearanceStatus,
+  TimelineEntry,
+} from '../lib/types'
+
+/** Same shape status.ts uses for a status's glyph; not exported from there. */
+type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 
 /*
  * "Where is this filing in the process?" — answered on the officer review sheet.
@@ -71,8 +89,23 @@ type StepState = 'done' | 'current' | 'upcoming'
 
 interface RailStep {
   /** The enum value this node stands for; also its React key. */
-  status: ApplicationStatus
+  status: ApplicationStatus | ServerClearanceStatus
   state: StepState
+  /**
+   * The label, tone and glyph for this node, when the node is not a FILING
+   * status.
+   *
+   * The rail was built for one enum and `StepNode` resolved every node through
+   * `applicationStatusMeta`. A clearance office's rail is the other enum —
+   * `ClearanceStatus` — and two of its values spell the same as an
+   * ApplicationStatus (`for_approval`, `returned`) while meaning something
+   * narrower, so resolving them through the filing table would put "For Initial
+   * Approval" on a node about one permit.
+   *
+   * Optional rather than required, so the filing rail is untouched: it passes
+   * nothing and `StepNode` falls back to the lookup it always did.
+   */
+  meta?: { label: string; tone: StatusTone; icon: IconType }
   /** Shown under the label — the loop and stop-reason annotations. */
   note?: string
   /**
@@ -177,8 +210,41 @@ function stoppedAt(history: TimelineEntry[], status: ApplicationStatus, rail: Ap
 }
 
 /** The rail as nodes, with the returns and the terminal stop written onto it. */
+/**
+ * The filing's own rail — four nodes or five.
+ *
+ * ── Why this is derived and not a constant ─────────────────────────────────
+ *
+ * `for_final_approval` left the new-application path on 18 September 2026: the
+ * fifth clearance now issues the Mayor's Permit outright, so a new filing goes
+ * `awaiting_other_permits → approved`. Drawn against the fixed five-node RAIL
+ * such a filing lit the Final Approval node as DONE, claiming a stage that
+ * never happened to the one audience — an officer auditing a late filing — most
+ * likely to be counting stages.
+ *
+ * Keyed on the FACTS rather than on the filing type, which is the part worth
+ * reading twice. Type alone would have been wrong in both directions: a renewal
+ * always passes through the stage, but a NEW filing can still land there too,
+ * when it becomes ready without a confirmed RA 11032 category and falls back to
+ * BPLO (see `WorkflowService::refreshReadiness`). Omitting the node from a
+ * filing standing on it would put `positionOf` at -1 and paint every node "Not
+ * started" — a worse lie than the one this fixes.
+ *
+ * So: a renewal keeps it, and anything that has ever BEEN there keeps it.
+ * Everything else draws four.
+ */
+function railFor(app: Application): ApplicationStatus[] {
+  const beenThere =
+    app.status === 'for_final_approval' ||
+    (app.status_history ?? []).some((h) => h.to_status === 'for_final_approval')
+
+  if (app.application_type === 'renewal' || beenThere) return RAIL
+
+  return RAIL.filter((s) => s !== 'for_final_approval')
+}
+
 function buildSteps(app: Application): { steps: RailStep[]; terminal: ApplicationStatus | null } {
-  const rail = RAIL
+  const rail = railFor(app)
   const history = app.status_history ?? []
   const status = app.status
   const isTerminal = status === 'rejected' || status === 'cancelled'
@@ -222,6 +288,118 @@ function buildSteps(app: Application): { steps: RailStep[]; terminal: Applicatio
   return { steps, terminal: isTerminal ? status : null }
 }
 
+/**
+ * ── The rail a CLEARANCE OFFICE gets, about its own permit ────────────────
+ *
+ * The filing rail above is BPLO's process: For Initial Approval → Pending
+ * Payment → Awaiting Other Permits → For Final Approval → Approved. Four of
+ * those five nodes are BPLO's own acts, and the fifth told a sanitary officer
+ * they were "waiting on SANITARY, FSIC, OCCUPANCY, CEC, ZONING" — which
+ * includes themselves. The client, from the sanitary seat, 17 September 2026:
+ * *"I think this progress bar should be different too on the other permits'
+ * offices' side, right?"*
+ *
+ * Right, and for the same reason the queue's tabs, badge and filter were
+ * changed the same day: the five clearances move independently, so an office's
+ * process is its OWN permit's — submitted, read, inspected, issued — and the
+ * filing's stage is somebody else's business.
+ *
+ * ── Two nodes are conditional, and that is the point ──────────────────────
+ *
+ * `not_started` leads the rail only while it is true. Once the applicant has
+ * handed the sheet in, "Not Yet Submitted" as a completed step is noise about
+ * something that was never the office's work — so it is dropped and the rail
+ * starts where the office's involvement starts.
+ *
+ * `for_inspection` appears only when the permit requires a visit. The filing
+ * rail deliberately has no conditional node — "every one of the five required
+ * clearances is inspected", says the note on RAIL — but that is a claim about
+ * the SET, and `requires_inspection` is a per-permit fact the payload carries.
+ * Drawing an inspection node on a permit issued straight from the paperwork
+ * would promise the applicant a visit nobody is coming for.
+ *
+ * `returned` is an annotation on For Approval, not a node, exactly as it is on
+ * the filing rail: it goes back to the applicant and comes back to the same
+ * place, so a node would read as forward progress. `rejected` ends the line.
+ */
+const CLEARANCE_RAIL: ServerClearanceStatus[] = ['not_started', 'for_approval', 'for_inspection', 'approved']
+
+function clearanceRailFor(permit: ApplicationPermitType): ServerClearanceStatus[] {
+  return CLEARANCE_RAIL.filter(
+    (step) =>
+      (step !== 'for_inspection' || permit.requires_inspection) &&
+      (step !== 'not_started' || permit.status === null || permit.status === 'not_started'),
+  )
+}
+
+/** Where this permit is standing on its own rail, or -1 before it starts. */
+function clearancePositionOf(
+  status: ServerClearanceStatus | null,
+  rail: ServerClearanceStatus[],
+): number {
+  if (status === null) return -1
+  // Returned resumes at For Approval, which is where it is annotated.
+  const mapped: ServerClearanceStatus = status === 'returned' ? 'for_approval' : status
+
+  return rail.indexOf(mapped)
+}
+
+/** The office's own permit as rail nodes. */
+function buildClearanceSteps(permit: ApplicationPermitType): {
+  rail: ServerClearanceStatus[]
+  steps: RailStep[]
+  terminal: ServerClearanceStatus | null
+} {
+  const rail = clearanceRailFor(permit)
+  /*
+   * No terminal state on this rail any more. It was `status === 'rejected'`,
+   * and that case is gone from the enum (17 September 2026): a permit is
+   * Returned rather than refused, and Returned is annotated on For Approval
+   * rather than ending the line. `Approved` is terminal in the enum's sense —
+   * nothing moves after it — but it is the LAST NODE here, so the rail stops
+   * there by running out, not by being cut short.
+   */
+  const here = clearancePositionOf(permit.status, rail)
+
+  /*
+   * The two annotations this rail can carry, and both are about the applicant
+   * rather than about the office — which is why they hang off nodes instead of
+   * becoming nodes.
+   */
+  const returnedNote =
+    permit.status === 'returned'
+      ? 'Sent back to the applicant — it re-enters this stage when they resubmit'
+      : undefined
+  const awaitingSheet =
+    permit.status === 'not_started'
+      ? permit.mode === 'apply'
+        ? 'The applicant has applied but not handed the form in yet'
+        : 'The applicant has not started this permit yet'
+      : undefined
+
+  /*
+   * The whole rail, every time. It used to be sliced short for a rejected
+   * permit — the remaining nodes were cancelled futures rather than pending
+   * ones — and with that state gone there is no way for one permit's line to
+   * stop early. Every state left has somewhere to go.
+   */
+  const steps: RailStep[] = rail.map((step, i) => {
+    const state: StepState = i < here ? 'done' : i === here ? 'current' : 'upcoming'
+    const meta = clearanceStatusMeta(step)
+
+    return {
+      status: step,
+      state,
+      meta: { label: meta.label, tone: meta.tone, icon: meta.icon },
+      note:
+        step === 'for_approval' ? returnedNote : step === 'not_started' ? awaitingSheet : undefined,
+      noteTone: (step === 'for_approval' ? 'warning' : 'muted') as RailStep['noteTone'],
+    }
+  })
+
+  return { rail, steps, terminal: null }
+}
+
 /* ── The rail ─────────────────────────────────────────────────────────── */
 
 const STATE_CAPTION: Record<StepState, string> = {
@@ -231,22 +409,40 @@ const STATE_CAPTION: Record<StepState, string> = {
 }
 
 function StepNode({ step, first, last }: { step: RailStep; first: boolean; last: boolean }) {
-  const meta = applicationStatusMeta(step.status)
+  // The node's own meta when it carried one (a clearance rail), else the filing
+  // table. See `meta` on RailStep.
+  const meta = step.meta ?? applicationStatusMeta(step.status as ApplicationStatus)
   const { state } = step
   const Glyph = state === 'done' ? CheckIcon : state === 'current' ? meta.icon : DotIcon
 
   /*
-   * Three visually separable treatments, each already redundant with its own
-   * glyph and its own caption below: a filled green tick, a tinted ring in the
-   * status's own tone, and a hollow outline. Someone who sees no colour at all
-   * still reads tick / icon-in-ring / empty-dot, and then the words.
+   * ── Every node carries its status's colour; the STATE carries the weight ──
+   *
+   * Three treatments that stay separable without colour — a filled green
+   * tick, a tinted ring, a hollow outline — so a reader who sees no colour at
+   * all still gets tick / icon-in-ring / empty-dot, and then the words
+   * underneath. That property is load-bearing and is why an upcoming node is
+   * not simply filled with its own tone: five tinted circles would say five
+   * stages are active.
+   *
+   * What the client asked for on 16 September 2026 is that the colours MATCH
+   * the applicant's — the status badges on Track and the status guide above
+   * them. So an upcoming node now takes its own status's border and glyph
+   * colour from the same `TONE_CLASSES` those use, on a white ground: the
+   * association is there to recognise, and "not started" is still plainly not
+   * started.
+   *
+   * `bg-white` last so it wins over the tone's own background — these are
+   * same-specificity Tailwind utilities, and the one that lands later in the
+   * stylesheet is the one that applies, so the ordering here is a request
+   * rather than a guarantee. It is stated as `!bg-white` to make it one.
    */
   const circle =
     state === 'done'
       ? 'bg-s-green text-white border-s-green'
       : state === 'current'
         ? `${TONE_CLASSES[meta.tone]} ring-4 ring-royal/15`
-        : 'bg-white text-ink-muted border-line'
+        : `${TONE_CLASSES[meta.tone]} !bg-white`
 
   return (
     <li
@@ -285,8 +481,19 @@ function StepNode({ step, first, last }: { step: RailStep; first: boolean; last:
 }
 
 /** The end of the line for a rejected or cancelled filing. */
-function TerminalNode({ status, stage }: { status: ApplicationStatus; stage: string }) {
-  const meta = applicationStatusMeta(status)
+function TerminalNode({
+  status,
+  stage,
+  ownPermit,
+}: {
+  status: ApplicationStatus | ServerClearanceStatus
+  stage: string
+  /** True when this is a permit's rejection, not the filing's. */
+  ownPermit?: boolean
+}) {
+  const meta = ownPermit
+    ? clearanceStatusMeta(status)
+    : applicationStatusMeta(status as ApplicationStatus)
 
   return (
     <li aria-current="step" className="flex min-w-0 flex-1 flex-col items-center text-center">
@@ -449,14 +656,65 @@ function HistoryLog({ history }: { history: TimelineEntry[] }) {
 
 /* ── The card ─────────────────────────────────────────────────────────── */
 
-export function ApplicationProgress({ app }: { app: Application }) {
+/**
+ * @param ownPermit
+ *   The reader's OWN permit on this filing, when the reader is one of the five
+ *   clearance offices. Supplied by the review sheet, which knows the seat;
+ *   `undefined` for BPLO and the super admin, who get the filing's rail.
+ *
+ *   A prop rather than a `useAuth` read inside here, because this component
+ *   renders one thing per caller and the seat is the caller's fact. It also
+ *   keeps the decision in one place — ReviewPage already derives the office's
+ *   own permit for the disclosure beside it.
+ */
+export function ApplicationProgress({
+  app,
+  ownPermit,
+}: {
+  app: Application
+  ownPermit?: ApplicationPermitType
+}) {
   const history = app.status_history ?? []
-  const rail = RAIL
-  const { steps, terminal } = buildSteps(app)
-  const meta = applicationStatusMeta(app.status)
-  const notStarted = !terminal && positionOf(app.status, rail) < 0
+
+  /*
+   * ── Which process this rail is about ──────────────────────────────────────
+   *
+   * BPLO's review is about the filing, so it gets the filing's five stages. A
+   * clearance office's review is about ONE permit, so it gets that permit's —
+   * see CLEARANCE_RAIL for the argument and for what the filing rail was
+   * telling a sanitary officer instead.
+   *
+   * Both branches produce the same three things, so everything below draws one
+   * rail and does not know which it is.
+   */
+  const own = buildClearanceSteps
+  const filing = buildSteps
+  const clearance = ownPermit ? own(ownPermit) : null
+  // The same rail `buildSteps` walks — through `railFor`, not RAIL, or the nodes
+  // drawn here and the steps computed there would disagree by one on a new
+  // filing and every node after the gap would be labelled from the wrong step.
+  const rail: (ApplicationStatus | ServerClearanceStatus)[] = clearance
+    ? clearance.rail
+    : railFor(app)
+  const { steps, terminal } = clearance ?? filing(app)
+
+  /*
+   * The header badge follows the rail. It read the FILING's status in every
+   * seat, so an office's header said "Awaiting Other Permits" above a rail
+   * about its own permit — the same mismatch the queue row had.
+   */
+  const meta =
+    clearance && ownPermit
+      ? clearanceStatusMeta(ownPermit.status ?? 'not_started')
+      : applicationStatusMeta(app.status)
+
+  const notStarted = clearance
+    ? false
+    : !terminal && positionOf(app.status, RAIL) < 0
   const stoppedStage = terminal
-    ? applicationStatusMeta(rail[stoppedAt(history, terminal, rail)] ?? 'for_approval').label
+    ? clearance
+      ? clearanceStatusMeta('for_approval').label
+      : applicationStatusMeta(RAIL[stoppedAt(history, terminal as ApplicationStatus, RAIL)] ?? 'for_approval').label
     : ''
 
   return (
@@ -467,7 +725,13 @@ export function ApplicationProgress({ app }: { app: Application }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="progress-heading" className="text-base font-bold text-ink">
-            Application progress
+            {/*
+              Named for what the rail is about. "Application progress" over a
+              rail describing one clearance would be the same mismatch the
+              badge beside it had — and the permit's own name is what tells a
+              sanitary officer this is THEIR permit and not the filing.
+            */}
+            {ownPermit ? `${ownPermit.name} progress` : 'Application progress'}
           </h2>
           <p className="text-xs text-ink-muted">
             {terminal
@@ -479,7 +743,25 @@ export function ApplicationProgress({ app }: { app: Application }) {
                    * interpret.
                    */
                   'This filing has not entered the process yet.'
-                : 'For Approval → Pending Payment → Awaiting Other Permits → For Final Approval → Approved'}
+                : /*
+                   * Built from the rail, not typed out. It WAS a hardcoded
+                   * sentence and it went stale the moment a status was
+                   * renamed: it still read "For Approval" after that state
+                   * became "For Initial Approval" everywhere else, so the
+                   * subtitle and the node directly beneath it disagreed about
+                   * the name of the stage the filing was in.
+                   *
+                   * Same labels as the nodes, the badges and the applicant's
+                   * status guide, because they all come from
+                   * `applicationStatusMeta`.
+                   */
+                  rail
+                    .map((status) =>
+                      clearance
+                        ? clearanceStatusMeta(status).label
+                        : applicationStatusMeta(status as ApplicationStatus).label,
+                    )
+                    .join(' → ')}
           </p>
         </div>
         <StatusBadge tone={meta.tone} label={meta.label} icon={meta.icon} />
@@ -494,10 +776,20 @@ export function ApplicationProgress({ app }: { app: Application }) {
             last={i === steps.length - 1 && !terminal}
           />
         ))}
-        {terminal && <TerminalNode status={terminal} stage={stoppedStage} />}
+        {terminal && (
+          <TerminalNode status={terminal} stage={stoppedStage} ownPermit={clearance !== null} />
+        )}
       </ol>
 
-      <OfficeProgress assignments={app.assignments ?? []} ended={terminal !== null} />
+      {/*
+        Which offices are still holding the FILING — coordination, and BPLO's
+        job. An office reading its own permit's rail is not coordinating the
+        other five, and the tally named them all including the reader's own,
+        which is the thing that read wrongly from that seat.
+      */}
+      {!clearance && (
+        <OfficeProgress assignments={app.assignments ?? []} ended={terminal !== null} />
+      )}
       <HistoryLog history={history} />
     </section>
   )

@@ -10,9 +10,29 @@ import type { ApplicationType, FeeProfile, FeeProfileLine } from '../../lib/type
  */
 
 export interface FeeCategoryDraft {
+  /**
+   * The Revenue Code class, as TYPED by the applicant.
+   *
+   * Empty for every ordinary filing since 16 September 2026: the class is
+   * derived from the line of business server-side, in FeeCalculator::classify.
+   * It stays on the draft for the one PSIC code that cannot classify itself —
+   * 00000 "Other (not listed)", where the applicant typed their own trade —
+   * and so that a draft saved while the question was still asked rehydrates
+   * with the answer its applicant gave rather than losing it.
+   */
   category: string
   gross_sales: string
   capitalization: string
+  /**
+   * Sec. 2J.02(c): dealers in ESSENTIAL commodities pay half the rate.
+   *
+   * The one classification question no industrial code can answer — PSIC
+   * cannot tell rice from radios, and a sari-sari store is both at once.
+   * Asked only for the 17 codes whose category_branch says so; the other 118
+   * either carry the answer in their trade or have no half-rate form at all
+   * (a contractor has no cheaper twin).
+   */
+  essentials: boolean
 }
 
 export interface FeeProfileDraft {
@@ -205,20 +225,14 @@ function categoryDisplayText(slug: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
-const OCCUPANCY_GROUPS: { value: string; label: string }[] = [
-  { value: 'a1', label: 'Group A-1: Residential, single dwelling' },
-  { value: 'a2', label: 'Group A-2: Residential, multiple dwelling' },
-  { value: 'b', label: 'Group B: Hotels, apartments, lodging houses' },
-  { value: 'c', label: 'Group C: Education & recreation' },
-  { value: 'd', label: 'Group D: Institutional' },
-  { value: 'e', label: 'Group E: Commercial / mercantile' },
-  { value: 'f', label: 'Group F: Light industrial' },
-  { value: 'g', label: 'Group G: Storage & hazardous' },
-  { value: 'h', label: 'Group H: Assembly (under 1,000 occupants)' },
-  { value: 'i', label: 'Group I: Assembly (1,000 or more occupants)' },
-  { value: 'j1', label: 'Group J-1: Agricultural (fee by floor area)' },
-  { value: 'j2', label: 'Group J-2: Accessory buildings' },
-]
+/*
+ * The twelve National Building Code occupancy groups were listed here, for a
+ * select that no longer exists — see the note where Occupancy Details used to
+ * be drawn. They are recoverable from git and from occupancy.json, which is
+ * where the fee rules that read the group live; keeping an unused option list
+ * next to a deleted field only invites someone to wire it back up without
+ * finding out why it went.
+ */
 
 /** User-settable feature flags with one-line plain-language explanations. */
 const BUSINESS_FLAGS: { value: string; label: string; hint: string }[] = [
@@ -247,11 +261,17 @@ const BUSINESS_FLAGS: { value: string; label: string; hint: string }[] = [
     label: 'Has a signboard or billboard',
     hint: 'Any sign displayed at the premises. Adds the signage fee.',
   },
-  {
-    value: 'stores_flammables',
-    label: 'Stores flammable materials',
-    hint: 'Keeps flammable or combustible goods on site. Adds the storage permit fee.',
-  },
+  /*
+   * "Stores flammable materials" is gone. It added nothing and could not:
+   * its seven fire-code rules are each priced on a quantity no screen
+   * collects — flammables_liters, film_units, celluloid_units, carbide_cases,
+   * tar_kilos, coal_tons, other_combustibles_units — so ticking it moved the
+   * total by exactly zero, measured against a filing holding all six
+   * clearances. A question whose answer cannot reach a fee is a question that
+   * only costs the applicant time. Removed 16 September 2026; if BFP wants
+   * these fees, the quantities have to be asked for and that is its own
+   * decision.
+   */
   {
     value: 'employees_need_health_certificates',
     label: 'Staff need health certificates',
@@ -294,12 +314,12 @@ export const MAX_PESOS = 10_000_000_000
 export const MAX_COUNT = 100_000
 const MAX_FLOOR_AREA = 1_000_000
 /*
- * Matches the API's own ceiling on `fee_profile.storeys` exactly. The two rules
- * have to agree or the wizard lets through a number the save then rejects, and
- * the applicant is told "something went wrong" by an autosave they never asked
- * for. 200 is far above anything in Malabon and still a number, not a typo.
+ * MAX_STOREYS was here, mirroring the API's own ceiling on
+ * `fee_profile.storeys`, so the wizard could not let through a number the save
+ * would then reject. Both went when the storey count did — see the note where
+ * its validation used to run. The API rule stays, because the column and the
+ * old drafts that filled it both still exist.
  */
-const MAX_STOREYS = 200
 
 /**
  * "1000000" → "1,000,000"; keeps at most two decimals, drops everything else.
@@ -417,7 +437,7 @@ export function feeProfileIssues(
   opts: {
     applicationType: ApplicationType
     permitCodes: string[]
-    lines: { id: number; title: string }[]
+    lines: { id: number; title: string; category?: string | null; categoryBranch?: string | null }[]
   },
 ): FeeProfileIssue[] {
   const issues: FeeProfileIssue[] = []
@@ -436,8 +456,23 @@ export function feeProfileIssues(
   }
 
   for (const line of opts.lines) {
-    const cat = draft.categories[line.id] ?? { category: '', gross_sales: '', capitalization: '' }
-    if (!cat.category.trim()) {
+    const cat = draft.categories[line.id] ?? {
+      category: '',
+      gross_sales: '',
+      capitalization: '',
+      essentials: false,
+    }
+    /*
+     * Only where the line of business cannot classify itself.
+     *
+     * This used to be demanded of every line, because the applicant did the
+     * classifying. They do not any more — psic_codes.category carries the
+     * Sec. 2J.02 class for 134 of the 135 codes — so requiring a typed answer
+     * would block a filing on a question the screen no longer asks. The one
+     * exception is 00000 "Other (not listed)", where the applicant typed their
+     * own trade and there is nothing to derive from.
+     */
+    if (line.category == null && !cat.category.trim()) {
       issues.push({
         key: `line:${line.id}:category`,
         // Named as the field is named, or the "Still needed" line sends the
@@ -474,7 +509,14 @@ export function feeProfileIssues(
     push(
       numericIssue({
         key: 'floor_area_sqm',
-        label: 'Floor Area',
+        /*
+         * Named the way the FIELD names itself, which it was not: the control
+         * has read "Business Area (sqm)" throughout and this said "Floor Area",
+         * so an applicant sent here by the Review summary was hunting for a
+         * heading the step does not have. The occupancy branch below keeps
+         * "Floor Area" — that is what the OBO sheet calls it.
+         */
+        label: '1. Business Area (sq. m.)',
         value: draft.floor_area_sqm,
         required: true,
         blankMessage: 'Enter the floor area of your premises in square metres.',
@@ -484,29 +526,22 @@ export function feeProfileIssues(
       }),
     )
     /*
-     * Optional, and deliberately so. Four offices ask for it on paper — BPLO,
-     * FSIC, the OBO occupancy sheet and the CPDD locational sheet — but the
-     * Revenue Code only charges by it for real-estate lessors (three rules,
-     * `unit_key: "storeys"`), and none of the paper forms marks any field
-     * required. Making every sari-sari store answer it to get past this step
-     * would be our rule, not the city's.
+     * The storey count's validation went with its box.
+     *
+     * It was optional and bounded, and the reasoning for keeping it optional
+     * was that four offices ask for it on paper while the Revenue Code charges
+     * by it only for real-estate lessors. Measuring settled the rest: the
+     * count moves the total by zero, because those lessor rules need a fine
+     * permit category still open with BPLO. The one paper that asks — CPDD's
+     * VIII.B — takes the answer on its own sheet now.
+     *
+     * Nothing validates `draft.storeys` any more, and nothing writes it. It
+     * stays on the type so a filing saved while it was asked still hydrates.
      */
     push(
       numericIssue({
-        key: 'storeys',
-        label: 'Number of Storeys',
-        value: draft.storeys,
-        required: false,
-        blankMessage: '',
-        integer: true,
-        max: MAX_STOREYS,
-        maxMessage: 'Enter the number of storeys in the building, not its floor area.',
-      }),
-    )
-    push(
-      numericIssue({
         key: 'employees',
-        label: 'Number of Employees',
+        label: '2. Total Number of Employees',
         value: draft.employees,
         required: true,
         blankMessage: 'Enter how many people you employ. Enter 0 if you work alone.',
@@ -529,9 +564,15 @@ export function feeProfileIssues(
      * EMPLOYEES: MALE ___ FEMALE ___" — the two boxes ARE the total, which is
      * why they must add up to it below rather than merely not exceed it.
      */
+    /*
+     * The labels match the field labels word for word, and have to: this is
+     * what Review prints under "still missing", so a summary naming "Female
+     * Employees" beside a box headed "Number of Female Employees" sends the
+     * applicant looking for a field that is not there.
+     */
     for (const [key, label] of [
-      ['male_employees', 'Male Employees'],
-      ['female_employees', 'Female Employees'],
+      ['male_employees', '2. Number of Male Employees'],
+      ['female_employees', '2. Number of Female Employees'],
     ] as const) {
       push(
         numericIssue({
@@ -551,7 +592,7 @@ export function feeProfileIssues(
     push(
       numericIssue({
         key: 'employees_in_lgu',
-        label: 'Employees Residing in Malabon',
+        label: '3. Number of Employees Residing in Malabon',
         value: draft.employees_in_lgu,
         required: true,
         blankMessage: 'Enter how many of your employees live in Malabon. Enter 0 if none.',
@@ -574,14 +615,14 @@ export function feeProfileIssues(
     if (total !== undefined && male !== undefined && female !== undefined && male + female !== total) {
       issues.push({
         key: 'male_employees',
-        label: 'Male and Female Employees',
+        label: '2. Number of Male and Female Employees',
         message: `These must add up to your total of ${total}. You have entered ${male + female}.`,
       })
     }
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
-        label: 'Employees Residing in Malabon',
+        label: '3. Number of Employees Residing in Malabon',
         message: 'This can’t be more than your total number of employees.',
       })
     }
@@ -724,7 +765,14 @@ export function buildFeeProfile(
   const lines: FeeProfileLine[] = []
   for (const id of opts.lineIds) {
     const cat = draft.categories[id]
-    if (!cat?.category.trim()) continue
+    /*
+     * EVERY declared line is sent now, not only the ones with a category typed
+     * into them. That skip was right while the applicant did the classifying —
+     * a line with no answer had nothing to contribute — and is wrong now that
+     * the server classifies: dropping the line drops its psic_code_id, which
+     * is the only thing the derivation has to go on, and its gross sales with
+     * it.
+     */
     lines.push({
       // psic_code_id keys the line back to the Location & Zoning selection so a reopened
       // draft restores each category onto the right line of business.
@@ -737,8 +785,23 @@ export function buildFeeProfile(
        * before this screen offered labels, holding whatever was typed then.
        * Idempotent, so a value that is already a slug passes through unchanged.
        */
-      category: normalizeCategory(cat.category),
-      ...(isRenewal ? { gross_sales: toNumber(cat.gross_sales) } : {}),
+      /*
+       * Only when the applicant actually typed one, which now means only
+       * 00000 "Other (not listed)" and drafts saved under the old question.
+       * Sending an empty string would be worse than sending nothing:
+       * FeeCalculator::classify leaves an EXISTING category alone by design,
+       * so an empty one would suppress the derivation and bill no tax at all.
+       *
+       * Still normalised at the boundary. This is the last line of code before
+       * the value reaches FeeCalculator, and the draft can arrive from
+       * somewhere the step never touched — feeProfileToDraft rehydrating a
+       * filing saved before this screen offered labels. Idempotent, so a value
+       * that is already a slug passes through unchanged.
+       */
+      ...(cat?.category.trim() ? { category: normalizeCategory(cat.category) } : {}),
+      // Sec. 2J.02(c). The server ignores it unless the code branches on it.
+      ...(cat?.essentials ? { essentials: true } : {}),
+      ...(isRenewal ? { gross_sales: toNumber(cat?.gross_sales ?? '') } : {}),
       // No per-line capitalization: it is one figure at profile level now, and
       // `FeeCalculator` falls back to it for every line.
     })
@@ -760,7 +823,6 @@ export function buildFeeProfile(
     ...(has('BUSINESS')
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
-          storeys: toInt(draft.storeys),
           employees: toInt(draft.employees),
           male_employees: toInt(draft.male_employees),
           female_employees: toInt(draft.female_employees),
@@ -805,6 +867,9 @@ export function feeProfileToDraft(
       category: line.category ?? '',
       gross_sales: money(line.gross_sales),
       capitalization: money(line.capitalization),
+      // Sec. 2J.02(c), as the applicant answered it. Absent on a draft saved
+      // before the question existed, which is the same as "No".
+      essentials: line.essentials ?? false,
     }
   })
   const flags = profile.flags ?? []
@@ -828,31 +893,19 @@ export function feeProfileToDraft(
 }
 
 /** Labels for the wizard's "Still needed on this part" line. */
-/**
- * The issue keys belonging to the Business Operation step (paper section B).
- *
- * The single source of the split. `feeProfileIssues` produces every issue for
- * the whole draft, and the draft is now written by two steps — so each step has
- * to be told which of them are its own, or Business Operation blocks on a
- * Revenue Code category the applicant has not been shown yet.
- *
- * Only these three carry validation. The male/female split and the delivery-unit
- * counts are optional on the paper and optional here, so they raise nothing.
- */
 /*
- * `male_employees` and `female_employees` join this set with B2's other
- * figures. They are asked ON the Business Operation step, so a filing missing
- * them has to be stopped THERE — left out, the wizard would let the applicant
- * walk past the step that asks for them and then refuse to submit at Review,
- * naming a field two sections back.
+ * OPERATION_ISSUE_KEYS was here: the set of issue keys belonging to the
+ * Business Operation step, which existed only because the fee draft was
+ * written by TWO steps and each had to be told which issues were its own —
+ * otherwise Business Operation blocked on a Revenue Code category the
+ * applicant had not been shown yet.
+ *
+ * One step writes the whole draft since 16 September 2026, when the Tax
+ * Classification & Fees step was removed, so there is no split to describe and
+ * no scope to pass. Every caller now asks for the whole draft, which is what
+ * Review always asked for: a filing is not submittable while anything is
+ * missing, wherever it was meant to be typed.
  */
-const OPERATION_ISSUE_KEYS = new Set([
-  'floor_area_sqm',
-  'employees',
-  'employees_in_lgu',
-  'male_employees',
-  'female_employees',
-])
 
 /**
  * BPLO item B7 — the one capital-investment figure, checked as the per-line
@@ -875,7 +928,9 @@ export function capitalInvestmentMissing(
 
   const issue = numericIssue({
     key: 'capital_investment',
-    label: 'Capital Investment',
+    // Numbered to match the field, so the 'Still needed on this part'
+    // summary names what the applicant can actually find on screen.
+    label: '6. Capital Investment',
     /*
      * Coerced, and not defensively — this took the whole wizard down.
      *
@@ -908,34 +963,130 @@ export function feeProfileMissing(
   opts: {
     applicationType: ApplicationType
     permitCodes: string[]
-    lines: { id: number; title: string }[]
+    lines: { id: number; title: string; category?: string | null; categoryBranch?: string | null }[]
   },
-  /**
-   * Which step is asking. Omitted, it answers for the whole draft, which is
-   * what Review needs — a filing is not submittable while anything is missing,
-   * wherever it was meant to be typed.
-   */
-  scope?: 'operation' | 'fees',
 ): string[] {
-  const issues = feeProfileIssues(draft, opts).filter((issue) => {
-    if (!scope) return true
-    const mine = OPERATION_ISSUE_KEYS.has(issue.key)
-
-    return scope === 'operation' ? mine : !mine
-  })
-
-  return [...new Set(issues.map((issue) => issue.label))]
+  // The whole draft, always. See the note where the scope filter used to be.
+  return [...new Set(feeProfileIssues(draft, opts).map((issue) => issue.label))]
 }
 
 /* ── Small local pieces (match the wizard's form-sheet language) ────────── */
 
-function SectionMarker({ letter, label }: { letter: string; label: string }) {
+/*
+ * SectionMarker drew a lettered chip beside a heading — D, E, F — continuing
+ * the wizard's own A/B/C lettering. It made sense while these fields were a
+ * step of their own; inside Business Operation, whose items are numbered 1-8
+ * straight off MCG-BPLO-FO-001, a letter would claim a section of that form
+ * which does not exist. Plain headings instead. The component is recoverable
+ * from git if a lettered step ever comes back.
+ */
+
+/**
+ * How the Revenue Code classifies this trade — stated, not asked.
+ *
+ * ── Why this replaced a question ──────────────────────────────────────────
+ *
+ * The applicant used to pick their own class from a type-ahead of 273 Revenue
+ * Code labels, under the heading "Tax Classification (Malabon Revenue Code)".
+ * It was not merely a hard question to put to a shopkeeper. It was MIS-BILLING,
+ * because two fee groups key on two different vocabularies and the screen
+ * offered one box: `business_tax` matches the 22 broad classes of Sec. 2J.02,
+ * `mayors_permit` the 117 fine categories of Sec. 3A.03.
+ *
+ * Measured on a carinderia with ₱1,200,000 of gross sales and 45 sq. m.:
+ * answering "Carinderia" billed ₱2,218.25 and answering "Restaurant" billed
+ * ₱11,707.00. The more accurate answer was the one that lost ₱9,750 of
+ * business tax — 81% of the bill — and no applicant could get it right,
+ * because the correct figure needs both keys at once.
+ *
+ * The line of business decides both, so `psic_codes.category` and
+ * `psic_codes.permit_category` carry them and nobody is asked. See
+ * App\Support\TaxClassification for the mapping and its open questions.
+ *
+ * ── Why it is shown at all, rather than silently applied ──────────────────
+ *
+ * Because it moves the money. The class picks the schedule the whole business
+ * tax is computed from, and an applicant signing for an amount is entitled to
+ * see the assumption underneath it — the same reasoning that kept the business
+ * structure visible in this step's intro after its field was removed. It is
+ * `readOnly`-in-spirit: a statement with the route to change it, which is to
+ * change the line of business in Location & Zoning.
+ *
+ * ── The one question that survives ───────────────────────────────────────
+ *
+ * Sec. 2J.02(c) halves the rate for dealers in essential commodities, and no
+ * industrial classification can tell rice from radios: a sari-sari store sells
+ * both. Asked for the 17 codes whose `categoryBranch` says so, and for those
+ * only — the other 118 either carry the answer in the trade itself (a pharmacy
+ * is always essential, a jeweller never) or have no half-rate form to move to.
+ *
+ * Yes first, as everywhere else on this wizard, and a real radiogroup rather
+ * than two `aria-pressed` toggles: the answers are mutually exclusive and
+ * `aria-pressed` would announce two independent switches that never say
+ * picking one unpicks the other.
+ */
+function DerivedTaxClass({
+  line,
+  essentials,
+  onEssentials,
+}: {
+  line: { title: string; category?: string | null; categoryBranch?: string | null }
+  essentials: boolean
+  onEssentials: (next: boolean) => void
+}) {
+  const label = line.category ? categoryDisplayText(line.category) : null
+  const asks = line.categoryBranch === 'essentials'
+
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="flex h-6 w-6 items-center justify-center rounded-sm bg-royal text-[13px] font-bold text-white">
-        {letter}
-      </span>
-      <h2 className="text-[15px] font-bold text-ink">{label}</h2>
+    <div>
+      <FieldLabel>Taxed as</FieldLabel>
+      <p className="text-sm font-semibold text-ink">{label}</p>
+      <p className="mt-1 text-xs text-ink-secondary">
+        Worked out from your line of business under the Malabon Revenue Code. To change it, change
+        the line of business in Location &amp; Zoning.
+      </p>
+
+      {asks && (
+        <div className="mt-3.5">
+          <FieldLabel required>Do you mainly sell essential commodities?</FieldLabel>
+          <p id={`essentials-help-${line.title}`} className="mb-2 text-xs text-ink-secondary">
+            Rice and corn, flour, meat, dairy and processed food, sugar and salt, cooking oil and
+            cooking gas, laundry soap and detergents, medicine, fertiliser and other farm inputs,
+            animal feeds, school supplies, cement. These are taxed at half the ordinary rate
+            (Revenue Code Sec. 2J.02(c)).
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Do you mainly sell essential commodities?"
+            aria-describedby={`essentials-help-${line.title}`}
+            className="flex flex-wrap gap-2"
+          >
+            {[
+              { value: true, label: 'Yes' },
+              { value: false, label: 'No' },
+            ].map((opt) => {
+              const selected = essentials === opt.value
+
+              return (
+                <button
+                  key={opt.label}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  onClick={() => onEssentials(opt.value)}
+                  className={`rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                    selected
+                      ? 'border-royal bg-input text-ink'
+                      : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1071,9 +1222,7 @@ export function FeeProfileStep({
   lines,
   value,
   onChange,
-  paymentMode,
-  onPaymentModeChange,
-  scope = 'fees',
+  scope,
 }: {
   applicationType: ApplicationType
   /**
@@ -1084,37 +1233,59 @@ export function FeeProfileStep({
   registrationType?: string
   /** Selected permit-type codes. */
   permitCodes: string[]
-  /** Lines of business declared in Location & Zoning: psic_code_id + title. */
-  lines: { id: number; title: string }[]
+  /**
+   * Lines of business declared in Location & Zoning, each carrying what the
+   * Revenue Code does with it.
+   *
+   * `category` is the Sec. 2J.02 tax class derived from the PSIC code, and
+   * `categoryBranch` names the follow-up the Code still forces. Both come
+   * straight from the reference table; the step displays them and asks at most
+   * one Yes/No, rather than asking the applicant to classify themselves.
+   *
+   * A null `category` means the code cannot classify itself — only 00000
+   * "Other (not listed)", where the applicant typed their own trade — and the
+   * old question is asked for that line alone.
+   */
+  lines: {
+    id: number
+    title: string
+    category?: string | null
+    categoryBranch?: string | null
+  }[]
   value: FeeProfileDraft
   onChange: (next: FeeProfileDraft) => void
-  paymentMode: 'annual' | 'quarterly'
-  onPaymentModeChange: (next: 'annual' | 'quarterly') => void
   /**
-   * Which half of this step to draw.
+   * Which half of the fee inputs to draw, and where on the page.
    *
-   * The fields here were one wizard step, and the paper splits them in two.
-   * MCG-BPLO-FO-001 v2.0 section B "Business Operation" asks for the business
-   * area (B1), the employee counts and their split (B2), how many of them live
-   * in the LGU (B3) and the number of delivery units (B4). The rest of what
-   * this component collects — the Revenue Code category, gross sales, mode of
-   * payment, occupancy group, storeys — appears NOWHERE on that form. It is
-   * ours, for the fee engine and for other offices' sheets.
+   * `paper` is MCG-BPLO-FO-001 section B's own four figures — business area
+   * (B1), the employee counts and their split (B2), how many live in the LGU
+   * (B3), delivery units (B4). `extras` is what the fee engine needs that the
+   * paper does not ask for: how the trade is taxed, gross sales, and what the
+   * business does that carries a fee of its own.
    *
-   * So the component is mounted twice: `operation` on the Business Operation
-   * step, drawing section B's four figures, and `fees` on the step after
-   * Documentary Requirements, drawing everything else.
+   * Both mount on the Business Operation step, and the split is what keeps
+   * them in ORDER. The paper's items 1-8 run in sequence and items 5-8 are
+   * drawn by ApplyWizard rather than here, so a single mount would wedge the
+   * classification and the fee questions between items 4 and 5. Two mounts put
+   * `paper` before item 5 and `extras` after item 8.
    *
-   * One component rather than two, because all of it writes the same
+   * Until 16 September 2026 `extras` was a step of its own, "Tax
+   * Classification & Fees". The client removed it as absent from the paper
+   * form, and most of what it held went with it: the mode of payment (stored,
+   * read by nothing), the occupancy boxes (never rendered at all), the storey
+   * count (priced nothing) and the 273-label classification picker (derived
+   * from the line of business now, and mis-billing while it was asked). What
+   * survived is small enough to sit with the answers it depends on.
+   *
+   * One component rather than two files, because all of it writes the same
    * `FeeProfileDraft` and shares `NumberField`, the touched-state tracking and
-   * `errorFor`. Splitting the file would have duplicated those three, and the
-   * duplicate would drift the first time a validation rule changed.
+   * `errorFor`. Splitting it would duplicate those three, and the duplicate
+   * would drift the first time a validation rule changed.
    */
-  scope?: 'operation' | 'fees'
+  scope: 'paper' | 'extras'
 }) {
   const isRenewal = applicationType === 'renewal'
   const hasBusiness = permitCodes.includes('BUSINESS')
-  const hasOccupancy = permitCodes.includes('OCCUPANCY')
   const showStallCount = needsStallCount(value.categories)
   /*
    * The structure carried over from Business Information, matched to its
@@ -1176,8 +1347,8 @@ export function FeeProfileStep({
     )
   }
 
-  const onOperation = scope === 'operation'
-  const onFees = scope === 'fees'
+  const onPaper = scope === 'paper'
+  const onExtras = scope === 'extras'
 
   /*
    * Section letters only make sense on the fee half. The operation half is
@@ -1185,58 +1356,58 @@ export function FeeProfileStep({
    * second lettered heading there would number a subsection as though it were a
    * section of the paper.
    */
-  let sectionLetter = 'C'.charCodeAt(0) // sections continue after C · Documents
-  const nextLetter = () => String.fromCharCode(++sectionLetter)
+  /*
+   * The lettered SectionMarkers went with the step. They continued the
+   * wizard's own A/B/C lettering, which only made sense while this was a step
+   * of its own; inside Business Operation, whose items are numbered 1-8 from
+   * the paper, a letter would claim a section MCG-BPLO-FO-001 does not have.
+   * Plain headings instead.
+   */
 
   return (
     <div className="space-y-8">
-      {onFees && (
-        <p className="-mt-2 text-xs text-ink-secondary">
-          Your Tax Order of Payment is computed from these, under the Revenue Code (Ord. A10-2016).
+      {onExtras && (
+        <p className="-mt-2 text-xs leading-relaxed text-ink-secondary">
+          At the counter a clerk works these out and writes the amount into the form&rsquo;s
+          &ldquo;Assessed Fee&rdquo; box by hand. BizTrack computes it instead, under the Revenue
+          Code (Ord. A10-2016), so it has to ask what the clerk would have determined.
+          {derivedStructure && (
+            <>
+              {' '}
+              Assessed as a <span className="font-semibold">{derivedStructure.label}</span> &mdash;
+              change that on Business Information.
+            </>
+          )}
         </p>
       )}
 
       {/* ── Structure + per-line classification ─────────────────────────── */}
-      {onFees && (
+      {onExtras && (
       <section>
-        <SectionMarker letter={nextLetter()} label="Business Structure & Tax Classification" />
+        <h2 className="text-[15px] font-bold text-ink">How your trade is taxed</h2>
         <div className="mt-4 space-y-5">
           {derivedStructure ? (
             /*
-             * Item 72 — the answer, not the question again.
+             * Item 72 — nothing. The ANSWER is in this step's opening line now.
              *
-             * "Type of Registration" (Business Information) and "Business
-             * Structure" (here) are one fact with two names, and asking twice
-             * invited two answers that the fee engine and the registration
-             * record would then disagree about. It is shown rather than hidden
-             * because it changes the tax: a cooperative and a sole
-             * proprietorship are assessed differently, and the applicant is
-             * signing for this figure.
+             * This was a read-only `Business Structure` field mirroring the Type
+             * of Registration from Business Information, and the argument for it
+             * was sound: the structure changes the tax, so the applicant should
+             * see what the step assumed about them rather than have it applied
+             * silently. The client removed it as duplication on 16 September
+             * 2026, and by then the better answer to the same worry had arrived
+             * — the estimate panel at the foot of this step shows the actual
+             * computed figures, which is what they are really signing for.
              *
-             * `readOnly`, never `disabled`: a disabled input drops out of the
-             * tab order and most screen readers pass over it, so the applicant
-             * who most needs to hear what this step assumed about them would be
-             * the one who never reaches it. Same reason as the carried-over
-             * fields on the office sheets and the locked gross-sales box below.
+             * So the fact survives as one clause of the intro rather than as a
+             * repeated field with its own label, hint and read-only box. The
+             * VALUE is untouched: ApplyWizard syncs
+             * `feeDraft.business_structure` from `form.registration_type` in its
+             * own effect, so removing the display removed nothing the fee engine
+             * reads. The branch below still ASKS, for the draft that arrived
+             * without a structure at all.
              */
-            <div className="sm:max-w-sm">
-              <label className="block">
-                <FieldLabel>
-                  Business Structure
-                  <span className="font-normal text-ink-muted"> (from your application)</span>
-                </FieldLabel>
-                <input
-                  value={derivedStructure.label}
-                  readOnly
-                  aria-readonly="true"
-                  className={`${inputCls} cursor-not-allowed bg-line/60 text-ink-secondary`}
-                />
-              </label>
-              <p className="mt-1 text-xs text-ink-muted">
-                Taken from the Type of Registration you chose in Business Information. To change it,
-                go back to that section.
-              </p>
-            </div>
+            null
           ) : (
             /*
              * Only reachable if the registration type never arrived — a draft
@@ -1336,6 +1507,7 @@ export function FeeProfileStep({
                   category: '',
                   gross_sales: '',
                   capitalization: '',
+                  essentials: false,
                 }
                 return (
                   <div
@@ -1345,6 +1517,14 @@ export function FeeProfileStep({
                     <p className="mb-2.5 truncate text-sm font-semibold text-ink">{line.title}</p>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div>
+                        {line.category ? (
+                          <DerivedTaxClass
+                            line={line}
+                            essentials={cat.essentials}
+                            onEssentials={(next) => setCategory(line.id, { essentials: next })}
+                          />
+                        ) : (
+                          <>
                         {/*
                           FieldLabel renders a span, so this input had a visible
                           label attached to nothing and a screen reader announced
@@ -1359,6 +1539,11 @@ export function FeeProfileStep({
                         <label htmlFor={`fee-category-${line.id}`} className="block">
                           <FieldLabel required>Revenue Code category</FieldLabel>
                         </label>
+                        {/*
+                          Reached only for 00000 "Other (not listed)" and for a
+                          draft saved while this was asked of everybody. See the
+                          derived block above for why.
+                        */}
                         <input
                           id={`fee-category-${line.id}`}
                           list="fee-categories"
@@ -1378,6 +1563,8 @@ export function FeeProfileStep({
                           <FieldError id={`fee-category-${line.id}-error`}>
                             {errorFor(`line:${line.id}:category`, cat.category)}
                           </FieldError>
+                        )}
+                          </>
                         )}
                       </div>
                       {isRenewal && (
@@ -1443,49 +1630,29 @@ export function FeeProfileStep({
       </section>
       )}
 
-      {/* ── BUSINESS permit: how the business tax is settled ─────────────── */}
-      {onFees && hasBusiness && (
-        <section>
-          <SectionMarker letter={nextLetter()} label="How You Want to Pay" />
-          <div>
-            <FieldLabel>Mode of Payment</FieldLabel>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  { value: 'annual', label: 'Annually', hint: 'One payment, on or before January 20.' },
-                  {
-                    value: 'quarterly',
-                    label: 'Quarterly',
-                    hint: 'Four payments, within the first 20 days of January, April, July and October.',
-                  },
-                ] as const
-              ).map((opt) => {
-                const selected = paymentMode === opt.value
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => onPaymentModeChange(opt.value)}
-                    className={`flex max-w-xs flex-col items-start gap-1 rounded-md border px-4 py-2.5 text-left transition-colors ${
-                      selected
-                        ? 'border-royal bg-input text-ink'
-                        : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                    }`}
-                  >
-                    <span className="text-sm font-medium">{opt.label}</span>
-                    <span className="text-xs text-ink-secondary">{opt.hint}</span>
-                  </button>
-                )
-              })}
-            </div>
-            <p className="mt-2 text-xs text-ink-secondary">
-              The business tax may be settled in full or in four instalments (Malabon Revenue Code
-              Sec. 2N). Regulatory fees are due with the first payment either way.
-            </p>
-          </div>
-        </section>
-      )}
+      {/*
+        ── "How You Want to Pay" is gone: nothing read the answer ────────────
+
+        A Mode of Payment picker offered Annually or Quarterly, citing the
+        Revenue Code's Sec. 2N instalment option, and wrote the choice to
+        `applications.payment_mode`. Nothing in the system ever read it back.
+        Not the fee engine, not the Tax Order of Payment, not the payment
+        stage, not one fee rule — traced, and the column's only other readers
+        were the wizard rehydrating its own state and the API validating the
+        write.
+
+        So an applicant could elect quarterly payment, be told regulatory fees
+        were due with the first instalment, and then be handed a Tax Order of
+        Payment for the full annual amount. A choice the system takes and then
+        ignores is worse than no choice: it is a promise, and this one was
+        never kept. Removed at the client's instruction, 16 September 2026.
+
+        The instalment option is real and the Code does allow it. If BizTrack
+        is to offer it, it is a feature of the fee engine, the TOP and the
+        payment stage — not a radio button. `applications.payment_mode` is left
+        on the table, unwritten, so rows filed while this existed keep what
+        they recorded.
+      */}
 
       {/*
         ── Section B's four figures (B1-B4) ──────────────────────────────────
@@ -1503,11 +1670,41 @@ export function FeeProfileStep({
         anywhere on MCG-BPLO-FO-001, and putting them under a heading that says
         "Business Operation" would claim the paper asks for them.
       */}
-      {onOperation && hasBusiness && (
+      {onPaper && hasBusiness && (
         <section>
+          {/*
+            ── The four employee counts are ONE question ─────────────────────
+
+            They were four boxes in a two-column grid, in source order, and the
+            grid put "Number of Employees" beside "Business Area (sqm)" — two
+            unrelated figures reading as a pair — while the three counts that
+            ACTUALLY belong with it were spread down the next two rows, the
+            total separated from its own breakdown by a floor area and a
+            sentence. "Employees Residing in Malabon" also sat alone against an
+            empty cell, which reads as a missing field rather than a deliberate
+            one.
+
+            They are one question with one arithmetic rule: male + female must
+            EQUAL the total, and those residing in Malabon cannot exceed it.
+            Both are enforced in feeProfileIssues, and a layout that scatters
+            the operands makes its own error message — "these must add up to
+            your total of 4" — point at a box that may be off-screen.
+
+            So the total leads and the breakdown sits under it, inside a real
+            <fieldset> with a <legend> rather than a styled div: the legend is
+            what makes a screen reader announce "Employees, Number of Male
+            Employees" instead of the label alone, and that is the only thing
+            that conveys the grouping to somebody who cannot see the border.
+            Same pattern as the amendment blocks in ApplyWizard.
+
+            Every label says "Number of" at the client's instruction, so each
+            one states what it counts without depending on the legend above it —
+            which matters on the review sheet and the officer's screen, where
+            these values are printed away from this grouping.
+          */}
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
-              label="Business Area (sqm)"
+              label="1. Business Area (sq. m.)"
               required
               kind="area"
               value={value.floor_area_sqm}
@@ -1516,74 +1713,132 @@ export function FeeProfileStep({
               error={errorFor('floor_area_sqm', value.floor_area_sqm)}
               placeholder="e.g. 45"
             />
+          </div>
+
+          {/*
+            ── One number per paper item ────────────────────────────────────
+
+            The numbers were on the FIELD labels, so items 2 and 4 printed
+            theirs once per box — "2. Number of Male Employees" beside "2.
+            Number of Female Employees", and "4." twice over on the delivery
+            counts. The client asked for each number to appear once.
+
+            So a paper item that is several boxes is now a GROUP, and the group
+            carries the number. Inside it the fields say only what they count.
+            Item 3 is its own box on the paper and stays its own field here.
+
+            A visible heading plus an sr-only <legend>, rather than a visible
+            legend: a legend is laid out inside the fieldset's top border and
+            cut into it on a rounded, filled box — tried, and it looked wrong.
+            The legend still has to exist, because a <fieldset> without one
+            conveys no grouping to a screen reader at all.
+          */}
+          <fieldset className="mt-4 rounded-lg border border-line bg-canvas px-4 py-4">
+            <legend className="sr-only">Total number of employees</legend>
+            <p aria-hidden className="text-[13px] font-semibold text-ink">
+              2. Total No. of Employees
+            </p>
+
+            {/*
+              MCG-CENRO-FO-001 prints "TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE
+              ___", so the two halves ARE the total — which is why they must add
+              up to it below rather than merely not exceed it.
+            */}
+            <div className="mt-2 grid gap-4 sm:grid-cols-3">
+              <NumberField
+                label="Total"
+                required
+                kind="count"
+                value={value.employees}
+                onChange={(next) => set('employees', next)}
+                onBlur={() => touch('employees')}
+                error={errorFor('employees', value.employees)}
+                placeholder="e.g. 3"
+              />
+              <NumberField
+                label="Male"
+                required
+                kind="count"
+                value={value.male_employees}
+                onChange={(next) => set('male_employees', next)}
+                onBlur={() => touch('male_employees')}
+                error={errorFor('male_employees', value.male_employees)}
+              />
+              <NumberField
+                label="Female"
+                required
+                kind="count"
+                value={value.female_employees}
+                onChange={(next) => set('female_employees', next)}
+                onBlur={() => touch('female_employees')}
+                error={errorFor('female_employees', value.female_employees)}
+              />
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
+              Male and female together must add up to the total.
+            </p>
+          </fieldset>
+
+          {/* Item 3 is its own box on the paper, so it is its own field here. */}
+          <div className="mt-4 sm:w-1/2 sm:pr-2">
             <NumberField
-              label="Number of Employees"
+              label="3. No. of Employees Residing within Malabon"
               required
-              kind="count"
-              value={value.employees}
-              onChange={(next) => set('employees', next)}
-              onBlur={() => touch('employees')}
-              error={errorFor('employees', value.employees)}
-              placeholder="e.g. 3"
-            />
-            {/* Unified form asks this separately; some LGU incentives key off it. */}
-            <NumberField
-              label="Employees Residing in Malabon"
               kind="count"
               value={value.employees_in_lgu}
               onChange={(next) => set('employees_in_lgu', next)}
               onBlur={() => touch('employees_in_lgu')}
               error={errorFor('employees_in_lgu', value.employees_in_lgu)}
             />
-            {/*
-              The male/female breakdown of the total above — BPLO item B2 on the
-              new form, B3 on the renewal, and the "MALE: FEMALE:" box on
-              CENRO's CEC application. Both counts are optional, so this is a
-              note rather than an error: the number that blocks the step is the
-              total, and the split only has to be possible against it.
-
-              Spans the grid so it reads as one sentence about the pair below it
-              rather than as a caption on the left-hand box.
-            */}
-            <p className="-mb-1 text-xs text-ink-secondary sm:col-span-2">
-              The city also asks how that total divides. Together these can’t come to more than
-              your total above.
-            </p>
-            <NumberField
-              label="Male Employees"
-              kind="count"
-              value={value.male_employees}
-              onChange={(next) => set('male_employees', next)}
-              onBlur={() => touch('male_employees')}
-              error={errorFor('male_employees', value.male_employees)}
-            />
-            <NumberField
-              label="Female Employees"
-              kind="count"
-              value={value.female_employees}
-              onChange={(next) => set('female_employees', next)}
-              onBlur={() => touch('female_employees')}
-              error={errorFor('female_employees', value.female_employees)}
-            />
-            <NumberField
-              label="Motorized Delivery Vehicles"
-              kind="count"
-              value={value.delivery_vehicles_motorized}
-              onChange={(next) => set('delivery_vehicles_motorized', next)}
-              onBlur={() => touch('delivery_vehicles_motorized')}
-              error={errorFor('delivery_vehicles_motorized', value.delivery_vehicles_motorized)}
-              placeholder="0"
-            />
-            <NumberField
-              label="Other Delivery Vehicles (pedicab, cart)"
-              kind="count"
-              value={value.delivery_vehicles_other}
-              onChange={(next) => set('delivery_vehicles_other', next)}
-              onBlur={() => touch('delivery_vehicles_other')}
-              error={errorFor('delivery_vehicles_other', value.delivery_vehicles_other)}
-              placeholder="0"
-            />
           </div>
+
+          {/*
+            ── Item 4 is one box on the paper and two here, on purpose ──────
+
+            The client asked why. Because the Revenue Code taxes the two kinds
+            at different rates and a single number cannot be assessed:
+
+              biztax.delivery_vehicle_motorized  Sec. 2I.01  P750.00 per unit
+              biztax.delivery_vehicle_other      Sec. 2I.01  P100.00 per unit
+
+            The paper gets away with one box because a clerk asks which kind at
+            the counter and writes the tax in by hand. BizTrack computes it, so
+            it has to know. Same reason the tax step exists at all.
+
+            Grouped under one number, with the rates stated, so the split reads
+            as the ordinance's doing rather than as the form asking twice.
+          */}
+          <fieldset className="mt-4 rounded-lg border border-line bg-canvas px-4 py-4">
+            <legend className="sr-only">Number of delivery units</legend>
+            <p aria-hidden className="text-[13px] font-semibold text-ink">
+              4. No. of Delivery Units
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+              Counted apart because the Revenue Code taxes them differently &mdash; &#8369;750 a
+              year per motor vehicle, &#8369;100 per pedicab or cart (Sec. 2I.01). Leave both at 0
+              if you have none.
+            </p>
+            <div className="mt-2 grid gap-4 sm:grid-cols-2">
+              <NumberField
+                label="Motorized (truck, van, motor vehicle)"
+                kind="count"
+                value={value.delivery_vehicles_motorized}
+                onChange={(next) => set('delivery_vehicles_motorized', next)}
+                onBlur={() => touch('delivery_vehicles_motorized')}
+                error={errorFor('delivery_vehicles_motorized', value.delivery_vehicles_motorized)}
+                placeholder="0"
+              />
+              <NumberField
+                label="Other (pedicab, cart)"
+                kind="count"
+                value={value.delivery_vehicles_other}
+                onChange={(next) => set('delivery_vehicles_other', next)}
+                onBlur={() => touch('delivery_vehicles_other')}
+                error={errorFor('delivery_vehicles_other', value.delivery_vehicles_other)}
+                placeholder="0"
+              />
+            </div>
+          </fieldset>
         </section>
       )}
 
@@ -1595,20 +1850,30 @@ export function FeeProfileStep({
         sheet) and the flags drive Revenue Code rules — but neither appears on
         MCG-BPLO-FO-001, so neither belongs under the Business Operation heading.
       */}
-      {onFees && hasBusiness && (
+      {/*
+        ── "Number of Storeys" is gone, and the heading with it ──────────────
+
+        It priced nothing. Measured against a filing holding all six
+        clearances, changing the storey count moved the total by zero pesos:
+        only two active rules read it — a lessor's commercial or residential
+        building, by storey — and both need a Sec. 3A.03 fine permit category
+        that is one of the sixty still open with BPLO, so neither can fire.
+
+        Its one real consumer was MCG-CPDD-FO-003 line VIII.B, "No. of Storey
+        of Building", which used to auto-fill from here. That sheet asks the
+        question itself now, and its field is editable — the same fix the
+        lessor boxes needed when they were removed from this side.
+
+        `storeys` stays on the draft type so a filing saved while this was
+        asked still hydrates, and OfficeFormAnswers still seeds VIII.B from it
+        for exactly those filings. Nothing writes it any more.
+
+        The section heading went with the box: "Building & Premises" described
+        a storey count, not a list of what a business happens to do.
+      */}
+      {onExtras && hasBusiness && (
         <section>
-          <SectionMarker letter={nextLetter()} label="Building & Premises" />
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <NumberField
-              label="Number of Storeys"
-              kind="count"
-              value={value.storeys}
-              onChange={(next) => set('storeys', next)}
-              onBlur={() => touch('storeys')}
-              error={errorFor('storeys', value.storeys)}
-            />
-          </div>
-          <div className="mt-5">
+          <div>
             <FieldLabel>Which of these apply to your business?</FieldLabel>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {BUSINESS_FLAGS.map((f) => (
@@ -1624,63 +1889,34 @@ export function FeeProfileStep({
         </section>
       )}
 
-      {/* ── OCCUPANCY permit ─────────────────────────────────────────────── */}
-      {onFees && hasOccupancy && (
-        <section>
-          <SectionMarker letter={nextLetter()} label="Occupancy Details" />
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            <div>
-              <FieldLabel required>Occupancy Group</FieldLabel>
-              <select
-                value={value.occupancy_group}
-                onChange={(e) => set('occupancy_group', e.target.value)}
-                onBlur={() => touch('occupancy_group')}
-                className={inputCls}
-                aria-invalid={Boolean(errorFor('occupancy_group', value.occupancy_group))}
-              >
-                <option value="">Select occupancy group…</option>
-                {OCCUPANCY_GROUPS.map((g) => (
-                  <option key={g.value} value={g.value}>
-                    {g.label}
-                  </option>
-                ))}
-              </select>
-              {errorFor('occupancy_group', value.occupancy_group) && (
-                <FieldError>{errorFor('occupancy_group', value.occupancy_group)}</FieldError>
-              )}
-            </div>
-            {value.occupancy_group === 'j1' ? (
-              hasBusiness ? (
-                <p className="self-end pb-2.5 text-xs text-ink-secondary">
-                  Group J-1 is assessed by floor area. The floor area you declared above is used.
-                </p>
-              ) : (
-                <NumberField
-                  label="Floor Area (sqm)"
-                  required
-                  kind="area"
-                  value={value.floor_area_sqm}
-                  onChange={(next) => set('floor_area_sqm', next)}
-                  onBlur={() => touch('floor_area_sqm')}
-                  error={errorFor('floor_area_sqm', value.floor_area_sqm)}
-                  placeholder="e.g. 120"
-                />
-              )
-            ) : (
-              <NumberField
-                label="Construction Cost (₱)"
-                required
-                kind="money"
-                value={value.construction_cost}
-                onChange={(next) => set('construction_cost', next)}
-                onBlur={() => touch('construction_cost')}
-                error={errorFor('construction_cost', value.construction_cost)}
-                placeholder="0.00"
-              />
-            )}
-          </div>
-        </section>
-      )}
+      {/*
+        ── Occupancy Details is gone, and it never once rendered ─────────────
+
+        An "Occupancy Details" section asked for the Occupancy Group, and then
+        either a Floor Area or a Construction Cost depending on the group. It
+        was gated on `hasOccupancy`, which reads `permitCodes` — and both mount
+        points pass `[BUSINESS_PERMIT_CODE]`, hardcoded, since the clearances
+        left the wizard. So the gate has been false for every applicant since,
+        and not one of these three boxes has ever been drawn.
+
+        Which means the occupancy fee could never be computed either: three
+        rules in occupancy.json price on `construction_cost` and fifteen
+        mention `occupancy_group`, and nothing anywhere collects either one.
+        That was logged rather than fixed at the client's decision, and the
+        decision to stop asking the fee questions here settles it — dead code
+        is not a fee input worth keeping.
+
+        `occupancy_group` and `construction_cost` stay on the draft type:
+        drafts saved while this section existed still carry those keys, and
+        hydrating one must not throw. Nothing writes them now. The option list
+        did NOT stay — an unused select's worth of constants beside a deleted
+        field is an invitation to wire it back up without finding out why it
+        went.
+
+        The Floor Area box here was also a second way to ask paper item B1,
+        which Business Operation asks as "Business Area (sq. m.)" into the same
+        `floor_area_sqm` key. One quantity, one box.
+      */}
 
       {/*
         ── Stalls, for a business that OPERATES a market ──────────────────────
@@ -1691,9 +1927,9 @@ export function FeeProfileStep({
         LANDLORD at all — and it is the landlord whose business permit and
         garbage fee are priced per stall. See STALL_PRICED_CATEGORIES.
       */}
-      {onFees && showStallCount && (
+      {onExtras && showStallCount && (
         <section>
-          <SectionMarker letter={nextLetter()} label="Market Stall Details" />
+          <h2 className="text-[15px] font-bold text-ink">Market Stall Details</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <NumberField
               label="Number of Stalls"

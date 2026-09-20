@@ -40,7 +40,26 @@ class BusinessStatusController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $query = Business::with('owner:id,name');
+        /*
+         * ── The arrears come down with the row ────────────────────────────────
+         *
+         * Client's decision, 17 September 2026: deferred permit fees *"wait
+         * indefinitely, and are visible"*. This is the visible half — the
+         * business record, wherever an admin looks a business up.
+         *
+         * Eager-loaded rather than counted per row. This list pages 25
+         * businesses and the register holds hundreds; a `sum` per row is the
+         * N+1 that makes an admin screen feel broken, and the figure is wanted
+         * on every row rather than on demand.
+         *
+         * `outstanding` in the constraint, not `unclaimed`: a fee already on an
+         * unpaid January bill is money the LGU has not received, and an arrears
+         * column that hid it would show zero for every business mid-renewal.
+         */
+        $query = Business::with([
+            'owner:id,name',
+            'unbilledPermitFees' => fn ($q) => $q->outstanding()->with('permitType:id,code,name')->orderBy('incurred_at'),
+        ]);
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
@@ -63,6 +82,36 @@ class BusinessStatusController extends Controller
                 'status' => $b->status,
                 'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
                 'created_at' => optional($b->created_at)->toISOString(),
+                /*
+                 * Deferred permit fees, as a total AND itemised.
+                 *
+                 * Both, because they answer different questions and the screen
+                 * shows both: the total is what the LGU is owed, and the items
+                 * are what it is owed FOR — "Sanitary Permit, June" is what
+                 * turns a figure into something an officer can raise with the
+                 * owner on the phone.
+                 *
+                 * An empty list and a zero are the honest answer for a business
+                 * with nothing deferred, rather than omitting the keys: a
+                 * missing key reads as "not loaded" to a screen that has to
+                 * tell those apart.
+                 */
+                'unbilled_fees' => [
+                    'total' => round((float) $b->unbilledPermitFees->sum('amount'), 2),
+                    'items' => $b->unbilledPermitFees->map(fn ($fee) => [
+                        'permit_type' => $fee->permitType?->name,
+                        'permit_code' => $fee->permitType?->code,
+                        'amount' => (float) $fee->amount,
+                        'incurred_at' => optional($fee->incurred_at)->toISOString(),
+                        /*
+                         * Claimed but unpaid is a real and different state: the
+                         * fee is on a bill the applicant has been shown and has
+                         * not settled. An officer chasing it needs to know that
+                         * a renewal is already in flight carrying it.
+                         */
+                        'on_a_bill' => $fee->billed_on_application_id !== null,
+                    ])->values(),
+                ],
             ])->values();
 
         return response()->json([

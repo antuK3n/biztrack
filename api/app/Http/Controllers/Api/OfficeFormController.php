@@ -14,6 +14,7 @@ use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\OfficeFormAnswers;
 use App\Support\PdfFile;
+use App\Support\RenewalPrefill;
 use App\Support\SheetRequirements;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -90,6 +91,35 @@ class OfficeFormController extends Controller
                  * not one CHO, BFP or OBO have made.
                  */
                 'requirements' => SheetRequirements::for($application, $code),
+                /*
+                 * ── Last year's answers, OFFERED not applied ──────────────────
+                 *
+                 * A renewal's office form is the same form as a new
+                 * application's, so the office wants the same facts about the
+                 * premises every year — and nothing carried them forward, so
+                 * applicants re-typed the water source and the sanitary
+                 * classification annually while last year's answers sat one
+                 * relation away.
+                 *
+                 * A SEPARATE key from `form_data`, deliberately. The client's
+                 * decision was "filled in and flagged, per field": the applicant
+                 * has to be able to see which answers came from last year and
+                 * confirm them. Folding these into `form_data` would make a
+                 * carried answer indistinguishable from a reviewed one the
+                 * moment the sheet reloaded — and would have the client autosave
+                 * them straight into the register as the applicant's own words,
+                 * on a statutory form they sign.
+                 *
+                 * So the sheet seeds its empty fields from this, flags each one,
+                 * and only writes when the applicant saves. Once an answer is in
+                 * `form_data` it stops being offered here, which is what makes
+                 * the flag clear itself.
+                 *
+                 * Empty for a new filing, for a first renewal, and for a prior
+                 * filing that never saved this sheet. See `RenewalPrefill` for
+                 * the three kinds of answer that never carry.
+                 */
+                'prefill' => RenewalPrefill::forSheet($application, $code),
             ])
             ->values();
 

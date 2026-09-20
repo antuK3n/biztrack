@@ -231,30 +231,51 @@ it('lets each of the five offices see and close its own visit, releasing that pe
          * with nothing waiting on the other four. This count climbing inside
          * the loop is that rule — the old flow issued nothing until every
          * office had finished, which is what the client asked to be changed.
+         *
+         * The LAST pass lands two permits, not one: since 18 September 2026 the
+         * fifth clearance being approved also issues the business permit, in the
+         * same transaction. Written as an explicit `+ 1` on the final iteration
+         * rather than by loosening the assertion to `>=`, because the exact
+         * count is the point — five offices release five, and the sixth has a
+         * different cause.
          */
         $released++;
-        expect($app->permits()->count())->toBe($released);
+        $isLast = $released === count(OFFICE_INSPECTOR);
+        expect($app->permits()->count())->toBe($released + ($isLast ? 1 : 0));
         expect(app(WorkflowService::class)->pivotFor($app->fresh(), $permitCode)->status)
             ->toBe(ClearanceStatus::Approved);
     }
 
-    // Five permits issued by five offices, and the filing is now in BPLO's
-    // queue for the final approval rather than approved outright — the Mayor's
-    // Permit is BPLO's to mint and is not one of these five.
+    /*
+     * Five permits issued by five offices — and then a SIXTH, without anybody
+     * pressing anything.
+     *
+     * This asserted `ForFinalApproval` and five permits until 18 September 2026:
+     * the Mayor's Permit was BPLO's to mint. The client asked what BPLO was
+     * checking when all five clearances are applied for and approved inside
+     * BizTrack, and there was nothing, so the fifth office's pass now issues the
+     * business permit too. `$released` above is still five, because the loop
+     * counts what each OFFICE releases; the sixth is the outcome permit.
+     */
     $settled = $app->fresh();
-    expect($settled->status)->toBe(ApplicationStatus::ForFinalApproval)
-        ->and($settled->permits()->count())->toBe(5);
+    expect($settled->status)->toBe(ApplicationStatus::Approved)
+        ->and($settled->permits()->count())->toBe(6);
 });
 
-it('holds the final approval until the last of the five visits passes', function () {
+it('holds the business permit until the last of the five visits passes', function () {
     $app = filingWithEveryClearance();
 
     /*
-     * The point of the five is that they are five. Four passes must not put the
-     * filing in front of BPLO — `refreshReadiness()` moves it to
-     * `for_final_approval` only when NO required permit is still outstanding,
-     * and an off-by-one there would offer BPLO an Approve button over a filing
-     * an office was still on its way out to.
+     * The point of the five is that they are five, and the off-by-one this
+     * guards against got WORSE on 18 September 2026 rather than going away.
+     *
+     * It used to be that four passes must not put the filing in front of BPLO.
+     * Now four passes must not ISSUE THE MAYOR'S PERMIT — `refreshReadiness()`
+     * approves only when no required permit is outstanding, and an off-by-one
+     * there would mint a legal instrument for a business one office was still
+     * on its way out to visit. There is no longer a human press between the
+     * miscount and the certificate, which is exactly why this test matters more
+     * than it did.
      */
     $offices = array_keys(OFFICE_INSPECTOR);
     foreach (array_slice($offices, 0, 4) as $officeCode) {
@@ -274,6 +295,7 @@ it('holds the final approval until the last of the five visits passes', function
     authAs(OFFICE_INSPECTOR[$last][1]);
     test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval)
-        ->and($app->permits()->count())->toBe(5);
+    // The fifth pass issues the fifth clearance AND the business permit.
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved)
+        ->and($app->permits()->count())->toBe(6);
 });

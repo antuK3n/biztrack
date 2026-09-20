@@ -4,17 +4,15 @@ import { admin, applications } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import { businessName, formatDate } from '../../lib/format'
-import { applicationStatusMeta } from '../../lib/status'
+import { BUSINESS_STATUS, applicationStatusMeta } from '../../lib/status'
 import type {
   AdminBusiness,
   AdminUser,
   ApplicationListItem,
-  BusinessStatus,
   PageMeta,
 } from '../../lib/types'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
-import type { ChipTone } from '../../components/ui/Proto'
 import { StatusBadge } from '../../components/ui/StatusBadge'
 import { BuildingIcon, ClipboardIcon, UsersIcon } from '../../components/icons'
 
@@ -114,20 +112,13 @@ interface RecordRow {
   date: string | null
 }
 
-/**
- * The four business statuses in the tones Owner Status already gives them.
- *
- * Copied rather than imported: OwnersPage keeps its map private and this screen
- * has no business reaching into another page's internals. If the palette moves
- * there, move it here too — a register that greys a blacklisting is worse than
- * one that does not colour it at all.
+/*
+ * BUSINESS_TONES was here, copied from OwnersPage under a comment that said so
+ * and asked whoever changed one to remember the other. The table it copied has
+ * moved to lib/status.ts as BUSINESS_STATUS, which is a place both screens can
+ * reach without either one owning the other's internals — the objection the
+ * copy was made to avoid.
  */
-const BUSINESS_TONES: Record<BusinessStatus, ChipTone> = {
-  active: 'tint-green',
-  flagged: 'tint-yellow',
-  suspended: 'tint-purple',
-  blacklisted: 'tint-red',
-}
 
 function applicationRow(app: ApplicationListItem): RecordRow {
   const meta = applicationStatusMeta(app.status, app.status_label)
@@ -156,7 +147,7 @@ function businessRow(business: AdminBusiness): RecordRow {
     primary: business.name,
     secondary: business.owner?.name ?? '—',
     status: (
-      <StatusChip tone={BUSINESS_TONES[business.status] ?? 'tint-gray'}>
+      <StatusChip tone={BUSINESS_STATUS[business.status]?.tone ?? 'tint-gray'}>
         {business.status_label}
       </StatusChip>
     ),

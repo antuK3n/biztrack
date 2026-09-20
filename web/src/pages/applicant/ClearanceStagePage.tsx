@@ -4,10 +4,10 @@ import { CheckIcon, InfoCircleIcon, UploadIcon } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal } from '../../components/ui/Proto'
-import { businessName, formatBytes, pesoToNumber } from '../../lib/format'
+import { businessName, formatBytes, formatRelative, pesoToNumber } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import { applications, clearances, officeForms } from '../../lib/resources'
-import { clearanceStarted } from '../../lib/status'
+import { clearanceStarted, clearanceWithOffice } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import {
   OfficeFormSheet,
@@ -87,11 +87,15 @@ import type {
  *      server ever unlocks on submission instead, the wording here is wrong
  *      before the behaviour is.
  *
- *   B. A REJECTED CLEARANCE DOES NOT KILL THE BUSINESS PERMIT. It stands as
- *      its own failed item — which is why `state === 'rejected'` renders a
- *      panel on ONE card and nothing anywhere near the filing as a whole. Same
- *      open question as checklist item 80 (`AssignmentStatus` has no
- *      `Rejected` case) and it should be answered once for both.
+ *   B. A CLEARANCE IS RETURNED, NEVER REFUSED. There is no rejected state for
+ *      one permit any more: an office asks for a correction, the sheet reopens
+ *      editable, and that can happen as often as it needs to. Settled on
+ *      17 September 2026 — *"I think Return is enough already"* — which also
+ *      closed the open question this note used to carry (checklist item 80,
+ *      `AssignmentStatus` having no `Rejected` case). The answer is that
+ *      neither machine needs one. A business that genuinely cannot have the
+ *      permit is BPLO rejecting the FILING, which is a different act on a
+ *      different object.
  *
  *   C. APPLYING AFTER THE PERMIT IS RELEASED is allowed by the data model but
  *      is NOT surfaced here. A business that adds a food line in June needs a
@@ -385,6 +389,16 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
     Record<string, OfficeFormRequirement[] | undefined>
   >({})
   /** The checklist slot with an upload in flight, so one row can say "Uploading". */
+  /**
+   * Last year's answers, as OFFERED by the server — per sheet, per key.
+   *
+   * Kept beside `officeData` rather than merged into it, so the sheet can tell
+   * a carried answer from one the applicant has looked at: a key counts as
+   * carried only while its current value is still the one that was offered.
+   * Touch the field and it stops being last year's — which is what makes the
+   * flag clear itself, with nothing having to clear it.
+   */
+  const [offered, setOffered] = useState<Record<string, Record<string, unknown>>>({})
   const [reqBusy, setReqBusy] = useState<string | null>(null)
   const [reqError, setReqError] = useState<string | null>(null)
 
@@ -436,15 +450,46 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           for (const f of forms) {
             // Never clobber an edit made in this session that has not saved yet.
             if (!(f.permit_type_code in next) && hasOfficeForm(f.permit_type_code)) {
-              next[f.permit_type_code] = f.form_data
+              /*
+               * ── Last year's answers go in UNDER this year's ────────────────
+               *
+               * `form_data` wins on every key it holds: an answer the applicant
+               * has already given is theirs, and an offer from last year must
+               * never overwrite it. The server does not offer a key that is
+               * already stored, so in practice these do not overlap — the
+               * spread order is the guarantee rather than the mechanism.
+               *
+               * The autosave BASELINE below is seeded with the merged object,
+               * not with `form_data`. That is what stops the prefill being
+               * written the instant the sheet opens: the effect that autosaves
+               * compares against this baseline, so a carried answer nobody has
+               * touched does not look like an edit. It reaches the register
+               * only when the applicant saves or submits — a deliberate act, on
+               * a form they sign.
+               */
+              const carried = f.prefill ?? {}
+              next[f.permit_type_code] = { ...carried, ...f.form_data }
+
+              if (Object.keys(carried).length > 0) {
+                setOffered((o) => ({ ...o, [f.permit_type_code]: carried }))
+              }
               /*
                * Seed the autosave's baseline with what the server just gave us.
                * Without this, opening a saved sheet and touching nothing would
                * look like an edit to the effect below and write the same answers
                * straight back — a pointless round trip on every sheet opened,
                * and one that would mark a submitted form dirty.
+               *
+               * The MERGED object, including the carried answers. Baselining on
+               * `form_data` alone would make every carried answer look like an
+               * edit the moment the sheet opened, and autosave would write last
+               * year's words into the register before the applicant had read
+               * them — which is the one thing "offered, not applied" exists to
+               * prevent.
                */
-              savedSheets.current[f.permit_type_code] = JSON.stringify(f.form_data)
+              savedSheets.current[f.permit_type_code] = JSON.stringify(
+                next[f.permit_type_code],
+              )
             }
           }
           return next
@@ -558,11 +603,22 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
      * that matters — has this clearance been started — rather than a list of
      * status names that can go stale again.
      *
+     * ── And it went stale ANYWAY, because the predicate read half the row ────
+     *
+     * `clearanceStarted` took only the state, so an applied-for clearance whose
+     * sheet was still blank (`not_started` + `mode = 'apply'`) answered "not
+     * started" here and the POST went out — straight into
+     * `ClearanceController::apply`'s refusal, *"You have already applied for
+     * the Zoning / Locational Clearance on this application."* `if (!ok) return`
+     * then stopped the line below, so the sheet the applicant was trying to
+     * reopen never opened. Both halves of the client's report, one missing
+     * field. The predicate takes the whole row now and mirrors the server's.
+     *
      * `removingCopy` is the other way in: swapping a held copy back to an
      * application. The old union spelled that `submitted`; it is a held document
      * on the row, which the line above already read.
      */
-    if (!clearanceStarted(row.state) || removingCopy) {
+    if (!clearanceStarted(row) || removingCopy) {
       const ok = await runAction(
         code,
         /*
@@ -719,7 +775,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
      * their clearance "is required and cannot be withdrawn" while trying to
      * hand in the very certificate that satisfies it.
      */
-    const switching = clearanceStarted(row.state) && row.held_document === null
+    const switching = clearanceStarted(row) && row.held_document === null
     setBusyCode(code)
     setActionError(null)
     try {
@@ -896,7 +952,32 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
     return <ErrorState error={loadError ?? new Error('Not found')} onRetry={() => void load()} />
   }
 
-  const formMissing = formCode ? officeFormMissing(formCode, officeData[formCode] ?? {}) : []
+  /*
+   * What is still outstanding on the open sheet — ANSWERS and DOCUMENTS.
+   *
+   * `officeFormMissing` reads the answers and nothing else, and for a while
+   * that was the whole of it. Then ZONING grew a checklist panel whose rule was
+   * "nothing here blocks the submit" — right for a counter checklist a clerk
+   * ticks on receipt, and wrong for the one row the paper itself makes a
+   * precondition. The client found the hole by walking through it:
+   *
+   *   "I wonder how I was able to submit the Locational Clearance without
+   *    submitting the Applicant Declaration."
+   *
+   * So the two sources are added together here rather than inside
+   * `officeFormMissing`, which takes answers and has no business fetching a
+   * document list. Which rows gate is the SERVER's call — see `blocking` on
+   * `OfficeFormRequirement` — so this adds no rule of its own; it only stops
+   * ignoring the one it is handed.
+   */
+  const formMissing = formCode
+    ? [
+        ...officeFormMissing(formCode, officeData[formCode] ?? {}),
+        ...(requirements[formCode] ?? [])
+          .filter((row) => row.blocking === true && !row.satisfied)
+          .map((row) => row.label),
+      ]
+    : []
 
   /*
    * Is the sheet on screen a record rather than a form?
@@ -962,6 +1043,31 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
           onChange={(data) => setOfficeData((d) => ({ ...d, [formCode]: data }))}
           readOnly={formLocked}
           requirements={requirements[formCode]}
+          /*
+           * What the office asked about, if it said. A stable code — a document
+           * type's, or an answer key — so the sheet marks the right row by
+           * LOOKUP and never by reading the prose. See `return_target`.
+           *
+           * Read off the row rather than threaded through state: the sheet is
+           * always the one whose card is open, so the row is in hand.
+           */
+          returnTarget={rows?.find((r) => r.permit_type.code === formCode)?.return_target ?? null}
+          /*
+           * The keys still showing last year's answer, computed rather than
+           * stored: a key is carried only while its current value is the one
+           * that was offered. So editing a field drops it from this set on the
+           * next render and the flag goes with it, with nothing to clear.
+           *
+           * Compared with `JSON.stringify` because an answer can be an array
+           * (the DENR permit lists) and `!==` on two equal arrays is always
+           * true — which would have shown every carried answer as edited the
+           * moment it rendered.
+           */
+          carriedKeys={Object.keys(offered[formCode] ?? {}).filter(
+            (key) =>
+              JSON.stringify((officeData[formCode] ?? {})[key]) ===
+              JSON.stringify((offered[formCode] ?? {})[key]),
+          )}
           requirementBusy={reqBusy}
           requirementError={reqError}
           onRequirementChange={(documentCode, file) =>
@@ -1064,6 +1170,71 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             </>
           )}
         </div>
+        {submitPrompt && (
+          /*
+            ── The last look before a one-way press ─────────────────────────────
+
+          It lives HERE, inside the `if (formCode)` branch, and that is the
+          whole of the bug reported on 17 September 2026: "why does this submit
+          button not work?"
+
+          It did work. It set `submitPrompt` and the component re-rendered —
+          and this file returns early at `if (formCode)` to draw the open
+          sheet, while the modal sat in the FINAL return, the branch that draws
+          the clearance cards. So the state changed and nothing mounted. Only
+          the sheet carries the Submit button, so only the sheet can set that
+          state: the copy down there was unreachable from the day it was
+          written, and no test noticed because a modal that never opens looks
+          exactly like a modal nobody asked for.
+
+            The client asked for it by name: "before submitting each form, please
+            create a modal that will ask them if they are already finished
+            reviewing before submitting."
+
+            It earns its place on the same test the two dialogs above pass —
+            something happens here that cannot be undone from this screen. Once
+            submitted the sheet is the office's and the applicant cannot change
+            it; getting it back means messaging the office and asking them to
+            return it. Until today that press was the same size as saving a draft.
+
+            Blue, not red. Nothing is destroyed and nothing is wrong — this is the
+            applicant doing the thing they came to do, and dressing it as a
+            warning would say otherwise. What the dialog adds is the one fact the
+            button cannot: that this is the last moment to change anything.
+          */
+          <ProtoModal
+            title="SUBMIT THIS FORM"
+            cancelLabel="Keep checking"
+            confirmLabel="Yes, submit it"
+            onCancel={() => setSubmitPrompt(null)}
+            onConfirm={() => {
+              setSubmitPrompt(null)
+              void saveForm()
+            }}
+          >
+            <p className="text-center text-base text-ink">
+              Have you finished reviewing your{' '}
+              <span className="font-bold">
+                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
+                  'application form'}
+              </span>
+              ?
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              Once you submit it,{' '}
+              <span className="font-semibold text-ink">
+                {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
+                  ?.name ?? 'the issuing office'}
+              </span>{' '}
+              receives it and you will not be able to change your answers. You can still read them
+              back at any time.
+            </p>
+            <p className="mt-3 text-center text-sm text-ink-secondary">
+              If you spot a mistake after submitting, message the office from this clearance&rsquo;s
+              card and they can send the form back to you.
+            </p>
+          </ProtoModal>
+        )}
       </div>
     )
   }
@@ -1271,7 +1442,30 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         {note}
       </p>
 
-      <ul id="clearance-cards" className="grid list-none gap-5 p-0 sm:grid-cols-2 xl:grid-cols-3">
+      {/*
+        ── Flex, not grid, so the last row centres ─────────────────────────────
+        *
+        * This was `grid sm:grid-cols-2 xl:grid-cols-3`. Five cards over three
+        * columns leaves two on the bottom row, and a grid pins them to the
+        * first two tracks with a column-wide hole on the right — which is what
+        * the client asked about on 17 September 2026. Nothing in CSS grid
+        * centres an incomplete final row; `justify-items` centres each card
+        * inside its own track, not the row inside the container.
+        *
+        * Flex-wrap with `justify-center` does, and the widths below reproduce
+        * the same 1 / 2 / 3 columns at the same breakpoints, so a full row is
+        * laid out exactly as it was. The arithmetic is the gap shared out: at
+        * two columns each card gives up half a gap, at three columns two
+        * thirds of one.
+        *
+        * `grow-0` is load-bearing. Let the cards grow and the last two would
+        * stretch to fill the row instead of centring — which is the same
+        * lopsided result in a different shape.
+        */}
+      <ul
+        id="clearance-cards"
+        className="flex list-none flex-wrap justify-center gap-5 p-0"
+      >
         {visibleRows.map((row) => {
           const code = row.permit_type.code
           const busy = busyCode === code
@@ -1295,9 +1489,12 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
            * the one thing they still have to do.
            *
            * `mode` is the honest signal: it is set the moment Apply is pressed
-           * and says which of the two routes was taken.
+           * and says which of the two routes was taken. This card read it
+           * inline, ahead of the predicate — which fixed the label here and
+           * left every OTHER caller reading the stale half-answer. `mode` is
+           * inside `clearanceStarted` now, so the plain call is the fix.
            */
-          const applied = row.mode === 'apply' || clearanceStarted(row.state)
+          const applied = clearanceStarted(row)
           /*
            * Has this clearance gone to its office?
            *
@@ -1313,8 +1510,15 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
            * accepted it stayed live, took a file, and was refused by the server
            * afterwards ("the office has already started on your …"). Offering a
            * control the server will refuse is CLR-4, by name, on this screen.
+           *
+           * Its own predicate, and not `clearanceStarted`, which now reads
+           * `mode` as well. "The applicant applied" and "the office has it" are
+           * different questions and were only ever one line apart by accident:
+           * folding `mode` in here would have declared a blank sheet handed in
+           * the moment Apply was pressed, turning Apply into View and hiding
+           * Submit on the one card the applicant still had work to do on.
            */
-          const handedIn = clearanceStarted(row.state) && row.state !== 'returned'
+          const handedIn = clearanceWithOffice(row.state)
           const held = row.held_document
           const appliesTo = APPLICABILITY[code]
           const appliesToId = `clearance-applies-${code}`
@@ -1332,7 +1536,10 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
               .join(' ') || undefined
 
           return (
-            <li key={code} className="flex flex-col rounded-2xl bg-white px-5 py-5 shadow-card">
+            <li
+              key={code}
+              className="flex grow-0 basis-full flex-col rounded-2xl bg-white px-5 py-5 shadow-card sm:basis-[calc(50%-0.625rem)] xl:basis-[calc(33.3333%-0.8334rem)]"
+            >
               {/*
                 No status badge beside the name. It said "Applied for" three
                 inches above a button that already reads "Applied ✓", so the
@@ -1475,11 +1682,56 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                 opened nothing. Do not re-solve this by making Apply a toggle.
               */}
 
-              {row.state === 'rejected' && (
-                <div className="mt-3 rounded-md border border-s-red/40 bg-s-red/10 px-3 py-2">
-                  <p className="text-xs font-bold text-s-red">This office refused it</p>
-                  <p className="mt-1 text-xs text-ink-secondary">
-                    {row.assignment?.remarks ?? 'No reason was recorded.'}
+              {/*
+                ── The "This office refused it" panel was here ─────────────────
+
+                It rendered for `state === 'rejected'` and read
+                `assignment.remarks`, and it was wrong twice over. The state
+                was unreachable — nothing could reject a clearance — and the
+                column was the wrong one: a return writes the PIVOT's remarks,
+                and the assignment's are written on an APPROVAL, so the panel
+                could have shown an approval note under "refused".
+
+                Removed with the state on 17 September 2026 (*"I think Return is
+                enough already"*). What the applicant needs in its place is the
+                RETURN note, which is what follows and reads `return_note` — the
+                column the office actually writes.
+              */}
+
+              {row.state === 'returned' && (
+                <div className="mt-3 rounded-md border border-s-rose bg-s-rose-tint px-3 py-2.5">
+                  <p className="text-xs font-bold text-ink">
+                    {row.permit_type.department?.name ?? 'This office'} asked for changes
+                    {/*
+                      Elapsed time, never a due date. RA 11032 fixes the
+                      OFFICE's clock and not the citizen's, and Malabon has
+                      given us no Citizen's Charter response window (open
+                      question A10) — so a deadline here would be one no
+                      ordinance backs.
+                    */}
+                    {row.returned_at !== null && ` ${formatRelative(row.returned_at)}`}
+                  </p>
+                  {/*
+                    The officer's own words. Quoted, so it reads as a person
+                    speaking rather than as the system's wording — and nothing
+                    is invented when the box was somehow empty, because the line
+                    above has already said what happened.
+                  */}
+                  {row.return_note !== null && row.return_note.trim() !== '' && (
+                    <p className="mt-1 text-xs italic leading-relaxed text-ink-secondary">
+                      “{row.return_note}”
+                    </p>
+                  )}
+                  {/*
+                    What to do about it. The sheet reopens editable on a
+                    returned permit — `OfficeFormController::ownerMayEdit`
+                    allows it — so this is the whole of the compliance loop:
+                    read, fix, hand back.
+                  */}
+                  <p className="mt-1.5 text-xs text-ink-secondary">
+                    {row.has_office_form
+                      ? 'Open the form below, make the change and submit it again.'
+                      : 'Upload a corrected copy below.'}
                   </p>
                 </div>
               )}
@@ -1600,7 +1852,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   * about it — a submitted clearance can never take a swap — and
                   * a permanently dead button in the layout is furniture, which
                   * is precisely what this card has twice been stripped of.
-                  * `View form` beside it is the control that still means
+                  * `View submitted form` beside it is the control that still means
                   * something here.
                   */}
                 {!handedIn && (
@@ -1716,7 +1968,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
                   {busy
                     ? 'Working…'
                     : handedIn
-                      ? 'View form'
+                      ? 'View submitted form'
                       : applied
                         ? 'Finish form'
                         : 'Apply'}
@@ -1779,7 +2031,7 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
             here would make a free, reversible change look like the deletion
             happening in the OTHER dialog, which really is one.
           */}
-          {clearanceStarted(heldPrompt.state) && heldPrompt.held_document === null && (
+          {clearanceStarted(heldPrompt) && heldPrompt.held_document === null && (
             <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-3.5 py-3">
               <p className="text-sm font-semibold text-blue-900">
                 You applied for this one. Submitting your own copy replaces that.
@@ -1897,58 +2149,6 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
         </ProtoModal>
       )}
 
-      {submitPrompt && (
-        /*
-          ── The last look before a one-way press ─────────────────────────────
-
-          The client asked for it by name: "before submitting each form, please
-          create a modal that will ask them if they are already finished
-          reviewing before submitting."
-
-          It earns its place on the same test the two dialogs above pass —
-          something happens here that cannot be undone from this screen. Once
-          submitted the sheet is the office's and the applicant cannot change
-          it; getting it back means messaging the office and asking them to
-          return it. Until today that press was the same size as saving a draft.
-
-          Blue, not red. Nothing is destroyed and nothing is wrong — this is the
-          applicant doing the thing they came to do, and dressing it as a
-          warning would say otherwise. What the dialog adds is the one fact the
-          button cannot: that this is the last moment to change anything.
-        */
-        <ProtoModal
-          title="SUBMIT THIS FORM"
-          cancelLabel="Keep checking"
-          confirmLabel="Yes, submit it"
-          onCancel={() => setSubmitPrompt(null)}
-          onConfirm={() => {
-            setSubmitPrompt(null)
-            void saveForm()
-          }}
-        >
-          <p className="text-center text-base text-ink">
-            Have you finished reviewing your{' '}
-            <span className="font-bold">
-              {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.name ??
-                'application form'}
-            </span>
-            ?
-          </p>
-          <p className="mt-3 text-center text-sm text-ink-secondary">
-            Once you submit it,{' '}
-            <span className="font-semibold text-ink">
-              {rows?.find((r) => r.permit_type.code === submitPrompt)?.permit_type.department
-                ?.name ?? 'the issuing office'}
-            </span>{' '}
-            receives it and you will not be able to change your answers. You can still read them
-            back at any time.
-          </p>
-          <p className="mt-3 text-center text-sm text-ink-secondary">
-            If you spot a mistake after submitting, message the office from this clearance&rsquo;s
-            card and they can send the form back to you.
-          </p>
-        </ProtoModal>
-      )}
     </div>
   )
 }

@@ -33,26 +33,38 @@ use App\Models\DocumentType;
  *
  * ── What is NOT collected twice ────────────────────────────────────────────
  *
- * Three of the paper's items are already on the filing by the time the
- * applicant reaches this sheet, and they are shown as satisfied rather than
- * asked for again:
+ * FIVE of the paper's items are already on the filing by the time the applicant
+ * reaches this sheet, and they are shown as satisfied rather than asked again:
  *
- *  - DTI / SEC Articles is `DTI_SEC_CDA`, mandatory on every business permit
- *    filing at step 4 of the wizard.
- *  - The title (owned) and the lease (rented) are both `LEASE_TITLE`, whose
- *    name is literally "Lease Contract or Land Title" — the document type is
- *    already the same branch this checklist makes, and BPLO requires it of
- *    everyone.
+ *  - DTI / SEC Articles is `DTI_SEC_CDA`.
+ *  - The title (owned) is `LAND_TITLE`; the lease (rented) is `LEASE_CONTRACT`.
+ *  - The sketch is `LOCATION_SKETCH` — BPLO's documentary requirements item 5,
+ *    "Sketch and photos of location of business".
+ *  - The authorisation is `SPA_AUTHORIZATION` — BPLO's item 6.
  *  - "Completely filled-up the application form" is THIS sheet. It is ticked
  *    when the sheet has been submitted, and nothing is uploaded for it.
  *
+ * ── The title and lease pointers were BROKEN for one release ──────────────
+ *
+ * Both said `LEASE_TITLE`, which was correct while BPLO demanded a single
+ * "Lease Contract or Land Title" of every filing. On 16 September 2026 that
+ * requirement was split in two and gated on the rent answer, and LEASE_TITLE
+ * was detached from the business permit — leaving these two rows pointing at a
+ * document nobody is asked for any more. They rendered as "attached with your
+ * business permit documents" and could never be satisfied, with no upload slot
+ * to fix it, because a carried row has none by design.
+ *
+ * Any future change to BPLO's requirement list has to come back here. A carried
+ * row is a claim about another screen, and nothing fails loudly when that claim
+ * stops being true.
+ *
  * ASSUMPTION, recorded because it is the one judgement call in the mapping:
- * that CPDD's "Transfer Certificate of Title" and BPLO's "Land Title" are the
- * same piece of paper, and its "Contract of Lease" and BPLO's "Lease Contract"
- * likewise. If CPDD wants its own copy regardless — offices do sometimes keep
- * separate files — these two become upload slots like the rest, which is a
- * one-line change to `carriedFrom` below. See questions-for-malabon C9 item 4,
- * which asked this and has not been answered.
+ * that CPDD's "Transfer Certificate of Title" and BPLO's "Tax Declaration /
+ * Transfer Certificate of Title (TCT)" are the same piece of paper, and its
+ * "Contract of Lease" and BPLO's likewise. If CPDD wants its own copy regardless — offices do sometimes
+ * keep separate files — these become upload slots like the rest, a one-line
+ * change to `carried_from` below. See questions-for-malabon C9 item 4, which
+ * asked this and has not been answered.
  *
  * ── Nothing here blocks ────────────────────────────────────────────────────
  *
@@ -92,7 +104,7 @@ final class ZoningRequirements
             'label' => 'Transfer Certificate of Title (TCT)',
             'when' => 'owned',
             'note' => 'The land title for the property, which you attached with your business permit documents.',
-            'carried_from' => 'LEASE_TITLE',
+            'carried_from' => 'LAND_TITLE',
         ],
         [
             'key' => 'TAX_DECLARATION',
@@ -113,7 +125,7 @@ final class ZoningRequirements
             'label' => 'Contract of Lease',
             'when' => 'rented',
             'note' => 'Your lease over the premises, which you attached with your business permit documents.',
-            'carried_from' => 'LEASE_TITLE',
+            'carried_from' => 'LEASE_CONTRACT',
         ],
         [
             'key' => 'LOT_OWNER_CONSENT',
@@ -133,8 +145,8 @@ final class ZoningRequirements
             'key' => 'SKETCH',
             'label' => 'Sketch of the Location',
             'when' => 'always',
-            'note' => 'A hand-drawn map of how to reach the site, showing street names and nearby landmarks. Draw it, photograph it, and upload the photo.',
-            'carried_from' => null,
+            'note' => 'The sketch and photos you attached with your business permit documents.',
+            'carried_from' => 'LOCATION_SKETCH',
         ],
         [
             'key' => 'DECLARATION',
@@ -142,13 +154,38 @@ final class ZoningRequirements
             'when' => 'always',
             'note' => 'Download the template below, sign it before a notary, then upload the scan. The paper says it MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION.',
             'carried_from' => null,
+            /*
+             * ── The one row on this checklist that is a gate ─────────────────
+             *
+             * The panel's rule is that nothing here blocks the submit: CPDD's
+             * paper is a counter checklist a clerk ticks on receipt, and a
+             * missing lease or tax declaration is a conversation with the
+             * office rather than a reason to refuse the form. That is still
+             * right for every other row.
+             *
+             * This one says otherwise in its own capitals — MUST BE NOTARIZED
+             * PRIOR TO SUBMISSION OF APPLICATION — and the client read the
+             * consequence off the screen: *"I wonder how I was able to submit
+             * the Locational Clearance without submitting the Applicant
+             * Declaration."* (17 September 2026.) Nothing downstream can
+             * repair it either. A zoning application whose declaration is not
+             * sworn is not an application CPDD can act on, so submitting
+             * without it buys the applicant a return trip and a second wait.
+             *
+             * Notarisation itself is still an open question with the LGU
+             * (questions-for-malabon C9 item 2) and this does not settle it —
+             * what it settles is that the scan has to BE here, however the
+             * signing happens. If BPLO comes back and says the counter accepts
+             * an unsworn copy, this flag is the one line to turn off.
+             */
+            'blocking' => true,
         ],
         [
             'key' => 'AUTHORIZATION',
             'label' => 'Authorization Letter',
             'when' => 'representative',
-            'note' => 'Asked only because you named an authorised representative on item IX. It lets them file and collect on your behalf.',
-            'carried_from' => null,
+            'note' => 'The authorisation you attached with your business permit documents, for the person filing on your behalf.',
+            'carried_from' => 'SPA_AUTHORIZATION',
         ],
     ];
 
@@ -224,6 +261,20 @@ final class ZoningRequirements
                 'note' => $row['note'],
                 'source' => $source,
                 'satisfied' => $source === 'sheet' ? $submitted : $document !== null,
+                /*
+                 * Whether an unsatisfied row stops the applicant handing the
+                 * sheet in. Absent means no, which is what every row but the
+                 * declaration wants — see the note on that row.
+                 *
+                 * Emitted per row rather than kept as a list of keys in the
+                 * browser for the reason this whole class exists: the checklist
+                 * has two consumers, the applicant's sheet and CPDD's review
+                 * screen, and a rule private to one of them is the defect this
+                 * codebase keeps paying for. The one that gates the submit and
+                 * the one that shows an officer what is outstanding now read
+                 * the same field.
+                 */
+                'blocking' => $row['blocking'] ?? false,
                 'document' => $document,
             ];
         }
@@ -298,7 +349,7 @@ final class ZoningRequirements
         return ApplicationDocument::with('documentType:id,code')
             ->where('application_id', $application->id)
             ->whereNull('permit_type_id')
-            ->whereHas('documentType', fn ($q) => $q->whereIn('code', ['DTI_SEC_CDA', 'LEASE_TITLE']))
+            ->whereHas('documentType', fn ($q) => $q->whereIn('code', ['DTI_SEC_CDA', 'LAND_TITLE', 'LEASE_CONTRACT', 'LOCATION_SKETCH', 'SPA_AUTHORIZATION']))
             ->latest('id')
             ->get()
             ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)

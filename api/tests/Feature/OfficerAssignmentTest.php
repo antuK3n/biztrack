@@ -905,3 +905,46 @@ it('keeps the caseload move behind oic.assign, not merely user.manage', function
             'to_user_id' => null, 'scope' => 'all', 'reason' => 'x',
         ])->assertForbidden();
 });
+
+/*
+ * ── The officer's sheet carries the named owner (BPLO items 11 / 12) ──────
+ *
+ * Reported 16 September 2026: the review sheet showed "—" for Owner /
+ * Representative and Gender on a sole proprietorship whose applicant had given
+ * both.
+ *
+ * Nothing was missing from the database. `BusinessResource` serialises the
+ * owner behind `whenLoaded('owners')`, which OMITS the key when the relation
+ * is not loaded rather than lazy-loading it — deliberate, because it is what
+ * stops a list endpoint firing a query per row, and treacherous, because a
+ * forgotten eager-load then reads on screen as an unanswered question instead
+ * of as an error.
+ *
+ * The applicant's own detail path had already been bitten by this and carries
+ * a note saying so ("the KEY IS ABSENT from the payload rather than null …
+ * Silent, and only visible on a reopen"). The officer path was simply missed.
+ *
+ * So this asserts the PAYLOAD rather than the load list: a future refactor may
+ * legitimately change how the relation is loaded, and what must not change is
+ * that the reviewing officer can see whose business they are approving.
+ */
+it('serves the named owner to the reviewing officer', function () {
+    $officer = authAs('bplo@biztrack.local');
+
+    $assignment = ApplicationAssignment::with('application.business')
+        ->whereHas('application.business.owners')
+        ->first();
+
+    expect($assignment)->not->toBeNull('no assignment has a business with a named owner');
+
+    $owner = $this->withHeaders($officer)
+        ->getJson("/api/v1/assignments/{$assignment->id}")
+        ->assertOk()
+        ->json('data.application.business.owner');
+
+    // The key exists AND carries a name — `whenLoaded` failing drops the key
+    // entirely, so asserting on the surname alone would pass a null payload.
+    expect($owner)->toBeArray()
+        ->and($owner['surname'] ?? null)->not->toBeEmpty()
+        ->and($owner)->toHaveKeys(['surname', 'given_name', 'middle_name', 'suffix', 'gender']);
+});

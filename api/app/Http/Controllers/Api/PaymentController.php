@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PaymentResource;
 use App\Models\Application;
 use App\Models\Payment;
+use App\Models\PermitType;
+use App\Services\FeeCalculator;
 use App\Services\PaymentGateway;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
@@ -45,6 +47,71 @@ class PaymentController extends Controller
             'data' => [
                 'line_items' => $fee->line_items,
                 'total_amount' => $fee->total_amount,
+            ],
+        ]);
+    }
+
+    /**
+     * What this filing would be billed, computed and thrown away.
+     *
+     * The wizard's fee step asked for a tax bracket, gross sales, a storey
+     * count and a handful of flags, and showed the applicant NOTHING in return
+     * — the amount appeared only after BPLO approved the form and the Tax Order
+     * of Payment was raised. The client's question was the reasonable one: why
+     * does this step exist? Data entry with no visible output invites exactly
+     * that, so the step now shows what the answers produce.
+     *
+     * ── Nothing is persisted, deliberately ───────────────────────────────────
+     *
+     * `GET /fee` above cannot serve this: it calls `assessFees`, which does
+     * `FeeAssessment::updateOrCreate`. Polling that while somebody types would
+     * write an assessment row per keystroke-debounce and leave a draft carrying
+     * a Tax Order of Payment nobody raised — and the real bill is supposed to
+     * be raised once, at submission, over a final permit set. `FeeCalculator`
+     * itself is pure, so this sets the inputs in memory, assesses, and returns.
+     *
+     * The profile comes from the REQUEST rather than the draft so the figure
+     * tracks what is on screen instead of lagging a step behind the autosave.
+     * It is not validated field by field: nothing is stored, the calculator
+     * coerces what it reads, and the same profile is validated properly by
+     * `ApplicationController::update` when it is actually saved.
+     */
+    public function feePreview(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+
+        $request->validate(['fee_profile' => ['sometimes', 'array']]);
+
+        $application->loadMissing('business.lines');
+
+        /*
+         * In memory only — no save() anywhere in this method. `fee_profile` is
+         * a cast attribute, so assigning it is enough for the calculator to
+         * read it.
+         */
+        if ($request->has('fee_profile')) {
+            $application->fee_profile = $request->input('fee_profile');
+        }
+
+        /*
+         * The set submission WILL attach, not the one the draft holds. A new
+         * filing carries only the business permit while the wizard is open, so
+         * assessing over that would quote one permit and omit the five
+         * clearances the applicant is about to pay for. Shared with
+         * `attachRequiredPermitTypes` so the estimate and the bill cannot
+         * disagree about which permits are being priced.
+         */
+        $application->setRelation(
+            'permitTypes',
+            PermitType::whereIn('id', WorkflowService::permitTypeIdsAtSubmission($application))->get(),
+        );
+
+        $assessed = app(FeeCalculator::class)->assess($application);
+
+        return response()->json([
+            'data' => [
+                'line_items' => $assessed['items'],
+                'total_amount' => $assessed['total'],
             ],
         ]);
     }

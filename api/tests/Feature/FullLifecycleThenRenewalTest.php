@@ -7,6 +7,7 @@ use App\Models\Department;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Models\UnbilledPermitFee;
 use App\Models\User;
 
 /*
@@ -150,17 +151,6 @@ function clearanceEndToEnd(int $appId, string $code): void
 }
 
 /** BPLO's last act: every office is done, so issue. */
-function bploIssues(int $appId, string $remarks): void
-{
-    authAs('bplo@biztrack.local');
-    $assignment = ApplicationAssignment::where('application_id', $appId)
-        ->where('department_id', Department::where('code', 'BPLO')->value('id'))
-        ->firstOrFail();
-
-    test()->postJson("/api/v1/assignments/{$assignment->id}/approve", ['remarks' => $remarks])
-        ->assertOk();
-}
-
 function permitCodesOn(int $appId): array
 {
     return Application::findOrFail($appId)
@@ -199,10 +189,15 @@ it('walks a new application from filing to every permit issued', function () {
     foreach (array_keys(OFFICER_FOR) as $code) {
         clearanceEndToEnd($appId, $code);
     }
-    expect(Application::find($appId)->status->value)->toBe('for_final_approval');
-
-    // ── 5. BPLO's final approval ─────────────────────────────────────────
-    bploIssues($appId, 'All clearances secured. Business permit approved.');
+    /*
+     * The fifth clearance closes the filing outright — there is no step 5.
+     *
+     * BPLO's final approval used to sit here. The client asked what it checked
+     * when every clearance is applied for and approved inside BizTrack, and the
+     * answer was nothing, so `refreshReadiness()` now issues the Mayor's Permit
+     * as the last office finishes. The stage survives only on the renewal path,
+     * which is the second half of this very test.
+     */
     expect(Application::find($appId)->status->value)->toBe('approved');
 
     // ── 6. Six certificates, one per permit ──────────────────────────────
@@ -272,23 +267,53 @@ it('renews two of the six and issues only those', function () {
     expect(Application::find($appId)->permitTypes()->pluck('code')->sort()->values()->all())
         ->toBe($renewCodes);
 
-    // ── 2. The same path a new filing takes ──────────────────────────────
-    bploAccepts($appId, 'Renewal form complete.');
+    /*
+     * ── 2. NOT the path a new filing takes, since 17 September 2026 ──────────
+     *
+     * This walked the renewal through BPLO and a payment: `bploAccepts`, then
+     * `/pay`, then a final BPLO approval at the end. None of that happens on a
+     * renewal carrying no business permit any more.
+     *
+     *  - BPLO is never routed it (`submit` skips the routing), so `bploAccepts`
+     *    failed looking up an assignment that does not exist — which is how
+     *    this test caught the change.
+     *  - it is never billed. The fee is collected on the next business permit
+     *    renewal, so there is nothing to pay here and `/pay` has no bill.
+     *  - it closes itself when the last permit is granted, so there is no
+     *    final approval to give.
+     *
+     * The three properties this test was written for are unchanged and still
+     * asserted: the permit set is not expanded, the stage offers two rather
+     * than five, and exactly two certificates come out.
+     */
+    expect(Application::find($appId)->defersPayment())->toBeTrue();
 
+    // No BPLO queue item on a filing BPLO has no say in.
+    expect(ApplicationAssignment::where('application_id', $appId)->count())->toBe(0);
+
+    // The stage is already open — there is no payment to wait for.
     authAs('owner@biztrack.local');
-    $this->postJson("/api/v1/applications/{$appId}/pay", ['method' => 'gcash'])->assertCreated();
-
-    // The clearance stage offers the two, not five.
-    $rows = $this->getJson("/api/v1/applications/{$appId}/clearances")->assertOk()->json('data');
-    expect(collect($rows)->pluck('permit_type.code')->sort()->values()->all())->toBe($renewCodes);
+    $rows = $this->getJson("/api/v1/applications/{$appId}/clearances")->assertOk();
+    expect($rows->json('meta.unlocked'))->toBeTrue();
+    expect(collect($rows->json('data'))->pluck('permit_type.code')->sort()->values()->all())
+        ->toBe($renewCodes);
 
     foreach ($renewCodes as $code) {
         clearanceEndToEnd($appId, $code);
     }
-    expect(Application::find($appId)->status->value)->toBe('for_final_approval');
 
-    // ── 3. Approval issues the two renewed certificates and no others ────
-    bploIssues($appId, 'Renewal approved.');
+    /*
+     * ── 3. It closed itself, and issued exactly the two ─────────────────────
+     */
     expect(Application::find($appId)->status->value)->toBe('approved');
     expect(permitCodesOn($appId))->toBe($renewCodes);
+
+    /*
+     * And the money is waiting for January rather than lost. Two permits
+     * issued unpaid, two receivables against the business — which is the whole
+     * of the deferral the client asked for, seen from the HTTP side.
+     */
+    $deferred = UnbilledPermitFee::where('business_id', $businessId)->outstanding()->get();
+    expect($deferred)->toHaveCount(2);
+    expect($deferred->sum('amount'))->toBeGreaterThan(0);
 })->group('lifecycle');

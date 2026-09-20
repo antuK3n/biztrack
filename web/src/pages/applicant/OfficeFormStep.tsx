@@ -462,6 +462,47 @@ function ControlNoField({
   )
 }
 
+/**
+ * Which answers on this sheet are still last year's, offered and unreviewed.
+ *
+ * A CONTEXT rather than a prop threaded through five sheet components and
+ * thirty controls, for the same reason `ReadOnlyContext` above is one: the
+ * fields that need it are scattered, the value is the same for all of them,
+ * and passing it by hand is how one sheet ends up not getting it.
+ */
+const CarriedContext = createContext<string[]>([])
+
+/**
+ * "From your 2026 application" — the flag on a carried answer.
+ *
+ * ── Why per field and not one banner ──────────────────────────────────────
+ *
+ * Client's decision, 18 September 2026. A single notice at the top of the
+ * sheet cannot say WHICH answers came from last year, so on a long form it
+ * stops meaning anything — the applicant reads it once and then cannot tell a
+ * carried answer from one they have already checked. Per field, the flag is
+ * also self-clearing: it is rendered from the set of keys whose value is still
+ * the offered one, so touching the field removes it.
+ *
+ * Renders nothing when the key is not carried, which is every field on a new
+ * application and every field the applicant has since edited. So it is safe to
+ * place beside any answer that CAN carry, and costs nothing where it cannot.
+ *
+ * The year comes from the answer's own provenance and is not printed: the sheet
+ * does not know which filing the answer came from, only that it did, and
+ * inventing "2026" would be wrong the moment a business skipped a year.
+ */
+function CarriedTag({ field }: { field: string }) {
+  const carried = useContext(CarriedContext)
+  if (! carried.includes(field)) return null
+
+  return (
+    <span className="mt-1 block text-xs font-normal text-s-orange-ink">
+      From your previous application — check this is still right
+    </span>
+  )
+}
+
 const AutoTag = () => <span className="font-normal text-ink-muted"> (auto-generated)</span>
 
 const FromApplicationTag = () => (
@@ -740,6 +781,7 @@ function ZoningFields({
             placeholder="No. of Street, Barangay, Municipality/City, Province"
             className={inputCls}
           />
+          <CarriedTag field="zoning_home_address" />
         </label>
 
         {/* III. NAME OF FIRM · CONTACT NO.  |  IV. ADDRESS OF FIRM */}
@@ -793,6 +835,7 @@ function ZoningFields({
             placeholder="e.g. Two-storey coffee shop with a small roasting area at the rear"
             className={inputCls}
           />
+          <CarriedTag field="zoning_project_description" />
           <p className="mt-1 text-xs text-ink-muted">
             In your own words, what will be built or operated at this address.
           </p>
@@ -804,22 +847,69 @@ function ZoningFields({
             value={get(data, 'total_floor_area_sqm')}
             hint="Square metres, from your Business Operation answers."
           />
-          <DerivedField
-            label={<>No. of Storey of Building<FromApplicationTag /></>}
-            value={get(data, 'building_storeys')}
-          />
+          {/*
+            VIII.B — asked here now, not carried.
+
+            It was derived from `fee_profile.storeys`, which the BPLO wizard
+            collected on its Tax Classification & Fees step until 16 September
+            2026. That box was removed because it priced nothing: measured
+            against a filing holding all six clearances, the storey count moved
+            the total by zero pesos. Only two fee rules read it at all — a
+            lessor's building, by storey — and both need a fine permit category
+            that is one of the sixty still open with BPLO.
+
+            So the only consumer left was this line, on the one paper that
+            actually asks for it. Left derived, it would print empty forever —
+            exactly what happened to the lessor boxes below.
+          */}
+          <label className="block">
+            <FieldLabel>No. of Storey of Building</FieldLabel>
+            <input
+              value={get(data, 'building_storeys')}
+              onChange={(e) => set('building_storeys', e.target.value)}
+              readOnly={ro}
+              inputMode="numeric"
+              placeholder="e.g. 2"
+              className={inputCls}
+            />
+            <CarriedTag field="building_storeys" />
+          </label>
           {/*
             VIII.C and VIII.D — "(if lessee)" on the paper, so they are blank on
             an owner-occupied site by design rather than by omission.
           */}
-          <DerivedField
-            label={<>Name of Lessor (if lessee)<FromApplicationTag /></>}
-            value={get(data, 'lessor_name')}
-          />
-          <DerivedField
-            label={<>Address of Lessor (if lessee)<FromApplicationTag /></>}
-            value={get(data, 'lessor_address')}
-          />
+          {/*
+            Asked here, not carried. They were read-only, derived from
+            `businesses.lessor_name` / `lessor_address` — which the BPLO wizard
+            collected until 16 September 2026, when the client removed those
+            boxes as absent from MCG-BPLO-FO-001. They were right: that form
+            asks whether rent is paid and nothing about the lessor.
+            MCG-CPDD-FO-003 is the paper that asks, so this is the sheet that
+            takes the answer. Left derived, both boxes would print empty
+            forever.
+          */}
+          <label className="block">
+            <FieldLabel>Name of Lessor (if lessee)</FieldLabel>
+            <input
+              value={get(data, 'lessor_name')}
+              onChange={(e) => set('lessor_name', e.target.value)}
+              readOnly={ro}
+              placeholder="Full name"
+              className={inputCls}
+            />
+            <CarriedTag field="lessor_name" />
+          </label>
+          <label className="block">
+            <FieldLabel>Address of Lessor (if lessee)</FieldLabel>
+            <input
+              value={get(data, 'lessor_address')}
+              onChange={(e) => set('lessor_address', e.target.value)}
+              readOnly={ro}
+              placeholder="No. of Street, Barangay, Municipality/City"
+              className={inputCls}
+            />
+            <CarriedTag field="lessor_address" />
+          </label>
         </div>
 
         <div>
@@ -830,6 +920,7 @@ function ZoningFields({
             value={get(data, 'zoning_industrial_project_type')}
             onChange={(v) => set('zoning_industrial_project_type', v)}
           />
+          <CarriedTag field="zoning_industrial_project_type" />
           <p className="mt-1 text-xs text-ink-muted">
             Only for industrial projects. Leave it alone if yours is not one.
           </p>
@@ -863,6 +954,7 @@ function ZoningFields({
               placeholder="Full name"
               className={inputCls}
             />
+            <CarriedTag field="authorized_representative" />
             <p className="mt-1 text-xs text-ink-muted">
               Leave blank if you are filing this yourself. If you name someone, CPDD asks for an
               authorization letter with your documents.
@@ -919,6 +1011,7 @@ function SanitaryFields({
             value={get(data, 'sanitary_classification')}
             onChange={(v) => set('sanitary_classification', v)}
           />
+          <CarriedTag field="sanitary_classification" />
         </div>
         <div className="grid gap-5 sm:grid-cols-2">
           {/*
@@ -961,6 +1054,7 @@ function SanitaryFields({
                 </option>
               ))}
             </select>
+            <CarriedTag field="water_source" />
           </div>
         </div>
       </section>
@@ -1021,13 +1115,31 @@ const DENR_GLOSSARY: { code: string; meaning: string }[] = [
  * exists to answer: uploading the wrong scan is the easiest mistake here, and
  * it was the one mistake the screen would not let you check for.
  *
- * ── Nothing here blocks the submit button ─────────────────────────────────
+ * ── One row here blocks the submit button, and only one ───────────────────
  *
- * The paper is a counter checklist a clerk ticks on receipt, not a gate, and
- * the notarised declaration in particular cannot be a precondition of an online
- * form — how notarisation is meant to work in this flow is still an open
- * question with the LGU (questions-for-malabon C9 item 2). So an incomplete
- * checklist is shown, said plainly, and submitted anyway.
+ * The paper is a counter checklist a clerk ticks on receipt, not a gate, so a
+ * missing lease or tax declaration is shown, said plainly, and submitted
+ * anyway. A document the applicant is still chasing from another office is not
+ * a reason to refuse them the form.
+ *
+ * The notarised Applicant Declaration was excepted from that on 17 September
+ * 2026, on the client's report: *"I wonder how I was able to submit the
+ * Locational Clearance without submitting the Applicant Declaration."* Its own
+ * line on the paper is in capitals — MUST BE NOTARIZED PRIOR TO SUBMISSION OF
+ * APPLICATION — and unlike the others nothing downstream repairs it: a zoning
+ * application whose declaration is not sworn is not one CPDD can act on, so
+ * letting it through buys the applicant a return trip.
+ *
+ * The earlier reasoning here was that notarisation "cannot be a precondition of
+ * an online form" because how it works in this flow is an open question with
+ * the LGU (questions-for-malabon C9 item 2). That question is still open and
+ * this does not close it — what is settled is that the SCAN must be here,
+ * whatever route the signing takes.
+ *
+ * Which rows gate is `blocking` on each row, decided by
+ * `App\Support\ZoningRequirements` and read by both this panel and CPDD's
+ * review screen. The gate itself is applied in ClearanceStagePage, beside the
+ * answer check it is added to.
  */
 /**
  * The heading and the office's own name, per sheet.
@@ -1046,6 +1158,7 @@ const REQUIREMENTS_META: Partial<Record<OfficeFormCode, { title: string; office:
 function RequirementsChecklist({
   code,
   rows,
+  returnTarget = null,
   busy,
   error,
   onChange,
@@ -1053,6 +1166,8 @@ function RequirementsChecklist({
 }: {
   code: OfficeFormCode
   rows: OfficeFormRequirement[]
+  /** The row an office pointed at on a return; see OfficeFormStep. */
+  returnTarget?: string | null
   busy: string | null
   error: string | null
   onChange?: (documentCode: string, file: File | null) => void
@@ -1060,6 +1175,15 @@ function RequirementsChecklist({
 }) {
   const ro = useReadOnly()
   const outstanding = rows.filter((r) => !r.satisfied).length
+  /*
+   * The rows that stop the submit, named. `blocking` is the server's flag (see
+   * the note above the panel), so this reads it rather than deciding it.
+   *
+   * Named and not counted: "1 is still missing" makes the applicant hunt down
+   * the list for which one, and the one that stops them is precisely the one
+   * worth spending the words on.
+   */
+  const blocked = rows.filter((r) => r.blocking === true && !r.satisfied).map((r) => r.label)
   const meta = REQUIREMENTS_META[code] ?? {
     title: 'Requirements',
     office: 'This office',
@@ -1074,11 +1198,25 @@ function RequirementsChecklist({
             ? `What ${meta.office} received with this application.`
             : outstanding === 0
               ? `Everything on ${meta.office}’s list is here.`
-              : `${meta.office} asks for ${rows.length === 1 ? 'this' : 'these'} with the application. ${outstanding} ${
-                  outstanding === 1 ? 'is' : 'are'
-                } still missing — you can submit the form now and add ${
-                  outstanding === 1 ? 'it' : 'them'
-                }, but the office will ask.`}
+              : blocked.length > 0
+                ? /*
+                     The blocking row leads, because until it is dealt with
+                     nothing else on this list matters. The old sentence — "you
+                     can submit the form now and add them, but the office will
+                     ask" — was the promise the client tested and found untrue
+                     of this row, so it is no longer made about a sheet that
+                     cannot be submitted.
+                  */
+                  `${blocked.join(' and ')} ${blocked.length === 1 ? 'has' : 'have'} to be uploaded before you can submit this form.${
+                    outstanding > blocked.length
+                      ? ` The rest you can add later, though ${meta.office} will ask.`
+                      : ''
+                  }`
+                : `${meta.office} asks for ${rows.length === 1 ? 'this' : 'these'} with the application. ${outstanding} ${
+                    outstanding === 1 ? 'is' : 'are'
+                  } still missing — you can submit the form now and add ${
+                    outstanding === 1 ? 'it' : 'them'
+                  }, but the office will ask.`}
         </p>
       </div>
 
@@ -1096,6 +1234,12 @@ function RequirementsChecklist({
           <RequirementRow
             key={row.key}
             row={row}
+            /*
+             * Matched on `code`, the document type — the same value the office
+             * picked from and the same one this row uploads into. Never on the
+             * label, which is prose and is translated and reworded.
+             */
+            flagged={returnTarget !== null && row.code === returnTarget}
             busy={busy === row.code}
             readOnly={ro}
             onChange={onChange}
@@ -1112,12 +1256,15 @@ function RequirementsChecklist({
 /** One checklist row, in the wizard's document-upload shape. */
 function RequirementRow({
   row,
+  flagged = false,
   busy,
   readOnly,
   onChange,
   onDeclarationTemplate,
 }: {
   row: OfficeFormRequirement
+  /** Did the office point at THIS row when it sent the permit back? */
+  flagged?: boolean
   busy: boolean
   readOnly: boolean
   onChange?: (documentCode: string, file: File | null) => void
@@ -1126,7 +1273,17 @@ function RequirementRow({
   const takesFile = row.source === 'upload' && row.code !== null && !readOnly && onChange
 
   return (
-    <div>
+    <div
+      /*
+       * The mark, and it is a tint and a rule rather than a badge: the row
+       * already carries its own tick or box, and a second status chip on it
+       * would compete with the one that says whether the document is there.
+       */
+      className={flagged ? '-mx-3 rounded-md border-l-4 border-s-rose bg-s-rose-tint/40 px-3 py-2' : undefined}
+    >
+      {flagged && (
+        <p className="mb-1 text-xs font-bold text-ink">This is what the office asked about</p>
+      )}
       <p className="flex items-center gap-2 text-sm font-bold text-ink">
         {row.satisfied ? (
           <CheckCircleFilledIcon size={16} className="shrink-0 text-s-green" />
@@ -1583,6 +1740,7 @@ function CecFields({
               placeholder="No. of Street, Barangay, Municipality/City, Province"
               className={inputCls}
             />
+            <CarriedTag field="owner_address" />
           </label>
           <DerivedField
             label={<>Business Address<FromApplicationTag /></>}
@@ -1604,6 +1762,7 @@ function CecFields({
               className={inputCls}
               aria-invalid={birthdayInFuture}
             />
+            <CarriedTag field="owner_birthday" />
             {birthdayInFuture && (
               <p className="mt-1 text-xs font-medium text-s-red">
                 The birthday must be a date in the past.
@@ -1786,6 +1945,7 @@ function OccupancyFields({
               value={get(data, 'application_type')}
               onChange={(v) => set('application_type', v)}
             />
+            <CarriedTag field="application_type" />
           </div>
           <ApplicationDateField data={data} />
           <div>
@@ -1796,6 +1956,7 @@ function OccupancyFields({
               readOnly={ro}
               className={inputCls}
             />
+            <CarriedTag field="building_permit_no" />
           </div>
           <div>
             <FieldLabel>FSEC No.</FieldLabel>
@@ -1805,6 +1966,7 @@ function OccupancyFields({
               readOnly={ro}
               className={inputCls}
             />
+            <CarriedTag field="fsec_no" />
           </div>
         </div>
         {/*
@@ -1829,6 +1991,8 @@ export function OfficeFormSheet({
   onChange,
   readOnly = false,
   requirements,
+  returnTarget = null,
+  carriedKeys = [],
   requirementBusy = null,
   requirementError = null,
   onRequirementChange,
@@ -1846,6 +2010,23 @@ export function OfficeFormSheet({
    * they ask for no documents would be four wrong claims.
    */
   requirements?: OfficeFormRequirement[]
+  /**
+   * The document code or answer key an office pointed at when it sent this
+   * permit back, or null.
+   *
+   * Marks one row so the applicant can see what to fix without reading a
+   * paragraph and guessing. It does NOT gate anything: the client's decision of
+   * 17 September 2026 was highlight-only, because a pointer aimed at the wrong
+   * row — or a fix that turns out to be a phone call — must not leave somebody
+   * unable to resubmit and unable to say so.
+   */
+  returnTarget?: string | null
+  /**
+   * Answers still showing last year's value on a renewal, offered and not yet
+   * reviewed. Flagged per field by `CarriedTag`; see the note there for why it
+   * is not one banner.
+   */
+  carriedKeys?: string[]
   /** The document code with an upload in flight, so one row can say so. */
   requirementBusy?: string | null
   requirementError?: string | null
@@ -1869,6 +2050,8 @@ export function OfficeFormSheet({
 
   return (
     <ReadOnlyContext.Provider value={readOnly}>
+      {/* Which answers are still last year’s; see CarriedTag. */}
+      <CarriedContext.Provider value={carriedKeys}>
     <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
       {readOnly && (
         <div className="mb-6 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">
@@ -1950,6 +2133,7 @@ export function OfficeFormSheet({
           <RequirementsChecklist
             code={code}
             rows={requirements}
+            returnTarget={returnTarget}
             busy={requirementBusy}
             error={requirementError}
             onChange={onRequirementChange}
@@ -1958,6 +2142,7 @@ export function OfficeFormSheet({
         )}
       </div>
     </div>
+      </CarriedContext.Provider>
     </ReadOnlyContext.Provider>
   )
 }

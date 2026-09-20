@@ -90,6 +90,31 @@ export default defineConfig({
    * unchanged, because this was always the cause.
    */
   expect: { timeout: 15_000 },
+
+  /*
+   * ── And the TEST timeout, which was the last one left at the default ──────
+   *
+   * The three above were raised and this one was not, which made them
+   * unreachable: a test cannot spend 30s navigating and 15s asserting inside a
+   * 30s budget. Playwright's default per-test timeout is 30_000, exactly ONE
+   * navigationTimeout, so any test that navigates twice was out of time before
+   * its first assertion — and the failure reads as the product, not the clock.
+   * "Apply did not open the office form", on a form that opens.
+   *
+   * Measured on the isolated stack, `--workers=1`, the clearances spec:
+   *
+   *     every card states its price       1.2m
+   *     Apply always opens the form       1.2m
+   *     a clearance applied for …         1.0m
+   *
+   * Most of that is `makePaidApplication`, which drives the whole wizard, then
+   * BPLO's approval, then a payment — three round trips through a
+   * single-process PHP server before the test's own subject begins. 180s is
+   * roughly two and a half times the worst measured run: enough that a slow
+   * machine is not reported as a broken product, and still short enough that a
+   * genuinely hung test fails inside a coffee break.
+   */
+  timeout: 180_000,
   projects: [
     // Mints the sessions once. Logging in per test tripped the login
     // endpoint's rate limiter, which is a control worth keeping.

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\PermitStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -158,6 +159,27 @@ class Business extends Model
     }
 
     /**
+     * A registration number reduced to what actually identifies the certificate.
+     *
+     * `CS-2018-12345`, `CS201812345` and `cs 2018 12345` are one SEC
+     * certificate typed three ways, and a duplicate check comparing the raw
+     * strings would pass all three as distinct — which makes the check
+     * bypassable by a keystroke rather than by intent. The separators carry no
+     * information: they are how the number is PRINTED, and the printing has
+     * varied by agency and by decade.
+     *
+     * Deliberately not stored. The column keeps what the applicant typed,
+     * because that is what is on the certificate the officer opens; this is a
+     * comparison key computed on both sides of the comparison. Storing a
+     * normalised copy would be a second column to keep in step, and the first
+     * time they disagreed the check would silently pass.
+     */
+    public static function normalizeRegistrationNumber(?string $raw): string
+    {
+        return strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) $raw) ?? '');
+    }
+
+    /**
      * The agency a structure is registered with — "DTI", "SEC" or "CDA".
      *
      * Legacy rows that still hold an agency code answer with themselves, so a
@@ -240,5 +262,63 @@ class Business extends Model
     public function permits(): HasMany
     {
         return $this->hasMany(Permit::class);
+    }
+
+    /**
+     * The one business permit this shop is trading on right now, if any.
+     *
+     * ── Why "current" is a DATE question, not a status one ──────────────────
+     *
+     * A permit's `status` says `active` until somebody writes otherwise, and
+     * expiry is a date passing — nothing writes it down. Measured 19 September
+     * 2026: Nena's Sari-Sari Store holds TWO business permits both reading
+     * `active`, one of which lapsed on 6 September. Filtering on the status
+     * alone would have picked whichever came back first.
+     *
+     * So: the outcome permit type, still `active`, and not past its
+     * `valid_until`. Ordered by the longest remaining cover so that a business
+     * which renewed early — legitimately holding two live rows while the old
+     * term runs out — resolves to the one that outlasts the other.
+     *
+     * There should never be more than one. `issuePermitFor` supersedes the
+     * predecessor when it mints a successor, so the pair above exists only
+     * because DemoSeeder writes permits directly and skips that path. This is
+     * a `hasOne` regardless: the register's answer to "what are you trading
+     * on" is singular even when its rows are untidy.
+     */
+    public function currentBusinessPermit(): HasOne
+    {
+        return $this->hasOne(Permit::class)
+            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->where('status', PermitStatus::Active->value)
+            ->whereDate('valid_until', '>=', now()->toDateString())
+            ->orderByDesc('valid_until')
+            ->orderByDesc('id');
+    }
+
+    /**
+     * Permit fees this business has been issued and not yet billed for.
+     *
+     * The receivable is the BUSINESS's, not any one filing's: the filing that
+     * incurred it is finished and charged nothing, and the filing that will
+     * collect it — the next business permit renewal — may not exist yet. See
+     * `WorkflowService::recordDeferredFee` and the migration that created the
+     * table.
+     */
+    public function unbilledPermitFees(): HasMany
+    {
+        return $this->hasMany(UnbilledPermitFee::class);
+    }
+
+    /**
+     * What this business owes in deferred permit fees, as one figure.
+     *
+     * `outstanding`, not `unclaimed` — a fee already sitting on an unpaid
+     * January renewal is still money the LGU has not received, and an arrears
+     * total that hid it would understate every business mid-renewal.
+     */
+    public function unbilledPermitFeeTotal(): float
+    {
+        return (float) $this->unbilledPermitFees()->outstanding()->sum('amount');
     }
 }

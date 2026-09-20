@@ -37,13 +37,17 @@ class ApplicationPermitType extends Model
     public $incrementing = true;
 
     protected $fillable = [
-        'status', 'mode', 'submitted_at', 'decided_at', 'remarks', 'rejection_reason',
+        'status', 'mode', 'submitted_at', 'decided_at',
+        'remarks', 'remarks_target', 'returned_at',
     ];
 
     protected $casts = [
         'status' => ClearanceStatus::class,
         'submitted_at' => 'datetime',
         'decided_at' => 'datetime',
+        // Or `->toISOString()` on it throws: an uncast timestamp comes back a
+        // string, and the resources format these for the wire.
+        'returned_at' => 'datetime',
     ];
 
     public function application(): BelongsTo
@@ -54,6 +58,51 @@ class ApplicationPermitType extends Model
     public function permitType(): BelongsTo
     {
         return $this->belongsTo(PermitType::class);
+    }
+
+    /**
+     * May an inspection still act on this permit?
+     *
+     * ── Why this is a method and not three copies of a condition ────────────
+     *
+     * Three places used to ask only the first half of this question — "is the
+     * pivot `for_inspection`" — and none asked the second:
+     *
+     *  - `WorkflowService::scheduleClearanceInspection()`, booking a first visit
+     *  - `Inspection::canBeReinspected()`, booking one after a failure
+     *  - `WorkflowService::recordInspection()`, consuming a visit's result
+     *
+     * The pivot rows are never walked back when BPLO ends a filing, so on a
+     * REJECTED application they all still read `for_inspection` and all three
+     * doors stood open. Measured on 18 September 2026: conduct a passing visit
+     * on a rejected filing and the third door answered 200, moved the permit to
+     * `approved` and MINTED THE CERTIFICATE — a Fire Safety clearance issued
+     * against a filing the LGU had refused. The other two book visits that no
+     * transition can ever consume.
+     *
+     * So the question is asked in one place that both halves have to pass, and
+     * the three callers ask it rather than reassembling it. The alternative
+     * considered was walking the pivot rows back in `rejectApplication()`; it
+     * was rejected because `ClearanceStatus::Rejected` was removed on
+     * 17 September at the client's decision, leaving no state to walk them to,
+     * and because leaving them where they stood is the honest record of how far
+     * each permit had got when the filing was refused.
+     *
+     * A read, not a transition — so it does not breach the note above. It
+     * decides nothing and writes nothing; `WorkflowService` remains the only
+     * writer of both status columns.
+     */
+    public function awaitingInspection(): bool
+    {
+        if ($this->status !== ClearanceStatus::ForInspection) {
+            return false;
+        }
+
+        // A decided filing — approved, rejected or cancelled — has no permit
+        // awaiting anything. `isTerminal()` is the flow's own word for it and
+        // is what `ApplicationStatus::allowedNext()` already enforces on the
+        // filing's own status; this carries the same guard down to the permit.
+        return ! ($this->application?->status?->isTerminal() ?? false);
     }
 
     /** The applicant filled this office's form. */
