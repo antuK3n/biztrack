@@ -84,39 +84,54 @@ final class OfficeFormAnswers
                 $derived['total_floor_area_sqm'] = (string) (0 + $floorArea);
             }
 
-            // VIII.B. No. of Storey of Building — the same answer from the same
-            // profile, cast to an int because a building has whole storeys and
-            // "2.0" on a planning form invites a question nobody meant to ask.
+            /*
+             * VIII.B. No. of Storey of Building — a SEED now, not a carry.
+             *
+             * The BPLO wizard stopped asking for the storey count on 16
+             * September 2026: measured against a filing holding all six
+             * clearances it moved the total by zero pesos, and the only two
+             * rules that read it need a fine permit category still open with
+             * BPLO. MCG-CPDD-FO-003 is now the one paper that asks, so the
+             * sheet takes the answer itself and the field there is editable.
+             *
+             * This is kept so a filing saved while the wizard still asked
+             * arrives with the box already filled rather than blank. Cast to
+             * an int because a building has whole storeys and "2.0" on a
+             * planning form invites a question nobody meant to ask.
+             */
             $storeys = $application->fee_profile['storeys'] ?? null;
             if (is_numeric($storeys)) {
                 $derived['building_storeys'] = (string) (int) $storeys;
             }
 
             /*
-             * VIII.C and VIII.D. Name and address of the lessor, which the form
-             * asks only of a lessee.
+             * ── VIII.C and VIII.D are ASKED now, not derived ─────────────────
              *
-             * These were one derived sentence — "Leased from Acme Realty" under a
-             * single `site_tenure` key — which read well and answered neither box.
-             * The paper asks for the name in VIII.C and the address in VIII.D,
-             * and Location & Zoning has already collected both, so both are
-             * carried and neither is retyped.
+             * They were carried from `businesses.lessor_name` and
+             * `lessor_address`, on the reasoning that Location & Zoning had
+             * already collected both and the applicant should not retype them.
+             * That reasoning died with the fields: MCG-BPLO-FO-001 asks whether
+             * rent is paid and nothing about the lessor, so the client removed
+             * the four lessor boxes from the wizard on 16 September 2026.
              *
-             * Derived rather than read from the business on the applicant's
-             * screen so that the OFFICER sees them too: the review sheet renders
-             * `form_data` and nothing else, so a field that only exists on the
-             * applicant's side is a field CPDD cannot check against the lease
-             * contract attached to the filing.
+             * Deriving them now would print two permanently empty boxes on
+             * CPDD's sheet — the office asks "NAME OF LESSOR (IF LESSEE)" and
+             * "ADDRESS OF LESSOR (IF LESSEE)" and would get nothing, because no
+             * screen writes those columns any more. So the SHEET takes the
+             * answer, in the form's own two boxes, and it stays in the sheet's
+             * `form_data` where the officer's review screen already reads it.
              *
-             * Blank on an owner-occupied site by design — the paper's own
-             * "(if lessee)" — and blank on a filing whose business is
-             * soft-deleted, where the tenure question genuinely has no answer.
+             * `is_rented` still decides whether they are shown: the paper's own
+             * "(if lessee)", and that answer is still asked, on section B item
+             * 8. What changed is who types the lessor's details, not who knows
+             * whether there is one.
+             *
+             * The columns are left in place and are still writable through the
+             * business endpoint — 139 filings point at businesses that hold
+             * values, and an office reading an older filing should still find
+             * them. Nothing new is written there.
              */
-            $business = $application->business;
-            if ($business !== null && $business->is_rented) {
-                $derived['lessor_name'] = trim((string) $business->lessor_name);
-                $derived['lessor_address'] = trim((string) $business->lessor_address);
-            }
+            $derived['site_is_rented'] = ($application->business?->is_rented ?? false) ? 'yes' : 'no';
 
             /*
              * IX. Authorized Representative. One answer about the applicant,

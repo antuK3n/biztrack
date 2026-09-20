@@ -11,6 +11,7 @@ use App\Models\BusinessOwner;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\Numbering;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -72,20 +73,29 @@ class BusinessController extends Controller
              * rows that could not be renewed and silently dropped the one that
              * could.
              *
-             * The obvious fix — filter to businesses holding a permit — is
-             * WRONG, and was tried. A renewal may legitimately be filed for a
-             * business with no permit in this system at all: its permit was
-             * issued on paper, which in year one is the common case, and
-             * `prior_permit_declared_none` exists precisely so an applicant can
-             * say so. Filtering would trap exactly those applicants, and
-             * "a business whose permits are on paper is not trapped" is an
-             * asserted rule.
+             * The obvious fix — filter to businesses holding a permit — was
+             * tried and is still not taken, though the reason has changed.
              *
-             * So the answer is ordering, not exclusion: the businesses that can
-             * be renewed surface first, and the paper-permit ones remain
-             * reachable behind them. `withCount` rather than a join because
-             * `permits` is many-per-business and a join would multiply the page.
+             * It used to be that a renewal could legitimately be filed for a
+             * business with no permit here, its permit having been issued on
+             * paper. The client retired that case on 18 September 2026, so such
+             * a business genuinely cannot be renewed now and must file a New
+             * Application instead.
+             *
+             * Exclusion is still the wrong shape. This endpoint feeds a chooser,
+             * and a business that is simply absent from it tells the applicant
+             * nothing about why; one they can pick, and be told "no permit to
+             * renew — file a New Application", tells them both. Filtering here
+             * would move that dead end earlier and make it silent.
+             *
+             * So the answer remains ordering: the businesses that can be renewed
+             * surface first, the rest stay reachable behind them. `withCount`
+             * rather than a join because `permits` is many-per-business and a
+             * join would multiply the page.
              */
+            // Named in the amendment chooser, so it must arrive with the
+            // list rather than a request per row. One constant query.
+            ->with('currentBusinessPermit')
             ->withCount('permits')
             ->orderByRaw('CASE WHEN permits_count > 0 THEN 0 ELSE 1 END')
             ->orderByDesc('created_at')
@@ -112,6 +122,16 @@ class BusinessController extends Controller
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
                 'is_rented' => (bool) ($data['is_rented'] ?? false),
+                /*
+                 * The paper's item 9 maps to this column and nothing had ever
+                 * written it: `pays_rent` sat in the migration and in $fillable
+                 * while every reader and writer used `is_rented`. They are one
+                 * fact — "do you pay rent for occupying a place of business?" —
+                 * so it is filled from the one answer rather than asked twice
+                 * or left reading false on a business that plainly rents.
+                 * Client's decision, 16 September 2026, over dropping it.
+                 */
+                'pays_rent' => (bool) ($data['is_rented'] ?? false),
                 'lessor_name' => $data['lessor_name'] ?? null,
                 'lessor_address' => $data['lessor_address'] ?? null,
                 'lessor_contact' => $data['lessor_contact'] ?? null,
@@ -147,7 +167,7 @@ class BusinessController extends Controller
     public function update(Request $request, Business $business): JsonResponse
     {
         $this->authorizeOwner($request, $business);
-        $data = $this->validateBusiness($request);
+        $data = $this->validateBusiness($request, $business);
 
         DB::transaction(function () use ($business, $data) {
             $business->update([
@@ -158,6 +178,16 @@ class BusinessController extends Controller
                 'registration_number' => $data['registration_number'] ?? null,
                 'tin' => $data['tin'] ?? null,
                 'is_rented' => (bool) ($data['is_rented'] ?? false),
+                /*
+                 * The paper's item 9 maps to this column and nothing had ever
+                 * written it: `pays_rent` sat in the migration and in $fillable
+                 * while every reader and writer used `is_rented`. They are one
+                 * fact — "do you pay rent for occupying a place of business?" —
+                 * so it is filled from the one answer rather than asked twice
+                 * or left reading false on a business that plainly rents.
+                 * Client's decision, 16 September 2026, over dropping it.
+                 */
+                'pays_rent' => (bool) ($data['is_rented'] ?? false),
                 'lessor_name' => $data['lessor_name'] ?? null,
                 'lessor_address' => $data['lessor_address'] ?? null,
                 'lessor_contact' => $data['lessor_contact'] ?? null,
@@ -319,7 +349,12 @@ class BusinessController extends Controller
         ];
     }
 
-    private function validateBusiness(Request $request): array
+    /**
+     * @param  Business|null  $business  the row being edited, excluded from the
+     *                                   duplicate-certificate check so an
+     *                                   update does not clash with itself
+     */
+    private function validateBusiness(Request $request, ?Business $business = null): array
     {
         /*
          * Item 94 — `registration_type` is the organisation STRUCTURE, and the
@@ -406,13 +441,101 @@ class BusinessController extends Controller
              * those registers — SEC "1074" — so it has no margin below it, and
              * it is what stops "111" and "Test" from passing.
              */
-            'registration_number' => ['required', 'string', 'min:4', 'max:100', 'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-\/]*$/'],
+            /*
+             * ── Whose certificate is it? ─────────────────────────────────────
+             *
+             * NOT `unique:businesses,registration_number`, and the difference
+             * is a real filing that rule would refuse.
+             *
+             * DTI registers a business NAME, so its numbers are effectively one
+             * per business. SEC and CDA register an ENTITY — a corporation or a
+             * cooperative — and one entity lawfully operates several
+             * establishments. BizTrack records one premises per business (it is
+             * why the zoning sheet's items IV and VI are the same address), so
+             * a corporation with a main store and a branch is TWO business rows
+             * citing ONE SEC number. A global unique index tells that applicant
+             * their own certificate is taken, and leaves them no way past it.
+             *
+             * What is never legitimate is the same certificate under two
+             * different owners: that is a typo, or somebody filing against a
+             * company that is not theirs. So the scope is the OWNER, not the
+             * row — the client's decision of 16 September 2026, over both a
+             * global unique and a per-agency split.
+             *
+             * The same-owner case is allowed here and merely NOTED on the
+             * wizard (see `registrationNumberOwnedElsewhere` in ApplyWizard),
+             * so an applicant adding a second branch is not stopped, and an
+             * applicant who meant to renew is told they already hold one.
+             */
+            'registration_number' => [
+                'required', 'string', 'min:4', 'max:100',
+                'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-\/]*$/',
+                function (string $attribute, mixed $value, Closure $fail) use ($request, $business) {
+                    $key = Business::normalizeRegistrationNumber(is_scalar($value) ? (string) $value : '');
+                    if ($key === '') {
+                        return;
+                    }
+
+                    /*
+                     * Compared in PHP rather than in SQL. The normalisation
+                     * strips every non-alphanumeric character, and SQLite has no
+                     * regex function to do that in a WHERE clause — a LIKE
+                     * approximation would be the bypassable comparison this
+                     * exists to prevent. The register is small enough that the
+                     * honest version costs nothing, and it is scoped to rows
+                     * belonging to OTHER owners.
+                     */
+                    $clash = Business::query()
+                        ->whereNotNull('registration_number')
+                        ->where('owner_user_id', '!=', $request->user()->id)
+                        ->when($business !== null, fn ($q) => $q->whereKeyNot($business->id))
+                        ->get(['id', 'registration_number'])
+                        ->first(fn (Business $other) => Business::normalizeRegistrationNumber(
+                            $other->registration_number,
+                        ) === $key);
+
+                    if ($clash !== null) {
+                        /*
+                         * The other business is NOT named. Its name and owner
+                         * belong to somebody else, and echoing them back would
+                         * turn this field into a lookup for whether a given
+                         * certificate is registered in Malabon and to whom.
+                         * BPLO can see both rows; the applicant gets the fact
+                         * and the counter as the way to resolve it.
+                         */
+                        $fail(
+                            'This registration number is already on file for another account. '
+                            .'Check the number against your certificate — if it is correct, '
+                            .'contact BPLO so they can sort out which record it belongs to.'
+                        );
+                    }
+                },
+            ],
             // Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
             // the taxpayer has one. Normalised above into hyphenated groups.
             'tin' => ['required', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
             'address' => ['required', 'array'],
-            'address.line1' => ['required', 'string', 'max:255'],
+            /*
+             * Not 'required' any more: `line1` is COMPOSED from item 5's two
+             * boxes in syncAddressAndLines, so a wizard that sends the parts
+             * sends no line1 at all. Still accepted, because an importer or a
+             * draft saved before the split has nothing else to offer.
+             */
+            'address.line1' => ['nullable', 'string', 'max:255'],
             'address.line2' => ['nullable', 'string', 'max:255'],
+            /*
+             * BPLO item 5's two boxes. `line1` becomes a composed value rather
+             * than a typed one — see syncAddressAndLines — so it is nullable
+             * now; these two carry the answer.
+             *
+             * The House/Bldg. No. is nullable on purpose. The paper prints a
+             * line for it, but premises exist with no number of their own: a
+             * stall inside a public market, a unit identified only by the
+             * building's name. Refusing to file without one would invent a
+             * requirement the paper does not make.
+             */
+            'address.house_bldg_no' => ['nullable', 'string', 'max:120'],
+            'address.street' => ['sometimes', 'required', 'string', 'max:255'],
             'address.barangay_id' => ['required', 'exists:barangays,id'],
             'address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
@@ -443,10 +566,22 @@ class BusinessController extends Controller
              * must not be asked to invent one.
              */
             'is_rented' => ['sometimes', 'boolean'],
-            'lessor_name' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
-            'lessor_address' => ['nullable', 'required_if:is_rented,true', 'string', 'max:255'],
+            /*
+             * No longer `required_if:is_rented`. MCG-BPLO-FO-001 asks whether
+             * rent is paid (item 9) and nothing about the lessor; the four
+             * lessor fields came from the national BPLS unified form and were
+             * removed from the wizard on 16 September 2026.
+             *
+             * The columns stay, and stay writable: MCG-CPDD-FO-003 items VIII.C
+             * and VIII.D do ask for the lessor's name and address, and the
+             * zoning sheet collects them. Requiring them HERE would refuse a
+             * BPLO filing for want of an answer no BPLO screen asks for.
+             */
+            'lessor_name' => ['nullable', 'string', 'max:255'],
+            'lessor_address' => ['nullable', 'string', 'max:255'],
             'lessor_contact' => ['nullable', 'string', 'max:40'],
-            'monthly_rental' => ['nullable', 'required_if:is_rented,true', 'numeric', 'min:0'],
+            // Same: on no paper form BizTrack holds, and no fee rule reads it.
+            'monthly_rental' => ['nullable', 'numeric', 'min:0'],
             'emergency_contact_name' => ['nullable', 'string', 'max:255'],
             'emergency_contact_number' => ['nullable', 'string', 'max:40'],
             /*
@@ -635,8 +770,38 @@ class BusinessController extends Controller
 
     private function syncAddressAndLines(Business $business, array $data): void
     {
+        /*
+         * BPLO item 5 asks for the House/Bldg. No. and the Street in two
+         * separate boxes, and `business_addresses` has carried
+         * `house_bldg_no` and `street` since the schema was aligned to the
+         * paper — both empty on every row, because the wizard asked one
+         * combined "House No. & Street Name" question and put the answer in
+         * `line1`.
+         *
+         * That cost more than tidiness. The officer's review page had to GUESS
+         * the split back out with a regex (`splitLine1`, "24 Mabini Street" →
+         * 24 / Mabini Street), and filings exist whose `line1` is just "17" —
+         * the applicant read the label as asking for the number. The regex
+         * cannot parse that, so BPLO was shown Street "17" and House "—", the
+         * two answers exactly reversed.
+         *
+         * So the two boxes are asked for and stored separately now, and
+         * `line1` is COMPOSED from them rather than typed. Everything that
+         * reads an address as one line — the office sheets, the permit PDFs,
+         * the officer list — keeps working untouched, and nothing has to guess.
+         */
+        $house = trim((string) ($data['address']['house_bldg_no'] ?? ''));
+        $street = trim((string) ($data['address']['street'] ?? ''));
+        $composed = trim($house.' '.$street);
+
         $address = $business->address()->updateOrCreate([], [
-            'line1' => $data['address']['line1'],
+            /*
+             * The composed line wins only when the parts were sent. A caller
+             * that still sends `line1` alone — an importer, or a draft saved
+             * before the split — keeps its own value rather than having it
+             * blanked by two empty parts.
+             */
+            'line1' => $composed !== '' ? $composed : ($data['address']['line1'] ?? null),
             'line2' => $data['address']['line2'] ?? null,
             'barangay_id' => $data['address']['barangay_id'],
             'latitude' => $data['address']['latitude'] ?? null,
@@ -666,6 +831,20 @@ class BusinessController extends Controller
          * further down), these two ARE stated on every save the wizard makes, so
          * an omitted key really is the applicant having cleared the field.
          */
+        /*
+         * Item 5's two boxes, set explicitly for the same reason as A6 and A9
+         * below: neither is mass assignable on BusinessAddress.
+         *
+         * Only written when the caller sent them. A payload that predates the
+         * split has no opinion about these columns, and writing null would
+         * replace a real answer with a blank on the next autosave.
+         */
+        if (array_key_exists('house_bldg_no', $data['address'])) {
+            $address->house_bldg_no = $house !== '' ? $house : null;
+        }
+        if (array_key_exists('street', $data['address'])) {
+            $address->street = $street !== '' ? $street : null;
+        }
         $address->telephone = filled($data['address']['telephone'] ?? null)
             ? trim($data['address']['telephone'])
             : null;

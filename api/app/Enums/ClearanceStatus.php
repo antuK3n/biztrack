@@ -25,11 +25,40 @@ namespace App\Enums;
  */
 enum ClearanceStatus: string
 {
+    /*
+     * ── There is no Rejected, and that is a decision ──────────────────────────
+     *
+     * There was one, and nothing could ever produce it. `rejectClearance()` had
+     * no controller and no route; `refileClearance()` — the documented way back
+     * — had neither either. So a state existed that no office could set and no
+     * applicant could clear, while the notification for it told them "You can
+     * file for it again" and pointed at a button that was never built.
+     *
+     * The client settled it on 17 September 2026, asked directly: *"I think
+     * Return is enough already."* And it is. Everything an office might refuse a
+     * permit for divides in two:
+     *
+     *  - FIXABLE — a cut-off scan, an expired lease, a wrong answer on the
+     *    sheet. That is `Returned`, which works today: the sheet reopens
+     *    editable (`OfficeFormController::ownerMayEdit`), the applicant fixes it
+     *    and resubmits, and the permit goes back to ForApproval. It can happen
+     *    as many times as it needs to.
+     *  - NOT FIXABLE — the site's zoning forbids the use, the business type is
+     *    not permitted here. No re-upload helps, and the honest answer is not a
+     *    permit state: it is BPLO rejecting the filing (`rejectApplication`,
+     *    which is kept and is a different thing) or the applicant changing
+     *    something real and filing again.
+     *
+     * Removing it was safe to the row: the register had 0 permits at `rejected`
+     * and 0 stored reasons, so there was nothing to migrate and nothing to
+     * strand. A failed INSPECTION never needed it either — `recordInspection`
+     * deliberately moves nothing on a failure and leaves the permit at
+     * ForInspection, so the office can book a re-visit against the kept row.
+     */
     case NotStarted = 'not_started';
     case ForApproval = 'for_approval';
     case ForInspection = 'for_inspection';
     case Approved = 'approved';
-    case Rejected = 'rejected';
     case Returned = 'returned';
 
     /**
@@ -47,22 +76,21 @@ enum ClearanceStatus: string
             self::ForApproval => 'For Approval',
             self::ForInspection => 'For Inspection',
             self::Approved => 'Approved',
-            self::Rejected => 'Rejected',
             self::Returned => 'Returned',
         };
     }
 
     /**
-     * Approved is terminal; Rejected is not.
+     * Approved is the only terminal state, and now the only one there could be.
      *
-     * A rejected permit can be re-filed — back to NotStarted, the applicant
-     * starts that one office's application again — because the client's rule is
-     * that a rejection kills only that permit and not the application. Leaving
-     * it terminal would mean one office's no permanently blocks
-     * `for_final_approval` with no way forward but abandoning the whole filing,
-     * which is exactly what they said should NOT happen.
+     * The permit is minted and numbered by then, so there is nothing further to
+     * move it to. Every other state has a way forward: Returned goes back to
+     * ForApproval when the applicant resubmits, and a failed inspection leaves
+     * the permit at ForInspection so a re-visit can be booked against it.
      *
-     * Approved really is terminal: the permit is minted and numbered by then.
+     * This used to read "Approved is terminal; Rejected is not" and explained at
+     * length how a rejected permit could be re-filed. See the note on the cases
+     * for why that state is gone.
      */
     public function isTerminal(): bool
     {
@@ -73,9 +101,13 @@ enum ClearanceStatus: string
      * Does this permit still owe the application work?
      *
      * The predicate behind `for_final_approval`: BPLO may approve the overall
-     * application only when no required permit is outstanding. Rejected counts
-     * as outstanding — the requirement is not met, it is refused — which is why
-     * this is not simply `!== Approved` written twice.
+     * application only when no required permit is outstanding.
+     *
+     * Kept as its own method rather than inlined as `!== Approved`, even though
+     * that is now all it is. It answers a different QUESTION from
+     * `isTerminal()` — "does the application still need something from this
+     * permit" versus "can this permit still move" — and the two agreeing today
+     * is a fact about the current states, not a rule that should be collapsed.
      */
     public function isOutstanding(): bool
     {
@@ -95,18 +127,18 @@ enum ClearanceStatus: string
             // rather than a form.
             self::NotStarted => [self::ForApproval],
 
-            self::ForApproval => [self::ForInspection, self::Returned, self::Rejected],
+            self::ForApproval => [self::ForInspection, self::Returned],
 
             // No route back to ForApproval. Once the office has accepted the
             // paperwork and booked a visit, what is outstanding is the visit;
             // sending it back to the reading queue would lose the booking and
             // tell the applicant nothing about why.
-            self::ForInspection => [self::Approved, self::Rejected],
+            self::ForInspection => [self::Approved],
 
-            self::Returned => [self::ForApproval, self::Rejected],
-
-            // Re-file. See isTerminal().
-            self::Rejected => [self::NotStarted],
+            // Returned resumes where it left off, as many times as it takes:
+            // nothing caps how often an office may ask for a correction, which
+            // is most of why Return is enough on its own.
+            self::Returned => [self::ForApproval],
 
             self::Approved => [],
         };

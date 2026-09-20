@@ -214,7 +214,23 @@ interface MapPickerProps {
    * owns the wording since only the caller knows what is missing.
    */
   lockedReason?: string | null
-  onPick: (lat: number, lng: number) => void
+  /**
+   * Show the pin, and take no input at all.
+   *
+   * Distinct from `lockedReason`, which is a control SET ASIDE until
+   * something else is answered — it paints a scrim and a sentence over the
+   * map, because an applicant whose map stopped responding needs to be told
+   * why. Read-only is not that: nothing is missing and nothing is waiting, so
+   * a scrim over the map would be covering the very thing the reader opened it
+   * for. The officer's review found this the hard way, with the locked
+   * sentence sitting across the middle of the pin it was describing.
+   *
+   * The lock is the same either way — ClickCapture is not mounted and the
+   * marker is not draggable — it is only the explanation that differs.
+   */
+  readOnly?: boolean
+  /** Omitted when `readOnly`: there is nothing that could call it. */
+  onPick?: (lat: number, lng: number) => void
 }
 
 export function MapPicker({
@@ -223,10 +239,18 @@ export function MapPicker({
   radiusM = null,
   highlightBarangay = null,
   lockedReason = null,
+  readOnly = false,
   onPick,
 }: MapPickerProps) {
   const hasPin = latitude !== null && longitude !== null
   const locked = lockedReason !== null
+  /*
+   * One flag for "can this map be changed", so the click handler and the
+   * marker's draggability cannot disagree. A missing `onPick` counts as no:
+   * mounting ClickCapture without a handler would be a click that silently
+   * does nothing, which is the failure mode `lockedReason` exists to avoid.
+   */
+  const editable = !locked && !readOnly && onPick !== undefined
   const center = useMemo<[number, number]>(
     () => (hasPin ? [latitude as number, longitude as number] : DEFAULT_CENTER),
     [hasPin, latitude, longitude],
@@ -334,7 +358,7 @@ export function MapPicker({
             />
           )
         })}
-        {!locked && <ClickCapture onPick={onPick} />}
+        {editable && <ClickCapture onPick={onPick} />}
         {/*
           * Circle, not CircleMarker. CircleMarker's radius is in screen pixels,
           * so it would stay the same size as the map zooms and would therefore
@@ -375,9 +399,13 @@ export function MapPicker({
           <Marker
             position={[latitude as number, longitude as number]}
             icon={pinIcon}
-            draggable={!locked}
+            draggable={editable}
             eventHandlers={{
               dragend: (e) => {
+                // Unreachable while `editable` is false — the marker is not
+                // draggable then — but the handler is registered either way,
+                // so it asks rather than assuming.
+                if (!onPick) return
                 const { lat, lng } = (e.target as { getLatLng: () => { lat: number; lng: number } })
                   .getLatLng()
                 onPick(Number(lat.toFixed(6)), Number(lng.toFixed(6)))

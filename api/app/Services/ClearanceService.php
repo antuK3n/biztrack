@@ -227,6 +227,31 @@ class ClearanceService
                 'status' => $assignment->status?->value,
                 'remarks' => $assignment->remarks,
             ] : null,
+            /*
+             * ── What the office asked the applicant to fix, and about what ───
+             *
+             * The applicant's card read `assignment.remarks` and that was the
+             * wrong column. `returnClearance` writes the reason to the PIVOT's
+             * `remarks`; nothing writes the assignment's on a return, and
+             * `completeAssignment` writes it on an APPROVAL — so the card could
+             * show an approval remark under the heading "this office asked for
+             * changes", or, on a filing where the office had never approved
+             * anything, "No reason was recorded" beside a reason that was.
+             *
+             * `remarks_target` is the pointer beside the prose: which checklist
+             * row or which answer the note is about, as a stable code. The text
+             * is never parsed to work that out — see the migration that added
+             * the column.
+             */
+            'return_note' => $this->pivotRow($application, $type)?->remarks,
+            'return_target' => $this->pivotRow($application, $type)?->remarks_target,
+            /*
+             * When it was last sent back. The applicant's card says "asked for
+             * changes 3 days ago" from this — elapsed time, never a deadline,
+             * because RA 11032 fixes the office's clock and not the citizen's
+             * and Malabon has given us no response window (open question A10).
+             */
+            'returned_at' => optional($this->pivotRow($application, $type)?->returned_at)->toISOString(),
             'fee_preview' => $this->feePreview($application, $type, $baseline),
         ];
     }
@@ -300,11 +325,16 @@ class ClearanceService
          * the filing so it can be billed, and not yet begun", which is the state
          * this predicate has to be able to see.
          *
-         * A REJECTED or RETURNED permit stays "applied for", deliberately. The
-         * applicant's way back in is `refileClearance()`, which resets the row to
-         * `not_started` first; letting them post to `apply` instead would create
-         * a second start on a permit an office has already ruled on and lose the
-         * remarks explaining why.
+         * A RETURNED permit stays "applied for", deliberately. The applicant's
+         * way back in is the office form — the sheet reopens editable
+         * (`OfficeFormController::ownerMayEdit` allows Returned) and
+         * resubmitting it moves the permit to `for_approval`. Letting them post
+         * to `apply` instead would create a second start on a permit an office
+         * has already read, and lose the remarks explaining what to fix.
+         *
+         * This said "A REJECTED or RETURNED permit" and named `refileClearance()`
+         * as the route. Clearance-level rejection was removed on 17 September
+         * 2026 — Return is enough — and that method went with it.
          *
          * ── And `not_started` stopped being the whole answer again ────────────
          *
@@ -457,7 +487,17 @@ class ClearanceService
      */
     public function isUnlocked(Application $application): bool
     {
-        return $application->status?->isPaid() ?? false;
+        /*
+         * Paid, OR nothing to pay — see `Application::defersPayment`. A
+         * clearance-only renewal has no bill and never will, so the payment
+         * gate would hold its stage shut for ever.
+         *
+         * `WorkflowService::startClearance` asks the same two questions, and it
+         * has to: this decides whether the screen OFFERS the stage and that
+         * decides whether the server accepts it. A stage this opened and that
+         * refused is the shape of defect this codebase keeps being repaired for.
+         */
+        return ($application->status?->isPaid() ?? false) || $application->defersPayment();
     }
 
     /**

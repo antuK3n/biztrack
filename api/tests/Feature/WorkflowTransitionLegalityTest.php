@@ -13,6 +13,7 @@ use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Services\WorkflowService;
+use Illuminate\Validation\ValidationException;
 
 /*
  * A terminal filing cannot be brought back to life (INS-5).
@@ -300,12 +301,20 @@ it('will not issue a second set of permits for a filing already approved', funct
     /*
      * The duplicate-permit path the legality table closes as a side effect.
      *
-     * A replayed inspection result does not fail loudly — transition() no-ops on
+     * A replayed inspection result did not fail loudly — transition() no-ops on
      * Approved → Approved — so without a guard it would succeed quietly and the
-     * extra permits would be real, with real numbers. Two things stop it now:
+     * extra permits would be real, with real numbers. Two things stopped it:
      * `grantClearance()` is only reached from a pivot row still sitting at
      * `for_inspection`, and that row is `approved` the moment its permit was
      * minted.
+     *
+     * Since 18 September 2026 it FAILS LOUDLY instead, and this test asserts
+     * both halves. `recordInspection()` now refuses outright on a decided
+     * filing, because the quiet no-op was only safe here by luck: the same
+     * silence on a REJECTED filing left the pivot at `for_inspection`, so the
+     * guard did not hold and the replay issued a certificate
+     * (WorkflowReinspectionTest covers that case). The count assertion stays —
+     * a refusal that threw after minting would be no use.
      */
     $codes = array_keys(LEGALITY_OFFICE);
     $app = legalityFiling($codes, 'Legality Duplicate Cafe');
@@ -328,10 +337,18 @@ it('will not issue a second set of permits for a filing already approved', funct
             ->assertOk();
     }
 
-    // BPLO's second act mints the Mayor's Permit on top of the five.
+    /*
+     * The fifth office's pass already minted the Mayor's Permit on top of the
+     * five — BPLO has no second act on a new filing since 18 September 2026.
+     *
+     * The press stays in the test, now expecting the refusal, because THIS test
+     * is about not issuing a second set of permits. A press that BPLO's screen
+     * might still offer is exactly the door a duplicate would come through, so
+     * it is worth firing at the endpoint rather than assuming nobody will.
+     */
     test()->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson('/api/v1/assignments/'.legalityAssignmentId($app, 'BPLO').'/approve', ['remarks' => 'All in.'])
-        ->assertOk();
+        ->assertStatus(422);
 
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
     $issued = Permit::where('application_id', $app->id)->count();
@@ -339,11 +356,11 @@ it('will not issue a second set of permits for a filing already approved', funct
 
     // Replay the result on the already-issued filing, at the service, the way a
     // late re-inspection would arrive.
-    app(WorkflowService::class)->recordInspection(
+    expect(fn () => app(WorkflowService::class)->recordInspection(
         Inspection::findOrFail($lastVisit),
         InspectionResult::Passed,
         'Re-checked after issuance.',
-    );
+    ))->toThrow(ValidationException::class);
 
     expect(Permit::where('application_id', $app->id)->count())->toBe($issued);
 });

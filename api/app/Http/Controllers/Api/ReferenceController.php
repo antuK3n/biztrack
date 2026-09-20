@@ -61,10 +61,23 @@ class ReferenceController extends Controller
         ]);
     }
 
+    /**
+     * Lines of business, each carrying what the Revenue Code does with it.
+     *
+     * `category` is the Sec. 2J.02 tax class and `category_branch` names the
+     * one follow-up the Code still forces — both are here so the wizard can
+     * show an applicant how their trade is classified and ask nothing for the
+     * 117 codes that classify themselves.
+     *
+     * `permit_category` is deliberately NOT exposed. It selects a Sec. 3A.03
+     * fine category and nothing on the applicant's screen needs it: the fee is
+     * derived server-side in FeeCalculator::classify, which is where it has to
+     * happen anyway, since the browser is not the only way in.
+     */
     public function psicCodes(): JsonResponse
     {
         return response()->json([
-            'data' => PsicCode::orderBy('code')->get(['id', 'code', 'title']),
+            'data' => PsicCode::orderBy('code')->get(['id', 'code', 'title', 'category', 'category_branch']),
         ]);
     }
 

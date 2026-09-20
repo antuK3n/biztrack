@@ -66,14 +66,14 @@ draft ──────────────> for_approval ─────�
                    return    │                    v
                         v    │            awaiting_other_permits
                       returned                    │
-                                                  │ every required
-                                                  │ permit approved
-                                                  v
-                                          for_final_approval
-                                                  │ BPLO approves
+                                                  │ every required permit
+                                                  │ approved → issue the
+                                                  │ Mayor's Permit
                                                   v
                                               approved
 ```
+
+*(`for_final_approval` was the fifth stop until 18 September 2026 — see below.)*
 
 `rejected` is reachable from every non-terminal status; `cancelled` only before
 BPLO has started reading. `approved`, `rejected` and `cancelled` are terminal.
@@ -84,11 +84,49 @@ would mean an application "For Inspection" while four of its six permits are
 being read and a fifth has already been issued — a status that answers a
 question nobody asked.
 
-**`for_final_approval` is not in the client's list** and is added deliberately.
-Their step reads "approve the overall application once other permits are all
-approved", which needs BPLO to *know* it is ready; a status is how that filing
-reaches BPLO's queue. It moves back to `awaiting_other_permits` if a permit
-stops being approved before BPLO acts.
+**`for_final_approval` is off this path since 18 September 2026.** It was never
+in the client's list — it was added here deliberately, because their step reads
+"approve the overall application once other permits are all approved" and a
+status was how that filing reached BPLO's queue.
+
+The client then asked what BPLO was reading when it got there:
+
+> What is the purpose of the BPLO checking if all other permits are legit, when
+> those permits are APPLIED DIRECTLY in BizTrack itself?
+
+Nothing, on this path. Every clearance is applied for in BizTrack, approved by
+its own office in BizTrack, and inspected against a pivot row in BizTrack. BPLO
+re-reading them was the system checking its own records against itself — and
+because `deadline_at` is `submitted_at + statutory working days`
+(`Ra11032::deadlineFor`), the RA 11032 clock ran the whole time it waited. So
+`refreshReadiness()` now issues the Mayor's Permit as the last clearance is
+approved, in the same transaction.
+
+Two arguments for keeping it were considered and withdrawn:
+
+- **the walk-back edge** (`for_final_approval → awaiting_other_permits`, for a
+  permit that stops qualifying) only ever protected the window *between*
+  readiness and BPLO's press. Auto-issuing makes that window zero, so the
+  protection existed because the wait did.
+- **the last chance to refuse** is real but thin: `rejectApplication` has no
+  status guard and `PermitStatus::Revoked` exists, so refusal after issuance is
+  possible. "Never issued" is tidier than "revoked", not more capable.
+
+What remained was a governance question — does a Mayor's Permit exist because an
+officer released it or because the system concluded the conditions were met? The
+client chose the system.
+
+**The status still exists and is still reached, twice:**
+
+1. **A renewal** stops there. On that path BPLO reads certificate copies the
+   applicant uploaded, which is real evidence of outside provenance rather than
+   a re-reading of our own records. Explicitly out of scope of this change.
+2. **A filing with no confirmed RA 11032 processing category** falls back to it,
+   because `approveOverall` requires one and auto-issue must not throw inside a
+   clearance office's own Approve press. There BPLO has real work: confirm the
+   category against the Citizen's Charter, then approve. `approveMainForm`
+   already guards this, so it should be unreachable — one pre-guard filing in
+   the register is at that status today, which is why the branch is live.
 
 ### Each other permit — `application_permit_types.status`
 
