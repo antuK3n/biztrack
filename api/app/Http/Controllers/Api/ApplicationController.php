@@ -11,6 +11,7 @@ use App\Http\Resources\StatusHistoryResource;
 use App\Models\Application;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
+use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
@@ -29,6 +30,8 @@ class ApplicationController extends Controller
 
     private array $fullEager = [
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
+        // What an amendment asks to change; empty on every other filing.
+        'requestedChanges',
         /*
          * BPLO items 11 / 12 — the named person.
          *
@@ -196,10 +199,6 @@ class ApplicationController extends Controller
              */
             'prior_permit_ids' => ['sometimes', 'array'],
             'prior_permit_ids.*' => ['exists:permits,id'],
-            // The ticked escape, carried on the create call so a draft opened
-            // from the identify dialog already holds the answer given there
-            // rather than waiting on the follow-up PUT to land.
-            'prior_permit_declared_none' => ['sometimes', 'boolean'],
             ...$this->amendmentRules(),
             ...$this->feeProfileRules($request),
         ]);
@@ -241,17 +240,25 @@ class ApplicationController extends Controller
             'title' => $this->cleanTitle($data['title'] ?? null),
             'status' => ApplicationStatus::Draft,
             'prior_permit_id' => $priorIds[0] ?? null,
-            // Contradictory answers resolve the same way they do in
-            // PriorPermitController: a named permit wins and the escape is not
-            // recorded, so the submit gate can never pass on both at once.
-            // "Named" now means any permit in the set, not just the primary —
-            // ticking three permits and also declaring there are none is the
-            // same contradiction it always was.
-            'prior_permit_declared_none' => $priorIds === []
-                && (bool) ($data['prior_permit_declared_none'] ?? false),
+            /*
+             * `prior_permit_declared_none` is NOT written here any more.
+             *
+             * It recorded the applicant ticking "my permit was issued on
+             * paper" — an escape the client retired on 18 September 2026: no
+             * permit is ever renewed on a manual system, so a renewal names the
+             * permit it carries forward or it is not a renewal at all.
+             *
+             * The COLUMN stays. One approved filing in the register holds it
+             * true, and that was a real answer honestly given under the rule of
+             * the day; dropping the column would erase it. Nothing writes it
+             * from here on, so it defaults false and reads as history.
+             */
             'payment_mode' => $data['payment_mode'] ?? 'annual',
             'data_privacy_consent' => (bool) ($data['data_privacy_consent'] ?? false),
-            'fee_profile' => $data['fee_profile'] ?? null,
+            // Classified on the way in, so the filing RECORDS the basis it was
+            // assessed on rather than having it re-derived later against a
+            // reference table that may since have been corrected.
+            'fee_profile' => $this->classifyFeeProfile($data['fee_profile'] ?? null),
             ...$this->amendmentAttributes($data, $data['application_type']),
         ]);
         $app->permitTypes()->sync($data['permit_type_ids']);
@@ -321,7 +328,7 @@ class ApplicationController extends Controller
             $application->permitTypes()->sync($data['permit_type_ids']);
         }
         if (array_key_exists('fee_profile', $data)) {
-            $application->update(['fee_profile' => $data['fee_profile']]);
+            $application->update(['fee_profile' => $this->classifyFeeProfile($data['fee_profile'])]);
             $this->syncLineCapitalization($application);
         }
         if (isset($data['payment_mode'])) {
@@ -401,19 +408,22 @@ class ApplicationController extends Controller
         /*
          * Checklist items 82/84 — an amendment amending nothing is not a filing.
          *
-         * The wizard blocks Next on the same rule, but the gate belongs here as
-         * well: the browser is not the only way into this endpoint, and a
-         * filing that reaches BPLO saying only "amendment" gives the counter
-         * nothing to act on. Checked at submit rather than at create because
-         * drafts autosave half-answered by design.
+         * The GATE moved rather than went: it is now the `requested_changes`
+         * check further down, which asks the same thing more precisely. Ticking
+         * "Location" said a category; naming a new street address says the
+         * amendment. The client removed the tick boxes from this form on
+         * 19 September 2026 — two answers to one question, in two vocabularies
+         * that did not line up — so a gate reading the ticks would now refuse
+         * every amendment ever filed.
+         *
+         * `has_amendments` is still SET here, because it is a column several
+         * readers take as "this filing changes something" and an amendment that
+         * reached submission plainly does. Derived rather than asked for: it
+         * cannot disagree with the requested changes if it is computed from
+         * their existence.
          */
-        if (
-            $application->application_type === ApplicationType::Amendment
-            && ! $application->has_amendments
-        ) {
-            throw ValidationException::withMessages([
-                'has_amendments' => ['Choose what is being amended: ownership, location, nature of business, or something else you specify.'],
-            ]);
+        if ($application->application_type === ApplicationType::Amendment) {
+            $application->update(['has_amendments' => true]);
         }
 
         /*
@@ -421,18 +431,30 @@ class ApplicationController extends Controller
          *
          * `prior_permit_id` is what makes a renewal a renewal and an amendment
          * an amendment: it names the permit being carried forward or altered.
-         * 749 of 756 renewals in the register carry it. The seven that do not
-         * got there because null was accepted as an answer without anyone ever
-         * having to give it — five on businesses holding no permit at all, one
-         * where the question was simply skipped past, and one written directly
-         * by DemoSeeder.
          *
-         * The escape is still open and still needed: in year one most renewals
-         * are of permits issued on paper, and those businesses have nothing in
-         * the register to name. But it now has to be TAKEN — the applicant
-         * ticks "no BizTrack permit" — rather than fallen into. That is the
-         * whole difference between the two states this gate can tell apart and
-         * a bare null could not.
+         * When this gate was written the register held 756 renewals and 749 of
+         * them carried it; the seven that did not got there because null was
+         * accepted as an answer without anyone ever having to give it. Measured
+         * again on 18 September 2026, after the register was rebuilt: 2
+         * renewals, 1 of them naming no permit — the DemoSeeder row, approved
+         * and terminal. Smaller numbers, same hole.
+         *
+         * ── The paper escape is closed (client, 18 September 2026) ───────────
+         *
+         * There used to be a second way past this gate: the applicant ticking
+         * "no BizTrack permit", recorded as `prior_permit_declared_none`. It
+         * existed because year one was expected to be mostly renewals of
+         * permits issued by the old counter process. The client has since ruled
+         * that case out — *"There could be no cases where the permit was
+         * renewed on a different/manual system"* — which makes a renewal naming
+         * no permit not an escape but a mis-filed NEW application, and one of
+         * those is already in the register.
+         *
+         * So the gate is unconditional again. The clause reading
+         * `prior_permit_declared_none` was removed rather than left as dead
+         * tolerance: the single filing that holds it true is `approved` and
+         * terminal, so it can never reach this gate again, and a clause nothing
+         * can set is one a future reader has to work out the meaning of.
          *
          * At submit rather than create, for the same reason as the amendment
          * gate above: drafts autosave half-answered by design. And on the
@@ -442,12 +464,44 @@ class ApplicationController extends Controller
         if (
             in_array($application->application_type, [ApplicationType::Renewal, ApplicationType::Amendment], true)
             && $application->prior_permit_id === null
-            && ! $application->prior_permit_declared_none
         ) {
             $verb = $application->application_type === ApplicationType::Renewal ? 'renewing' : 'amending';
 
             throw ValidationException::withMessages([
-                'prior_permit_id' => ["Say which permit you are {$verb} — pick it from your permits, or tell us this business has no permit issued through BizTrack."],
+                'prior_permit_id' => ["Say which permit you are {$verb} — pick it from this business’s permits. If it holds none, file a New Application instead."],
+            ]);
+        }
+
+        /*
+         * ── An amendment must say what the detail changes TO ─────────────────
+         *
+         * Ordered AFTER the prior-permit gate deliberately. "Which permit are
+         * you amending" is the more fundamental question, and an amendment that
+         * names none should hear about that first rather than be sent to fill in
+         * details for a permit it has not identified.
+         *
+         * Section A above says WHAT changed. This checks they said what it
+         * changed to, which is the whole of
+         * This checks that they said what it changed to, which is the whole of
+         * what the LGU's Amendment Form asks for: every box on that paper has a
+         * blank beside it for the new value.
+         *
+         * Without this an amendment could reach BPLO carrying a tick and
+         * nothing else, and `approveAmendment()` would apply an empty set:
+         * the register unchanged, the permit reprinted identically, the filing
+         * closed as approved. A filing that succeeds at doing nothing is worse
+         * than one that is refused, because everybody downstream believes it
+         * worked.
+         */
+        if (
+            $application->application_type === ApplicationType::Amendment
+            && $application->requestedChanges()->whereNotNull('new_value')->doesntExist()
+        ) {
+            throw ValidationException::withMessages([
+                'requested_changes' => [
+                    'Fill in at least one new detail under New Details. An amendment has to say '
+                    .'what the detail should say now, not only that it changed.',
+                ],
             ]);
         }
 
@@ -489,6 +543,36 @@ class ApplicationController extends Controller
      * categories by. A profile line without one is matched by position, which is
      * how `feeProfileToDraft` reads the older saves that predate the key.
      */
+    /**
+     * Stamp each line of business with the Revenue Code classes that price it.
+     *
+     * The wizard used to ask the applicant to classify themselves from 273
+     * labels, and that was mis-billing rather than mere friction: the business
+     * tax keys on the 22 broad classes of Sec. 2J.02 and the mayor's-permit fee
+     * on the 117 fine categories of Sec. 3A.03, and one box held one answer, so
+     * whichever they picked the other group missed. A carinderia that answered
+     * "Carinderia" — the accurate answer — lost its entire ₱9,750 business tax.
+     *
+     * Done HERE, at the boundary, and not only in the calculator, for two
+     * reasons. The filing then records the basis it was assessed on, which is
+     * what the officer's review sheet has to show. And the mapping is reference
+     * data that can be corrected, so a correction must not silently re-price
+     * filings that were already assessed under the old table.
+     *
+     * FeeCalculator classifies again at assessment. That is not redundant: it
+     * is the path for filings written before this existed, and it leaves an
+     * existing class alone, so a draft an applicant classified themselves keeps
+     * their answer.
+     */
+    private function classifyFeeProfile(?array $profile): ?array
+    {
+        if ($profile === null) {
+            return null;
+        }
+
+        return app(FeeCalculator::class)->classifyProfile($profile);
+    }
+
     private function syncLineCapitalization(Application $application): void
     {
         $profile = $application->fee_profile;
@@ -634,6 +718,65 @@ class ApplicationController extends Controller
         $document->delete();
 
         return response()->json(['data' => ['id' => $document->id]]);
+    }
+
+    /**
+     * Throw a draft away.
+     *
+     * ── Why this is not `cancel` ────────────────────────────────────────────
+     *
+     * `cancel()` above moves a filing to `Cancelled`, which is correct for one
+     * an office has already seen: the LGU was asked for something and the
+     * record of the asking, and of the withdrawal, both belong in the register.
+     * A DRAFT was never submitted. No office saw it, no fee was assessed, no
+     * assignment was raised — so leaving a `Cancelled` row behind puts a filing
+     * in the applicant's history that never existed as a filing, and the Drafts
+     * page then reads as a list of abandoned attempts rather than work in
+     * progress. The client asked for delete, and delete is the honest verb.
+     *
+     * ── Draft only, and `Returned` deliberately excluded ────────────────────
+     *
+     * `destroyDocument()` accepts `Draft` OR `Returned`, and this does not.
+     * Removing one attachment from a returned filing is editing it, which is
+     * the whole point of a return; removing the FILING would erase the record
+     * of BPLO's decision to send it back, along with the remarks the applicant
+     * is supposed to be acting on. A returned filing gets `cancel`.
+     *
+     * ── Soft, so it is recoverable ──────────────────────────────────────────
+     *
+     * `Application` already uses `SoftDeletes` and the column has been there
+     * since before this endpoint — nothing had ever written it (measured: 0
+     * trashed rows). Eloquent's global scope hides the row from every reader,
+     * and the ~20 raw `DB::table('applications')` queries in the analytics
+     * already carry `whereNull('deleted_at')`, so the figures do not count a
+     * deleted draft either. That was checked rather than assumed.
+     *
+     * The documents and their blobs are left alone. A soft delete that also
+     * unlinked the files would be recoverable in name only — the row would come
+     * back pointing at storage that no longer exists. The cost is that an
+     * abandoned draft's uploads keep their disk space; the alternative is a
+     * restore that silently loses the applicant's papers.
+     */
+    public function destroy(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+
+        abort_unless(
+            $application->status === ApplicationStatus::Draft,
+            422,
+            'Only a draft can be deleted. A filing you have already submitted can be cancelled instead.'
+        );
+
+        // Logged BEFORE the delete, so the audit row is written while the thing
+        // it describes is still there to be described.
+        Audit::log('application.draft_deleted', $application, [
+            'application_type' => $application->application_type?->value,
+            'business_id' => $application->business_id,
+        ]);
+
+        $application->delete();
+
+        return response()->json(['data' => ['id' => $application->id]]);
     }
 
     // --- authorization helpers ----------------------------------------------
@@ -870,7 +1013,19 @@ class ApplicationController extends Controller
             'fee_profile.lines' => ['sometimes', 'array', 'max:200'],
             // Ties a line back to the PSIC selection so reopened drafts restore.
             'fee_profile.lines.*.psic_code_id' => ['nullable', 'integer'],
-            'fee_profile.lines.*.category' => ['required_with:fee_profile.lines', 'string', 'max:80'],
+            /*
+             * NULLABLE since 16 September 2026, where it was required.
+             *
+             * The tax class is derived from psic_code_id server-side — see
+             * FeeCalculator::classify — so demanding it here would reject the
+             * very payload the wizard now sends. It is still ACCEPTED, for
+             * 00000 "Other (not listed)", which no industrial code can
+             * classify, and for drafts saved while the question was asked.
+             */
+            'fee_profile.lines.*.category' => ['nullable', 'string', 'max:80'],
+            // Sec. 2J.02(c): the applicant's own declaration that they deal
+            // mainly in essential commodities, which halves the rate.
+            'fee_profile.lines.*.essentials' => ['nullable', 'boolean'],
             'fee_profile.lines.*.gross_sales' => $money,
             'fee_profile.lines.*.capitalization' => $money,
             'fee_profile.gross_sales' => $money,

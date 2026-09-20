@@ -6,7 +6,8 @@ use App\Models\Barangay;
 use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
-use Illuminate\Support\Carbon;
+use App\Support\RenewalSeason;
+use Carbon\CarbonImmutable;
 
 /*
  * The whole lifecycle, walked once, over the 6 September 2026 flow
@@ -171,29 +172,45 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
             ->assertOk();
 
         $issued++;
-        expect(Permit::where('application_id', $appId)->count())->toBe($issued);
+        /*
+         * The LAST office's pass lands TWO certificates: its own clearance and
+         * the Mayor's Permit, minted in the same transaction since
+         * 18 September 2026. Spelled out as `+ 1` on the final turn rather than
+         * relaxed to `>=`, because five offices issuing five and the sixth
+         * having a different cause is the fact worth keeping.
+         */
+        $isLast = $issued === count(HAPPY_PATH_OFFICE);
+        expect(Permit::where('application_id', $appId)->count())
+            ->toBe($issued + ($isLast ? 1 : 0));
     }
 
     /*
-     * 10. Five permits in, so the filing is in BPLO's queue for its second act
-     * — and the Mayor's Permit is NOT among the five. `for_final_approval` is
-     * the status that carries the filing there; without it BPLO would have to
-     * know by other means that the filing had become ready.
+     * 10. There is no step 11 any more.
+     *
+     * BPLO used to have a SECOND act here: the filing reached
+     * `for_final_approval` with five permits out, and BPLO pressed Approve to
+     * mint the sixth. The client asked what that press was for, given that all
+     * five clearances are applied for, approved and inspected inside BizTrack —
+     * *"what is the purpose of the BPLO checking if all other permits are legit,
+     * when those permits are APPLIED DIRECTLY in BizTrack itself?"* — and there
+     * was no answer, so the fifth office's pass now issues the Mayor's Permit
+     * itself.
+     *
+     * The press is not merely unnecessary now, it is REFUSED: the filing is
+     * already Approved, and `approveAssignment` turns a second press away with
+     * "this application has been decided". That is asserted below, because a
+     * BPLO screen still offering the button would be the visible half of this
+     * change going wrong.
      */
-    expect(Application::find($appId)->status->value)->toBe('for_final_approval');
-    expect(Permit::where('application_id', $appId)->count())->toBe(5);
+    $app = Application::find($appId);
+    expect($app->status->value)->toBe('approved');
 
-    // 11. BPLO's SECOND act. The only place an application becomes Approved and
-    // the only place the Mayor's Permit is minted.
     $bploAssignmentId = ApplicationAssignment::where('application_id', $appId)
         ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
         ->value('id');
     $this->withHeaders(authAs('bplo@biztrack.local'))
         ->postJson("/api/v1/assignments/{$bploAssignmentId}/approve", ['remarks' => 'All requirements met.'])
-        ->assertOk();
-
-    $app = Application::find($appId);
-    expect($app->status->value)->toBe('approved');
+        ->assertStatus(422);
 
     // Six permits: the Mayor's Permit and the five clearances behind it.
     $permits = Permit::where('application_id', $appId)->get();
@@ -205,9 +222,36 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     );
     expect($businessPermit)->not->toBeNull();
 
-    $days = (int) Carbon::parse($businessPermit->valid_from)
-        ->diffInDays(Carbon::parse($businessPermit->valid_until));
-    expect($days)->toBe(365);
+    /*
+     * ── The business permit ends on 20 January, not 365 days from issue ──────
+     *
+     * This asserted 365 and was right until 17 September 2026, when the client
+     * anchored the business permit to the renewal season: *"Business permits
+     * always expire on January, regardless of application date."* A filing
+     * approved in September now yields a term of about four months, so a
+     * day-count assertion measures the calendar rather than the rule.
+     *
+     * Asserted as the DATE, which is the rule: 20 January of the year after the
+     * one it was issued in (`RenewalSeason::endOfTermFor`). That holds whenever
+     * the suite runs, where `toBe(365)` only held between January and the end
+     * of the year and `toBe(126)` would hold on one day.
+     *
+     * The five clearances keep 365 days — they renew any time and continue an
+     * unexpired term — and that is asserted where they are issued rather than
+     * bundled in here.
+     */
+    /*
+     * `->toDateString()` on both sides: `valid_until` is a DATE CAST on the
+     * model, so it comes back a Carbon and comparing it to a string fails with
+     * a twenty-line object dump that says nothing about permits.
+     */
+    expect($businessPermit->valid_until->toDateString())->toBe(
+        RenewalSeason::endOfTermFor(
+            CarbonImmutable::parse($businessPermit->valid_from),
+        )->toDateString(),
+    );
+    expect($businessPermit->valid_until->format('m-d'))
+        ->toBe('01-20', 'the business permit year no longer ends on 20 January');
 });
 
 it('routes one queue item per office, and only as that office’s permit is filed', function () {

@@ -1083,10 +1083,47 @@ export function InspectionDecisionPanel({
    * visit would then arrive down the wire as well. Two identical cards for one
    * appointment is a worse bug than the stale card this fixes.
    */
-  const visits =
+  const allVisits =
     booked && !inspections.some((item) => item.id === booked.id)
       ? [...inspections, booked]
       : inspections
+
+  /*
+   * ── An office sees its OWN visits, and no one else's (INS-6) ──────────────
+   *
+   * The client, from the OBO account, 17 September 2026: *"I am using OBO's
+   * account and they should not see the application process for the CHO. Remove
+   * the inspection details from other office. I told you that Clearance Office
+   * are independent of each other."*
+   *
+   * Another office's visits were drawn deliberately, badged "Another office"
+   * and captioned *"recorded this result on its own visit. It is not a decision
+   * on the filing, and it is not your office's clearance."* That copy is
+   * accurate and it is answering a question nobody in an office chair asked:
+   * the five clearances are independent, so CHO's visit is not context for
+   * OBO's decision, it is somebody else's file.
+   *
+   * ── Filtered HERE and not on the server, deliberately ─────────────────────
+   *
+   * The payload is not a leak and this is not a confidentiality fix.
+   * `ApplicationVisibility`'s line is that PROGRESS is readable across offices
+   * and PROSE is not — an office can see that another office's permit is moving
+   * and cannot read its remarks — and BPLO legitimately needs every visit,
+   * because coordinating the five is BPLO's job. Narrowing the API would take
+   * that away from BPLO to tidy a card for CHO.
+   *
+   * So the server keeps sending what it sends, and the panel shows the reader
+   * what is theirs. `application.view_any_office` is the same flag the queue
+   * and the review sheet's two disclosures key on: BPLO and the super admin see
+   * all six, the five offices see one.
+   *
+   * `isMine` is reused rather than a second department comparison — it already
+   * refuses the `undefined === undefined` case that would badge an unrouted
+   * visit as the reader's own, and that refusal matters more when it decides
+   * whether a card appears at all.
+   */
+  const seesEveryOffice = Boolean(user?.permissions.includes('application.view_any_office'))
+  const visits = seesEveryOffice ? allVisits : allVisits.filter(isMine)
 
   /*
    * The card, and the live region that says what came of it.

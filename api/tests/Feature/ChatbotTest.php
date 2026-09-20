@@ -33,9 +33,48 @@ it('answers the requirements intent from the seeded checklists', function () {
         ->assertJsonPath('data.sender', 'bot')
         ->json('data.body');
 
+    /*
+     * Asserted against the paper's list, which is what the seeded checklist
+     * holds since 16 September 2026 — MCG-BPLO-FO-001 prints six documentary
+     * requirements and does NOT include the Barangay Business Clearance this
+     * test used to look for (questions-for-malabon E9, answered).
+     *
+     * The conditional markers are asserted too, because the bot reads the whole
+     * checklist flat: without them it would recite "Contract of Lease" and
+     * "Tax Declaration/Transfer Certificate of Title" one after the other,
+     * and no applicant needs both.
+     *
+     * The names here are the paper's own wording. BusinessPermitRequirementList
+     * is where that is pinned; this asserts the bot passes it through rather
+     * than paraphrasing.
+     */
     expect($body)->toContain("Mayor's / Business Permit")
-        ->toContain('Barangay Business Clearance')
-        ->toContain('Fire Safety Inspection Certificate');
+        ->toContain('Proof of Business Registration (DTI / SEC / CDA)')
+        ->toContain('Sketch and photos of location of business')
+        ->toContain('if you pay rent for the premises')
+        ->toContain('if you own the premises')
+        ->toContain('Fire Safety Inspection Certificate')
+        ->not->toContain('Barangay Business Clearance');
+
+    /*
+     * Certain requirements before conditional ones, and the optional one last.
+     *
+     * The bot recites the whole checklist as one run of bullets and cannot show
+     * or hide a row the way the wizard does — it has no answers to go on — so
+     * every conditional row is read out to everybody. Which makes the ordering
+     * matter MORE here than on the screen: the two lines that are true for any
+     * listener have to come first, ahead of the five qualified with "if" and
+     * the one nobody is obliged to bring at all.
+     */
+    expect(strpos($body, 'Proof of Business Registration'))
+        ->toBeLessThan(strpos($body, 'Sketch and photos'))
+        ->and(strpos($body, 'Sketch and photos'))
+        ->toBeLessThan(strpos($body, 'Contract of Lease'))
+        ->and(strpos($body, 'Contract of Lease'))
+        ->toBeLessThan(strpos($body, 'Tax Incentive Certificate'))
+        // The optional one last, here as on the screen.
+        ->and(strpos($body, 'Tax Incentive Certificate'))
+        ->toBeLessThan(strpos($body, 'SPA / Authorization'));
 });
 
 it('answers the fees intent with surcharge and interest', function () {

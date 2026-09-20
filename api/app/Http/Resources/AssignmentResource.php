@@ -172,6 +172,22 @@ class AssignmentResource extends JsonResource
             'status_label' => $type->pivot?->status?->label(),
             'mode' => $type->pivot?->mode,
             'requires_inspection' => (bool) $type->requires_inspection,
+            /*
+             * When this office last sent the permit back.
+             *
+             * The client's decision of 17 September 2026 was to show how long a
+             * return has been waiting on BOTH sides — the applicant's card and
+             * the officer's queue row — and invent no deadline. The applicant's
+             * half shipped; this is the officer's, and it is the half that
+             * matters for chasing: it is what lets an office see which filings
+             * have gone quiet.
+             *
+             * Progress, not prose, so it is NOT gated on `readsOfficeSheet`
+             * like the remarks are. "This office is waiting on the applicant"
+             * is the same kind of fact as the status beside it, and says
+             * nothing about what anyone wrote.
+             */
+            'returned_at' => optional($type->pivot?->returned_at)->toISOString(),
         ];
     }
 

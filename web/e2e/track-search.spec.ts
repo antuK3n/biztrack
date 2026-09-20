@@ -26,7 +26,7 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'for_approval',
-    status_label: 'For Approval',
+    status_label: 'For Initial Approval',
     business: { id: 1, name: 'Aling Nena Sari-Sari Store' },
     submitted_at: '2026-06-01T00:00:00.000000Z',
     deadline_at: '2026-08-20T00:00:00.000000Z',
@@ -461,12 +461,13 @@ test.describe('officer queue', () => {
     await page.getByRole('button', { name: /^Filter/ }).click()
     /*
      * `exact` because the tab and one of its statuses are both called "For
-     * Approval" now, so the listbox holds "All in For Approval" as well as the
-     * status itself. That is the intended wording — the tab is what is with the
-     * offices awaiting a decision (under review, or sent back), the status is
-     * the first of those two — and it is only ambiguous to a substring match.
+     * Approval" now, so the listbox holds "All in For Approval" as well as
+     * "For Initial Approval" itself. That is the intended wording — the tab is
+     * what is with the offices awaiting a decision (under review, or sent
+     * back), the status is the first of BPLO's two approvals — and it is only
+     * ambiguous to a substring match, which is why this asks for an exact one.
      */
-    await page.getByRole('option', { name: 'For Approval', exact: true }).click()
+    await page.getByRole('option', { name: 'For Initial Approval', exact: true }).click()
 
     // The proof that this is a query change and not a browser-side slice: the
     // page asked the server for the narrowed set. Filtering a page in the
@@ -544,6 +545,6 @@ test.describe('officer queue', () => {
     // ever return nothing.
     await expect(page.getByRole('option', { name: 'All in Pending Payment' })).toBeVisible()
     await expect(page.getByRole('option', { name: 'Pending Payment', exact: true })).toBeVisible()
-    await expect(page.getByRole('option', { name: 'For Approval', exact: true })).toBeHidden()
+    await expect(page.getByRole('option', { name: 'For Initial Approval', exact: true })).toBeHidden()
   })
 })

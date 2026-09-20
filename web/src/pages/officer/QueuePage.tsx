@@ -6,23 +6,28 @@ import {
   FilterPills,
   PageTitle,
   SortFilter,
-  StatusChip,
   type SortFilterOption,
 } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { applications, assignments } from '../../lib/resources'
-import { formatDateTime } from '../../lib/format'
-import { applicationStatusMeta } from '../../lib/status'
+import { formatDateTime, formatRelative } from '../../lib/format'
+import { TONE_CLASSES, applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
-import type { ApplicationListItem, ApplicationStatus, Assignment, PageMeta } from '../../lib/types'
+import type {
+  ApplicationListItem,
+  ApplicationStatus,
+  Assignment,
+  PageMeta,
+  ServerClearanceStatus,
+} from '../../lib/types'
 
 /*
  * Application Verification (PDF p61/p80) — the officer queue restyled to the
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
-type Tab = 'approval' | 'inspection' | 'payment' | 'final'
+type Tab = 'approval' | 'payment' | 'gathering' | 'inspection' | 'final'
 
 /**
  * The stages, in the order the flow visits them (docs/application-flow-2026-09.md):
@@ -60,11 +65,86 @@ const HOLDER_PILLS: { value: '' | 'unassigned' | 'mine' | 'others'; label: strin
   { value: 'others', label: 'Assigned to others' },
 ]
 
-const TABS: { value: Tab; label: string }[] = [
-  { value: 'approval', label: 'For Approval' },
+/**
+ * New, renewal or amendment — the third question this screen can be asked.
+ *
+ * ── Why it was missing, and what adding it does not fix ───────────────────
+ *
+ * The client, 17 September 2026: *"where is the part where they can see those
+ * for Renewal? Currently, it only displays those for New Applications."*
+ *
+ * There was no such control: `/applications` has taken a `type` filter since
+ * it was written, but the four assignment-backed tabs read `/assignments`,
+ * which had none — so the only way to find a renewal was to read every row.
+ *
+ * Worth being exact about what this control can show, because it will look
+ * broken otherwise. The register holds two renewals and the queue holds
+ * outstanding work: one is `approved` (finished, and the tabs deliberately
+ * exclude terminal statuses — see INSPECTION_STATUSES) and the other is a
+ * `draft` nobody has filed. So "Renewal" narrows to nothing today, and will
+ * hold rows the moment a renewal is actually submitted. That is the filter
+ * working, not failing.
+ *
+ * ── Amendment is BPLO's, on the client's instruction ──────────────────────
+ *
+ * *"add an Amendment filter too for the BPLO side ONLY."* It is also the honest
+ * split: an amendment changes what is on the register for a permit already
+ * issued, which is BPLO's business, and offering the pill to a sanitary officer
+ * would be a narrowing that can only ever empty their queue — the same reason
+ * Pending Payment is hidden from them. (No amendment has been filed yet either;
+ * the register has none of the three.)
+ */
+const TYPE_PILLS: { value: '' | 'new' | 'renewal' | 'amendment'; label: string }[] = [
+  { value: '', label: 'All types' },
+  { value: 'new', label: 'New' },
+  { value: 'renewal', label: 'Renewal' },
+  { value: 'amendment', label: 'Amendment' },
+]
+
+/** Amendment is BPLO's and the super admin's; see TYPE_PILLS. */
+const BPLO_ONLY_TYPES: string[] = ['amendment']
+
+/*
+ * ── Five entries, and no officer is shown all five ────────────────────────
+ *
+ * Ordered by the flow, so whichever four an officer gets read left to right in
+ * the order the work happens. `gathering` and `inspection` occupy the same
+ * position deliberately: they are the same stage of the filing seen from two
+ * seats, and no seat sees both.
+ *
+ * The client, at the BPLO account, 17 September 2026: *"There should be no For
+ * Inspection anymore since BPLO does not have that. There should be Awaiting
+ * Other Permits too."* Both halves were already true in the code and neither
+ * reached the screen — INSPECTION_STATUSES' own note says "BPLO never appears,
+ * and needs no special case", so BPLO was being offered a tab that could not
+ * ever hold a row, while the one stage BPLO waits through had no tab at all.
+ */
+const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
+  /*
+   * ── "Initial" is BPLO's word, and only BPLO's ─────────────────────────────
+   *
+   * BPLO approves a filing TWICE — once on the main form before the bill, once
+   * on the whole application at the end — so "For Initial Approval" is doing
+   * real work in that seat: it says which of the two.
+   *
+   * A clearance office approves its permit ONCE, by itself, and there is no
+   * second pass. The rule was already written down for the status, in
+   * status.ts: *"CLEARANCE_STATUS below keeps plain 'For Approval' — a single
+   * clearance is approved once, by its own office, and calling that 'initial'
+   * would promise a second pass that never comes."* The tab was breaking that
+   * rule, and the client read it off the screen from the sanitary account:
+   * *"This is still sanitary's account, so why there is Initial Approval? It
+   * should be For Approval only."* (17 September 2026.)
+   *
+   * `officeLabel` rather than a second TABS array, so the two names cannot get
+   * out of step over which tab they belong to. Only this one differs; the rest
+   * are either the same word in both seats or offered in one seat alone.
+   */
+  { value: 'approval', label: 'For Initial Approval', officeLabel: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
+  { value: 'gathering', label: 'Awaiting Other Permits' },
   { value: 'inspection', label: 'For Inspection' },
-  { value: 'final', label: 'Final Approval' },
+  { value: 'final', label: 'For Final Approval' },
 ]
 
 
@@ -169,8 +249,83 @@ const APPROVAL_STATUSES = ['for_approval', 'returned', 'awaiting_other_permits']
  */
 const INSPECTION_STATUSES = ['awaiting_other_permits'] as const
 
+/**
+ * BPLO between its two approvals: the filing is out with the other five.
+ *
+ * The same filing status the For Inspection tab reads, and deliberately so —
+ * `awaiting_other_permits` IS this stage. What differs is the seat. An
+ * inspecting office narrows it to its own permit being out on a visit; BPLO has
+ * no permit out on a visit and no visit to conduct, so it gets the stage whole:
+ * every filing that has been paid for and is waiting on somebody else.
+ *
+ * Nothing here is BPLO's work, and the tab is honest about that — it is the
+ * answer to "what have I approved that has not come back yet", which is the
+ * question the applicant's own Awaiting Other Permits badge raises and which
+ * this screen had no way to answer. The actionable stage is For Final Approval,
+ * which is where these rows go on their own the moment the last permit lands.
+ *
+ * No assignment-status filter, for the same reason FINAL_STATUSES gives: BPLO's
+ * assignment was closed by `approveMainForm()` at the other end of the process
+ * and nothing reopens it, so filtering on an open one would empty the tab
+ * permanently. And no clearance filter, which is what keeps it from becoming a
+ * second For Inspection: BPLO's Business Permit pivot sits at `for_approval`
+ * through the whole of this stage, and narrowing on it would hide the filings
+ * whose other permits are the only thing moving.
+ */
+const GATHERING_STATUSES = ['awaiting_other_permits'] as const
+
 /** The clearance statuses that put a row in the For Inspection tab. */
 const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
+
+/**
+ * What an OFFICE's Filter dropdown offers, per tab — its own permit's states.
+ *
+ * ── Why the filing's statuses were the wrong list to offer them ───────────
+ *
+ * The dropdown listed `TAB_STATUSES`, which is the FILING's vocabulary, and
+ * for an office two of the three entries on the For Approval tab could never
+ * match one of its rows: `for_approval` and `returned` are the stage where
+ * BPLO is reading the main form, and an office has no assignment then at all.
+ * So a sanitary officer was offered two narrowings that empty the queue every
+ * time, and one — "Your permit · waiting on your review" — that is the whole
+ * tab. Three options, one of them real, none of them in the words the permit
+ * is described by anywhere else.
+ *
+ * The client asked for exactly this check: *"can you verify if the list of
+ * status here is correct based on what is shown on the applicant side about the
+ * status of other permits."* It was not. The applicant is shown per-permit
+ * states — Not Yet Submitted, For Approval, For Inspection, Approved, Rejected,
+ * Returned — and those are the states an office's row actually has, so those
+ * are what it can usefully filter on.
+ *
+ * Each list is the states REACHABLE in that tab, not every state a permit can
+ * hold. For Approval keeps the office's assignment open, which is
+ * `pending,in_progress,returned` — so the permit is being read
+ * (`for_approval`), has been sent back (`returned`), or is one of the migrated
+ * rows whose permit never started (`not_started`, see APPROVAL_STATUSES). An
+ * approved permit closes the assignment and leaves the tab, so offering
+ * `approved` here would be the dead option this replaces.
+ *
+ * For Inspection is one state by construction — the tab IS
+ * `clearance_status = for_inspection` — so it offers nothing, and the dropdown
+ * falls back to its "All in …" entry alone rather than printing a choice
+ * between one thing and itself.
+ */
+const TAB_CLEARANCE_OPTIONS: Partial<Record<Tab, readonly ServerClearanceStatus[]>> = {
+  approval: ['for_approval', 'returned', 'not_started'],
+  /*
+   * Present and empty, which is not the same as absent.
+   *
+   * The key is what puts an office on the own-permit vocabulary at all, so
+   * leaving it out would drop this tab back to listing FILING statuses — one
+   * entry, `awaiting_other_permits`, relabelled "Your permit · site visit
+   * outstanding". A choice between one thing and itself, in the vocabulary the
+   * client asked to be rid of here. Empty leaves the dropdown with its
+   * "All in For Inspection" entry, which is the honest shape for a tab that is
+   * already one state.
+   */
+  inspection: [],
+}
 
 /**
  * BPLO's second act: the application is complete and wants a signature.
@@ -196,46 +351,61 @@ const FINAL_STATUSES = ['for_final_approval'] as const
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   approval: APPROVAL_STATUSES,
   payment: PAYMENT_STATUSES,
+  gathering: GATHERING_STATUSES,
   inspection: INSPECTION_STATUSES,
   final: FINAL_STATUSES,
 }
 
-const TAB_LABEL: Record<Tab, string> = {
-  approval: 'For Approval',
-  payment: 'Pending Payment',
-  inspection: 'For Inspection',
-  final: 'Final Approval',
+/**
+ * One tab's caption, for the seat reading it. See `officeLabel` on TABS.
+ *
+ * Reads TABS rather than holding a second copy of the words. The duplicate it
+ * replaces was a `Record<Tab, string>` that had to be edited in step with the
+ * array above — and the Filter dropdown's "All in …" entry is built from it, so
+ * a drift would have shown an officer one caption on the pill and a different
+ * one inside the control that narrows it.
+ */
+function tabLabel(tab: Tab, ownPermit: boolean): string {
+  const entry = TABS.find((t) => t.value === tab)
+
+  return (ownPermit ? entry?.officeLabel : undefined) ?? entry?.label ?? tab
 }
 
 /**
- * What a status MEANS inside the tab it is being offered in.
+ * What BPLO's Filter dropdown offers, per tab — the FILING's states.
  *
- * The Filter dropdown lists the tab's own statuses, and `applicationStatusMeta`
- * labels each one the same way everywhere because it describes the FILING and
- * knows nothing about which office is reading. Two of them need saying
- * differently from this seat.
+ * ── This replaced STATUS_IN_TAB, which relabelled instead of excluding ────
  *
- * Both are `awaiting_other_permits`. To an applicant that status means "the
- * other permits are being worked"; an office reading its own queue is one of the
- * workers, and the row is there because the work is theirs. The bare label would
- * read as an explanation of why the row is NOT actionable, which is the opposite
- * of true.
+ * That map existed because one status, `awaiting_other_permits`, read wrongly
+ * from an office chair: to an applicant it means "the other permits are being
+ * worked", and an office reading its own queue IS one of the workers, so the
+ * bare label explained why a row was not actionable when the reason it was on
+ * screen is that it was. The fix was two relabellings — "Your permit · waiting
+ * on your review" and "Your permit · site visit outstanding".
  *
- * Deliberately only where the two readings diverge. Everywhere else the shared
- * filing label is right, and renaming a status that was already unambiguous
- * would move a control out from under the tests that press it by name.
+ * Both are unreachable now: an office narrows its own permit through
+ * TAB_CLEARANCE_OPTIONS and never sees a filing status in this dropdown at all.
+ * So the relabelling has nothing left to relabel, and what is left is the
+ * question it was working around — which filing statuses can a BPLO row in this
+ * tab actually have.
+ *
+ * `awaiting_other_permits` is NOT among the For Initial Approval options, and
+ * that is the whole point of writing this out rather than reusing
+ * `TAB_STATUSES`. It is in APPROVAL_STATUSES because that list serves the query
+ * for BOTH seats — an office's rows at that stage are how it gets any rows at
+ * all — but BPLO's own assignment is `completed` by `approveMainForm()` before
+ * a filing reaches it, so BPLO can never hold an open one. Measured on the
+ * register: 3 filings at `awaiting_other_permits`, all 3 carrying a BPLO
+ * assignment, 0 of them open. Offering it would be a narrowing that empties the
+ * queue every time it is chosen.
  */
-const STATUS_IN_TAB: Record<Tab, Partial<Record<ApplicationStatus, string>>> = {
-  approval: {
-    awaiting_other_permits: 'Your permit · waiting on your review',
-  },
-  payment: {},
-  inspection: {
-    awaiting_other_permits: 'Your permit · site visit outstanding',
-  },
-  final: {},
+const TAB_FILING_OPTIONS: Record<Tab, readonly ApplicationStatus[]> = {
+  approval: ['for_approval', 'returned'],
+  payment: PAYMENT_STATUSES,
+  gathering: GATHERING_STATUSES,
+  inspection: INSPECTION_STATUSES,
+  final: FINAL_STATUSES,
 }
-
 /**
  * This office's own assignment states that still want a decision (item 111).
  *
@@ -392,6 +562,23 @@ interface QueueItem {
   atMs: number
   unpaid: boolean
   /**
+   * The filing's own status, which `unpaid` was being computed FROM and
+   * throwing away.
+   *
+   * The chip on the right of the row read Unpaid / Paid, and the client asked
+   * on 16 September 2026 whether it was worth the space. Nearly not: the For
+   * Initial Approval tab holds `for_approval`, `returned` AND
+   * `awaiting_other_permits`, so it varies by exactly one of three rows —
+   * and payment is implied by the status anyway, since everything past
+   * `pending_payment` has been paid.
+   *
+   * The status says more in the same space. It separates a filing waiting on
+   * BPLO from one sent BACK to the applicant, which is the distinction that
+   * changes whether the officer is waiting or the applicant is, and those two
+   * sat in this tab wearing one identical orange "Unpaid".
+   */
+  status: ApplicationStatus
+  /**
    * This office's own permit on the filing, when the row came from an
    * assignment. Null on the Pending Payment tab, whose rows are applications and
    * belong to no office yet.
@@ -453,6 +640,7 @@ function fromAssignment(item: Assignment): QueueItem {
     at: item.assigned_at,
     atMs: item.assigned_at ? new Date(item.assigned_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
+    status: app.status,
     clearance: item.clearance,
     assignmentId: item.id,
     officer: item.officer,
@@ -488,6 +676,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     at: app.submitted_at,
     atMs: app.submitted_at ? new Date(app.submitted_at).getTime() : 0,
     unpaid: UNPAID_STATUSES.includes(app.status),
+    status: app.status,
     // No office holds this filing yet, so there is no "your permit" to report.
     clearance: null,
   }
@@ -510,6 +699,15 @@ async function loadPage(args: {
   query: string
   /** Who holds the case. undefined = all, which is the default tab. */
   oic?: 'unassigned' | 'mine' | 'others'
+  /**
+   * New / renewal / amendment. undefined = every type.
+   *
+   * One value in, two spellings out: the two endpoints named this parameter
+   * differently and neither name is wrong where it lives. Translated below
+   * rather than at the call site, so the screen holds one piece of state and
+   * not one per feed.
+   */
+  appType?: 'new' | 'renewal' | 'amendment'
   page: number
   perPage: number
 }): Promise<QueueFeed> {
@@ -517,6 +715,10 @@ async function loadPage(args: {
     const res = await applications.page({
       status: args.statuses,
       ...(args.query ? { q: args.query } : {}),
+      // `type` here — ApplicationController has taken that name since it was
+      // written, and renaming a public query parameter to match this screen
+      // would break every other caller of it.
+      ...(args.appType ? { type: args.appType } : {}),
       page: args.page,
       per_page: args.perPage,
     })
@@ -528,6 +730,10 @@ async function loadPage(args: {
     application_status: args.statuses,
     ...(args.assignmentStatuses ? { status: args.assignmentStatuses } : {}),
     ...(args.clearanceStatuses ? { clearance_status: args.clearanceStatuses } : {}),
+    // `application_type`, not `type`: on this endpoint the bare noun would
+    // read as the assignment's own type, and application-vs-assignment is
+    // already what goes wrong here most often.
+    ...(args.appType ? { application_type: args.appType } : {}),
     ...(args.query ? { q: args.query } : {}),
     ...(args.oic ? { oic: args.oic } : {}),
     page: args.page,
@@ -563,11 +769,47 @@ function QueueRow({
   item,
   onClaim,
   claiming,
+  ownPermit,
 }: {
   item: QueueItem
   onClaim?: (item: QueueItem) => void
   claiming?: boolean
+  /**
+   * Does this reader's badge describe their own permit, or the whole filing?
+   *
+   * True for the five clearance offices, false for BPLO. Passed in rather than
+   * read from the auth store here so that one component renders one row the
+   * same way whoever calls it, and so the decision is made once beside the tab
+   * gating it belongs with.
+   */
+  ownPermit: boolean
 }) {
+  /*
+   * The status this row reports, from whichever of the two machines the reader
+   * owns. See the note beside the badge itself.
+   *
+   * `clearanceStatusMeta` takes the SERVER's own label when it has one, so the
+   * badge cannot drift from the word the applicant is shown for the same
+   * permit; the tone comes from the shared table either way.
+   */
+  /*
+   * `status` is nullable — AssignmentResource sends null for a permit type with
+   * no pivot row — so the guard is on the STATUS and not just on the clearance
+   * object. Without it the badge would read "Available", which is the label
+   * status.ts gives an absent status, on a row an office is holding.
+   */
+  const own = ownPermit ? item.clearance : null
+  const ownPermitBadge = own !== null && own.status !== null
+  const badge = ownPermitBadge
+    ? {
+        tone: clearanceStatusMeta(own.status!).tone,
+        label: own.status_label ?? clearanceStatusMeta(own.status!).label,
+      }
+    : {
+        tone: applicationStatusMeta(item.status).tone,
+        label: applicationStatusMeta(item.status).label,
+      }
+
   const body = (
     <>
       <div className="min-w-0 flex-1 px-6 py-4">
@@ -629,7 +871,15 @@ function QueueRow({
         {item.clearance && (
           <p className="mt-1 text-sm text-ink-secondary">
             {item.clearance.name}
-            {item.clearance.status_label && (
+            {/*
+              * The status comes off this line when the badge is carrying it —
+              * which is every office row. Printing "Sanitary Permit / Health
+              * Certificate · For Approval" three inches from a badge reading
+              * "For Approval" spends the row's most readable line on a word
+              * already on screen. BPLO's badge shows the FILING's status, so
+              * there the permit's own status is still this line's to say.
+              */}
+            {item.clearance.status_label && !ownPermitBadge && (
               <span className="text-ink-muted"> · {item.clearance.status_label}</span>
             )}
             {/*
@@ -637,6 +887,31 @@ function QueueRow({
               * officer needs to know before they open it that there is nothing
               * to read but the attachment.
               */}
+            {/*
+              ── How long this office has been waiting on the applicant ────────
+
+              Client's decision, 17 September 2026: show the elapsed time on
+              BOTH sides and invent no deadline. The applicant's card got it
+              first; this is the half that lets an office see which filings have
+              gone quiet and ring somebody, which is the reason it was asked
+              for.
+
+              No due date, deliberately. RA 11032 fixes the OFFICE's clock, not
+              the citizen's, and Malabon has given us no Citizen's Charter
+              response window (open question A10) — so a deadline here would be
+              one no ordinance backs.
+
+              Rose, and the only coloured thing on this line. The row's badge
+              already reads "Returned"; this is the part the badge cannot say,
+              and it earns the emphasis because it is the one number an officer
+              scans the queue for.
+            */}
+            {item.clearance.status === 'returned' && item.clearance.returned_at !== null && (
+              <span className="font-semibold text-s-rose">
+                {' '}
+                · waiting on the applicant {formatRelative(item.clearance.returned_at)}
+              </span>
+            )}
             {item.clearance.mode === 'upload' && (
               <span className="text-ink-muted"> · copy on file</span>
             )}
@@ -656,16 +931,46 @@ function QueueRow({
         * and it was read exactly that way, immediately, by the first person to
         * open the screen.
         *
-        * "Unpaid" says the one thing this chip knows. The stage is the tab's job
-        * and the permit line's, and no two of the three now use the same words
-        * for different things.
+        * "Unpaid" said the one thing that chip knew, and by 16 September 2026
+        * that was too little. It varied by one row in three on this tab, and
+        * the status it was derived from carries the payment fact anyway —
+        * anything past `pending_payment` is paid.
+        *
+        * So the slot shows the STATUS, in the same tone the applicant's Track
+        * badges and status guide use, from the same `applicationStatusMeta`.
+        * Two things that follow: a filing waiting on BPLO is now visibly not
+        * the same as one returned to the applicant, where both used to wear an
+        * identical orange "Unpaid"; and the officer and the applicant finally
+        * describe a row the same way, in the same colour, which is the whole
+        * reason the tones live in one table.
         */}
-      <StatusChip
-        tone={item.unpaid ? 'orange' : 'green'}
-        className="w-28 shrink-0 rounded-none! px-4 py-3 text-sm"
+      {/*
+        * ── And WHICH status, which depends on the seat ───────────────────────
+        *
+        * BPLO gets the filing's. It owns the filing end to end — both its
+        * approvals are about the whole application — so "Awaiting Other
+        * Permits" is precisely its situation.
+        *
+        * An office gets its OWN permit's, and the client's reasoning is the
+        * whole of it: *"As someone from other permits' office, I think I
+        * shouldn't care on the other permits since they are independent of each
+        * other, so no need to show Awaiting Other Permits."* (17 September
+        * 2026.) The five clearances move independently. A sanitary officer
+        * reading "Awaiting Other Permits" beside their own row is being told
+        * about four offices' work and nothing about theirs — and the row was
+        * already at For Approval FOR THEM, which is the one fact the badge had
+        * room for and was not saying.
+        *
+        * `badge` is computed on the item so the fallback is explicit: an
+        * office row with no clearance payload (the Pending Payment tab's rows
+        * are applications, not assignments) still has a status to show, and
+        * showing the filing's is better than showing none.
+        */}
+      <span
+        className={`flex w-36 shrink-0 items-center justify-center self-stretch border-l px-3 text-center text-sm font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
       >
-        {item.unpaid ? 'Unpaid' : 'Paid'}
-      </StatusChip>
+        {badge.label}
+      </span>
     </>
   )
 
@@ -749,21 +1054,66 @@ export function QueuePage() {
    * cases are further down the feed.
    */
   const [holder, setHolder] = useState<'' | 'unassigned' | 'mine' | 'others'>('')
+  /**
+   * New / renewal / amendment. '' is every type, which is what the officer sees
+   * on arrival — a queue that opens pre-narrowed is a queue that lies about how
+   * much work there is.
+   *
+   * Server-side, like the tab, the search and the holder. A browser filter over
+   * one page of a paged feed would tell an officer there are no renewals when
+   * theirs are further down.
+   */
+  const [appType, setAppType] = useState<'' | 'new' | 'renewal' | 'amendment'>('')
   /** The row being claimed, so one press cannot be double-fired. */
   const [claimingId, setClaimingId] = useState<number | null>(null)
   const [claimError, setClaimError] = useState<string | null>(null)
 
   /*
-   * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
-   * and an empty queue is a claim this screen cannot make to them truthfully.
+   * See ANY_OFFICE: an officer handed a permanently empty tab is being told
+   * something, and an empty queue is a claim this screen cannot make truthfully
+   * to somebody it was never going to show a row.
    *
-   * Two tabs are hidden now rather than one. Final Approval joins Pending
-   * Payment because it is BPLO's act, not an office's: a filing reaches it only
-   * once every clearance is approved, so a sanitary officer's own work on it is
-   * finished and the tab could only ever tell them what somebody else owes.
+   * ── It cuts BOTH ways now, and one of the two was showing ────────────────
+   *
+   * Three tabs are BPLO's. Pending Payment, because an unpaid filing is routed
+   * to no office at all. Final Approval, because a filing reaches it only once
+   * every clearance is approved, so an office's own work on it is done and the
+   * tab could only report what somebody else owes. And Awaiting Other Permits,
+   * which is the stage from BPLO's seat — an inspecting office reads the same
+   * stage through its own permit, on the tab below.
+   *
+   * For Inspection is the office tabs' one entry, and it is the half that was
+   * missing. It filters on the reader's OWN permit being out for a site visit,
+   * and BPLO has no such permit: its Business Permit pivot runs
+   * `not_started` → `for_approval` → `approved` and is never
+   * `for_inspection` (INSPECTION_STATUSES says so in as many words). So BPLO
+   * was being offered a tab that could not hold a row on any filing, ever, and
+   * the client found it by pressing it: *"There should be no For Inspection
+   * anymore since BPLO does not have that."*
+   *
+   * Stated as two lists rather than one predicate because they are two facts —
+   * "this stage is not yours to act on" and "this stage is not yours to see
+   * through your own permit" — and a single `canReadEveryOffice ? … : …`
+   * ternary would hide which tab was excluded for which reason.
    */
-  const BPLO_ONLY_TABS: Tab[] = ['payment', 'final']
-  const tabs = canReadEveryOffice ? TABS : TABS.filter((t) => !BPLO_ONLY_TABS.includes(t.value))
+  const BPLO_ONLY_TABS: Tab[] = ['payment', 'gathering', 'final']
+  const OFFICE_ONLY_TABS: Tab[] = ['inspection']
+  /*
+   * The pills: which tabs this seat gets, captioned the way this seat says it.
+   *
+   * `label` is rewritten rather than left to the component, because FilterPills
+   * renders what it is handed — so the caption has to be resolved here, where
+   * the seat is known. `tabLabel` returns the shared word for every tab but
+   * one; see `officeLabel` on TABS for the one.
+   */
+  const tabs = TABS.filter((t) =>
+    canReadEveryOffice
+      ? !OFFICE_ONLY_TABS.includes(t.value)
+      : !BPLO_ONLY_TABS.includes(t.value),
+  ).map((t) => ({ value: t.value, label: tabLabel(t.value, !canReadEveryOffice) }))
+  const typePills = canReadEveryOffice
+    ? TYPE_PILLS
+    : TYPE_PILLS.filter((t) => !BPLO_ONLY_TYPES.includes(t.value))
   /*
    * Every tab searches on the server now, not just Pending Payment.
    *
@@ -792,9 +1142,19 @@ export function QueuePage() {
    * those two.
    */
   const tabStatuses = TAB_STATUSES[tab]
-  const activeStatuses: readonly ApplicationStatus[] = statusFilter
-    ? [statusFilter as ApplicationStatus]
-    : tabStatuses
+  /*
+   * Whose status the Filter dropdown is narrowing on this screen.
+   *
+   * An office filters its own permit, so its selection is a CLEARANCE status
+   * and must not be sent as `application_status` — doing that would ask the
+   * server for filings whose FILING status is "for_approval" on a tab whose
+   * rows are all `awaiting_other_permits`, and empty the queue. The two
+   * vocabularies overlap in spelling (`for_approval`, `returned`) and in
+   * nothing else, which is exactly how that mistake would go unnoticed.
+   */
+  const filtersOwnPermit = !canReadEveryOffice && TAB_CLEARANCE_OPTIONS[tab] !== undefined
+  const activeStatuses: readonly ApplicationStatus[] =
+    statusFilter && !filtersOwnPermit ? [statusFilter as ApplicationStatus] : tabStatuses
   const statuses = activeStatuses.join(',')
   /*
    * Which of the three server-side filters each tab needs, and — as important —
@@ -824,7 +1184,18 @@ export function QueuePage() {
    * at, rather than every assignment the office has ever held.
    */
   const assignmentStatuses = tab === 'approval' ? OPEN_ASSIGNMENT_STATUSES : undefined
-  const clearanceStatuses = tab === 'inspection' ? INSPECTION_CLEARANCE_STATUSES : undefined
+  /*
+   * The For Inspection tab's filter is the tab itself. An office narrowing its
+   * own permit inside another tab sends the same parameter, which is why these
+   * are one expression and not two — `clearance_status` can only carry one
+   * answer, and a tab that defines itself by it has already used it.
+   */
+  const clearanceStatuses =
+    tab === 'inspection'
+      ? INSPECTION_CLEARANCE_STATUSES
+      : filtersOwnPermit && statusFilter
+        ? statusFilter
+        : undefined
   // A deep page buys nothing where the server is doing the searching; only the
   // browser-side sorts still need more rows than fit on a screen.
   const deep = searchesOnServer ? sort !== 'newest' : isDeep(search, sort)
@@ -842,10 +1213,28 @@ export function QueuePage() {
         // hold; sending the narrowing there would be a parameter that endpoint
         // does not know and a filter the tab cannot honour.
         oic: tab === 'payment' || holder === '' ? undefined : holder,
+        /*
+         * Both endpoints can narrow by it, and they spell it differently:
+         * `/applications` has taken `type` since it was written, the
+         * assignment feed takes `application_type` to keep the noun
+         * unambiguous beside `application_status`. `loadPage` does the
+         * translating, so this passes one value.
+         */
+        appType: appType === '' ? undefined : appType,
         page,
         perPage,
       }),
-    [tab, statuses, assignmentStatuses, clearanceStatuses, serverQuery, holder, page, perPage],
+    [
+      tab,
+      statuses,
+      assignmentStatuses,
+      clearanceStatuses,
+      serverQuery,
+      holder,
+      appType,
+      page,
+      perPage,
+    ],
   )
 
   // Paging in extends the list being read; a new tab starts its own list. Merged
@@ -919,6 +1308,12 @@ export function QueuePage() {
     if (next === holder) return
     setHolder(next)
     setClaimError(null)
+    restart()
+  }
+
+  function selectType(next: '' | 'new' | 'renewal' | 'amendment') {
+    if (next === appType) return
+    setAppType(next)
     restart()
   }
 
@@ -1005,13 +1400,36 @@ export function QueuePage() {
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
   const firstLoad = loading && rows.length === 0
 
-  /** Status options for the tab in hand — a tab never offers a status it excludes. */
+  /**
+   * Status options for the tab in hand — a tab never offers a status it excludes.
+   *
+   * Two vocabularies, one per seat, for the reason the row badge has two: BPLO
+   * narrows the FILING, an office narrows its OWN PERMIT. See
+   * TAB_CLEARANCE_OPTIONS for why the filing's list was unusable from an office
+   * chair.
+   *
+   * An office tab with no clearance options — For Inspection, which is one
+   * state by construction — is left with the "All in …" entry alone. That is
+   * the honest dropdown for it: there is nothing to choose between.
+   */
   const statusOptions: SortFilterOption[] = [
-    { value: '', label: `All in ${TAB_LABEL[tab]}` },
-    ...tabStatuses.map((s) => ({
-      value: s,
-      label: STATUS_IN_TAB[tab][s] ?? applicationStatusMeta(s).label,
-    })),
+    /*
+     * Captioned off the SEAT, not off `filtersOwnPermit`. The two agree on
+     * every tab an office can currently reach, and they are not the same
+     * question: one asks whose vocabulary this officer speaks, the other
+     * whether this particular tab has a clearance list to offer. A future
+     * office tab without one would print BPLO's wording here.
+     */
+    { value: '', label: `All in ${tabLabel(tab, !canReadEveryOffice)}` },
+    ...(filtersOwnPermit
+      ? (TAB_CLEARANCE_OPTIONS[tab] ?? []).map((c) => ({
+          value: c,
+          label: clearanceStatusMeta(c).label,
+        }))
+      : TAB_FILING_OPTIONS[tab].map((s) => ({
+          value: s,
+          label: applicationStatusMeta(s).label,
+        }))),
   ]
 
   const needle = search.trim().toLowerCase()
@@ -1033,7 +1451,21 @@ export function QueuePage() {
 
   const sortLabel = SORTS.find((s) => s.value === sort)?.label.toLowerCase() ?? 'newest first'
   const partial = rows.length < total
-  const narrowed = Boolean(needle || statusFilter)
+  /*
+   * Is the officer looking at a NARROWED queue, or at all of it?
+   *
+   * It decides which empty state they get, and that is not cosmetic: "Your
+   * queue is clear" is a claim about the office's workload, and making it to
+   * somebody who has just filtered to Renewal would be false — there may be
+   * plenty of work, none of it a renewal. The other message, "Nothing matches
+   * these filters", says the true thing and points at the cause.
+   *
+   * `appType` had to be added here for exactly that reason. The register holds
+   * no submitted renewal today, so the first thing anybody does with the new
+   * pill is produce an empty queue — and without this it would have read as
+   * "you have no work".
+   */
+  const narrowed = Boolean(needle || statusFilter || appType)
 
   /*
    * What this screen is actually showing, in one sentence, announced.
@@ -1072,6 +1504,10 @@ export function QueuePage() {
   function clearSearchAndFilter() {
     setSearch('')
     if (statusFilter) selectStatus('')
+    // The type pill too: it is one of the things that can have emptied the
+    // queue, so a button offering to undo the narrowing has to undo all of it.
+    // Leaving it set made "Clear search" hand back a list that was still empty.
+    if (appType) selectType('')
     if (!searchesOnServer && isDeep('', sort) !== isDeep(search, sort)) restart()
   }
 
@@ -1116,7 +1552,28 @@ export function QueuePage() {
         Application Verification
       </PageTitle>
 
-      <div className="mb-5">
+      {/*
+        * ── New / renewal / amendment, FIRST ──────────────────────────────────
+        *
+        * Client's instruction, 17 September 2026: *"please place the application
+        * type at the very top."* It reads as the outer question and the rows
+        * below it as narrowings of that, which is also how the work divides: a
+        * renewal is a different piece of work from a new registration, and an
+        * officer who handles one kind picks it once and then moves between
+        * stages inside it.
+        *
+        * Offered on EVERY tab, unlike the holder pills below: the type is a fact
+        * about the filing and is meaningful wherever a filing appears, including
+        * Pending Payment, where "which of these unpaid ones are renewals" is a
+        * real question and there is no holder to ask about.
+        *
+        * Amendment is dropped for the five clearance offices — see TYPE_PILLS.
+        */}
+      <div className="mb-3">
+        <FilterPills options={typePills} value={appType} onChange={selectType} />
+      </div>
+
+      <div className="mb-3">
         <FilterPills options={tabs} value={tab} onChange={selectTab} />
       </div>
 
@@ -1134,10 +1591,11 @@ export function QueuePage() {
         * narrowing would return an empty list under every heading but "All".
         */}
       {tab !== 'payment' && (
-        <div className="mb-5">
+        <div className="mb-3">
           <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
         </div>
       )}
+
 
       {claimError && (
         <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-sm font-medium text-s-red">
@@ -1165,14 +1623,63 @@ export function QueuePage() {
           title={narrowed ? 'Nothing matches these filters' : 'Your queue is clear'}
           description={
             narrowed
-              ? 'No application in this queue has that status. Try a different filter.'
+              ? /*
+                 * ── Name the narrowing that emptied it ────────────────────────
+                 *
+                 * It said "No application in this queue has that status" for
+                 * every narrowing, and that became wrong the moment the type
+                 * pills arrived: an officer on Amendment was told the QUEUE had
+                 * no filing at that STATUS, which is a claim about the stage and
+                 * usually false — the stage is full, of new filings.
+                 *
+                 * The client hit it immediately, on Amendment × Awaiting Other
+                 * Permits: *"Make sure the filtering is appropriate because
+                 * there are NO AMENDMENTS that are AWAITING OTHER PERMITS."*
+                 * True of the register today and worth saying rather than
+                 * leaving them to infer it — but NOT a reason to hide the
+                 * combination, because an amendment does reach that stage:
+                 * `WorkflowService::attachRequiredPermitTypes` leaves
+                 * amendments on the NEW path deliberately ("the client has said
+                 * they will deal with it separately"), so it attaches all five
+                 * clearances and passes through Awaiting Other Permits exactly
+                 * as a new filing does. There is simply no amendment on the
+                 * register yet. Hiding the pill would hide real rows the day
+                 * somebody files one.
+                 */
+                appType !== ''
+                  ? `No ${TYPE_PILLS.find((t) => t.value === appType)?.label.toLowerCase() ?? appType} filing is at this stage right now. Other types may be — try All types.`
+                  : 'No application in this queue has that status. Try a different filter.'
               : tab === 'payment'
                 ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
                   ? 'Nothing is waiting on your department’s review right now.'
-                  : // Both halves of what this tab now holds: filings this
-                    // office has signed off and that have not finished.
-                    'Nothing your office has approved is still in progress.'
+                  : tab === 'gathering'
+                    ? // Said from BPLO's seat, because this tab is only ever
+                      // read from it: nothing here is waiting on BPLO, and an
+                      // empty version of it is good news rather than an idle
+                      // queue.
+                      'No filing is out with the other offices right now.'
+                    : tab === 'final'
+                      ? /*
+                         * ── Say WHY this tab is usually empty ─────────────────
+                         *
+                         * It shared the inspection tab's line — "Nothing your
+                         * office has approved is still in progress" — which
+                         * since 18 September 2026 reads as a system that has
+                         * stopped working. A new application no longer stops
+                         * here at all: the fifth clearance issues the Mayor's
+                         * Permit outright, so the only filings that reach this
+                         * stage are renewals, whose uploaded certificates BPLO
+                         * genuinely does read.
+                         *
+                         * An empty destructive-looking queue makes people go
+                         * looking for the filings they think they have lost, so
+                         * the emptiness is explained rather than merely stated.
+                         */
+                        'Nothing is waiting on your final approval. New applications no longer stop here — their Mayor’s Permit is issued as soon as the last clearance is approved. Renewals still arrive here for you to check the certificates they uploaded.'
+                      : // Both halves of what this tab now holds: filings this
+                        // office has signed off and that have not finished.
+                        'Nothing your office has approved is still in progress.'
           }
         />
       ) : nothingToShow ? (
@@ -1218,6 +1725,8 @@ export function QueuePage() {
                 item={item}
                 onClaim={claim}
                 claiming={claimingId === item.assignmentId}
+                /* BPLO reads the filing; the five offices read their own permit. */
+                ownPermit={!canReadEveryOffice}
               />
             ))}
           </ul>

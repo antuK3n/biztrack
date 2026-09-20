@@ -201,7 +201,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
             A real label wrapper fixes the association (WCAG 2.1 AA 3.3.2).
           */}
           <label className="block">
-          <FieldLabel>{staff ? 'Work email' : 'Email or number'}</FieldLabel>
+          <FieldLabel required>{staff ? 'Work email' : 'Email or number'}</FieldLabel>
           <input
             type="email"
             name="email"
@@ -231,7 +231,7 @@ export function LoginPage({ portal = 'public' }: { portal?: Portal } = {}) {
               by htmlFor rather than wrapped — a label may not contain a second
               interactive control. */}
           <label htmlFor="login-password" className="block">
-            <FieldLabel>Password</FieldLabel>
+            <FieldLabel required>Password</FieldLabel>
           </label>
           <PasswordInput
             id="login-password"

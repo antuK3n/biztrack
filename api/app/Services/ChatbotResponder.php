@@ -254,12 +254,26 @@ class ChatbotResponder
                 .'Some fees are charged per square metre, so this figure feeds straight into your assessment. Give the space you occupy, not the whole building.',
         ],
         [
-            'label' => 'Number of Employees',
+            /*
+             * Renamed with the field, 16 September 2026. The four employee
+             * counts were regrouped into one bordered block on the Business &
+             * Tax Profile step and every label now says what it counts, the
+             * total included — so an answer still calling it "Number of
+             * Employees" would name a box the applicant cannot find. The old
+             * wording stays in the aliases, which is where a name the applicant
+             * might still use belongs.
+             */
+            'label' => 'Total Number of Employees',
             'codes' => [],
-            'aliases' => ['number of employees', 'no. of employees', 'employee', 'employees', 'headcount', 'staff', 'manggagawa'],
-            'answer' => 'Number of Employees is in the Business & Tax Profile step: your total headcount at this location. '
-                ."Employees Residing in Malabon is a subset of that number, so it can never be higher.\n"
-                .'Some fees are computed from staff counts, which is why both are asked.',
+            'aliases' => [
+                'total number of employees', 'total employees',
+                'number of employees', 'no. of employees',
+                'employee', 'employees', 'headcount', 'staff', 'manggagawa',
+                'male employees', 'female employees', 'employees residing in malabon',
+            ],
+            'answer' => 'Total Number of Employees is in the Business & Tax Profile step, in the Employees block: your total headcount at this location. '
+                ."Three counts sit under it. Number of Male Employees and Number of Female Employees must ADD UP to the total, because the city's forms treat those two boxes as the total. Number of Employees Residing in Malabon is a different cut of the same people, so it only has to be no higher than the total.\n"
+                .'All four are required, and some fees are computed from staff counts, which is why the breakdown is asked for as well as the total.',
         ],
     ];
 
@@ -524,13 +538,44 @@ class ChatbotResponder
             ->implode("\n");
     }
 
+    /**
+     * When each requirement applies, said in the list rather than left implied.
+     *
+     * `context` used to mean one of two things — 'all', or an application type —
+     * so "(renewals only)" plus an optional marker covered every case. Since 16
+     * September 2026 it also carries ANSWER-driven values, and without them
+     * named the chatbot reads out mutually exclusive items side by side:
+     *
+     *   • Contract of Lease
+     *   • Tax Declaration/Transfer Certificate of Title (TCT)
+     *
+     * No applicant needs both — which they hold is decided by the rent answer —
+     * and an unqualified list implies otherwise. A bot that over-states the
+     * requirements is worse than one that says nothing: the applicant chases a
+     * document they will never be asked for.
+     *
+     * Unrecognised contexts fall through to the mandatory/optional marker rather
+     * than being guessed at, so a context added later reads as plain rather than
+     * as wrongly qualified.
+     */
     private function docSuffix(object $doc): string
     {
-        if ($doc->pivot->context === 'renewal') {
-            return ' (renewals only)';
-        }
-
-        return $doc->pivot->is_mandatory ? '' : ' (optional)';
+        return match ($doc->pivot->context) {
+            'renewal' => ' (renewals only)',
+            'rented' => ' (if you pay rent for the premises)',
+            'owned' => ' (if you own the premises)',
+            'tax_incentives' => ' (if you hold a tax incentive)',
+            /*
+             * Kept although nothing sets this context any more — the SPA and
+             * the representative's ID are plain optional rows now, because the
+             * paper states that condition in its own wording rather than asking
+             * it. One arm of a match costs nothing, and the alternative is a
+             * bot that recites "(optional)" at a requirement whose own text
+             * says who it is for.
+             */
+            'representative' => ' (if somebody files on your behalf)',
+            default => $doc->pivot->is_mandatory ? '' : ' (optional)',
+        };
     }
 
     /**

@@ -15,7 +15,7 @@ import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import { applications } from '../../lib/resources'
-import { applicationStatusMeta, otherPermitProgress } from '../../lib/status'
+import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
@@ -176,14 +176,34 @@ function OfficeVisits({ app }: { app: Application }) {
               <span className="shrink-0 text-xs italic text-ink-muted">
                 {done ? 'Visited' : 'Scheduled'} {formatDateTime(when)}
               </span>
-              {/* Icon plus word: the three outcomes must not rest on colour. */}
+              {/*
+                Icon plus word: the three outcomes must not rest on colour.
+
+                ── And the colours come from TONE_CLASSES now ─────────────────
+
+                They were written here — `bg-s-red-tint text-s-red`,
+                `bg-s-green-tint text-s-green`, `bg-s-yellow-tint
+                text-amber-800` — a fourth palette for three facts the shared
+                table already names: `danger`, `success` and `scheduled`. Two
+                of the three were not even the same colour as their counterpart
+                (`danger` is `bg-red-50 text-red-700`; `text-amber-800` is
+                Tailwind's, and `--color-*: initial` means it resolves to
+                nothing in this build, so that word was rendering unstyled).
+
+                The client, 17 September 2026: *"I told you to match the colors
+                for the same status. Do this for ALL, even those that are not
+                captured by the screenshot I sent."* A failed visit and a
+                rejected permit are the same news to the person reading it, and
+                a scheduled visit is the same yellow the permit wears while it
+                waits for one.
+
+                The border comes with the tone, so it is added here — the tones
+                are written for bordered badges and a tint without one sits
+                differently against a tinted card.
+              */}
               <span
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold ${
-                  failed
-                    ? 'bg-s-red-tint text-s-red'
-                    : done
-                      ? 'bg-s-green-tint text-s-green'
-                      : 'bg-s-yellow-tint text-amber-800'
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${
+                  TONE_CLASSES[failed ? 'danger' : done ? 'success' : 'scheduled']
                 }`}
               >
                 {failed ? (
@@ -525,7 +545,7 @@ export function ApplicationDetailPage() {
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
-              <span className="text-4xl font-medium">For Approval</span>
+              <span className="text-4xl font-medium">For Initial Approval</span>
             </div>
             {/*
               * What this stage IS, said plainly, because the client's whole

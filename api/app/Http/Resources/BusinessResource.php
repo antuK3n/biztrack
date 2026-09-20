@@ -13,6 +13,35 @@ class BusinessResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            /*
+             * The business permit this shop is trading on right now, or null.
+             *
+             * Here so a chooser can name it without a request per business.
+             * The amendment entry folds the permit into the business option —
+             * "Pedro's Snack Bar — MCB-2026-000003" — because a business has
+             * exactly one current business permit and asking which one is a
+             * question with a single possible answer (client, 19 September
+             * 2026).
+             *
+             * Null is NOT a data fault. A business row exists from the moment
+             * somebody starts filing, so a shop still applying for its first
+             * permit has none yet — measured: three of the five businesses on
+             * the register, all with an application in flight. Such a business
+             * has nothing to amend, and the chooser leaves it out rather than
+             * offering it with an apologetic label.
+             *
+             * `whenLoaded`, so a caller that has not asked for the relation
+             * gets no key at all rather than a null it would read as "this
+             * business holds no permit".
+             */
+            'current_business_permit' => $this->whenLoaded(
+                'currentBusinessPermit',
+                fn () => $this->currentBusinessPermit === null ? null : [
+                    'id' => $this->currentBusinessPermit->id,
+                    'permit_number' => $this->currentBusinessPermit->permit_number,
+                    'valid_until' => $this->currentBusinessPermit->valid_until?->toDateString(),
+                ],
+            ),
             'trade_name' => $this->trade_name,
             'registration_type' => $this->registration_type,
             'registration_number' => $this->registration_number,
@@ -50,6 +79,16 @@ class BusinessResource extends JsonResource
             'address' => $this->whenLoaded('address', fn () => $this->address ? [
                 'line1' => $this->address->line1,
                 'line2' => $this->address->line2,
+                /*
+                 * BPLO item 5's two boxes. Columns since the schema was
+                 * aligned to the paper and empty on every row until the wizard
+                 * stopped asking for them as one combined question — which had
+                 * the officer's review guessing the split back out of `line1`
+                 * with a regex, and getting it backwards on any filing whose
+                 * applicant typed only the number.
+                 */
+                'house_bldg_no' => $this->address->house_bldg_no,
+                'street' => $this->address->street,
                 'city' => $this->address->city,
                 'province' => $this->address->province,
                 'postal_code' => $this->address->postal_code,

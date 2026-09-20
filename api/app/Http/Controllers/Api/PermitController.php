@@ -8,6 +8,7 @@ use App\Models\ApplicationDocument;
 use App\Models\Permit;
 use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
+use App\Support\PermitFace;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -233,9 +234,12 @@ class PermitController extends Controller
             'application',
         ]);
 
-        $business = $permit->business;
-        $address = $business?->address;
-
+        /*
+         * Both locals are gone with the inline face: `PermitFace` reads the
+         * business itself for the live fallback, so holding a copy here only
+         * invited the next field to be assembled beside the snapshot instead
+         * of inside it.
+         */
         $signatories = $permit->permitType?->department?->signatories
             ?->where('is_active', true)
             ->sortBy([['sort_order', 'asc'], ['role', 'asc']])
@@ -248,19 +252,20 @@ class PermitController extends Controller
             'permit_type_name' => $permit->permitType?->name ?? 'Permit',
             'department_name' => $permit->permitType?->department?->name,
             'status_label' => $permit->status?->label(),
-            // Null, not '', so the reader can tell "removed" from "unnamed".
-            'business_name' => $business?->name,
-            'trade_name' => $business?->trade_name,
-            'owner_name' => $business?->owner?->fullName(),
-            'address' => $address?->line1,
-            'barangay' => $address?->barangay?->name,
-            'city' => $address?->city,
-            // Every declared line, joined: a permit face lists the activities it
-            // covers, and a business may carry more than one.
-            'line_of_business' => $business?->lines
-                ->map(fn ($l) => $l->psicCode?->title)
-                ->filter()
-                ->implode(', ') ?: null,
+            /*
+             * ── The face as it was SIGNED, not as the register reads today ───
+             *
+             * These seven were assembled here from the live business record, so
+             * every edit to a business rewrote every certificate it had ever
+             * held — including, after an amendment, five clearances describing
+             * premises their offices had never seen. See
+             * `permits.issued_details` for the full argument.
+             *
+             * `PermitFace` is the one builder, shared with the issuance that
+             * writes the snapshot, so the frozen face and a live fallback
+             * cannot drift into two different shapes.
+             */
+            ...PermitFace::forPrinting($permit),
             'tracking_id' => $permit->application?->tracking_id,
             'valid_from' => optional($permit->valid_from)->format('F j, Y'),
             'valid_until' => optional($permit->valid_until)->format('F j, Y'),

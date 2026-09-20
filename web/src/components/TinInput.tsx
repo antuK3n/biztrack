@@ -287,7 +287,8 @@ export function TinInput({
       className="min-w-0 border-0 p-0"
     >
       <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
-        Tax Identification Number (TIN)
+        {/* Item 2 on MCG-BPLO-FO-001 section A. */}
+        2. Tax Identification Number (TIN)
         <span className="text-s-red"> *</span>
       </legend>
 

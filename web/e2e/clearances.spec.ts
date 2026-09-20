@@ -420,6 +420,43 @@ async function applyFor(page: Page, appId: number, code: string): Promise<void> 
 }
 
 /**
+ * Open the clearance stage and wait for it to actually be there.
+ *
+ * ── Why this is a helper and not another `timeout: 30_000` ─────────────────
+ *
+ * The stage is two of the largest modules in the app — ClearanceStagePage and
+ * OfficeFormStep, about 4,000 lines between them — and the dev server
+ * transforms them on demand, on first navigation, per run. Whichever test
+ * reaches this route first pays for that, and the page it is waiting on has not
+ * been compiled yet: the app shell renders, `<main>` is empty, and a 30s wait
+ * on the heading expires against a page that is not broken and not slow to
+ * answer, just not built.
+ *
+ * That made the FIRST test in the file fail and the rest pass, which reads
+ * exactly like a product defect in whatever that test happened to cover. It is
+ * also why this belongs in one place: with a bare number per call site, moving
+ * a test or filtering with `-g` silently hands the bill to a different test.
+ *
+ * 90s, against ~5s warm. The per-test budget is 180s (see playwright.config.ts)
+ * so a cold first navigation and the assertions after it both fit.
+ */
+async function openClearances(page: Page, appId: number): Promise<void> {
+  await page.goto(`/applications/${appId}/clearances`)
+  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
+    timeout: 90_000,
+  })
+  /*
+   * And the cards, because "the heading is up" is not "the stage is drawn".
+   * Clicking a card's Apply straight after the heading spent the whole 15s
+   * action budget waiting for a control that was still a skeleton — the same
+   * failure as the cold compile, one render later, and it reads the same way:
+   * a button that is not there.
+   */
+  await expect(clearanceCards(page)).toHaveCount(5, { timeout: 30_000 })
+}
+
+
+/**
  * One clearance's state, as the SERVER has it.
  *
  * `application_permit_types.status` is the fact — `not_started` once the filing
@@ -499,10 +536,7 @@ test('before the first payment the stage is visible but locked, in the API’s o
   // A draft, unpaid on purpose — that IS the locked state under test.
   const appId = await makeDraft(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   /*
    * All five are on screen, and every one of them is required.
@@ -579,7 +613,7 @@ test('before the first payment the stage is visible but locked, in the API’s o
   ).toHaveCount(0)
 })
 
-test('once the stage is open, every card states its price and the ledger behind it', async ({
+test('once the stage is open, no card quotes a fee, and the ledger is on screen', async ({
   page,
 }) => {
   /*
@@ -598,10 +632,7 @@ test('once the stage is open, every card states its price and the ledger behind 
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   // Five, all required. See the locked test above for what the sixth was.
   const cards = clearanceCards(page)
@@ -613,22 +644,38 @@ test('once the stage is open, every card states its price and the ledger behind 
   await expect(apply).toHaveAttribute('aria-disabled', 'false')
 
   /*
-   * The AMOUNT, on the card. This assertion is the exact inverse of what stood
-   * here on 4 August (`not.toContainText(/fee ₱/i)`), and it survives the
-   * reordering: the applicant is entitled to see what each office's permit cost
-   * them on the screen where that office's permit is worked, whether or not the
-   * press itself moves money.
+   * NO amount on the card — and this assertion has now flipped three times.
    *
-   * Asserted across the grid rather than on one card, because `fee_preview` is
-   * legitimately null where an office sets the amount case by case, and
-   * legitimately zero — "No fee assessed" — where the permit is already attached
-   * to the filing, which is now every permit here from the moment it is
-   * submitted. All three cases have to say something; none may say nothing.
+   * It asserted the absence on 4 August, the PRESENCE on 30 August (8cfb368,
+   * which put `feeAmount()` back on the card in the same commit), and the
+   * product removed it again on 9 September without the test following. It has
+   * been red ever since: `feeAmount` is still exported from
+   * ClearanceStagePage, with its reasoning and its three cases intact, and has
+   * had no caller for eight days. Being exported is why `tsc` never said so.
+   *
+   * The client's instruction is the one that settles it, and it is a good
+   * argument rather than a preference (3b69e3f):
+   *
+   *   "Would displaying the fee still matter because we have already paid it
+   *    for that beforehand, right? If not, kindly remove it."
+   *
+   * Every clearance is billed once, on the Tax Order of Payment raised at
+   * submission, and applying adds nothing. So "Fee ₱735.00" sitting above an
+   * Apply button reads to an applicant who has already paid as a second ₱735 —
+   * the card was making a claim about money that pressing it does not make.
+   * The per-permit breakdown is not lost; it is on the Tax Order of Payment,
+   * which is where money is agreed to.
+   *
+   * Written as the absence, on every card, because the line has come back
+   * twice. `fee_preview` is still on the wire — ₱735.00 for Zoning and ₱0.00
+   * for the other four, measured on the isolated stack — so nothing stops a
+   * future card from printing it again by accident.
    */
   for (const card of await cards.all()) {
-    await expect(card, 'a clearance card quotes no price at all').toContainText(
-      /fee ₱|no fee assessed|fee set by this office/i,
-    )
+    await expect(
+      card,
+      'a clearance card quotes a fee again: applying adds nothing, so the card must not price it',
+    ).not.toContainText(/fee ₱|no fee assessed|fee set by this office/i)
   }
 
   /*
@@ -685,10 +732,7 @@ test('the grid never charges for what the Tax Order of Payment already covered',
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
   /*
    * The CARDS, not the heading, before any "this text is absent" assertion.
    *
@@ -724,10 +768,7 @@ test('a locked Apply stays reachable, and refuses to do anything', async ({ page
   // Unpaid, so shut. Same reason as the test above.
   const appId = await makeDraft(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(5, { timeout: 30_000 })
@@ -776,7 +817,7 @@ test('a locked Apply stays reachable, and refuses to do anything', async ({ page
   await apply.dispatchEvent('click')
   await page.waitForTimeout(500)
   await expect(page.getByRole('dialog')).toBeHidden()
-  await expect(page.getByRole('button', { name: /save & back to clearances/i })).toBeHidden()
+  await expect(page.getByRole('button', { name: /^back to clearances$/i })).toBeHidden()
 
   const submit = cards.first().getByRole('button', { name: /submit a copy/i })
   await submit.dispatchEvent('click')
@@ -792,15 +833,12 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
   // already-applied clearance must open the form and must not undo anything.
   await applyFor(page, appId, 'SANITARY')
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await expect(card).toHaveCount(1)
   /*
-   * Located on `appl(y|ied)`, which is the accessible name in EITHER state.
+   * Located on the one control, whichever of its three names it is wearing.
    *
    * It pinned `/^applied for the/i` — the name the card gives the control once
    * the clearance has been started — and that reads the card's own idea of the
@@ -809,20 +847,45 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
    * is red for it). Pinning it here as well would make one bug fail two tests
    * and hide THIS rule, which is about the click and not about the label:
    * Apply opens the office form, every time, and undoes nothing.
+   *
+   * Then it pinned `/^appl(y|ied) for the /i`, which covered both names the
+   * button had at the time and neither of the two it has now: the applied
+   * branch became "Finish the … form — you applied but have not submitted it"
+   * when the label started following the work rather than the transaction, and
+   * `applyFor` above means this card is ALWAYS in that branch. The locator
+   * matched nothing and the test failed on `toBeVisible` before reaching its
+   * own subject. Written as the union of the names now, and commented, because
+   * "either state" was the intent each time and the enumeration is what rots.
    */
-  const apply = card.getByRole('button', { name: /^appl(y|ied) for the /i })
+  const apply = card.getByRole('button', {
+    name: /^(apply for the |finish the .* form — you applied|view the .* form you submitted)/i,
+  })
 
   // Under the old toggle this click un-applied it and opened nothing.
   await expect(apply).toBeVisible()
 
-  const backToCards = page.getByRole('button', { name: /save & back to clearances/i })
+  const backToCards = page.getByRole('button', { name: /^back to clearances$/i })
   const stateOf = () => readClearanceState(page, appId, 'SANITARY')
   const before = await stateOf()
 
   await apply.click()
+  /*
+   * Checked BEFORE the sheet, because this is the failure this test met: the
+   * click did reach the server, and the server refused it. `applyFor` above
+   * POSTs for real, so the row is `not_started` with `mode = 'apply'` — and
+   * while `clearanceStarted` read only the state, the page believed nothing had
+   * been started and posted again, into `ClearanceController::apply`'s "You
+   * have already applied for the …". The early return then stopped the sheet
+   * from opening, so this test would have failed on the line below with
+   * nothing on screen to say a refusal had happened at all.
+   */
+  await expect(
+    page.getByRole('alert'),
+    'Apply on an already-applied clearance was refused by the server',
+  ).toBeHidden()
   await expect(backToCards, 'Apply did not open the office form').toBeVisible()
 
-  await page.getByRole('button', { name: /back without saving/i }).click()
+  await page.getByRole('button', { name: /^back to clearances$/i }).click()
   await expect(backToCards).toBeHidden()
 
   /*
@@ -836,7 +899,7 @@ test('Apply always opens that office’s form, and never un-applies', async ({ p
   // And again. A toggle would open nothing the second time.
   await apply.click()
   await expect(backToCards, 'a second Apply did not open the office form').toBeVisible()
-  await page.getByRole('button', { name: /back without saving/i }).click()
+  await page.getByRole('button', { name: /^back to clearances$/i }).click()
   expect(await stateOf(), 'a second Apply took the clearance back off the filing').toBe(before)
 })
 
@@ -844,10 +907,7 @@ test('Submit always opens the upload box, and never removes what is there', asyn
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   const dialog = page.getByRole('dialog')
@@ -973,10 +1033,7 @@ test('changing your mind from Apply to Submit works, and takes nothing back to d
   await applyFor(page, appId, 'ZONING')
   const totalBefore = await readTotal(page, appId)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   const card = page.locator('ul > li').filter({ hasText: /zoning/i })
   await card.getByRole('button', { name: /submit a copy of the/i }).click()
@@ -1024,10 +1081,7 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await card.getByRole('button', { name: /submit a copy of the/i }).click()
@@ -1051,8 +1105,8 @@ test('applying over a copy you uploaded asks first, and Cancel keeps the file', 
   await card.getByRole('button', { name: /^apply for the/i }).click()
   await page.getByRole('dialog').getByRole('button', { name: /^delete & apply$/i }).click()
 
-  await expect(page.getByRole('button', { name: /back without saving/i })).toBeVisible()
-  await page.getByRole('button', { name: /back without saving/i }).click()
+  await expect(page.getByRole('button', { name: /^back to clearances$/i })).toBeVisible()
+  await page.getByRole('button', { name: /^back to clearances$/i }).click()
 
   // The copy is gone — which is the whole of what was agreed to. What the
   // button reads afterwards is the subject of 'applying is reported on the
@@ -1091,10 +1145,7 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
   await onDashboard(page)
   const appId = await makePaidApplication(page)
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
 
   /*
    * Applying starts a request an office will act on and books an inspection of
@@ -1126,7 +1177,7 @@ test('what just happened is announced, not only drawn', async ({ page }) => {
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
   await card.getByRole('button', { name: /^apply for the/i }).click()
 
-  const back = page.getByRole('button', { name: /back without saving/i })
+  const back = page.getByRole('button', { name: /^back to clearances$/i })
   await expect(back, 'Apply did not open the office sheet').toBeVisible()
   await back.click()
 
@@ -1191,11 +1242,20 @@ test('applying is reported on the button, and never by a second meaning of it', 
   const appId = await makePaidApplication(page)
   await applyFor(page, appId, 'SANITARY')
 
-  await page.goto(`/applications/${appId}/clearances`)
+  await openClearances(page, appId)
   const card = page.locator('ul > li').filter({ hasText: /sanitary/i })
 
   // The state is on the control that changed it, not in a separate badge.
-  const apply = card.getByRole('button', { name: /^applied for the/i })
+  /*
+   * The applied label, as the card spells it now. `/^applied for the/i` was
+   * the name before it started following the work rather than the transaction:
+   * an applied-for clearance whose sheet is unfinished reads "Finish the … form
+   * — you applied but have not submitted it". Same rename as the nine sheet
+   * buttons above, one test further down the file.
+   */
+  const apply = card.getByRole('button', {
+    name: /^finish the .* form — you applied/i,
+  })
   await expect(apply).toBeVisible()
 
   /*
@@ -1387,10 +1447,7 @@ test('one bill at submission covers all five, and applying adds nothing to it', 
 
   /* ── 3. Shut through both waits, and each wait says which one it is ─────── */
 
-  await page.goto(`/applications/${appId}/clearances`)
-  await expect(page.getByRole('heading', { name: /lgu clearances/i })).toBeVisible({
-    timeout: 30_000,
-  })
+  await openClearances(page, appId)
   const cards = clearanceCards(page)
   await expect(cards).toHaveCount(5, { timeout: 30_000 })
   /*
@@ -1518,11 +1575,216 @@ test('a required permit cannot be withdrawn from the application', async ({ page
    * The rule is the pair, which is why they are asserted together: the server
    * refuses, AND the screen does not invite the refusal.
    */
-  await page.goto(`/applications/${appId}/clearances`)
-  const cards = clearanceCards(page)
-  await expect(cards).toHaveCount(5, { timeout: 30_000 })
+  await openClearances(page, appId)
   await expect(
     page.getByRole('button', { name: /^withdraw your application for the/i }),
     'the card offers a Withdraw that the API refuses on every one of the five',
+  ).toHaveCount(0)
+})
+
+/*
+ * ── The Submit button on an office sheet actually opens its modal ─────────
+ *
+ * Reported 17 September 2026: "why does this submit button not work?"
+ *
+ * It worked. It set `submitPrompt` and the component re-rendered — and
+ * ClearanceStagePage returns early at `if (formCode)` to draw the open sheet,
+ * while the confirmation modal sat in the FINAL return, the branch that draws
+ * the clearance cards. The state changed and nothing mounted.
+ *
+ * Nothing caught it because nothing in this suite had ever pressed that
+ * button. It is the one irreversible action on the screen — submit and the
+ * sheet belongs to the office until they send it back — and it had no test at
+ * all, which is how a permanently dead control shipped.
+ *
+ * So this presses it. Deliberately NOT asserting on `submitPrompt` or on any
+ * branch: the failure was entirely about WHERE the modal was rendered, and a
+ * test that reached for internals would have passed against the broken build.
+ */
+test('the office sheet’s Submit opens a confirmation before handing it over', async ({ page }) => {
+  await onDashboard(page)
+  const appId = await makePaidApplication(page)
+  await openClearances(page, appId)
+
+  /*
+   * BFP's sheet, named, and not `.first()`.
+   *
+   * It took whichever card came first, which is Zoning — and Zoning's Submit is
+   * now held shut until the notarised declaration is uploaded (see the test at
+   * the foot of this file). This test is about the press reaching the modal, so
+   * it needs a sheet with nothing outstanding, and FSIC is the one: it has no
+   * required answers in `officeFormMissing` and no checklist to gate on.
+   *
+   * There was a guard here for exactly this — skip if Submit reads
+   * aria-disabled — and it did not hold, because it is a race. The checklist
+   * arrives with the office-form payload a moment after the sheet renders, so
+   * the guard read "false" and the click 15s later hit a button that had since
+   * been shut. Naming a sheet that cannot be gated is the fix; a conditional
+   * skip a fetch can beat is not a guard.
+   */
+  await page
+    .locator('ul > li')
+    .filter({ hasText: /fire safety/i })
+    .getByRole('button', { name: /^apply for the /i })
+    .click()
+
+  const submit = page.getByRole('button', { name: /submit to this office/i })
+  await expect(submit).toBeVisible({ timeout: 30_000 })
+  await expect(
+    submit,
+    'the FSIC sheet has something outstanding, so this test cannot reach the modal',
+  ).toHaveAttribute('aria-disabled', 'false')
+
+  await submit.click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog, 'pressing Submit rendered no confirmation at all').toBeVisible()
+  await expect(dialog).toContainText(/have you finished reviewing/i)
+  await expect(dialog).toContainText(/will not be able to change your answers/i)
+  // And it is a confirmation, not a dead end: there is a way back.
+  await expect(dialog.getByRole('button', { name: /keep checking/i })).toBeVisible()
+
+  await dialog.getByRole('button', { name: /keep checking/i }).click()
+  await expect(dialog).toBeHidden()
+  await expect(submit, 'cancelling the confirmation left the sheet closed').toBeVisible()
+})
+
+/**
+ * The client's own path, on the clearance they reported it on.
+ *
+ * *"I haven't submitted my Zoning Clearance application yet but the system
+ * tells me I already have. The submit button does not work in the first
+ * place."* — 17 September 2026.
+ *
+ * Both sentences were one missing field. Apply set `mode` and left the status
+ * at `not_started`; the card correctly redrew itself as "Finish form"; and that
+ * button runs the same `onApply`, which asked a predicate that could not see
+ * `mode` whether to POST. It posted, the server refused it as a second
+ * application, and the refusal returned before the sheet could open — so the
+ * one control left on the card had become unusable by being pressed once.
+ *
+ * Written against ZONING rather than the generic first card because that is
+ * where it was found, and because a clearance the client has walked is worth a
+ * test that walks it the same way: through the UI both times, not seeded.
+ */
+test('a clearance applied for but not filled in reopens its form, not a refusal', async ({
+  page,
+}) => {
+  await onDashboard(page)
+  const appId = await makePaidApplication(page)
+  await openClearances(page, appId)
+
+  const card = page.locator('ul > li').filter({ hasText: /zoning/i })
+  await expect(card).toHaveCount(1)
+
+  // FIRST apply — through the UI, exactly as the client did it.
+  await card.getByRole('button', { name: /^apply for the /i }).click()
+  const backToCards = page.getByRole('button', { name: /^back to clearances$/i })
+  await expect(backToCards, 'the first Apply did not open the Zoning sheet').toBeVisible()
+
+  // Leave without saving. This is the state that had no way forward: the
+  // permit applied for, the sheet blank, not one row in application_office_forms.
+  await page.getByRole('button', { name: /^back to clearances$/i }).click()
+  await expect(backToCards).toBeHidden()
+
+  /*
+   * The card has to have noticed. If it still reads "Apply" then `mode` is not
+   * reaching the render either, and the rest of this test would be measuring
+   * the wrong thing.
+   */
+  const finish = card.getByRole('button', { name: /^finish the .* form — you applied/i })
+  await expect(finish, 'the card forgot that Zoning had been applied for').toBeVisible()
+  await expect(finish).toContainText(/finish form/i)
+
+  // SECOND press. The whole bug.
+  await finish.click()
+  await expect(
+    page.getByRole('alert'),
+    'Finish form was refused as a fresh application: "You have already applied for the …"',
+  ).toBeHidden()
+  await expect(backToCards, 'Finish form did not reopen the Zoning sheet').toBeVisible()
+
+  /*
+   * And the sheet it reopened is writable. `OfficeFormController::ownerMayEdit`
+   * allows NotStarted and Returned, so this state is inside its window — but
+   * that window and this button are the two doors the defect lived between,
+   * and a sheet that opens read-only would leave the client exactly as stuck.
+   */
+  await expect(
+    page.getByRole('button', { name: /submit to this office/i }),
+    'the reopened sheet offers no way to hand it in',
+  ).toBeVisible()
+})
+
+/**
+ * The notarised declaration is a precondition, and the button has to say so.
+ *
+ * The client submitted a Locational Clearance without it and asked how:
+ * *"I wonder how I was able to submit the Locational Clearance without
+ * submitting the Applicant Declaration. There should be upload there upon
+ * answering the form."* — 17 September 2026.
+ *
+ * Two claims, because the fix has two halves and either one alone is a hole.
+ * The gate reads `blocking` off the server's checklist, so a row that stops
+ * being blocking silently un-shuts this button; and the sentence under the
+ * heading used to promise the opposite — "you can submit the form now and add
+ * them, but the office will ask" — which is the promise that was tested and
+ * found untrue.
+ *
+ * Deliberately NOT asserting the cleared case by uploading a scan. The row
+ * takes a real file through a real multipart request, and a test that uploads a
+ * PDF to prove a button re-enables is testing the upload endpoint, which
+ * ZoningRequirementsTest already does against the same slot. What is only
+ * testable here is the shut state and the reason printed beside it.
+ */
+test('the Zoning sheet will not be submitted without the notarised declaration', async ({
+  page,
+}) => {
+  await onDashboard(page)
+  const appId = await makePaidApplication(page)
+  await openClearances(page, appId)
+
+  const card = page.locator('ul > li').filter({ hasText: /zoning/i })
+  await card.getByRole('button', { name: /^apply for the /i }).click()
+
+  const submit = page.getByRole('button', { name: /submit to this office/i })
+  await expect(submit).toBeVisible({ timeout: 30_000 })
+
+  /*
+   * CPDD's checklist has to be on screen before the gate means anything: the
+   * rows arrive with the office-form payload, and asserting the button is shut
+   * while the list is still in flight would pass for the wrong reason.
+   */
+  await expect(page.getByRole('heading', { name: /checklist of requirements/i })).toBeVisible()
+  /*
+   * `.first()` because the row's own label is no longer the only place those
+   * words appear: the sentence under the heading names it, and so does the note
+   * under the Submit button. All three are the fix working. What this line is
+   * for is the ROW being on screen, so it takes the first of them, and the two
+   * assertions below read the other two deliberately.
+   */
+  await expect(page.getByText(/applicant declaration, notarised/i).first()).toBeVisible()
+
+  // Shut, and shut with aria-disabled rather than `disabled` — the same rule
+  // the locked-Apply test states at length: a control nobody can find is worse
+  // than one that refuses.
+  await expect(
+    submit,
+    'the Zoning sheet can be handed in with the notarised declaration missing',
+  ).toHaveAttribute('aria-disabled', 'true')
+
+  /*
+   * And the reason, naming the row. "1 is still missing" would leave the
+   * applicant hunting the list for which of seven rows shut the button.
+   */
+  await expect(
+    page.getByText(/applicant declaration, notarised.*before you can submit this form/i),
+    'the checklist does not say which row is stopping the submission',
+  ).toBeVisible()
+
+  // The promise that was untrue is gone from the blocking case.
+  await expect(
+    page.getByText(/you can submit the form now and add/i),
+    'the checklist still offers to submit a form the button refuses',
   ).toHaveCount(0)
 })

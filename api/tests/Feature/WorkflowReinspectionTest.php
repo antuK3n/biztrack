@@ -244,20 +244,33 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     /*
      * This is the assertion the old `allPassed` over EVERY row could not pass:
      * the failed visit is still in the table and the permit is issued anyway.
-     * With the fifth clearance in, the filing goes to BPLO for its second act.
+     *
+     * And with the fifth clearance in, the filing closes itself — six permits,
+     * not five. A passing RE-inspection is worth pinning here specifically: it
+     * reaches readiness by a different route from a first-time pass, through
+     * `recordInspection` on a re-booked visit, and since 18 September 2026 that
+     * route mints the Mayor's Permit too. A filing rescued from a failed
+     * inspection must end up exactly where a clean one does.
      */
     expect(clearanceStatusOf($appId, 'FSIC'))->toBe('approved');
-    expect(Permit::where('application_id', $appId)->count())->toBe(5);
-    expect(Application::find($appId)->status->value)->toBe('for_final_approval');
+    expect(Permit::where('application_id', $appId)->count())->toBe(6);
+    expect(Application::find($appId)->status->value)->toBe('approved');
 
-    // BPLO signs the whole thing off on the strength of the five.
+    /*
+     * There is nothing left for BPLO to sign. The filing approved itself above,
+     * so the press that used to end this test is now REFUSED as already
+     * decided — and that refusal is worth keeping rather than deleting the
+     * lines, because a re-inspected filing reaching Approved by a second route
+     * would be a double issuance.
+     */
     $bploAssignmentId = ApplicationAssignment::where('application_id', $appId)
         ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
         ->value('id');
     test()->withHeaders(authAs($deptEmail['BPLO']))
         ->postJson("/api/v1/assignments/{$bploAssignmentId}/approve", ['remarks' => 'All requirements met.'])
-        ->assertOk();
+        ->assertStatus(422);
 
+    // Still six, not seven: the refused press minted nothing.
     expect(Application::find($appId)->status->value)->toBe('approved');
     expect(Permit::where('application_id', $appId)->count())->toBe(6);
 
@@ -320,24 +333,31 @@ it('refuses a second re-inspection booked from a superseded failure', function (
 });
 
 /*
- * ⚠ CURRENTLY RED, and left red deliberately. This is a gap in the code, not a
- * stale test.
+ * GREEN since 18 September 2026. Kept exactly as written — the assertion was
+ * never weakened to match the bug, and this note records how it was closed.
  *
  * `WorkflowService::approveClearance()` refuses outright when the application is
  * terminal — "This application has been decided. Its permits can no longer be
- * acted on." — so the rule below is the flow's own, stated by the flow's own
- * code. But `Inspection::canBeReinspected()` no longer checks it. It used to ask
+ * acted on." — so the rule below was always the flow's own. But
+ * `Inspection::canBeReinspected()` had stopped checking it. It used to ask
  * `application->status === ForInspection`, which happened to carry the terminal
  * guard for free; that had to go when `for_inspection` became a per-permit
  * state, and `permitIsAwaitingInspection()` replaced it without carrying the
- * guard across. A rejected filing keeps its permit rows at `for_inspection`,
- * nothing walks them back, so the office can still book a visit against a filing
- * the LGU has refused — the exact failure `ApplicationStatus::allowedNext()`
- * describes ("booked a site visit against a filing the LGU had refused").
+ * guard across. A rejected filing keeps its permit rows at `for_inspection` and
+ * nothing walks them back, so the office could still book a visit against a
+ * filing the LGU had refused.
  *
- * The assertion is not weakened to match. The fix is one clause in
- * `canBeReinspected()`, or a walk-back of the permit rows in
- * `rejectApplication()`, and which of those it should be is the lead's call.
+ * Chasing it found TWO MORE doors asking the same half-question, and the worst
+ * was not this one: `recordInspection()` would take a PASSING visit on a
+ * rejected filing and issue the certificate. The test after this one is that
+ * case, and it was measured before it was fixed — 200, permit approved,
+ * `permits` 0 → 1.
+ *
+ * The fix is one predicate — `ApplicationPermitType::awaitingInspection()` —
+ * asked by all three doors. Walking the pivot rows back in `rejectApplication()`
+ * was the alternative and was rejected: `ClearanceStatus::Rejected` was removed
+ * on 17 September at the client's decision, so there is no state to walk them
+ * to, and where each permit stood when the filing was refused is worth keeping.
  */
 it('refuses a re-inspection once the filing has been decided', function () use ($deptEmail) {
     [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Closed Book Store');
@@ -356,6 +376,49 @@ it('refuses a re-inspection once the filing has been decided', function () use (
         ->postJson("/api/v1/inspections/{$fire->id}/reinspect", [
             'scheduled_at' => now()->addWeekdays(5)->toIso8601String(),
         ])->assertStatus(422);
+});
+
+/*
+ * The one that mattered: a passing visit on a decided filing must not ISSUE.
+ *
+ * The test above refuses a BOOKING, which on its own only saves a useless row.
+ * This refuses the act that produced a real document. Measured on
+ * 18 September 2026, before the fix, on a filing BPLO had rejected: the conduct
+ * endpoint answered 200, the FSIC pivot moved `for_inspection → approved`, and
+ * `permits` went 0 → 1. A Fire Safety certificate issued against a filing the
+ * LGU had refused — and the business holding it would have been right to think
+ * it meant something.
+ *
+ * Both halves are asserted, because either alone can pass while the defect
+ * stands: the refusal (422), and the absence of a certificate. A version of
+ * this that only checked the status code would still go green if the endpoint
+ * refused AFTER `grantClearance()` had run.
+ *
+ * The visit record is asserted absent too. The guard sits before the row is
+ * written, so a dead filing does not collect a conducted visit that achieved
+ * nothing — the officer is told why instead.
+ */
+it('refuses to conduct, and never issues, once the filing has been decided', function () use ($deptEmail) {
+    [$appId, $visits] = filingAwaitingInspection($deptEmail, 'Refused Bakery');
+
+    test()->withHeaders(authAs($deptEmail['BPLO']))
+        ->postJson("/api/v1/applications/{$appId}/reject", ['reason' => 'Premises unsafe.'])
+        ->assertOk();
+
+    $fire = $visits->firstWhere('department.code', 'BFP');
+
+    test()->withHeaders(authAs($deptEmail['BFP']))
+        ->postJson("/api/v1/inspections/{$fire->id}/conduct", [
+            'result' => 'passed',
+            'findings' => 'all clear',
+        ])->assertStatus(422);
+
+    expect(Permit::where('application_id', $appId)->count())->toBe(0);
+    expect($fire->fresh()->conducted_at)->toBeNull();
+
+    // And the permit is left where it stood when the filing was refused, which
+    // is the record the walk-back alternative would have destroyed.
+    expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
 });
 
 /*

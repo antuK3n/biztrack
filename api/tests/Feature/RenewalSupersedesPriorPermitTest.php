@@ -87,12 +87,40 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
 
     $workflow->submit($app);
     $app->refresh();
-    classifyAsOfficer($app);
-    $workflow->approveMainForm($app->fresh());
-    $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+
+    /*
+     * ── Two routes, because a renewal without the business permit has one ────
+     *
+     * This helper walked every renewal through BPLO — approve the form, a
+     * hand-written transition to AwaitingOtherPermits standing in for the
+     * payment, then BPLO's final approval. On 17 September 2026 that stopped
+     * being the route for most of these fixtures: a renewal carrying no
+     * business permit is never billed and never reaches BPLO (*"its office
+     * alone, BPLO never sees it"*), so `approveMainForm` refuses it outright
+     * and `approveOverall` has nothing to sign.
+     *
+     * Every property this file tests is about SUPERSESSION — the new permit
+     * continuing the old term, the predecessor being retired, a superseded
+     * permit leaving the picker and failing verification. All of those live in
+     * `issuePermitFor` and `grantClearance` and are indifferent to which office
+     * approved, so branching the route here preserves the lot.
+     */
+    $carriesBusinessPermit = in_array(PermitType::OUTCOME_CODE, $codes, true);
+
+    if ($carriesBusinessPermit) {
+        classifyAsOfficer($app);
+        $workflow->approveMainForm($app->fresh());
+        $app->refresh();
+        $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
+    }
 
     foreach ($codes as $code) {
+        if ($code === PermitType::OUTCOME_CODE) {
+            // The business permit is issued by BPLO's final approval below, not
+            // by an office reading a sheet it does not have.
+            continue;
+        }
+
         $type = PermitType::where('code', $code)->firstOrFail();
         $workflow->startClearance($app->fresh(), $type, ApplicationPermitType::MODE_APPLY);
         $workflow->submitClearanceForm($app->fresh(), $type);
@@ -102,8 +130,16 @@ function issuedRenewal(array $codes, array $prior, int $businessId): Application
         $workflow->recordInspection($inspection, InspectionResult::Passed, 'Compliant.');
     }
 
-    $workflow->approveOverall($app->fresh(), 'Renewal approved.');
+    if ($carriesBusinessPermit) {
+        $workflow->approveOverall($app->fresh(), 'Renewal approved.');
+    }
 
+    /*
+     * A clearance-only renewal needs no closing act: `refreshReadiness` moved it
+     * to Approved as the last permit was granted. Asserted here so this helper
+     * fails loudly if that stops happening, rather than leaving every test in
+     * the file to fail on a symptom further down.
+     */
     return $app->fresh();
 }
 

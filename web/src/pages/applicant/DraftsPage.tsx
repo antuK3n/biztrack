@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom'
 import type { SVGProps } from 'react'
 import { AmendIcon, DraftsIcon, FilePlusIcon, RenewIcon } from '../../components/icons'
 import { EmptyState, ErrorState, LinkButton, SkeletonList } from '../../components/ui/primitives'
-import { FilterPills, PageTitle, SortFilter } from '../../components/ui/Proto'
+import { FilterPills, PageTitle, ProtoModal, SortFilter } from '../../components/ui/Proto'
+import { toApiError } from '../../lib/api'
 import { formatDate } from '../../lib/format'
 import { applications } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
-import type { ApplicationType } from '../../lib/types'
+import type { ApplicationListItem, ApplicationType } from '../../lib/types'
 
 /* Application Drafts — PDF p20: filter pills + trash, cards on the deep-blue panel. */
 
@@ -67,6 +68,40 @@ export function DraftsPage() {
   const { data, loading, error, reload } = useAsync(() => applications.list({ status: 'draft' }), [])
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<'recent' | 'oldest'>('recent')
+  /*
+   * The draft the confirmation modal is asking about, held whole rather than by
+   * id: the dialog names it ("Delete 'Pedro's Snack Bar'?"), and looking the
+   * name back up from the list would go wrong in exactly the case that matters
+   * — the list reloading underneath an open dialog.
+   */
+  const [confirming, setConfirming] = useState<ApplicationListItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+
+  async function confirmDelete() {
+    if (confirming === null) return
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await applications.destroy(confirming.id)
+      setConfirming(null)
+      /*
+       * Reloaded rather than spliced out of `visible`. The server decides what
+       * a draft is — it refuses anything already submitted — so a local removal
+       * would be the browser asserting an outcome the server may not have
+       * agreed to, and a draft submitted in another tab would vanish from this
+       * list while still sitting in the register.
+       */
+      reload()
+    } catch (err) {
+      // Kept OPEN on failure, with the reason. Closing the dialog on an error
+      // leaves the draft on screen with no explanation, which reads as the
+      // button not working.
+      setDeleteError(toApiError(err).message)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const drafts = data ?? []
   const byType = filter === 'all' ? drafts : drafts.filter((d) => d.application_type === filter)
@@ -107,15 +142,22 @@ export function DraftsPage() {
         Application Drafts
       </PageTitle>
 
-      <div className="mb-5 flex items-center justify-between gap-4">
+      {/*
+        The pills alone.
+
+        A trash button sat here, labelled "Delete drafts", with no `onClick` at
+        all — drawn from the PDF mockup (p20: "filter pills + trash") and never
+        wired to anything. So the page advertised a delete it did not have,
+        which is how the client came to ask whether it had one.
+
+        It is not wired up in place, it is GONE. Up here the control has no
+        object: "delete drafts" could mean the one you are looking at, the ones
+        this filter shows, or all of them, and a destructive button whose scope
+        the reader has to guess is the one most likely to be pressed by
+        accident. Each card now carries its own, which can name what it deletes.
+      */}
+      <div className="mb-5">
         <FilterPills options={FILTERS} value={filter} onChange={setFilter} />
-        <button
-          type="button"
-          aria-label="Delete drafts"
-          className="text-royal-deep transition-colors hover:text-s-red"
-        >
-          <TrashIcon size={26} />
-        </button>
       </div>
 
       {loading ? (
@@ -150,7 +192,15 @@ export function DraftsPage() {
                 // understand it.
                 const name = d.title?.trim() || d.business?.name || 'My Application'
                 return (
-                  <li key={d.id}>
+                  /*
+                   * `relative`, because the delete button is positioned over
+                   * the card and must be a SIBLING of the Link rather than a
+                   * child of it. A <button> inside an <a> is invalid HTML, and
+                   * in practice the click would open the draft on its way to
+                   * the handler — the one interaction where being taken
+                   * somewhere unexpected is worst.
+                   */
+                  <li key={d.id} className="group relative">
                     <Link
                       to={`/apply?draft=${d.id}`}
                       className="block overflow-hidden rounded-md bg-white shadow-card transition-shadow hover:shadow-raised"
@@ -174,15 +224,94 @@ export function DraftsPage() {
                           edited it three weeks back, which is the sort of thing
                           that makes someone doubt their work was saved.
                         */}
-                        <p className="mt-1 text-xs text-ink-secondary">Started: {formatDate(d.created_at)}</p>
+                        <p className="mt-1 text-xs text-ink-secondary">
+                          Started: {formatDate(d.created_at)}
+                        </p>
                       </div>
                     </Link>
+                    {/*
+                      Always in the DOM and always reachable, never
+                      hover-to-reveal.
+
+                      A control that appears on hover does not exist on a touch
+                      screen, and City Hall's applicants are largely on phones.
+                      Hover and focus raise its contrast rather than summon it,
+                      so it is discoverable by pointer, keyboard and finger
+                      alike — and the label names the draft, because a screen
+                      reader moving through four cards otherwise hears "Delete
+                      draft" four times with no way to tell them apart.
+                    */}
+                    <button
+                      type="button"
+                      aria-label={`Delete draft: ${name}`}
+                      onClick={() => {
+                        setDeleteError(null)
+                        setConfirming(d)
+                      }}
+                      className="absolute right-2 top-2 rounded-md bg-white/90 p-1.5 text-ink-muted shadow-card transition-colors hover:bg-s-red-tint hover:text-s-red focus-visible:bg-s-red-tint focus-visible:text-s-red group-hover:text-ink-secondary"
+                    >
+                      <TrashIcon size={18} />
+                    </button>
                   </li>
                 )
               })}
             </ul>
           )}
         </div>
+      )}
+
+      {/*
+        ── The confirmation the client asked for ───────────────────────────────
+
+        Red tone, because this is the destructive branch of ProtoModal's three
+        and the header colour is the first thing read.
+
+        The draft is NAMED. "Are you sure?" over an unnamed draft is the dialog
+        people learn to dismiss without reading, and on a page of four cards
+        that all look alike it genuinely does not say which one is about to go.
+
+        It also says what is lost, in the applicant's terms — the answers and
+        the uploads — rather than "this action cannot be undone". On the server
+        the delete is soft and the row survives for recovery, so "cannot be
+        undone" would be false; but there is no restore button in the product,
+        so promising recoverability would be worse. "You will have to start it
+        again" is true from where the applicant stands, which is the only place
+        that matters here.
+      */}
+      {confirming !== null && (
+        <ProtoModal
+          title="Delete this draft?"
+          tone="red"
+          cancelLabel="Keep it"
+          confirmLabel={deleting ? 'Deleting…' : 'Delete draft'}
+          confirmDisabled={deleting}
+          onCancel={() => {
+            if (deleting) return
+            setConfirming(null)
+            setDeleteError(null)
+          }}
+          onConfirm={() => void confirmDelete()}
+        >
+          <p className="text-sm text-ink">
+            <span className="font-bold">
+              {confirming.title?.trim() || confirming.business?.name || 'My Application'}
+            </span>{' '}
+            will be removed from your drafts.
+          </p>
+          <p className="mt-2 text-sm text-ink-secondary">
+            The answers you have filled in and any documents you attached to it go with it. Nothing
+            has been submitted to the LGU, so there is nothing to cancel — but you will have to
+            start this application again if you want it back.
+          </p>
+          {deleteError !== null && (
+            <p
+              role="alert"
+              className="mt-3 rounded-md border border-s-red bg-s-red-tint px-3 py-2 text-sm text-ink"
+            >
+              {deleteError}
+            </p>
+          )}
+        </ProtoModal>
       )}
     </div>
   )
