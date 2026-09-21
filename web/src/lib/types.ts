@@ -2001,6 +2001,15 @@ export interface AdminCaseload {
    * same reason as `finished_reviews`: an older payload still type-checks.
    */
   cases?: CaseloadCase[]
+  /**
+   * The officer's OFFICE queue — open work nobody holds.
+   *
+   * The other direction the Reassign dialog offers: a case nobody has picked
+   * up, handed to the officer whose row was clicked. Kept apart from `cases`
+   * because they are opposite acts, and a single list would need a flag on
+   * every row to say which way it moves.
+   */
+  unassigned?: CaseloadCase[]
   candidates: { id: number; name: string; email: string; open_total: number }[]
 }
 
@@ -2373,6 +2382,16 @@ export type BusinessStatus = 'active' | 'flagged' | 'suspended' | 'blacklisted'
 export interface AdminBusiness {
   id: number
   name: string
+  /**
+   * The business number under the name on the table — a FILING's `BIZ-2026-…`.
+   *
+   * Minted per APPLICATION, so a business that renews or amends holds several;
+   * this is the LATEST, and `applications_count` is what stops it reading as
+   * the only one. Null when the business has never filed.
+   */
+  tracking_id?: string | null
+  /** How many filings this business has. 0 is a real answer. */
+  applications_count?: number
   owner: { id: number; name: string } | null
   status: BusinessStatus
   status_label: string

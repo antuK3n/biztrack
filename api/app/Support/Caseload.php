@@ -137,6 +137,84 @@ class Caseload
     }
 
     /**
+     * One row per review, in the shape both lists print.
+     *
+     * Shared so that "what this officer holds" and "what nobody holds" cannot
+     * describe the same filing two different ways on one dialog.
+     *
+     * @param  Builder<ApplicationAssignment>  $query
+     * @return array<int, array<string, mixed>>
+     */
+    private static function describeReviews($query, int $limit): array
+    {
+        return $query
+            ->with([
+                'department:id,code,name',
+                'application:id,tracking_id,business_id',
+                'application.business:id,name',
+                'application.permitTypes:id,code,name,issuing_department_id',
+            ])
+            ->orderBy('assigned_at')
+            ->orderBy('id')
+            ->limit($limit)
+            ->get()
+            ->map(fn (ApplicationAssignment $a) => [
+                'kind' => 'review',
+                'id' => $a->id,
+                'application_id' => $a->application_id,
+                'tracking_id' => $a->application?->tracking_id,
+                // Null when the business has been removed from the register;
+                // the filing stays and the row still has to render.
+                'business' => $a->application?->business?->name,
+                'office' => $a->department ? ['code' => $a->department->code, 'name' => $a->department->name] : null,
+                /*
+                 * This office's own permit on the filing — what the officer is
+                 * actually reviewing. Matched on the issuing department rather
+                 * than taken as "the first permit", so a six-clearance filing
+                 * names the sanitary permit to City Health and the fire one to
+                 * BFP instead of naming the same permit to all six.
+                 */
+                'permit' => optional(
+                    $a->application?->permitTypes?->firstWhere('issuing_department_id', $a->department_id)
+                )->name,
+                'status_label' => $a->status?->label(),
+                'at' => optional($a->assigned_at)->toISOString(),
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * The office's open work that NOBODY holds.
+     *
+     * The other half of the Reassign dialog: it could only move work away from
+     * the officer whose row was clicked, and the client wants a case nobody has
+     * picked up handed to them from the same place. Same permission, opposite
+     * direction.
+     *
+     * Scoped to the officer's own DEPARTMENT, not to the register: this list
+     * exists to be assigned from, and an officer may only be given work their
+     * own office was routed. An account with no office is offered nothing —
+     * `department_id` null matches no department rather than every one.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public static function unassignedInOfficeOf(User $officer, int $limit = 50): array
+    {
+        if ($officer->department_id === null) {
+            return [];
+        }
+
+        return self::describeReviews(
+            ApplicationAssignment::query()
+                ->where('department_id', $officer->department_id)
+                ->whereNull('officer_user_id')
+                ->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses())),
+            $limit,
+        );
+    }
+
+    /**
      * The open work itself, named — one row per filing the officer holds.
      *
      * The Reassign dialog used to say "Open reviews: 2" and stop, so the admin
@@ -157,39 +235,7 @@ class Caseload
      */
     public static function cases(User $officer, int $limit = 50): array
     {
-        $reviews = self::reviews($officer)
-            ->with([
-                'department:id,code,name',
-                'application:id,tracking_id,business_id',
-                'application.business:id,name',
-                'application.permitTypes:id,code,name,issuing_department_id',
-            ])
-            ->get()
-            ->map(fn (ApplicationAssignment $a) => [
-                'kind' => 'review',
-                'id' => $a->id,
-                'application_id' => $a->application_id,
-                'tracking_id' => $a->application?->tracking_id,
-                // Null when the business has been removed from the register;
-                // the filing stays and the row still has to render.
-                'business' => $a->application?->business?->name,
-                'office' => $a->department ? ['code' => $a->department->code, 'name' => $a->department->name] : null,
-                /*
-                 * This office's own permit on the filing — what the officer is
-                 * actually reviewing. Matched on the issuing department rather
-                 * than taken as "the first permit", so a six-clearance filing
-                 * names the sanitary permit to City Health and the fire one to
-                 * BFP instead of naming the same permit to all six.
-                 *
-                 * Null is a real answer and the key is always present: an office
-                 * can be routed a filing that carries no permit it issues.
-                 */
-                'permit' => optional(
-                    $a->application?->permitTypes?->firstWhere('issuing_department_id', $a->department_id)
-                )->name,
-                'status_label' => $a->status?->label(),
-                'at' => optional($a->assigned_at)->toISOString(),
-            ]);
+        $reviews = collect(self::describeReviews(self::reviews($officer), $limit));
 
         $inspections = self::inspections($officer)
             ->with([
