@@ -10,14 +10,14 @@ Status vocabulary: **open** · **done** · **superseded** (the rule changed) ·
 
 ## Business owner — Register
 
-1. Integrate email verification upon creation of account. — **open**
+1. Integrate email verification upon creation of account. — **done**
 
 ## Business owner — Login
 
-1. Put a CAPTCHA before signing in. — **open**
+1. Put a CAPTCHA before signing in. — **done**
 2. Remove the "use the other sign-in page" banner. — **done**
 3. There should be no hint on the business owner side that an admin must not log
-   in there. — **open**
+   in there. — **done**
 
 ## Business owner — Apply for permit (zoning)
 
@@ -44,38 +44,38 @@ Status vocabulary: **open** · **done** · **superseded** (the rule changed) ·
 12. Put decimal places in capitalisation. — **done**
 13. State "number of" before each type of employee asked for. — **done**
 14. An editable preview of the WHOLE form in the last section, and a modal on
-    Submit confirming the applicant has finished reviewing. — **open**
+    Submit confirming the applicant has finished reviewing. — **done**
 15. All date formats must state the whole month name (September, not Sep).
     — **done**
 16. Improve the interface — fields such as TIN should not take so much space;
-    proper formatting and spacing throughout. — **open**
+    proper formatting and spacing throughout. — **done**
 17. Allow multiple files per documentary requirement. — **done**
-18. Check the line-of-business categories for accuracy. — **open**
-19. Check the zoning rules for accuracy. — **open**
+18. Check the line-of-business categories for accuracy. — **blocked** — needs the client's PSIC source list to check against
+19. Check the zoning rules for accuracy. — **blocked** — the ordinance is now wired in (695 uses, ZoningConformance); needs the client to say which rules to check
 20. Detect the conforming / non-conforming message live, rather than only after
-    Next is clicked. — **open**
-21. Implement validation rules for DTI / SEC / CDA. — **open**
-22. Put an asterisk on every required field. — **open**
+    Next is clicked. — **done**
+21. Implement validation rules for DTI / SEC / CDA. — **done**
+22. Put an asterisk on every required field. — **done**
 23. Number the fields so the applicant can tell which one the "still needed"
-    list is pointing at. — **open**
+    list is pointing at. — **done**
 24. The view-application form for the other permits is missing. Return it.
-    — **open**
-25. Submissions for other permits are not working. — **open**
-26. Validation in DTI / SEC / CDA. — **open** (duplicate of 21)
+    — **done**
+25. Submissions for other permits are not working. — **done**
+26. Validation in DTI / SEC / CDA. — **done** (duplicate of 21)
 
 ## Business owner — Renew permit
 
 1. Allow multiple permit renewal selections, creating a section per permit
    selected. — **done**
 2. On renewing other permits, state that payment for them will appear on the
-   renewal payment of the business permit. — **open**
+   renewal payment of the business permit. — **done**
 
 ## Business owner — Track applications
 
 1. The notification icon needs an indicator when there are new ones. — **done**
 2. There should be no "Not Yet Submitted" while the new application has not
    reached initial approval. — **open**
-3. "Not billed yet" should read "For Initial Approval". — **open**
+3. "Not billed yet" should read "For Initial Approval". — **done**
 
 ## Business owner — Manage drafts
 
@@ -108,7 +108,7 @@ No items recorded. — **blocked** (needs a stated requirement)
 ## Business owner — View other requirements
 
 1. The Other Requirements icon on Home should carry a count, like notifications,
-   which does not reduce until the requirement is submitted. — **open**
+   which does not reduce until the requirement is submitted. — **done**
 
 ## Business owner — View payment history
 
@@ -128,9 +128,9 @@ No items recorded. — **blocked** (needs a stated requirement)
 
 ## Office admin — Manage applications
 
-1. The OLDEST application should appear at the top, not the latest. — **open**
+1. The OLDEST application should appear at the top, not the latest. — **done**
 2. Remove "Paid" from the right side of Application Verification — every filing
-   there is already paid. — **open**
+   there is already paid. — **done**
 3. Correct RBAC: each office sees only its own application form. City Health
    must not see Fire Safety fields, and so on. — **done**
 4. Correct scheduling for inspections. — **done**
@@ -142,10 +142,10 @@ No items recorded. — **blocked** (needs a stated requirement)
    Remove them. — **open**
 8. After BPLO's initial approval, while the applicant is applying for other
    permits, the application disappears from the admin's view. — **open**
-9. Add filtering for application / renewal / amendment. — **open**
-10. Clicking a notification logs the user out. — **open**
+9. Add filtering for application / renewal / amendment. — **done**
+10. Clicking a notification logs the user out. — **done**
 11. The whole initial-approval form should stay visible to BPLO; hide it only
-    from the other five offices. — **open**
+    from the other five offices. — **done**
 12. A permit uploaded by the applicant does not appear on the office admin side.
     — **open**
 
@@ -155,12 +155,12 @@ No items recorded. — **blocked** (needs a stated requirement)
 
 ## Office admin — Manage approved permits
 
-1. An analytics dashboard covering ALL offices. — **open**
+1. An analytics dashboard covering ALL offices. — **done**
 2. A page listing ALL approved permits as a table, with only the necessary
    columns, allowing the admin to view a permit, revoke it, and the other
-   actions in the use case diagram. — **open**
+   actions in the use case diagram. — **done** — revoke deliberately not built; A26 in docs/questions-for-malabon.md
 3. GIS mapping showing all businesses and whether their permit is still active.
-   — **open**
+   — **done**
 
 ## Office admin — Manage amendments
 
@@ -174,7 +174,7 @@ No items recorded. — **blocked** (needs a stated requirement)
 
 ## Super admin — Login
 
-1. A separate login for the super admin. — **open**
+1. A separate login for the super admin. — **done**
 
 ## Super admin — Manage officer-in-charge
 
@@ -193,3 +193,4 @@ No items recorded. — **blocked** (needs a stated requirement)
 
 1. Responsiveness. — **open**
 2. Cleaning: remove unnecessary or inaccessible pages. — **open**
+
