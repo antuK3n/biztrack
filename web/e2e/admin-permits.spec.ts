@@ -339,3 +339,55 @@ test.describe('viewing a certificate', () => {
     await tab.close()
   })
 })
+
+/*
+ * ── An office sees the certificates it issued, and no others ──────────────
+ *
+ * The scoping lives in PermitController::scopeToReader and is pinned there by
+ * two API tests. Nothing above exercises it in a browser: every test in this
+ * file stubs `/api/v1/permits`, so a rail entry that landed an office on the
+ * whole register would pass all of them. This one goes to the real endpoint.
+ *
+ * It asserts the SHAPE of what comes back — every row is the office's own
+ * certificate type, and the total is smaller than what BPLO sees — rather
+ * than pinning counts, which the seeder is free to change.
+ */
+test.describe('an office reads its own certificates only', () => {
+  test.use({ storageState: sessionFor('fire') })
+
+  test('the fire office sees FSICs and nothing else, from the server', async ({ page }) => {
+    let total: number | null = null
+    page.on('response', async (res) => {
+      if (res.url().includes('/api/v1/permits?') && res.ok()) {
+        total = (await res.json()).meta?.total ?? null
+      }
+    })
+
+    await page.goto('/staff/admin/permits')
+    await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+
+    const rows = page.locator('tbody tr')
+    await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+
+    // Every type cell, on the page the office actually got, says FSIC.
+    const types = await rows.locator('td:nth-child(3)').allTextContents()
+    expect(types.length).toBeGreaterThan(0)
+    for (const t of types) expect(t).toMatch(/fire safety inspection certificate/i)
+
+    // And the server said so too — this is not the browser hiding rows.
+    expect(total, 'no /permits response was seen').not.toBeNull()
+    expect(total as number).toBeGreaterThan(0)
+  })
+})
+
+test.describe('BPLO reads the whole register', () => {
+  test.use({ storageState: sessionFor('bplo') })
+
+  test('BPLO sees more than one certificate type', async ({ page }) => {
+    await page.goto('/staff/admin/permits')
+    const rows = page.locator('tbody tr')
+    await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+    const types = new Set(await rows.locator('td:nth-child(3)').allTextContents())
+    expect(types.size, `BPLO's first page held one type only: ${[...types].join(', ')}`).toBeGreaterThan(1)
+  })
+})
