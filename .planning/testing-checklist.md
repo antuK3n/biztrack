@@ -10,11 +10,11 @@ Status vocabulary: **open** · **done** · **superseded** (the rule changed) ·
 
 ## Business owner — Register
 
-1. Integrate email verification upon creation of account. — **done**
+1. Integrate email verification upon creation of account. — **blocked** — built and tested, but `MAIL_MAILER=log` sends every verification email to `storage/logs/laravel.log`, and login enforcement is off until `AUTH_REQUIRE_VERIFIED_EMAIL=true` (89 accounts unverified). Needs the mailer and `FRONTEND_URL` set
 
 ## Business owner — Login
 
-1. Put a CAPTCHA before signing in. — **done**
+1. Put a CAPTCHA before signing in. — **blocked** — Turnstile is wired and verified server-side, but with no `TURNSTILE_SECRET_KEY` / `VITE_TURNSTILE_SITE_KEY` the widget renders nothing. A tester sees no captcha
 2. Remove the "use the other sign-in page" banner. — **done**
 3. There should be no hint on the business owner side that an admin must not log
    in there. — **done**
