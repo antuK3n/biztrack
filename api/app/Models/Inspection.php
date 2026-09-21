@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-use App\Enums\ClearanceStatus;
 use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use Illuminate\Database\Eloquent\Builder;
@@ -119,10 +118,11 @@ class Inspection extends Model
      *
      * - the visit FAILED. A passed visit has nothing to re-inspect; offering it
      *   would be an invitation to re-open a filing that has already cleared.
-     * - the PERMIT is still for inspection. Once that permit is approved or
-     *   rejected the decision is made, and scheduling a visit against it would
-     *   produce a booking no transition can ever consume. This used to ask the
-     *   APPLICATION's status and had to stop — see permitIsAwaitingInspection().
+     * - the PERMIT is still for inspection AND the FILING is not decided. Once
+     *   either is settled, scheduling a visit would produce a booking no
+     *   transition can ever consume. Both halves live in one predicate on the
+     *   pivot — `ApplicationPermitType::awaitingInspection()` — because this
+     *   was one of three places asking only the first half; see the note there.
      * - this row is still the CURRENT visit. Otherwise an officer reading the
      *   history of a filing that already failed twice could schedule a third
      *   visit from the older of the two failures, and the office would end up
@@ -172,11 +172,16 @@ class Inspection extends Model
     /**
      * Is the PERMIT this visit belongs to still waiting on an inspection?
      *
-     * This asked the APPLICATION's status and could not any more: since
+     * This asked the APPLICATION's status alone and could not any more: since
      * 6 September 2026 `for_inspection` is a state of one permit, not of the
      * filing. An application whose CHO permit is being re-inspected reads
      * `awaiting_other_permits`, so the old test would have refused every
      * legitimate re-inspection in the system.
+     *
+     * What replaced it dropped the filing from the question entirely, which was
+     * an over-correction: the filing's status still matters when it is TERMINAL.
+     * Both halves are now in `ApplicationPermitType::awaitingInspection()`,
+     * shared with the two other callers that had the same hole.
      *
      * Matched through the issuing department, which is how inspections have
      * always been keyed. Every seeded permit type has its own office, so the
@@ -190,7 +195,8 @@ class Inspection extends Model
 
         return ApplicationPermitType::where('application_id', $this->application_id)
             ->whereIn('permit_type_id', $typeIds)
-            ->where('status', ClearanceStatus::ForInspection->value)
-            ->exists();
+            ->with('application')
+            ->get()
+            ->contains(fn (ApplicationPermitType $row) => $row->awaitingInspection());
     }
 }

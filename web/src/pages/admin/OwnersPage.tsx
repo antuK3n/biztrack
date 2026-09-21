@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { admin } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
-import { formatDateTime } from '../../lib/format'
+import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
 import type { AdminBusiness, AuditLog, BusinessStatus } from '../../lib/types'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import {
@@ -17,6 +17,7 @@ import {
 } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { BuildingIcon } from '../../components/icons'
+import { BUSINESS_STATUS } from '../../lib/status'
 
 /*
  * Business Owner Status (PDF p99–101): the real /admin/businesses roster with
@@ -25,12 +26,10 @@ import { BuildingIcon } from '../../components/icons'
  * audit-fed Status History dot-timeline modal.
  */
 
-const STATUS_META: Record<BusinessStatus, { label: string; tone: ChipTone }> = {
-  active: { label: 'Active', tone: 'tint-green' },
-  flagged: { label: 'Flagged', tone: 'tint-yellow' },
-  suspended: { label: 'Suspended', tone: 'tint-purple' },
-  blacklisted: { label: 'Blacklisted', tone: 'tint-red' },
-}
+/* The words, the tones and the dots all come from lib/status.ts now — see
+ * BUSINESS_STATUS there for why they stopped being three private tables. The
+ * local names are kept so the call sites below read as they did. */
+const STATUS_META = BUSINESS_STATUS
 
 const REASON_CODES = [
   'Falsified / misrepresented documents',
@@ -40,6 +39,108 @@ const REASON_CODES = [
   'Compliance restored',
   'Other (see details)',
 ]
+
+/* ── Transfer of ownership (MCG-BPLO-FO-003 section II) ──────────────── */
+
+/**
+ * Move a business to another owner account.
+ *
+ * ── Why this screen and not the amendment's approval ──────────────────
+ *
+ * An approved CHANGE OF OWNERSHIP states a NAME. An account is a different
+ * thing: it may not exist, and matching a person to one by name is how a
+ * business ends up with the wrong Maria Reyes. So the applicant states the
+ * name, BPLO reads the Deed of Transfer, and the judgement about which
+ * account that is gets made here by a person — client's decision,
+ * 21 September 2026.
+ *
+ * Until this existed the decision had nowhere to land: `owner_user_id` was
+ * written in exactly one place, from the session, when a business was first
+ * registered.
+ */
+function TransferOwnerModal({
+  row,
+  onClose,
+  onTransferred,
+}: {
+  row: AdminBusiness
+  onClose: () => void
+  onTransferred: (owner: { id: number; name: string }) => void
+}) {
+  const [email, setEmail] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function confirm() {
+    setBusy(true)
+    setError(null)
+    try {
+      const moved = await admin.transferBusinessOwner(row.id, email.trim(), reason.trim())
+      onTransferred({ id: moved.owner_user_id, name: moved.owner_name })
+    } catch (err) {
+      setError(toApiError(err).message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ProtoModal
+      title="Transfer Ownership"
+      cancelLabel="Cancel"
+      confirmLabel="Transfer"
+      onCancel={onClose}
+      onConfirm={confirm}
+      confirmDisabled={busy || email.trim() === '' || reason.trim() === ''}
+    >
+      <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
+        {row.name}
+        {row.owner && (
+          <>
+            {' · currently '}
+            <span className="font-semibold text-ink">{row.owner.name}</span>
+          </>
+        )}
+      </p>
+      <div className="space-y-4">
+        <label className="block">
+          <FieldLabel required>New owner’s BizTrack email</FieldLabel>
+          <input
+            type="email"
+            className={inputCls}
+            placeholder="the address they registered with"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {/*
+            Said before the attempt, not only after it fails. The commonest
+            dead end here is a new owner who has never registered, and an
+            officer who knows that up front can tell them on the phone
+            instead of discovering it at the counter.
+          */}
+          <span className="mt-1.5 block text-xs text-ink-secondary">
+            They must already have a BizTrack account. Filings, permits and deferred fees all move
+            with the business, and the previous owner loses access to it.
+          </span>
+        </label>
+        <label className="block">
+          <FieldLabel required>Reason</FieldLabel>
+          <textarea
+            className={`${inputCls} min-h-20`}
+            placeholder="e.g. Deed of Sale attached to amendment MCB-2026-000012"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+        {error !== null && (
+          <p role="alert" className="text-sm font-medium text-s-red">
+            {error}
+          </p>
+        )}
+      </div>
+    </ProtoModal>
+  )
+}
 
 /* ── Changing Status (p100) ───────────────────────────────────────────── */
 
@@ -127,12 +228,9 @@ interface HistoryEntry {
   note: string
 }
 
-const STATUS_DOT: Record<BusinessStatus, string> = {
-  active: 'bg-s-green',
-  flagged: 'bg-s-yellow',
-  suspended: 'bg-s-purple',
-  blacklisted: 'bg-s-red',
-}
+const STATUS_DOT: Record<BusinessStatus, string> = Object.fromEntries(
+  (Object.keys(BUSINESS_STATUS) as BusinessStatus[]).map((s) => [s, BUSINESS_STATUS[s].dot]),
+) as Record<BusinessStatus, string>
 
 function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }) {
   /*
@@ -249,7 +347,69 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
 
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
-type ModalState = { kind: 'change' | 'history'; row: AdminBusiness } | null
+type ModalState = { kind: 'change' | 'transfer' | 'history' | 'fees'; row: AdminBusiness } | null
+
+/**
+ * What a business has been issued and not yet paid for, itemised.
+ *
+ * ── Why the total is a control and not just a figure ──────────────────────
+ *
+ * The column shows one number; the officer chasing it needs to know what it is
+ * FOR. "₱2,100" is not something you can raise with an owner on the phone;
+ * "the Sanitary Permit from June and the FSIC from August" is. So the total
+ * opens this.
+ *
+ * `on_a_bill` earns its own line. A fee already sitting on a renewal the
+ * applicant has been shown is still unpaid — which is why it is in the total —
+ * but a chase is already in flight and an officer ringing about it should know
+ * that before they do.
+ */
+function FeesModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }) {
+  const fees = row.unbilled_fees
+
+  /*
+   * `onCancel` with a Close label and no `onConfirm`: this dialog is a record,
+   * not a decision, so there is nothing to proceed to. `ProtoModal` takes
+   * `onCancel` and not `onClose` — passing the latter is what `HistoryModal`
+   * beside this one hand-rolls its whole overlay to avoid, losing the focus
+   * trap and the Escape handling in doing so.
+   */
+  return (
+    <ProtoModal title="UNBILLED PERMIT FEES" cancelLabel="Close" onCancel={onClose}>
+      <p className="mb-4 border-b border-line pb-3 text-sm text-ink-secondary">{row.name}</p>
+
+      <p className="text-xs leading-relaxed text-ink-secondary">
+        A permit renewed outside January is issued straight away and billed on the next business
+        permit renewal. These are waiting for that renewal — nothing is overdue and no permit
+        lapses, but the fees are not collected yet.
+      </p>
+
+      <ul className="mt-4 divide-y divide-line">
+        {(fees?.items ?? []).map((item, i) => (
+          <li key={`${item.permit_code ?? 'fee'}-${i}`} className="flex items-baseline gap-3 py-2.5">
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-ink">
+                {item.permit_type ?? 'Permit fee'}
+              </span>
+              <span className="block text-xs text-ink-muted">
+                Issued {formatDate(item.incurred_at)}
+                {item.on_a_bill && ' · already on a renewal awaiting payment'}
+              </span>
+            </span>
+            <span className="tnum shrink-0 text-sm font-semibold text-ink">
+              {formatMoney(item.amount)}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-3 flex items-baseline justify-between border-t border-ink/40 pt-3 text-base font-bold text-ink">
+        <span>Total uncollected</span>
+        <span className="tnum">{formatMoney(fees?.total ?? 0)}</span>
+      </div>
+    </ProtoModal>
+  )
+}
 
 /** Rows per request. The roster is 705 businesses and grows with the city. */
 const PAGE_SIZE = 25
@@ -383,6 +543,19 @@ export function OwnersPage() {
                   <th className="px-5 py-3">Business</th>
                   <th className="px-5 py-3">Owner</th>
                   <th className="px-5 py-3">Status</th>
+                  {/*
+                    Deferred permit fees. Client's decision, 17 September 2026:
+                    a clearance renewed outside January is issued unbilled and
+                    its fee waits for the next business permit renewal — *"they
+                    wait indefinitely, and are visible"*. This is the visible
+                    half; the other half is already on the renewal's Tax Order
+                    of Payment.
+
+                    Right-aligned, like every money column: the digits line up
+                    and a reader scanning for the largest debt does it by eye
+                    rather than by reading each one.
+                  */}
+                  <th className="px-5 py-3 text-right">Unbilled fees</th>
                   <th className="px-5 py-3">Actions</th>
                 </tr>
               </thead>
@@ -440,6 +613,29 @@ export function OwnersPage() {
                       <td className="px-5 py-3.5">
                         <StatusChip tone={meta.tone}>{meta.label}</StatusChip>
                       </td>
+                      <td className="px-5 py-3.5 text-right">
+                        {/*
+                          Three states, and they are genuinely different:
+                          the key absent (an older payload — say nothing rather
+                          than claim zero), a zero (nothing deferred, and the
+                          dash reads faster than ₱0.00 down a column of them),
+                          and a real debt.
+                        */}
+                        {row.unbilled_fees === undefined ? (
+                          <span className="text-ink-muted">—</span>
+                        ) : row.unbilled_fees.total === 0 ? (
+                          <span className="text-ink-muted">—</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setModal({ kind: 'fees', row })}
+                            className="tnum font-bold text-royal underline underline-offset-2 hover:text-royal-hover"
+                            aria-label={`What ${row.name} owes in unbilled permit fees`}
+                          >
+                            {formatMoney(row.unbilled_fees.total)}
+                          </button>
+                        )}
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2">
                           <button
@@ -451,6 +647,13 @@ export function OwnersPage() {
                             className="rounded-full border border-transparent bg-s-red px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
                           >
                             Change Status
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setModal({ kind: 'transfer', row })}
+                            className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                          >
+                            Transfer Ownership
                           </button>
                           <button
                             type="button"
@@ -515,7 +718,23 @@ export function OwnersPage() {
           onChanged={applyChange}
         />
       )}
+      {modal?.kind === 'transfer' && (
+        <TransferOwnerModal
+          row={modal.row}
+          onClose={() => setModal(null)}
+          onTransferred={(owner) => {
+            /*
+             * The roster row is patched in place rather than refetched. The
+             * owner is the only thing that moved, and a refetch would reset
+             * the page and the filter the admin is working through.
+             */
+            applyChange({ ...modal.row, owner })
+            setModal(null)
+          }}
+        />
+      )}
       {modal?.kind === 'history' && <HistoryModal row={modal.row} onClose={() => setModal(null)} />}
+      {modal?.kind === 'fees' && <FeesModal row={modal.row} onClose={() => setModal(null)} />}
     </div>
   )
 }

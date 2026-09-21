@@ -979,10 +979,13 @@ it('lets a copy replace an application, and does not let an application replace 
      * for", and removing the copy does not reopen the door: `destroyHeld` only
      * forgets the document and leaves the status where it was.
      *
-     * That predicate is deliberate for the states it was written about — a
-     * REJECTED or RETURNED permit must go back through `refileClearance()` so
-     * the office's remarks are not lost to a second start. Upload mode simply
-     * falls under the same rule, so there is one way in and no way back.
+     * That predicate is deliberate for the state it was written about — a
+     * RETURNED permit goes back through its office FORM, which reopens
+     * editable, so the office's remarks are not lost to a second start. Upload
+     * mode simply falls under the same rule: one way in and no way back.
+     *
+     * This named `refileClearance()` and a REJECTED permit alongside it. Both
+     * went on 17 September 2026 when clearance-level rejection was removed.
      */
     $this->postJson("/api/v1/applications/{$app->id}/clearances/SANITARY/apply")->assertStatus(422);
 
@@ -1082,41 +1085,52 @@ it('releases each permit the moment its own office passes the inspection', funct
 });
 
 /*
- * REPLACES "releases the permits when the second payment settles the balance".
+ * REPLACES "releases the permits when the second payment settles the balance",
+ * and re-aimed again on 18 September 2026 when the waiting stage went.
  *
  * The second payment was the thing that released everything at once, and the
  * spec records why it existed: without it the applicant faced "a balance they
  * could see, could not pay, and which blocked the permit they were waiting
- * for". Nothing blocks now, so what is left to assert is the other end — the
- * business permit is the ONLY one that waits, and it waits for BPLO rather than
- * for money.
+ * for". Nothing blocks now.
+ *
+ * What it asserted next was that the business permit waits for BPLO. It no
+ * longer does, on a NEW filing. The client asked what BPLO was checking, given
+ * that every clearance is applied for, approved and inspected inside BizTrack —
+ * and there was no answer, so the permit is now minted the instant the fifth
+ * clearance is approved. The assertion moved with the behaviour rather than
+ * being deleted: what it pins now is that the sixth permit needs NO further
+ * press, which is the whole of the change.
  */
-it('issues the business permit last, at BPLO’s final approval, once all five are approved', function () {
+it('issues the business permit the moment the fifth clearance is approved', function () {
     $app = paidClearanceApplication('Final Approval Cafe');
 
     foreach (PermitType::CLEARANCE_ORDER as $code) {
         driveClearanceToApproved($app, $code);
     }
 
-    $ready = Application::findOrFail($app->id);
+    $done = Application::findOrFail($app->id);
 
-    // Five permits out, and the filing has walked itself into BPLO's queue.
-    expect($ready->permits()->count())->toBe(5)
-        ->and($ready->status)->toBe(ApplicationStatus::ForFinalApproval);
+    /*
+     * Six permits and Approved, with nobody at BPLO having touched it since
+     * their first act. The count is the load-bearing half: five would mean the
+     * filing had merely become ready.
+     */
+    expect($done->status)->toBe(ApplicationStatus::Approved)
+        ->and($done->permits()->count())->toBe(6)
+        ->and($done->permits()->pluck('permit_type_id'))
+        ->toContain(PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'));
 
+    /*
+     * And BPLO's assignment is closed by the automatic approval rather than
+     * left open in a queue nobody needs to work. `approveOverall` completes it,
+     * which is why it is worth asserting here: an open assignment on an
+     * approved filing is a queue item that can never be cleared.
+     */
     $bplo = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', Department::where('code', 'BPLO')->firstOrFail()->id)
         ->firstOrFail();
 
-    authAs('bplo@biztrack.local');
-    $this->postJson("/api/v1/assignments/{$bplo->id}/approve")->assertOk();
-
-    $approved = Application::findOrFail($app->id);
-
-    expect($approved->status)->toBe(ApplicationStatus::Approved)
-        ->and($approved->permits()->count())->toBe(6)
-        ->and($approved->permits()->pluck('permit_type_id'))
-        ->toContain(PermitType::where('code', PermitType::OUTCOME_CODE)->value('id'));
+    expect($bplo->fresh()->status->value)->toBe('completed');
 });
 
 /*

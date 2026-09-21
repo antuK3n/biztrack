@@ -89,7 +89,7 @@ export function ForgotPasswordPage() {
           {/* Wrapped so the visible label actually names the input; it was a
               span, leaving the placeholder as the only accessible name. */}
           <label className="block">
-          <FieldLabel>Email Address</FieldLabel>
+          <FieldLabel required>Email Address</FieldLabel>
           <input
             type="email"
             name="email"

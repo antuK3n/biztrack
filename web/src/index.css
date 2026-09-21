@@ -60,6 +60,35 @@
   --color-s-orange-ink: #8a4a06;
   --color-s-yellow-ink: #6b4e00;
   --color-s-purple: #7a4bd0;
+  /*
+   * ── Two hues the palette lacked, added 17 September 2026 ────────────────
+   *
+   * Ten application statuses were sharing six tones, so four of them rendered
+   * in one identical orange and two in one identical grey — useless on the
+   * status guide, where all nine are stacked and telling them apart is the
+   * whole job. See StatusTone in lib/status.ts for which status takes which.
+   *
+   * Added here rather than reached for from Tailwind's defaults, because
+   * `--color-*: initial` above WIPES those: `violet-50` and `rose-50` do not
+   * exist in this build, and a badge asking for one renders with no background
+   * and no border at all. The first attempt did exactly that.
+   *
+   * Teal is For Final Approval. It had to be a new family: royal and blue are
+   * Awaiting Other Permits, purple is For Initial Approval, orange is Pending
+   * Payment, and amber-50 is byte-identical to s-yellow-tint (#fdf6d8), so
+   * amber would have collided with For Inspection.
+   *
+   * Rose is Returned — kept clear of s-red (#c11212), which is Rejected.
+   * Being asked to correct something is not being refused, and one red for
+   * both would tell an applicant their filing was dead when it is waiting for
+   * them. Magenta-leaning so the two are not a shade apart.
+   */
+  --color-s-teal: #0d8b8b;
+  --color-s-teal-tint: #d9f0f0;
+  --color-s-teal-ink: #08585a;
+  --color-s-rose: #d6336c;
+  --color-s-rose-tint: #fde3ec;
+  --color-s-rose-ink: #8f1b43;
   --color-s-purple-tint: #ece4f9;
 
   /* Modal footer buttons */

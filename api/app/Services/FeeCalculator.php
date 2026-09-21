@@ -4,6 +4,9 @@ namespace App\Services;
 
 use App\Models\Application;
 use App\Models\FeeRule;
+use App\Models\PsicCode;
+use App\Support\TaxClassification;
+use Illuminate\Support\Collection;
 
 class FeeCalculator
 {
@@ -21,12 +24,53 @@ class FeeCalculator
         $lines = collect($profile['lines'] ?? []);
         if ($lines->isEmpty()) {
             $lines = $app->business->lines->map(fn ($l) => [
-                'category' => $l->category ?? null,
+                'psic_code_id' => $l->psic_code_id,
                 'gross_sales' => $profile['gross_sales'] ?? null,
                 'capitalization' => $profile['capitalization'] ?? null,
             ]);
         }
-        $profile['categories'] = $lines->pluck('category')->filter()->values()->all();
+
+        $lines = $this->classify($lines);
+
+        /*
+         * TWO lists, not one, and this is the fix for a real mis-billing.
+         *
+         * `business_tax` matches the 22 broad classes of Sec. 2J.02;
+         * `mayors_permit` matches the 117 fine categories of Sec. 3A.03. They
+         * are separate vocabularies, and while one field held one answer the
+         * applicant could only ever satisfy one of them — a carinderia that
+         * classified itself accurately as "Carinderia" got its ₱550 permit fee
+         * and NO business tax at all, losing ₱9,750 on ₱1,200,000 of gross.
+         *
+         * So the fine categories join the broad ones here. The per-line
+         * matching below is unaffected: `matches()` reads the LINE's own
+         * `category` when a line is given, so a fine category in this list
+         * cannot reach a business-tax rule and vice versa.
+         */
+        $categories = $lines
+            ->pluck('category')
+            ->merge($lines->pluck('permit_category'));
+
+        /*
+         * A THIRD key, from the liquor answer.
+         *
+         * The nine Sec. 3A.03 liquor rules key on how the liquor is sold —
+         * `liquor_retailer`, `liquor_wholesaler`, `liquor_serving`,
+         * `liquor_manufacturer`, `amusement_place` — and no line of business
+         * maps to one, because nothing about a trade says whether the shop
+         * happens to stock beer. While the wizard offered its 273-label
+         * picker an applicant could type the category themselves; deriving the
+         * class instead took that route away and left the flag inert for
+         * everyone but an amusement place. See TaxClassification::LIQUOR_OF.
+         */
+        if (in_array('sells_liquor', $profile['flags'] ?? [], true)) {
+            $categories = $categories->merge(
+                $lines->pluck('category')
+                    ->map(fn (?string $class) => TaxClassification::LIQUOR_OF[$class] ?? null)
+            );
+        }
+
+        $profile['categories'] = $categories->filter()->unique()->values()->all();
 
         $rules = FeeRule::where('active', true)->get()
             ->filter(fn (FeeRule $r) => $r->group === 'penalty' ? false
@@ -175,6 +219,76 @@ class FeeCalculator
         ];
     }
 
+    /**
+     * Give every line the two Revenue Code keys that price it.
+     *
+     * The line of business decides both, so neither is asked of the applicant
+     * any more: `psic_codes.category` is the Sec. 2J.02 tax class and
+     * `psic_codes.permit_category` the Sec. 3A.03 fine category. See
+     * App\Support\TaxClassification for the mapping and the reasoning, and
+     * migration 2026_09_16_000100 for why one column could not do it.
+     *
+     * A `category` the filing ALREADY carries is left alone. That is not
+     * deference to the browser — it is for the drafts filled in while the
+     * wizard still asked the question, whose applicant gave an answer that is
+     * theirs and not ours to overwrite mid-filing. New filings send none, so
+     * they are classified here, where the browser cannot get it wrong.
+     *
+     * `essentials` is the one answer still taken from the applicant: Sec.
+     * 2J.02(c) halves the rate for dealers in essential commodities, and no
+     * industrial classification can tell rice from radios.
+     *
+     * `classifyProfile` is the same work done at WRITE time, so the filing
+     * RECORDS what it was classified as instead of the classification being
+     * re-derived every time somebody looks. Two reasons that matters: the
+     * officer's review sheet shows the basis of the assessment, which has to
+     * be the basis that was actually used; and the mapping is reference data
+     * that can be corrected, so a filing assessed under the old mapping must
+     * not silently re-price itself when the table changes underneath it.
+     */
+    public function classifyProfile(array $profile): array
+    {
+        if (($profile['lines'] ?? []) === []) {
+            return $profile;
+        }
+
+        $profile['lines'] = $this->classify(collect($profile['lines']))->values()->all();
+
+        return $profile;
+    }
+
+    private function classify(Collection $lines): Collection
+    {
+        $ids = $lines->pluck('psic_code_id')->filter()->unique();
+        if ($ids->isEmpty()) {
+            return $lines;
+        }
+
+        $codes = PsicCode::whereIn('id', $ids)
+            ->get(['id', 'category', 'permit_category', 'category_branch'])
+            ->keyBy('id');
+
+        return $lines->map(function (array $line) use ($codes) {
+            $psic = $codes->get($line['psic_code_id'] ?? null);
+            if ($psic === null) {
+                return $line;
+            }
+
+            if (($line['category'] ?? null) === null && $psic->category !== null) {
+                $essential = ($line['essentials'] ?? false)
+                    && $psic->category_branch === TaxClassification::BRANCH_ESSENTIALS;
+
+                $line['category'] = $essential
+                    ? (TaxClassification::ESSENTIAL_OF[$psic->category] ?? $psic->category)
+                    : $psic->category;
+            }
+
+            $line['permit_category'] ??= $psic->permit_category;
+
+            return $line;
+        });
+    }
+
     /** Does the rule's condition set hold for this profile (and line)? */
     private function matches(FeeRule $rule, array $profile, ?array $line = null): bool
     {
@@ -307,6 +421,21 @@ class FeeCalculator
             'code' => $rule->code,
             'label' => $rule->title,
             'amount' => $amount,
+            /*
+             * WHICH PERMITS this line pays for, from the rule itself.
+             *
+             * Without it a bill was a flat list of money with no way back to
+             * the permits it covered, and two things downstream had to guess:
+             * the deferred-fee row, which recomputed the amount from a
+             * different schedule and so disagreed with the bill it came from,
+             * and the flat fallback, which could only ask "did ANY rule match"
+             * rather than "did any rule match THIS permit".
+             *
+             * Null for a line that belongs to the filing rather than to a
+             * permit — the application filing fee, the business tax — which is
+             * a real distinction and not a missing value.
+             */
+            'permit_codes' => $rule->permit_types ?: null,
             'office' => $rule->office,
             'group' => $rule->group,
             'section' => $rule->section,

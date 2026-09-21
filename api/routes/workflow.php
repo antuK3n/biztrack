@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\Admin\AuditLogController;
 use App\Http\Controllers\Api\Admin\BusinessStatusController;
 use App\Http\Controllers\Api\Admin\OicAssignmentController;
 use App\Http\Controllers\Api\Admin\UserController;
+use App\Http\Controllers\Api\AmendmentController;
 use App\Http\Controllers\Api\AnalyticsController;
 use App\Http\Controllers\Api\ApplicationController;
 use App\Http\Controllers\Api\AssignmentController;
@@ -42,6 +43,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('departments', [ReferenceController::class, 'departments']);
         Route::get('document-types', [ReferenceController::class, 'documentTypes']);
         Route::get('permit-types', [ReferenceController::class, 'permitTypes']);
+        /*
+         * The amendment form's field list. Reference data because it is the
+         * same for every business — see the controller for why it stopped
+         * travelling with the per-filing values.
+         */
+        Route::get('amendable-fields', [ReferenceController::class, 'amendableFields']);
     });
 
     // Businesses (owner: business.manage_own)
@@ -102,9 +109,26 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('applications/{application}/submit', [ApplicationController::class, 'submit']);
         Route::post('applications/{application}/resubmit', [ApplicationController::class, 'resubmit']);
         Route::post('applications/{application}/cancel', [ApplicationController::class, 'cancel']);
+        /*
+         * Throw a DRAFT away. Distinct from `cancel` above, which is the right
+         * verb for a filing an office has already seen — see the controller.
+         */
+        Route::delete('applications/{application}', [ApplicationController::class, 'destroy']);
         // Which permit a renewal/amendment is for (checklist item 50).
         Route::get('applications/{application}/prior-permit', [PriorPermitController::class, 'show']);
         Route::put('applications/{application}/prior-permit', [PriorPermitController::class, 'update']);
+        /*
+         * What an amendment asks to change. Owner-only throughout, checked in
+         * the controller — the read included, because which of their own
+         * details a business wants changed is not something an office needs
+         * before the filing is submitted to it.
+         */
+        Route::get('applications/{application}/amendments', [AmendmentController::class, 'index']);
+        Route::post('applications/{application}/amendments', [AmendmentController::class, 'store']);
+        Route::delete(
+            'applications/{application}/amendments/{field}',
+            [AmendmentController::class, 'destroy']
+        );
     });
 
     /*
@@ -180,6 +204,12 @@ Route::middleware('auth:sanctum')->group(function () {
     // Payments (owner: payment.make)
     Route::middleware('permission:payment.make')->group(function () {
         Route::get('applications/{application}/fee', [PaymentController::class, 'fee']);
+        /*
+         * What the filing WOULD be billed, computed and discarded. POST because
+         * it carries the profile being typed, not because it writes anything —
+         * see the note on the action for why `GET /fee` cannot serve this.
+         */
+        Route::post('applications/{application}/fee-preview', [PaymentController::class, 'feePreview']);
         Route::post('applications/{application}/pay', [PaymentController::class, 'pay']);
         Route::get('payments', [PaymentController::class, 'index']);
     });
@@ -473,6 +503,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
             Route::get('businesses', [BusinessStatusController::class, 'index']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
+            /*
+             * The other half of FO-003's section II. Same permission as the
+             * status change: both are the register's own facts about a
+             * business, set by an admin rather than by its owner, and an
+             * account that may blacklist a business is not meaningfully
+             * restrained by being unable to transfer one.
+             */
+            Route::post('businesses/{business}/owner', [BusinessStatusController::class, 'transferOwner']);
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);

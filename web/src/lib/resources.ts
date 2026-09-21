@@ -12,6 +12,8 @@ import type {
   AnalyticsSummary,
   Application,
   ApplicationListItem,
+  AmendableField,
+  AmendmentRow,
   ApplicationType,
   Assignment,
   AssignmentPageMeta,
@@ -211,6 +213,14 @@ export const reference = {
   psicCodes: () => unwrap<PsicCode[]>(api.get('/reference/psic-codes')),
   departments: () => unwrap<Department[]>(api.get('/reference/departments')),
   documentTypes: () => unwrap<DocumentType[]>(api.get('/reference/document-types')),
+  /**
+   * The amendment form's field list — definitions only, no business.
+   *
+   * Fetched with the rest of the reference data so the step can draw its four
+   * boxes before any per-filing request returns. The values that go IN them
+   * come from `applications.amendments`.
+   */
+  amendableFields: () => unwrap<AmendableField[]>(api.get('/reference/amendable-fields')),
   permitTypes: () => unwrap<PermitType[]>(api.get('/reference/permit-types')),
 }
 
@@ -230,12 +240,17 @@ export const businesses = {
    * Callers that want the page meta still have `page()` below.
    */
   list: (params: PageParams = {}) =>
-    unwrap<Business[]>(api.get('/businesses', { params: { per_page: PICKER_PAGE_SIZE, ...params } })),
+    unwrap<Business[]>(
+      api.get('/businesses', {
+        params: { per_page: PICKER_PAGE_SIZE, ...params },
+      }),
+    ),
   /** Same list, keeping the page meta. */
   page: (params: PageParams = {}) => unwrapPaged<Business>(api.get('/businesses', { params })),
   get: (id: number) => unwrap<Business>(api.get(`/businesses/${id}`)),
   create: (body: BusinessPayload) => unwrap<Business>(api.post('/businesses', body)),
-  update: (id: number, body: BusinessPayload) => unwrap<Business>(api.put(`/businesses/${id}`, body)),
+  update: (id: number, body: BusinessPayload) =>
+    unwrap<Business>(api.put(`/businesses/${id}`, body)),
   /** Renewal/amendment prefill: prior permit + suggested permit types (v2). */
   prefill: (id: number, type: 'renewal' | 'amendment') =>
     unwrap<PrefillResult>(api.get(`/businesses/${id}/prefill`, { params: { type } })),
@@ -284,7 +299,6 @@ export interface PriorPermitChoice {
   prior_permit_id: number | null
   prior_permit: Permit | null
   prior_permit_ids: number[]
-  declared_none: boolean
 }
 
 export const applications = {
@@ -298,40 +312,37 @@ export const applications = {
    */
   list: (filters: ApplicationFilters = {}) =>
     unwrap<ApplicationListItem[]>(
-      api.get('/applications', { params: { per_page: PICKER_PAGE_SIZE, ...filters } }),
+      api.get('/applications', {
+        params: { per_page: PICKER_PAGE_SIZE, ...filters },
+      }),
     ),
   /** Same list, keeping the page meta. Prefer this on any screen with a list. */
   page: (filters: ApplicationFilters = {}) =>
     unwrapPaged<ApplicationListItem>(api.get('/applications', { params: filters })),
   get: (id: number) => unwrap<Application>(api.get(`/applications/${id}`)),
-  create: (body: {
-    business_id: number
-    application_type: ApplicationType
-    /** Applicant's own name for the filing (blank keeps the business name). */
-    title?: string
-    permit_type_ids: number[]
-    /** Set on renewal/amendment to link the prior permit (v2). */
-    prior_permit_id?: number
-    /**
-     * Every permit this renewal covers. Sent alongside `prior_permit_id`, not
-     * instead of it — the primary keys the renewal chain and this is the full
-     * set the applicant ticked.
-     */
-    prior_permit_ids?: number[]
-    /**
-     * The applicant's ticked "this business has no BizTrack permit" — the
-     * year-one escape for permits issued on paper. Sent instead of, never
-     * alongside, `prior_permit_id`: submit accepts either, and a bare null is
-     * no longer an answer to the question.
-     */
-    prior_permit_declared_none?: boolean
-    /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
-    fee_profile?: FeeProfile
-    /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
-    payment_mode?: 'annual' | 'quarterly'
-    /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
-    data_privacy_consent?: boolean
-  } & AmendmentAnswers) => unwrap<Application>(api.post('/applications', body)),
+  create: (
+    body: {
+      business_id: number
+      application_type: ApplicationType
+      /** Applicant's own name for the filing (blank keeps the business name). */
+      title?: string
+      permit_type_ids: number[]
+      /** Set on renewal/amendment to link the prior permit (v2). */
+      prior_permit_id?: number
+      /**
+       * Every permit this renewal covers. Sent alongside `prior_permit_id`, not
+       * instead of it — the primary keys the renewal chain and this is the full
+       * set the applicant ticked.
+       */
+      prior_permit_ids?: number[]
+      /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
+      fee_profile?: FeeProfile
+      /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
+      payment_mode?: 'annual' | 'quarterly'
+      /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
+      data_privacy_consent?: boolean
+    } & AmendmentAnswers,
+  ) => unwrap<Application>(api.post('/applications', body)),
   update: (
     id: number,
     body: {
@@ -346,30 +357,59 @@ export const applications = {
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
+  /**
+   * Throw a DRAFT away. Refused (422) on anything already submitted, where
+   * `cancel` above is the right verb — see ApplicationController::destroy for
+   * why the two are different acts rather than two names for one.
+   *
+   * Soft on the server, so the row survives for recovery; from the browser's
+   * point of view it is gone, and the caller reloads rather than patching it
+   * out of a local list.
+   */
+  destroy: (id: number) => unwrap<{ id: number }>(api.delete(`/applications/${id}`)),
+  /**
+   * The amendable business details, with what the register holds and what this
+   * amendment asks for.
+   *
+   * Returns EVERY amendable detail, not only the ones asked about, because the
+   * screen is "what it is now, what you want it to be" — a form showing only
+   * the new values asks somebody to remember what they are replacing.
+   */
+  amendments: (id: number) =>
+    unwrap<AmendmentRow[]>(api.get(`/applications/${id}/amendments`)),
+  /**
+   * State new values. Refused as a WHOLE if any field is not amendable, so a
+   * request naming four good details and one bad one writes nothing — applying
+   * four fifths would leave the applicant to work out which fifth went missing.
+   */
+  setAmendments: (id: number, changes: { field: string; new_value: string | null }[]) =>
+    unwrap<AmendmentRow[]>(api.post(`/applications/${id}/amendments`, { changes })),
+  /** Withdraw one requested change. */
+  removeAmendment: (id: number, field: string) =>
+    unwrap<AmendmentRow[]>(api.delete(`/applications/${id}/amendments/${field}`)),
   timeline: (id: number) => unwrap<TimelineEntry[]>(api.get(`/applications/${id}/timeline`)),
   /**
    * Which permit a renewal/amendment is for. Separate from update() because a
    * business holds several permits with different expiry dates, so the choice
    * outlives the moment the draft was created and has to be re-readable.
    */
-  priorPermit: (id: number) => unwrap<PriorPermitChoice>(api.get(`/applications/${id}/prior-permit`)),
+  priorPermit: (id: number) =>
+    unwrap<PriorPermitChoice>(api.get(`/applications/${id}/prior-permit`)),
   /**
-   * `declaredNone` is what tells a skipped question from an answered one. Both
-   * used to arrive as `prior_permit_id: null`, so a renewal nobody had asked
-   * looked exactly like a renewal of a paper permit — which is how seven
-   * renewals of nothing reached the register.
+   * A renewal names the permit it carries forward, and there is no longer any
+   * other answer.
+   *
+   * `declaredNone` used to ride along here — the applicant ticking "my permit
+   * was issued on paper", which told a skipped question from an answered one
+   * when both arrived as `prior_permit_id: null`. The client retired the paper
+   * case on 18 September 2026, so a null is once again just an unanswered
+   * question and the flag has nothing left to distinguish.
    */
-  setPriorPermit: (
-    id: number,
-    priorPermitId: number | null,
-    declaredNone = false,
-    priorPermitIds: number[] = [],
-  ) =>
+  setPriorPermit: (id: number, priorPermitId: number | null, priorPermitIds: number[] = []) =>
     unwrap<PriorPermitChoice>(
       api.put(`/applications/${id}/prior-permit`, {
         prior_permit_id: priorPermitId,
         prior_permit_ids: priorPermitIds,
-        declared_none: priorPermitId === null && priorPermitIds.length === 0 && declaredNone,
       }),
     ),
   reject: (id: number, reason: string) =>
@@ -492,7 +532,10 @@ export const officeForms = {
     const body = new FormData()
     body.append('file', file)
 
-    return unwrap<{ permit_type_code: string; requirements: OfficeFormRequirement[] }>(
+    return unwrap<{
+      permit_type_code: string
+      requirements: OfficeFormRequirement[]
+    }>(
       api.post(
         `/applications/${applicationId}/office-forms/${permitTypeCode}/requirements/${documentCode}`,
         body,
@@ -552,8 +595,7 @@ export const documents = {
     unwrap<{ id: number }>(api.delete(`/applications/${applicationId}/documents/${documentId}`)),
   downloadUrl: (id: number) => `${api.defaults.baseURL}/documents/${id}/download`,
   /** Authenticated save-to-disk (the plain downloadUrl has no bearer header). */
-  download: (id: number, filename: string) =>
-    downloadBlob(`/documents/${id}/download`, filename),
+  download: (id: number, filename: string) => downloadBlob(`/documents/${id}/download`, filename),
   /** Authenticated open-in-a-tab: PDFs and images render, nothing is saved. */
   view: (id: number, target?: Window | null) => viewBlob(`/documents/${id}/download`, target),
 }
@@ -661,7 +703,9 @@ export const messages = {
       form.append('body', body)
       form.append('attachment', attachment)
       return unwrap<Message>(
-        api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+        api.post(url, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        }),
       )
     }
     return unwrap<Message>(api.post(url, { body }))
@@ -723,7 +767,9 @@ export const requests = {
     }
     form.append('reference', reference)
     return unwrap<OfficerRequest>(
-      api.post(url, form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+      api.post(url, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }),
     )
   },
   /** The office's reference file (a blank form, a template), opened in a tab. */
@@ -755,20 +801,35 @@ export const requests = {
    *
    * `remarks` is required by the API for anything but an approval.
    */
-  close: (
-    id: number,
-    outcome: RequestStatus,
-    remarks?: string,
-  ) =>
+  close: (id: number, outcome: RequestStatus, remarks?: string) =>
     unwrap<OfficerRequest>(
-      api.post(`/requests/${id}/close`, { outcome, ...(remarks ? { remarks } : {}) }),
+      api.post(`/requests/${id}/close`, {
+        outcome,
+        ...(remarks ? { remarks } : {}),
+      }),
     ),
 }
 
 /* ── Payments ─────────────────────────────────────────────────────────── */
 
 export const payments = {
-  fee: (applicationId: number) => unwrap<FeeAssessment>(api.get(`/applications/${applicationId}/fee`)),
+  fee: (applicationId: number) =>
+    unwrap<FeeAssessment>(api.get(`/applications/${applicationId}/fee`)),
+  /**
+   * An ESTIMATE of what this filing would be billed, from a profile still being
+   * typed. Writes nothing.
+   *
+   * `fee()` above cannot serve this: it persists a FeeAssessment, so polling it
+   * while somebody types would raise a Tax Order of Payment on a draft nobody
+   * has submitted. POST carries the profile so the figure tracks the screen
+   * rather than lagging behind the autosave.
+   */
+  feePreview: (applicationId: number, feeProfile: FeeProfile) =>
+    unwrap<FeeAssessment>(
+      api.post(`/applications/${applicationId}/fee-preview`, {
+        fee_profile: feeProfile,
+      }),
+    ),
   pay: (applicationId: number, method: PaymentMethod) =>
     unwrap<Payment>(api.post(`/applications/${applicationId}/pay`, { method })),
   history: (params: PageParams = {}) => unwrap<Payment[]>(api.get('/payments', { params })),
@@ -791,7 +852,9 @@ export const payments = {
 /* ── Officer queues + review ──────────────────────────────────────────── */
 
 export interface AssignmentWithApplication extends Assignment {
-  application: Assignment['application'] & { documents?: Application['documents'] }
+  application: Assignment['application'] & {
+    documents?: Application['documents']
+  }
 }
 
 export interface AssignmentFilters extends PageParams {
@@ -837,6 +900,16 @@ export interface AssignmentFilters extends PageParams {
    * never selected on a clearance beside its own.
    */
   clearance_status?: string
+  /**
+   * New / renewal / amendment, on the filing behind the assignment.
+   *
+   * `application_type` and not `type`, matching `application_status` above: on
+   * this endpoint the bare noun reads as the ASSIGNMENT's type, and
+   * application-vs-assignment is already the confusion this list is written to
+   * avoid. `/applications` takes the same narrowing under the name `type`,
+   * which is right there because there is only one noun in play.
+   */
+  application_type?: string
 }
 
 export const assignments = {
@@ -859,8 +932,23 @@ export const assignments = {
     unwrap<Assignment & { application: Application }>(api.get(`/assignments/${id}`)),
   approve: (id: number, remarks?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/approve`, { remarks })),
-  return: (id: number, remarks: string) =>
-    unwrap<Assignment>(api.post(`/assignments/${id}/return`, { remarks })),
+  /**
+   * Send one permit back for the applicant to fix.
+   *
+   * `target` is the optional POINTER — which checklist row or which answer on
+   * the sheet the remarks are about, as a stable code. The prose is never
+   * parsed to derive it; see the migration that added `remarks_target`.
+   */
+  return: (id: number, remarks: string, target?: string | null) =>
+    unwrap<Assignment>(
+      api.post(`/assignments/${id}/return`, {
+        remarks,
+        // Omitted rather than sent as null when there is none: the endpoint
+        // takes it `sometimes`, and an absent key is the same answer with less
+        // to read in the request log.
+        ...(target ? { remarks_target: target } : {}),
+      }),
+    ),
   /**
    * Take this case: become its Officer in Charge (client §2).
    *
@@ -935,7 +1023,9 @@ export const inspections = {
    */
   schedule: (applicationId: number, code: string, scheduled_at: string) =>
     unwrap<Inspection>(
-      api.post(`/applications/${applicationId}/permits/${code}/inspection`, { scheduled_at }),
+      api.post(`/applications/${applicationId}/permits/${code}/inspection`, {
+        scheduled_at,
+      }),
     ),
   conduct: (id: number, body: { result: InspectionResult; findings?: string }) =>
     unwrap<Inspection>(api.post(`/inspections/${id}/conduct`, body)),
@@ -1005,20 +1095,28 @@ export const permits = {
   /**
    * Open the same certificate in a tab instead of saving it.
    *
+   * ── Wanted twice, from opposite ends of the building ──────────────────
+   *
    * Issue #103 asks the admin permit table for a "view a permit" action, and
    * this is what it means: the certificate the City actually issued, not a
-   * second detail screen restating the row. `/permits/{id}/pdf` already renders
-   * the full face — owner, address, line of business, signature block, QR — and
-   * a screen rebuilt from PermitResource would carry none of it while looking
-   * authoritative.
+   * second detail screen restating the row. `/permits/{id}/pdf` already
+   * renders the full face — owner, address, line of business, signature
+   * block, QR — and a screen rebuilt from PermitResource would carry none of
+   * it while looking authoritative. The officer review sheet wanted the same
+   * thing for the certificate it had just issued, and for a while pointed a
+   * View link at a route that does not exist.
    *
-   * Same endpoint as `pdf` above, same authorisation (PermitController::
-   * authorizeView), different disposition: the blob is pointed at rather than
-   * downloaded. Checking one permit should not leave a PDF in Downloads —
-   * PaymentsPage reached this conclusion first for receipts.
+   * Why it has to go through here at all: `/permits/{id}/pdf` is a Bearer
+   * endpoint, so a plain link or a `window.open` on the URL gets a 401. That
+   * is the reason the certificate could only be DOWNLOADED until now.
+   * `viewBlob` is the mechanism documents, message attachments and payment
+   * receipts already use — same endpoint as `pdf` above, same authorisation
+   * (PermitController::authorizeView), different disposition: the blob is
+   * pointed at rather than downloaded. Checking one permit should not leave a
+   * PDF in Downloads; PaymentsPage reached that conclusion first for receipts.
    *
-   * `target` is a tab opened synchronously inside the click handler; see
-   * `viewBlob` for why the popup blocker requires that.
+   * `target` is a tab the caller opened synchronously inside the click
+   * handler; see `viewBlob` for why the popup blocker requires that.
    */
   viewPdf: (id: number, target?: Window | null) => viewBlob(`/permits/${id}/pdf`, target),
 }
@@ -1042,7 +1140,11 @@ export const notifications = {
       data: Notification[]
       meta: PageMeta & { unread: number }
     }>('/notifications', { params })
-    return { data: res.data.data, unread: res.data.meta?.unread ?? 0, meta: res.data.meta }
+    return {
+      data: res.data.data,
+      unread: res.data.meta?.unread ?? 0,
+      meta: res.data.meta,
+    }
   },
   read: (id: number) => api.post(`/notifications/${id}/read`),
   readAll: () => api.post('/notifications/read-all'),
@@ -1128,14 +1230,20 @@ export const analytics = {
     ),
 
   processingTimeReport: (weeks: number) =>
-    downloadBlob(`/analytics/processing-time/report?weeks=${weeks}`, 'processing-time-monitoring.pdf'),
+    downloadBlob(
+      `/analytics/processing-time/report?weeks=${weeks}`,
+      'processing-time-monitoring.pdf',
+    ),
 
   businessGrowth: (months: number) =>
     unwrapComputed<BusinessGrowthReport>(
       api.get('/analytics/business-growth', { params: { months } }),
     ),
   businessGrowthReport: (months: number) =>
-    downloadBlob(`/analytics/business-growth/report?months=${months}`, 'business-growth-analysis.pdf'),
+    downloadBlob(
+      `/analytics/business-growth/report?months=${months}`,
+      'business-growth-analysis.pdf',
+    ),
 
   /**
    * Renewal Risk: permits near expiry ranked by a weighted rule score.
@@ -1198,8 +1306,7 @@ export const analytics = {
    * a refresh can partly succeed and the screens would then mix fresh and stale
    * figures.
    */
-  refresh: () =>
-    unwrap<AnalyticsRefreshResult>(api.post('/analytics/refresh')),
+  refresh: () => unwrap<AnalyticsRefreshResult>(api.post('/analytics/refresh')),
 }
 
 /* ── Admin ────────────────────────────────────────────────────────────── */
@@ -1260,7 +1367,9 @@ export const admin = {
    */
   users: (filters: AdminUserFilters = {}) =>
     unwrap<AdminUser[]>(
-      api.get('/admin/users', { params: { per_page: PICKER_PAGE_SIZE, ...userParams(filters) } }),
+      api.get('/admin/users', {
+        params: { per_page: PICKER_PAGE_SIZE, ...userParams(filters) },
+      }),
     ),
   /** Same directory, keeping the page meta. Prefer this on the Users screen. */
   usersPage: (filters: AdminUserFilters = {}) =>
@@ -1274,6 +1383,22 @@ export const admin = {
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
+  /**
+   * Move a business to another owner account.
+   *
+   * The half of an approved CHANGE OF OWNERSHIP that a person has to do.
+   * MCG-BPLO-FO-003 section II lets an applicant state the new owner and
+   * attach the Deed of Transfer; the permit prints the ACCOUNT holder's name,
+   * so BPLO names the account here having read the deed.
+   *
+   * By email, because that is the identifier BPLO can get from the new owner.
+   * An unknown address is refused with the next step in the message — the new
+   * owner has to register first, and nobody at the counter can do it for them.
+   */
+  transferBusinessOwner: (id: number, ownerEmail: string, reason: string) =>
+    unwrap<{ id: number; owner_user_id: number; owner_name: string }>(
+      api.post(`/admin/businesses/${id}/owner`, { owner_email: ownerEmail, reason }),
+    ),
   /**
    * The roles an officer account may be given, with the labels the API holds.
    *
@@ -1292,10 +1417,13 @@ export const admin = {
    * Deactivation hands the officer's open work back to their office, so the
    * caller needs the counts to say what happened rather than just that it did.
    */
-  toggleActive: async (id: number): Promise<{ user: AdminUser; released: ReleasedCaseload | null }> => {
-    const res = await api.post<{ data: AdminUser; meta?: { released?: ReleasedCaseload } }>(
-      `/admin/users/${id}/toggle-active`,
-    )
+  toggleActive: async (
+    id: number,
+  ): Promise<{ user: AdminUser; released: ReleasedCaseload | null }> => {
+    const res = await api.post<{
+      data: AdminUser
+      meta?: { released?: ReleasedCaseload }
+    }>(`/admin/users/${id}/toggle-active`)
     return { user: res.data.data, released: res.data.meta?.released ?? null }
   },
   /** What this officer is holding, and which colleagues could take it. */
@@ -1412,7 +1540,9 @@ export const profilePhoto = {
    */
   objectUrl: async (): Promise<string | null> => {
     try {
-      const res = await api.get('/auth/profile/photo', { responseType: 'blob' })
+      const res = await api.get('/auth/profile/photo', {
+        responseType: 'blob',
+      })
       return URL.createObjectURL(res.data as Blob)
     } catch (error) {
       // 404 is the ordinary "no photo set" answer, not a failure to report.

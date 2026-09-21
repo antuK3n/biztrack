@@ -180,27 +180,36 @@ test('the wizard is the business permit alone, with no clearance step', async ({
   // that describes it; and Review last, with nothing between it and the tax
   // profile any more.
   /*
-   * "fees & tax computation", not "tax profile" — the phase was renamed, and
    * `at()` returns -1 for a label that is not there, which quietly satisfies
-   * every `toBeLessThan` above it. A missing label must fail loudly here, so
-   * each index is asserted present before it is ordered.
+   * every `toBeLessThan` below it. A missing label must fail loudly, so each
+   * index is asserted present before it is ordered.
+   *
+   * The tax step is NOT in this list any more. It was 'fees & tax
+   * computation', then 'tax classification & fees', then gone — removed on 16
+   * September 2026 as absent from MCG-BPLO-FO-001, with its surviving
+   * questions moved onto Business Operation after the paper's item 8 and its
+   * estimate onto Review.
    */
-  for (const label of ['privacy', 'location & zoning', 'business information', 'documentary', 'fees & tax computation', 'review']) {
+  for (const label of ['privacy', 'location & zoning', 'business information', 'documentary', 'review']) {
     expect(at(label), `"${label}" missing from the step map: ${joined}`).toBeGreaterThanOrEqual(0)
   }
   expect(at('privacy')).toBeLessThan(at('location & zoning'))
   expect(at('location & zoning')).toBeLessThan(at('business information'))
   expect(at('business information')).toBeLessThan(at('documentary'))
-  expect(at('documentary')).toBeLessThan(at('fees & tax computation'))
-  expect(at('fees & tax computation')).toBeLessThan(at('review'))
+  expect(at('documentary')).toBeLessThan(at('review'))
+  // And the step that used to sit between them is gone, not merely renamed.
+  expect(at('tax classification')).toBe(-1)
+  expect(at('fees & tax computation')).toBe(-1)
 
   /*
    * The count is part of the promise, and its history is the fastest way to
    * see which arrangement is live: "Part 1 of 8" was the original flow,
-   * "Part 1 of 7" was the day the clearances were step 6, and "Part 1 of 6" is
-   * payment-first.
+   * "Part 1 of 7" was the day the clearances became step 6, and "Part 1 of 6"
+   * is with the Tax Classification & Fees step removed — 16 September 2026 —
+   * leaving privacy, location & zoning, business information, business
+   * operation, documentary requirements and review.
    */
-  await expect(page.getByText(/part 1 of 7/i).first()).toBeVisible()
+  await expect(page.getByText(/part 1 of 6/i).first()).toBeVisible()
 })
 
 test('line of business is asked once, and the one ask is the searchable picker', async ({
@@ -2354,3 +2363,183 @@ test('the numbers on a step run in the order the fields are read', async ({ page
   )
 })
 
+/*
+ * ── Review shows the whole form, editable ─────────────────────────────────
+ *
+ * Client requirement, 16 September 2026: the last step must show Location &
+ * Zoning through Documentary Requirements, editable, so an applicant can check
+ * and correct everything before committing — with a visible division between
+ * sections and a control to fold them away.
+ *
+ * Asserted here rather than trusted because of HOW it is built. The sections
+ * are the same JSX the individual steps render, drawn out of turn by
+ * <WizardSection>; nothing is copied, which is what keeps the two views from
+ * drifting. The risk that remains is a section quietly failing to appear at
+ * all — a gate edited, a block moved — and that is what this catches.
+ */
+test('the review step shows every section, in the wizard’s own order', async ({ page }) => {
+  await page.getByRole('checkbox').first().check()
+
+  // Walk to the last part. Next is disabled while a part is incomplete, so a
+  // blocked press means the step map changed rather than that the walk failed.
+  for (let i = 0; i < 8; i++) {
+    const submit = page.getByRole('button', { name: /^submit$/i })
+    if (await submit.isVisible().catch(() => false)) break
+    const next = page.getByRole('button', { name: /next/i })
+    if (!(await next.isEnabled().catch(() => false))) break
+    await next.click()
+    await page.waitForTimeout(250)
+  }
+
+  await expect(page.getByRole('heading', { name: /review & submit/i }).first()).toBeVisible({
+    timeout: 20_000,
+  })
+
+  /*
+   * One collapsible heading per section, and in the wizard's order — which is
+   * DOM order, and therefore tab order and the order a screen reader reads.
+   * The blocks were reordered in the source to make this true rather than
+   * shuffled with CSS, which would have left both of those wrong.
+   */
+  const headings = ['Location & Zoning', 'Business Information', 'Business Operation', 'Documentary Requirements']
+  const positions: number[] = []
+  for (const name of headings) {
+    const heading = page.getByRole('heading', { name: new RegExp(name, 'i') }).first()
+    await expect(heading, `"${name}" is missing from the review`).toBeVisible()
+    positions.push(await heading.evaluate((el) => el.getBoundingClientRect().top + window.scrollY))
+  }
+  for (let i = 1; i < positions.length; i++) {
+    expect(positions[i], `${headings[i]} is above ${headings[i - 1]}`).toBeGreaterThan(
+      positions[i - 1],
+    )
+  }
+
+  /*
+   * A SUMMARY by default, not the form. A form is built for input and a review
+   * is for reading, so each answer is one row — label, answer, Change — and
+   * the real inputs stay behind it until asked for.
+   */
+  await expect(page.getByText(/^business name$/i).first()).toBeVisible()
+  await expect(page.getByLabel(/^business name/i).first()).toBeHidden()
+
+  /*
+   * Editable in place, which is the half that matters: Change opens that
+   * section's OWN form — the same JSX its step renders, not a second
+   * implementation — so the review and the step cannot drift in behaviour.
+   * Only the label and the formatted value are written twice, and the test
+   * below guards that.
+   */
+  await page
+    .getByRole('button', { name: /change business name/i })
+    .first()
+    .click()
+  await expect(page.getByLabel(/^business name/i).first()).toBeEditable()
+
+  /*
+   * Foldable. Submit sits at the bottom of a long page with no sticky footer,
+   * so this is what gets a finished applicant to it. `hidden` rather than
+   * unmounting, so nothing half-typed is lost on the way.
+   */
+  const foldAll = page.getByRole('button', { name: /collapse all/i })
+  await expect(foldAll).toBeVisible()
+  await foldAll.click()
+  await expect(page.getByText(/^business name$/i).first()).toBeHidden()
+  await expect(page.getByRole('button', { name: /expand all/i })).toBeVisible()
+})
+
+/*
+ * ── The summary is the one thing written twice, so it is the one thing tested
+ *
+ * Pressing Change opens the section's real form, so the FIELDS are not
+ * duplicated. The rows are: a label and a formatted value per answer, held in
+ * `reviewAnswers`. That list can fall behind the form, and this is not
+ * hypothetical — the OFFICER's review page hand-writes its own summary and was
+ * still rendering Lessor's Name, Lessor's Address, Lessor's Contact Number and
+ * Monthly Rental for months after the wizard stopped collecting them, showing
+ * BPLO four rows of "—" on every rented filing.
+ *
+ * So this counts what each section actually renders against what the summary
+ * claims for it. It is deliberately a loose bound — some inputs are one
+ * question in several boxes (the TIN is four) and some answers combine several
+ * fields (the owner's name is four) — so it asserts that neither side is
+ * wildly ahead of the other, which is what drift looks like when a section
+ * gains a question nobody added a row for.
+ */
+test('the review summary covers every field a section asks', async ({ page }) => {
+  await page.getByRole('checkbox').first().check()
+
+  for (let i = 0; i < 8; i++) {
+    const submit = page.getByRole('button', { name: /^submit$/i })
+    if (await submit.isVisible().catch(() => false)) break
+    const next = page.getByRole('button', { name: /next/i })
+    if (!(await next.isEnabled().catch(() => false))) break
+    await next.click()
+    await page.waitForTimeout(250)
+  }
+  await expect(page.getByRole('heading', { name: /review & submit/i }).first()).toBeVisible({
+    timeout: 20_000,
+  })
+
+  for (const name of ['address', 'business', 'operation']) {
+    const body = page.locator(`#review-body-${name}`)
+    await expect(body, `${name} has no review body`).toBeAttached()
+
+    const rows = await body.locator('dl > div').count()
+    expect(rows, `${name} contributes no summary rows`).toBeGreaterThan(0)
+
+    // Open the real form and count what it asks for.
+    await page
+      .getByRole('button', { name: /edit this section/i })
+      .nth(['address', 'business', 'operation'].indexOf(name))
+      .click()
+    const inputs = await body
+      .locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea')
+      .count()
+
+    /*
+     * A section that asks for far more than the summary reports has grown a
+     * question nobody added a row for — the drift this test exists to catch.
+     * Half is the threshold because of the legitimate mismatches above.
+     */
+    expect(rows, `${name}: ${inputs} inputs but only ${rows} summary rows`).toBeGreaterThan(
+      inputs / 2,
+    )
+  }
+})
+
+/*
+ * The confirmation modal says what the press costs.
+ *
+ * Client requirement the same day. It confirmed an action without saying the
+ * action is one-way, and "irrevocable" is not a word to put in front of a
+ * shopkeeper — so the wording is plain, and it names the way out (Cancel) as
+ * well as the door that closes.
+ */
+test('the submit confirmation warns that answers cannot be changed afterwards', async ({ page }) => {
+  await page.getByRole('checkbox').first().check()
+
+  for (let i = 0; i < 8; i++) {
+    const submit = page.getByRole('button', { name: /^submit$/i })
+    if (await submit.isVisible().catch(() => false)) break
+    const next = page.getByRole('button', { name: /next/i })
+    if (!(await next.isEnabled().catch(() => false))) break
+    await next.click()
+    await page.waitForTimeout(250)
+  }
+
+  const submit = page.getByRole('button', { name: /^submit$/i })
+  await expect(submit).toBeVisible({ timeout: 20_000 })
+  if (!(await submit.isEnabled())) {
+    // Nothing to confirm while the form is incomplete, and that gate is the
+    // subject of its own assertion above rather than a failure here.
+    test.skip(true, 'the seeded walk left the form incomplete, so Submit is gated')
+  }
+  await submit.click()
+
+  const modal = page.getByRole('dialog')
+  await expect(modal).toContainText(/check your answers first/i)
+  await expect(modal).toContainText(/will not be able to change your answers yourself/i)
+  // Honest about what does NOT end: BPLO can still send it back, with remarks.
+  await expect(modal).toContainText(/return the application to you/i)
+  await expect(modal).toContainText(/cancel/i)
+})
