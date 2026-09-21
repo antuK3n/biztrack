@@ -252,44 +252,44 @@ it('keeps the application off BPLO’s desk while any required permit is outstan
     expect(Permit::where('application_id', $app->id)->count())->toBe(4);
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 
-    // The fifth is what tips it, and only the fifth.
+    // The fifth is what tips it, and only the fifth — and since 18 September
+    // 2026 it tips the filing all the way to Approved rather than into BPLO's
+    // queue, issuing the Mayor's Permit as the sixth certificate.
     $last = end($codes);
     approveOfficePaperwork($app, $last);
     conductOfficeVisit($app, $last, bookOfficeVisit($app, $last));
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
-    expect(Permit::where('application_id', $app->id)->count())->toBe(5);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(6);
 });
 
-it('refuses to reverse a permit that has already been issued, and leaves the filing with BPLO', function () {
+it('refuses to reverse a permit that has already been issued', function () {
     /*
      * An issued permit is final. `ClearanceStatus::Approved` lists nothing in
      * `allowedNext()` and `isTerminal()` returns true for it alone — "the permit
      * is minted and numbered by then", so walking it back would leave a numbered
      * legal instrument in the register behind a status saying it was refused.
      *
-     * ── A note on the walk-back edge, because this case is where you find it ──
+     * ── The walk-back edge, and why this case is where you find it ───────────
      *
      * `ApplicationStatus::ForFinalApproval` allows a move BACK to
-     * `AwaitingOtherPermits`, and the comment defending that edge justifies it
-     * with "a re-inspection is opened, an office reverses itself". Neither is
-     * reachable today, and this test is the proof of the second: the filing gets
-     * to `for_final_approval` only when all five permits are Approved, Approved
-     * is terminal, so `refreshReadiness()` can never find one outstanding again.
-     * `scheduleReinspection()` does not move the pivot status either, and
-     * `attachRequiredPermitTypes()` runs once at submission, so the required set
-     * cannot grow underneath a filing in flight.
+     * `AwaitingOtherPermits`, justified in its own comment with "a re-inspection
+     * is opened, an office reverses itself". This test was the proof that the
+     * second of those is unreachable: a filing arrived at `for_final_approval`
+     * only when all five permits were Approved, Approved is terminal, so
+     * `refreshReadiness()` could never find one outstanding again.
      *
-     * The edge is therefore defensive rather than live. That is a reasonable
-     * thing for a legality table to be — it costs nothing and it is the safe
-     * direction to be wrong in — but the reasoning attached to it describes a
-     * transition the other machine forbids. Left as found and reported rather
-     * than "fixed" in either direction: making the permit reversible and making
-     * the edge unreachable-by-construction are both product decisions.
+     * "and leaves the filing with BPLO" came off the name on 18 September 2026.
+     * A NEW filing no longer stops with BPLO at all — the client asked what the
+     * stage was checking and the answer was nothing, so the fifth clearance
+     * issues the business permit outright. The edge itself stays, and now
+     * belongs to the renewal path, which still passes through that status.
      *
-     * Driven at the service because no route exposes a per-clearance rejection:
-     * each office returns its own assignment, and ending a permit outright is
-     * not a button the officer screens offer today.
+     * The property under test is unchanged and is not about the filing's status:
+     * an APPROVED clearance cannot be walked back, whatever the application is
+     * doing. Driven at the service because no route exposes a per-clearance
+     * rejection — each office returns its own assignment, and ending a permit
+     * outright is not a button the officer screens offer today.
      */
     $codes = array_keys(PARALLEL_OFFICE);
     $app = parallelFiling($codes, 'Reversal Store');
@@ -299,21 +299,34 @@ it('refuses to reverse a permit that has already been issued, and leaves the fil
         conductOfficeVisit($app, $code, bookOfficeVisit($app, $code));
     }
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
     expect(ClearanceStatus::Approved->isTerminal())->toBeTrue();
     expect(ClearanceStatus::Approved->allowedNext())->toBe([]);
 
+    /*
+     * Aimed at `returnClearance` since 17 September 2026, when clearance-level
+     * rejection was removed (*"I think Return is enough already"*). The property
+     * under test never was about rejection: it is that APPROVED IS FINAL, and
+     * the guard is `transitionClearance` refusing a move out of a state whose
+     * `allowedNext()` is empty — asserted two lines above.
+     *
+     * Re-aiming it rather than deleting it puts the assertion on a path that is
+     * actually reachable, which the rejection never was. An office pressing
+     * Return on a permit it has already issued is a real mis-click; an office
+     * rejecting one was not a thing the product could do.
+     */
     $workflow = app(WorkflowService::class);
-    expect(fn () => $workflow->rejectClearance(
+    expect(fn () => $workflow->returnClearance(
         $workflow->pivotFor($app->fresh(), 'SANITARY'),
         'The certificate was issued against the wrong premises.',
     ))->toThrow(ValidationException::class);
 
-    // Nothing moved: the permit is still approved, the five issued permits are
-    // still issued, and BPLO still has the filing on its desk.
+    // Nothing moved: the permit is still approved, and all six issued permits
+    // are still issued. The refused Return must not undo the approval it was
+    // aimed at, nor the business permit that approval caused.
     expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::Approved);
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
-    expect(Permit::where('application_id', $app->id)->count())->toBe(5);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
+    expect(Permit::where('application_id', $app->id)->count())->toBe(6);
 });
 
 it('refuses a second visit to an office that already holds one', function () {

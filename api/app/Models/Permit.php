@@ -11,6 +11,7 @@ class Permit extends Model
 {
     protected $fillable = [
         'permit_number', 'application_id', 'business_id', 'permit_type_id',
+        'issued_details',
         'prior_permit_id',
         'status', 'valid_from', 'valid_until', 'pdf_path', 'issued_at',
         'issued_by_user_id',
@@ -21,6 +22,12 @@ class Permit extends Model
         'valid_from' => 'date',
         'valid_until' => 'date',
         'issued_at' => 'datetime',
+        /*
+         * The business details as they were when this certificate was signed.
+         * See `App\Support\PermitFace` for the builder and the migration for
+         * why a permit is a snapshot rather than a live view of the register.
+         */
+        'issued_details' => 'array',
     ];
 
     /**

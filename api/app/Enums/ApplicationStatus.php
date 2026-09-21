@@ -55,7 +55,18 @@ enum ApplicationStatus: string
     {
         return match ($this) {
             self::Draft => 'Draft',
-            self::ForApproval => 'For Approval',
+            /*
+             * "For INITIAL Approval", renamed 16 September 2026.
+             *
+             * BPLO approves a filing twice — once on the form before there is
+             * a bill, once again after every other permit is in — and the two
+             * were called "For Approval" and "For Final Approval". The second
+             * announced itself as one of a pair and the first did not, so an
+             * applicant at the start could not tell they were at the start, and
+             * the tracking card fell back to saying only that no bill existed
+             * yet.
+             */
+            self::ForApproval => 'For Initial Approval',
             self::PendingPayment => 'Pending Payment',
             self::AwaitingOtherPermits => 'Awaiting Other Permits',
             self::ForFinalApproval => 'For Final Approval',
@@ -130,10 +141,74 @@ enum ApplicationStatus: string
     {
         return match ($this) {
             self::Draft => [self::ForApproval, self::Cancelled, self::Rejected],
-            self::ForApproval => [self::PendingPayment, self::Returned, self::Cancelled, self::Rejected],
+            /*
+             * `Approved` is here for ONE shape of filing: a renewal carrying no
+             * business permit.
+             *
+             * Such a filing is never billed and never reaches BPLO (client,
+             * 17 September 2026), so it has no Pending Payment and no Final
+             * Approval to pass through. It is done the moment the office that
+             * grants its permit has granted it — there is nothing left to
+             * decide, the paperwork was accepted and the visit passed.
+             *
+             * `WorkflowService::refreshReadiness` is the only thing that takes
+             * this edge, and only when `Application::defersPayment()` is true.
+             * This table is the LEGALITY of a move, not the choice of one — so
+             * an ordinary filing's route out of ForApproval is still the bill.
+             */
+            self::ForApproval => [
+                self::PendingPayment,
+                self::Approved,
+                self::Returned,
+                self::Cancelled,
+                self::Rejected,
+            ],
             self::Returned => [self::ForApproval, self::Cancelled, self::Rejected],
-            self::PendingPayment => [self::AwaitingOtherPermits, self::Cancelled, self::Rejected],
-            self::AwaitingOtherPermits => [self::ForFinalApproval, self::Rejected],
+            /*
+             * ── Two ways out of the bill, and which one depends on the type ──
+             *
+             * A NEW filing goes to AwaitingOtherPermits: the five clearances do
+             * not exist yet and the applicant has to obtain each one.
+             *
+             * A RENEWAL goes straight to ForFinalApproval, because there is
+             * nothing to gather. The client's decision of 17 September 2026:
+             * *"there should no longer be Awaiting Other Permits status because
+             * the applicant may already have valid other permit that he/she can
+             * submit in the Upload/Submit button."* The copies are uploaded
+             * before the filing is ever paid for, so by the time the money
+             * clears the evidence is already in — and a stage named for waiting
+             * would be a stage that waits for nothing.
+             *
+             * Both are listed here rather than branched, because this table is
+             * the LEGALITY of a move and not the choice of one.
+             * `onPaymentCompleted` makes the choice, and it is the only caller.
+             */
+            self::PendingPayment => [
+                self::AwaitingOtherPermits,
+                self::ForFinalApproval,
+                self::Cancelled,
+                self::Rejected,
+            ],
+            /*
+             * ── A new filing issues straight from here ───────────────────────
+             *
+             * `Approved` was added on 18 September 2026. Client's question, and
+             * it answered itself once asked: *"what is the purpose of the BPLO
+             * checking if all other permits are legit, when those permits are
+             * APPLIED DIRECTLY in BizTrack itself?"*
+             *
+             * On a NEW filing there is nothing to check. All five clearances
+             * were applied for in this system, each office approved its own in
+             * this system, and each inspection is a row against the pivot. BPLO
+             * reading them was the system checking its own records against
+             * itself, and the RA 11032 clock ran the whole time it waited.
+             *
+             * `ForFinalApproval` stays in this list and stays reachable, because
+             * a RENEWAL still stops there — on that path BPLO reads certificate
+             * copies the applicant uploaded, which is a real reading of real
+             * evidence. The stage was hollow on one path, not both.
+             */
+            self::AwaitingOtherPermits => [self::Approved, self::ForFinalApproval, self::Rejected],
             self::ForFinalApproval => [self::Approved, self::AwaitingOtherPermits, self::Rejected],
             self::Approved, self::Rejected, self::Cancelled => [],
         };

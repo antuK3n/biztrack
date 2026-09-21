@@ -104,9 +104,25 @@ const ADMIN_REVIEW_SHEET = 'Business Information & Registration'
 /**
  * The disclosure that sheet now lives behind, and the two states it has.
  *
- * Third position on this sheet: rendered flat, then deleted for the office
- * that had finished, now collapsed-by-default wherever it renders at all. The
- * long form of that history is in ReviewPage.tsx at `application-as-filed`.
+ * Fifth position on this sheet: rendered flat, deleted for the office that had
+ * finished, collapsed by default, deleted outright for every seat, and now
+ * collapsed for the five clearance offices and flat for BPLO. The long form of
+ * that history is in ReviewPage.tsx at `application-as-filed`; the short form
+ * is that BPLO's review IS reading the application and an office's is not.
+ *
+ * This file runs as ZONING, which is one of the five, so the disclosure is the
+ * shape it expects. These two tests went red on 16 September when the control
+ * was removed for everyone and nobody ran them — worth saying out loud,
+ * because a red test nobody sees is what let the sanitary seat ship without
+ * the control and with a note on screen still promising it.
+ *
+ * ── The caption says "business permit application" now ────────────────────
+ *
+ * It said "the application as filed", which is accurate and reads oddly from an
+ * office chair: a zoning officer's OWN clearance is also an application, and
+ * the sheet folded away is specifically the business permit one. The client's
+ * own words for it, 17 September 2026: *"the hide and show thingy … which will
+ * show or hide the business permit application."*
  *
  * A prefix match, not the whole label — the accessible name also carries the
  * summary of what is inside ("business registration and address, ... 8 uploaded
@@ -114,8 +130,8 @@ const ADMIN_REVIEW_SHEET = 'Business Information & Registration'
  * filing. The summary is asserted for its own sake in the collapse test below;
  * pinning it here would make every other test fixture-sensitive.
  */
-const SHOW_SHEET = /^Show the application as filed/
-const HIDE_SHEET = /^Hide the application as filed/
+const SHOW_SHEET = /^Show the business permit application/
+const HIDE_SHEET = /^Hide the business permit application/
 
 /**
  * Is the filed sheet ON THE PAGE, however it is folded?
@@ -450,7 +466,15 @@ test('the application as filed starts collapsed and opens on one click', async (
    * requirements has no reason to think this is where they are. The summary is
    * built from the payload, so this checks the shape rather than a literal.
    */
-  await expect(toggle).toContainText('Sections A–E')
+  /*
+   * "Sections A–E" was asserted here and the sheet has no Section E: the Fee
+   * Declaration was removed on 17 September 2026 — *"Why did you invent a
+   * section? This DOES NOT EXIST in the application form itself."* — so the
+   * summary would have been naming a section that cannot open. It now
+   * describes the CONTENT rather than counting lettered sections, which is
+   * also the thing an officer is hunting for when they open this.
+   */
+  await expect(toggle).toContainText('exactly as submitted')
   await expect(toggle).toContainText(/uploaded requirement/)
 
   /*
@@ -1475,4 +1499,76 @@ test('the office that issues a permit books its first visit from the review scre
     scheduled.some((at) => at !== null && new Date(at).getHours() === 10),
     'the booked visit did not keep the hour the officer chose',
   ).toBe(true)
+})
+
+/**
+ * Two stacked disclosures, in the order the client asked for them.
+ *
+ * *"In the Clearance Office's admin view of the application form, add a Hide or
+ * Show too for the Tax Order of Payment, similar to the view of application
+ * form for business permit. Rearrange the tax order of payment too, put it
+ * below the BP appl. form. This means 2 hide/show bars stacked."*
+ * — 17 September 2026.
+ *
+ * Three claims, and the ORDER is the one a unit test could not make: the
+ * assessment moved out of FOR OFFICE USE ONLY for this seat, so "it exists" and
+ * "it is in the right place" are different facts. Asserted by DOM position
+ * rather than by eye.
+ *
+ * Independent state is the third claim and the one most likely to regress: two
+ * bars sharing a boolean would look right and behave as one control, opening
+ * 1,200 lines of registration data every time an officer checked a fee.
+ */
+test('the Tax Order of Payment is a second bar under the application, opening on its own', async ({
+  page,
+}) => {
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no working filing with an open review for this office')
+
+  const sheetBar = page.getByRole('button', { name: SHOW_SHEET })
+  const taxBar = page.getByRole('button', { name: /^Show the Tax Order of Payment/ })
+
+  /*
+   * The assessment is raised at BPLO's first approval, so a filing this office
+   * owes a review on has one — but if the fixture is earlier than that there is
+   * no assessment and no bar, and that is correct rather than broken.
+   */
+  if ((await taxBar.count()) === 0) {
+    test.skip(true, 'this filing has no Tax Order of Payment yet, so there is nothing to fold')
+  }
+
+  /* 1. Both bars are there, both shut. */
+  await expect(sheetBar).toBeVisible()
+  await expect(sheetBar).toHaveAttribute('aria-expanded', 'false')
+  await expect(taxBar).toBeVisible()
+  await expect(taxBar).toHaveAttribute('aria-expanded', 'false')
+
+  /*
+   * 2. STACKED, and in that order. `aria-controls` names each bar's region, so
+   * comparing the regions' document positions is a claim about the rearrangement
+   * and not about pixels.
+   */
+  const order = await page.evaluate(() => {
+    const sheet = document.getElementById('application-as-filed')
+    const tax = document.getElementById('tax-order-of-payment')
+    if (!sheet || !tax) return 'missing'
+
+    return sheet.compareDocumentPosition(tax) & Node.DOCUMENT_POSITION_FOLLOWING
+      ? 'tax after sheet'
+      : 'tax before sheet'
+  })
+  expect(order, 'the Tax Order of Payment is not below the business permit application').toBe(
+    'tax after sheet',
+  )
+
+  /* 3. Each opens alone. The whole point of two states rather than one. */
+  await taxBar.click()
+  await expect(page.getByRole('button', { name: /^Hide the Tax Order of Payment/ })).toBeVisible()
+  await expect(
+    sheetBar,
+    'opening the Tax Order of Payment also opened the application — the two bars share a state',
+  ).toHaveAttribute('aria-expanded', 'false')
+
+  // And the assessment really is behind it, not just a state flip.
+  await expect(page.getByText('Tax Order of Payment', { exact: true })).toBeVisible()
 })
