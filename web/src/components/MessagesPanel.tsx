@@ -237,12 +237,12 @@ function OfficePicker({
    * fixed height: every row of pills came straight out of the transcript. An
    * applicant with three messages was scrolling to read them.
    *
-   * The CODE is what goes on the pill. It is the same handle the offices use
-   * for themselves, and the full name is still in three places: the `title` for
-   * a hover, the `aria-label` below, which already spelled it out, and — the
-   * one that matters for an applicant who does not know the codes — the message
-   * box itself, whose placeholder reads "Write to Bureau of Fire Protection…".
-   * The strip is navigation; the box says where the message is going.
+   * The CODE is what goes on the pill — except the chosen one, which spells
+   * itself out, because the office the message is actually going to should not
+   * be an abbreviation the reader has to decode. The full name is still in
+   * three more places for the others: the `title` for a hover, the
+   * `aria-label` below, which already spelled it out, and the message box
+   * itself, whose placeholder reads "Write to Bureau of Fire Protection…".
    *
    * `name` is the fallback, not a nicety: `code` is nullable on the wire, and a
    * pill with no label at all would be a button nobody could aim at.
@@ -279,7 +279,21 @@ function OfficePicker({
                   : 'bg-royal-tint text-royal hover:bg-royal/15'
               }`}
             >
-              {office.code ?? office.name}
+              {/*
+                * The CHOSEN office spells itself out; the rest stay codes.
+                *
+                * The strip was made compact because six full office names wrap
+                * to three or four rows in a 630px pane, and every row of pills
+                * is a row of conversation the reader loses. But the one office
+                * the message is actually going to should not be an
+                * abbreviation the reader has to decode — so the selection is
+                * the exception, and it costs one pill's width rather than six.
+                *
+                * `code ?? name` stays the fallback for the unselected ones:
+                * `code` is nullable on the wire, and a pill with no label is a
+                * button nobody can aim at.
+                */}
+              {active ? office.name : (office.code ?? office.name)}
               {office.messages_count > 0 && (
                 <span className={active ? 'ml-1.5 text-white/80' : 'ml-1.5 text-ink-secondary'}>
                   {office.messages_count}

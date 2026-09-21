@@ -40,7 +40,35 @@ class BusinessStatusController extends Controller
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $query = Business::with('owner:id,name');
+        /*
+         * `withCount` and one eager-loaded filing, rather than a query per row.
+         *
+         * The table prints the business's latest filing number and how many it
+         * has; doing that off the relation inside the map would be two queries
+         * per row and this list is paged at twenty.
+         */
+        $query = Business::with([
+            'owner:id,name',
+            /*
+             * Latest by the CALENDAR, not by insertion order.
+             *
+             * This was `latest('id')`, and an id is the order rows went into
+             * the table rather than the order the filings happened. The client
+             * caught it by asking how BIZ-2026-00001 "became" BIZ-2026-00003:
+             * Nena's Sari-Sari Store carries a renewal submitted 2026-08-13 as
+             * id 1 and the original new filing submitted 2025-10-02 as id 3, so
+             * the row showed the 2025 one and called it the latest.
+             *
+             * `submitted_at` is the date the register keeps, and `created_at`
+             * stands in for a draft that has never been handed in — a draft has
+             * no tracking id either way, so it can only ever be the fallback
+             * for a business whose filings are all drafts.
+             */
+            'applications' => fn ($a) => $a->select('id', 'business_id', 'tracking_id', 'submitted_at', 'created_at')
+                ->orderByRaw('COALESCE(submitted_at, created_at) DESC')
+                ->orderByDesc('id')
+                ->limit(1),
+        ])->withCount('applications');
 
         if ($q = $request->query('q')) {
             $query->where(fn ($sub) => $sub
@@ -59,6 +87,26 @@ class BusinessStatusController extends Controller
             ->map(fn (Business $b) => [
                 'id' => $b->id,
                 'name' => $b->name,
+                /*
+                 * The business number under the name on the table — and it is
+                 * a FILING's, which is the thing to be careful about.
+                 *
+                 * `BIZ-2026-…` is minted per APPLICATION (Numbering::trackingId),
+                 * and the tester register already shows what follows: Nena's
+                 * Sari-Sari Store holds BIZ-2026-00001 and BIZ-2026-00003,
+                 * because every renewal and amendment takes a new one.
+                 *
+                 * So this is the LATEST — the filing an admin is most likely
+                 * holding paperwork for — and the count travels with it. A bare
+                 * number on a business with three filings would read as the
+                 * business's own, which is the one thing it is not.
+                 *
+                 * Null when the business has never filed: a business exists in
+                 * the register from the moment it is created, and inventing a
+                 * number for it would be worse than saying it has none.
+                 */
+                'tracking_id' => $b->applications->first()?->tracking_id,
+                'applications_count' => (int) $b->applications_count,
                 'owner' => $b->owner ? ['id' => $b->owner->id, 'name' => $b->owner->name] : null,
                 'status' => $b->status,
                 'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),

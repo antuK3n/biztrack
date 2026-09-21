@@ -433,6 +433,12 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::get('users/{user}/caseload', [UserController::class, 'caseload']);
             Route::post('users/{user}/reassign-caseload', [UserController::class, 'reassignCaseload']);
             /*
+             * The same act from the other end: give this officer work nobody
+             * holds. On `oic.assign` with its sibling above, because that
+             * permission names who handles a case whichever way it moves.
+             */
+            Route::post('users/{user}/take-cases', [UserController::class, 'takeCases']);
+            /*
              * The OIC register: every office's caseload in one list, and the
              * officers one row may be moved to.
              *

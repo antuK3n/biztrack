@@ -1249,6 +1249,17 @@ export const admin = {
   /** Move it. `to_user_id: null` releases it to the office queue. */
   reassignCaseload: (id: number, body: CaseloadMovePayload) =>
     unwrap<CaseloadMove>(api.post(`/admin/users/${id}/reassign-caseload`, body)),
+  /**
+   * The other direction: give this officer work nobody in their office holds.
+   *
+   * Same permission as the move above — `oic.assign` names who handles a case
+   * whichever way it travels — and the server checks every id is genuinely
+   * free and genuinely theirs to be given before anything moves.
+   */
+  takeCases: (id: number, body: { cases: { kind: 'review'; id: number }[]; reason: string }) =>
+    unwrap<{ total: number; to: { id: number; name: string } }>(
+      api.post(`/admin/users/${id}/take-cases`, body),
+    ),
   /*
    * The Officer-in-Charge register: every office's caseload in one list.
    *
