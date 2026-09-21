@@ -391,7 +391,51 @@ export function OwnersPage() {
                   const meta = STATUS_META[row.status] ?? { label: row.status_label, tone: 'tint-gray' as ChipTone }
                   return (
                     <tr key={row.id} className="border-t border-line">
-                      <td className="px-5 py-3.5 font-bold text-ink">{row.name}</td>
+                      <td className="px-5 py-3.5">
+                        <span className="block font-bold text-ink">{row.name}</span>
+                        {/*
+                          * The number under the name, because this is the
+                          * screen where an admin suspends somebody's
+                          * livelihood and "which of these is the one the
+                          * complaint is about" must not be answered by a name
+                          * alone — six rows, two owners, names that share a
+                          * word.
+                          *
+                          * The BAN joins it only when the business has one: it
+                          * is the reference a restriction quotes back, so an
+                          * owner ringing to ask why they were suspended is
+                          * reading out a number this row can be found by.
+                          *
+                          * Said in words when there is nothing, rather than a
+                          * dash: "no number on file" is a fact about the
+                          * register, and a dash reads as a value that failed
+                          * to load.
+                          */}
+                        {/*
+                          * Name, then number. Nothing else.
+                          *
+                          * It carried a label and a count — "Latest filing
+                          * BIZ-2026-00003 · 2 in total" — because `BIZ-…` is a
+                          * FILING's number and a business that renews holds
+                          * several, so a bare number can read as the business's
+                          * own. The client has seen both and asked for the bare
+                          * pair, knowing that: a renewal takes a new number and
+                          * this is the newest one.
+                          *
+                          * Which filing it is remains a real question, and it
+                          * is still answered — by the ORDER (latest by
+                          * `submitted_at`, not by insertion) rather than by
+                          * words on the row.
+                          *
+                          * "No filing yet" stays in words: a business exists in
+                          * the register from the moment it is created, and a
+                          * blank line under its name would read as a value that
+                          * failed to load.
+                          */}
+                        <span className="tnum mt-0.5 block text-xs text-ink-muted">
+                          {row.tracking_id ?? <span className="italic">No filing yet</span>}
+                        </span>
+                      </td>
                       <td className="px-5 py-3.5 text-ink-secondary">{row.owner?.name ?? '—'}</td>
                       <td className="px-5 py-3.5">
                         <StatusChip tone={meta.tone}>{meta.label}</StatusChip>

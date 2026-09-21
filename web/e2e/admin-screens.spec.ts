@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
@@ -84,10 +84,29 @@ const OFFICERS = [
   officer({ id: 14, first: 'Rosa', last: 'Lim', email: 'retired@biztrack.local', dept: DEPARTMENTS[1], role: 'sanitary_officer', active: false }),
 ]
 
+/*
+ * The super admin, which belongs to NO office. Built by hand rather than
+ * through `officer()` because that helper takes a department and this account's
+ * whole point is not having one.
+ */
+const SUPER_ADMIN = {
+  ...officer({ id: 15, first: 'Ramon', last: 'Santos', email: 'admin@biztrack.local', dept: DEPARTMENTS[0], role: 'admin' }),
+  department: null,
+}
+
+/*
+ * What an unfiltered /admin/users answers with: the offices AND the seat that
+ * belongs to none of them. Counted from here so adding an account to the
+ * fixture cannot leave a stale number behind in a test.
+ */
+const ROSTER = [...OFFICERS, SUPER_ADMIN]
+
 const BUSINESSES = [
   {
     id: 21,
     name: 'Aling Nena Sari-Sari Store',
+    tracking_id: 'BIZ-2026-00001',
+    applications_count: 2,
     status: 'active',
     status_label: 'Active',
     owner: { id: 31, name: 'Nena Makiling', email: 'owner@biztrack.local' },
@@ -95,6 +114,8 @@ const BUSINESSES = [
   {
     id: 22,
     name: 'RxCare Pharmacy',
+    tracking_id: 'BIZ-2026-00002',
+    applications_count: 1,
     status: 'suspended',
     status_label: 'Suspended',
     owner: { id: 32, name: 'Juan Ramos', email: 'juan@biztrack.local' },
@@ -133,9 +154,9 @@ test.describe('Officer Assignment', () => {
       const role = url.searchParams.get('role')
       const active = url.searchParams.get('is_active')
 
-      let rows = [...OFFICERS]
+      let rows = [...ROSTER]
       if (q) rows = rows.filter((u) => `${u.first_name} ${u.last_name} ${u.email}`.toLowerCase().includes(q))
-      if (dept) rows = rows.filter((u) => String(u.department.id) === dept)
+      if (dept) rows = rows.filter((u) => String(u.department?.id) === dept)
       if (role) rows = rows.filter((u) => u.roles.includes(role))
       if (active === '1') rows = rows.filter((u) => u.is_active)
       if (active === '0') rows = rows.filter((u) => !u.is_active)
@@ -145,7 +166,7 @@ test.describe('Officer Assignment', () => {
 
     await page.goto('/staff/admin/users')
     await expect(page.getByRole('heading', { name: 'Officer Assignment', level: 1 })).toBeVisible()
-    await expect(page.locator('tbody tr')).toHaveCount(OFFICERS.length)
+    await expect(page.locator('tbody tr')).toHaveCount(ROSTER.length)
   })
 
   test('one office can hold several accounts, and the roster shows them', async ({ page }) => {
@@ -173,7 +194,7 @@ test.describe('Officer Assignment', () => {
     await expect.poll(() => asked.at(-1)).toContain('q=carlos')
 
     await page.getByRole('button', { name: 'Clear filters' }).click()
-    await expect(rows).toHaveCount(OFFICERS.length)
+    await expect(rows).toHaveCount(ROSTER.length)
 
     await office.selectOption({ label: 'CHO — City Health Office' })
     await expect(rows).toHaveCount(2)
@@ -227,6 +248,148 @@ test.describe('Officer Assignment', () => {
     await expect(admin).toHaveText(/already assigned/)
   })
 
+  test('offers Reassign only to an account that belongs to an office', async ({ page }) => {
+    /*
+     * Reassign moves an officer's caseload to a colleague in their own office,
+     * and hands them work from that office's queue. The super admin belongs to
+     * no department, so both halves are empty by construction — nothing to
+     * move, no queue to move it from — and the take endpoint answers 422 on
+     * exactly that ground. A button that can only fail is worse than no button.
+     */
+    const officer = page.locator('tbody tr', { hasText: 'bplo@biztrack.local' })
+    await expect(officer.getByRole('button', { name: 'Reassign' })).toBeVisible()
+
+    const superAdmin = page.locator('tbody tr', { hasText: 'admin@biztrack.local' })
+    await expect(superAdmin).toHaveCount(1)
+    await expect(superAdmin.getByRole('button', { name: 'Reassign' })).toHaveCount(0)
+    // The rest of the row is untouched: the account is still editable.
+    await expect(superAdmin.getByRole('button', { name: 'Edit' })).toBeVisible()
+  })
+
+  /*
+   * ── The Reassign dialog ──────────────────────────────────────────────────
+   *
+   * `caseload` is stubbed per test rather than in the beforeEach: the three
+   * cases below are three different SERVER answers — a held caseload, an empty
+   * list, and an office queue — and the screen is supposed to read differently
+   * for each. A shared stub would test one of them three times.
+   */
+  const caseloadRoute = (page: Page, body: Record<string, unknown>) =>
+    page.route('**/api/v1/admin/users/11/caseload*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            user: { id: 11, name: 'Liza Reyes' },
+            department: { id: 1, code: 'BPLO', name: 'Business Permits and Licensing Office' },
+            open_reviews: 0,
+            open_inspections: 0,
+            total: 0,
+            candidates: [],
+            ...body,
+          },
+        }),
+      }),
+    )
+
+  const aCase = (over: Partial<Record<string, unknown>> = {}) => ({
+    kind: 'review',
+    id: 501,
+    application_id: 301,
+    tracking_id: 'BIZ-2026-00007',
+    business: 'Aling Nena Sari-Sari Store',
+    office: { code: 'BPLO', name: 'Business Permits and Licensing Office' },
+    permit: 'Mayor’s Permit',
+    status_label: 'For approval',
+    at: '2026-09-01T02:00:00.000000Z',
+    ...over,
+  })
+
+  const openReassign = async (page: Page) => {
+    await page
+      .locator('tbody tr', { hasText: 'bplo@biztrack.local' })
+      .getByRole('button', { name: 'Reassign' })
+      .click()
+    await expect(page.getByRole('heading', { name: 'Reassign' })).toBeVisible()
+  }
+
+  test('an officer holding nothing is told so, with no scope to choose from', async ({ page }) => {
+    /*
+     * The client asked for exactly this: drop "Everything they are holding (0)"
+     * and leave the sentence. An empty `cases` array is the server SAYING the
+     * desk is clear, so offering a chooser over it invites a reader to pick a
+     * category, type a reason and be refused.
+     */
+    await caseloadRoute(page, { cases: [], unassigned: [] })
+    await openReassign(page)
+
+    await expect(page.getByText('Liza Reyes is not holding any open work, so there is nothing to move.')).toBeVisible()
+    await expect(page.getByText(/Everything they are holding/)).toHaveCount(0)
+    await expect(page.getByText(/Scope — the permits/)).toHaveCount(0)
+    // And the act it would perform cannot be started.
+    await expect(page.getByRole('button', { name: /Release to office|Move caseload/ })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    )
+  })
+
+  test('the scope is the permits the officer actually holds, named one by one', async ({ page }) => {
+    await caseloadRoute(page, {
+      open_reviews: 1,
+      total: 1,
+      cases: [aCase()],
+      unassigned: [],
+    })
+    await openReassign(page)
+
+    const scope = page.getByRole('checkbox', { name: /Aling Nena Sari-Sari Store/ })
+    await expect(scope).toBeVisible()
+    // Ticked to begin with: "this officer has gone, move their work" is the
+    // common act and should not cost a click per case.
+    await expect(scope).toBeChecked()
+    await expect(page.getByText('BIZ-2026-00007').first()).toBeVisible()
+  })
+
+  test('the same dialog hands the office’s unheld work to the officer', async ({ page }) => {
+    /*
+     * The other direction. The client: "ang mga unassign applications pede
+     * maiassign kung kanino mang officer ako magclick." Asserted through the
+     * REQUEST, not the dialog closing — a screen that ticks without sending
+     * the case is the defect this covers.
+     */
+    let sent: unknown = null
+    await page.route('**/api/v1/admin/users/11/take-cases', async (route) => {
+      sent = route.request().postDataJSON()
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { total: 1, to: { id: 11, name: 'Liza Reyes' } } }),
+      })
+    })
+    await caseloadRoute(page, {
+      cases: [],
+      unassigned: [aCase({ id: 777, tracking_id: 'BIZ-2026-00009', business: 'RxCare Pharmacy' })],
+    })
+    await openReassign(page)
+
+    await expect(page.getByText('Unassigned in BPLO')).toBeVisible()
+    const free = page.getByRole('checkbox', { name: /RxCare Pharmacy/ })
+    // Nothing ticked to begin with — taking work on is a decision about a
+    // particular case, never a sweep.
+    await expect(free).not.toBeChecked()
+
+    const hand = page.getByRole('button', { name: /^Assign .*to Liza Reyes$/ })
+    await expect(hand).toHaveAttribute('aria-disabled', 'true')
+
+    await free.check()
+    await expect(hand).not.toHaveAttribute('aria-disabled', 'true')
+    await hand.click()
+
+    await expect.poll(() => sent).not.toBeNull()
+    expect(sent).toMatchObject({ cases: [{ kind: 'review', id: 777 }] })
+  })
+
   test('the pager stays reachable at the ends of the list', async ({ page }) => {
     /*
      * §6.2 again: a `disabled` pager drops out of the tab order, so a keyboard
@@ -264,6 +427,46 @@ test.describe('Owner Status', () => {
     const suspended = page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
     await expect(suspended).toContainText('Juan Ramos')
     await expect(suspended).toContainText('Suspended')
+  })
+
+  test('each row carries the business’s filing number, under its name', async ({ page }) => {
+    /*
+     * This is the screen where an admin suspends somebody's livelihood, and
+     * "which of these is the one the complaint is about" must not be answered
+     * by a name alone — six rows, two owners, names that share a word.
+     *
+     * `BIZ-2026-…` is a FILING's number, minted at submit and taken afresh by
+     * every renewal, so a business that has filed twice holds two. The row
+     * shows the LATEST, which is a claim about ORDER — see the API test that
+     * pins it to `submitted_at` rather than to insertion order.
+     */
+    const store = page.locator('tbody tr', { hasText: 'Aling Nena Sari-Sari Store' })
+    await expect(store).toContainText('BIZ-2026-00001')
+
+    const pharmacy = page.locator('tbody tr', { hasText: 'RxCare Pharmacy' })
+    await expect(pharmacy).toContainText('BIZ-2026-00002')
+
+    // Name and number, and nothing else: the label and the count came off at
+    // the client's request once they knew a renewal takes a new number.
+    await expect(store).not.toContainText(/latest filing|in total|filings/i)
+  })
+
+  test('says so in words when a business has not filed yet', async ({ page }) => {
+    // Not a blank. A business exists in the register from the moment it is
+    // created, and an empty line under its name reads as a value that failed
+    // to load.
+    await page.route('**/api/v1/admin/businesses?*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: [{ ...BUSINESSES[0], tracking_id: null, applications_count: 0 }],
+          meta: { current_page: 1, last_page: 1, per_page: 20, total: 1 },
+        }),
+      }),
+    )
+    await page.reload()
+    await expect(page.locator('tbody tr').first()).toContainText('No filing yet')
   })
 
   test('both numbers are named', async ({ page }) => {

@@ -66,6 +66,13 @@ const HOLDER_PILLS: { value: '' | 'unassigned' | 'mine' | 'others'; label: strin
   { value: 'others', label: 'Assigned to others' },
 ]
 
+/** What each section is a list OF, said under the pills while it is chosen. */
+const HOLDER_HINT: Record<'unassigned' | 'mine' | 'others', string> = {
+  unassigned: 'filings nobody has taken yet',
+  mine: 'the filings you are officer in charge of',
+  others: 'filings a colleague is holding, read-only for you',
+}
+
 const TABS: { value: Tab; label: string }[] = [
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
@@ -231,8 +238,25 @@ const INSPECTION_CLEARANCE_STATUSES = 'for_inspection'
  * `approveMainForm()` at the other end of the process, and nothing reopens it.
  * Its final approval is work with no open work item behind it. Filtering on an
  * open assignment would empty this tab permanently.
+ *
+ * ── Why `awaiting_other_permits` is here too ────────────────────────────────
+ *
+ * A paid filing lands on `awaiting_other_permits` and stays there while the
+ * clearance offices work and while any Other Requirement is open. BPLO's own
+ * part is finished at that point, so the filing appeared in NO tab BPLO could
+ * see: it left For Approval when BPLO approved the form, it is not Pending
+ * Payment, and it had not yet qualified for Final Approval. BPLO lost sight of
+ * every paid filing until the moment it was ready to sign — which is the one
+ * stretch where somebody needs to notice a filing that has stopped moving.
+ *
+ * So the tab is "filings that have paid and are heading for my signature",
+ * which is what the client describes: after payment it goes to Final Approval,
+ * and everything else has to be complete before it can be signed. The two are
+ * told apart on the row and on the sheet — `for_final_approval` can be
+ * approved, `awaiting_other_permits` says what it is still waiting for — and
+ * the API refuses the early approval either way.
  */
-const FINAL_STATUSES = ['for_final_approval'] as const
+const FINAL_STATUSES = ['awaiting_other_permits', 'for_final_approval'] as const
 
 const TAB_STATUSES: Record<Tab, readonly ApplicationStatus[]> = {
   approval: APPROVAL_STATUSES,
@@ -528,6 +552,8 @@ interface QueueItem {
   /** May this reader take it, and may they work it? Both come from the server. */
   canClaim: boolean
   canAct: boolean
+  /** Does this reader hold it? What "My assigned" means, on one row. */
+  mine: boolean
 }
 
 /**
@@ -581,6 +607,12 @@ function fromAssignment(item: Assignment): QueueItem {
      */
     canClaim: item.can_claim === true,
     canAct: item.can_act === true,
+    /*
+     * Held by THIS reader. `can_act` is true on an unheld case too — acting on
+     * one claims it — so it cannot answer "is this mine", and the give-back
+     * control must not appear on a case nobody holds.
+     */
+    mine: item.officer !== null && item.can_act === true,
   }
 }
 
@@ -594,6 +626,7 @@ function fromApplication(app: ApplicationListItem): QueueItem {
     officer: null,
     canClaim: false,
     canAct: false,
+    mine: false,
     trackingId: app.tracking_id,
     ...nameOf(app.business, app.tracking_id),
     /*
@@ -701,10 +734,12 @@ const CARD = 'flex items-stretch overflow-hidden rounded-lg bg-white shadow-card
 function QueueRow({
   item,
   onClaim,
+  onRelease,
   claiming,
 }: {
   item: QueueItem
   onClaim?: (item: QueueItem) => void
+  onRelease?: (item: QueueItem) => void
   claiming?: boolean
 }) {
   const body = (
@@ -876,7 +911,30 @@ function QueueRow({
               aria-disabled={claiming || undefined}
               className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
             >
-              {claiming ? 'Taking…' : 'Claim this filing'}
+              {claiming ? 'Assigning…' : 'Assign to Me'}
+            </button>
+          )}
+          {/*
+            * Putting it down again.
+            *
+            * Only on rows this reader holds — `mine` is the payload's answer,
+            * not an id comparison here. Claiming is one click and was
+            * irreversible without the super admin, which is what stops officers
+            * using it: a mis-click, or a case that turns out to be a
+            * colleague's area, needed an admin to unpick.
+            *
+            * Quiet styling on purpose. It sits beside "Assign to Me" in the
+            * same strip, and an outline button is how the row says this is the
+            * undo rather than the action.
+            */}
+          {item.mine && onRelease && (
+            <button
+              type="button"
+              onClick={() => onRelease(item)}
+              aria-disabled={claiming || undefined}
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+            >
+              {claiming ? 'Releasing…' : 'Unassign from me'}
             </button>
           )}
         </div>
@@ -921,6 +979,20 @@ export function QueuePage() {
   /** The row being claimed, so one press cannot be double-fired. */
   const [claimingId, setClaimingId] = useState<number | null>(null)
   const [claimError, setClaimError] = useState<string | null>(null)
+  /*
+   * What just happened, said rather than only drawn.
+   *
+   * Taking a filing or putting it back changes a row the reader is often not
+   * looking at — under "Unassigned" the row LEAVES the list, so the only
+   * feedback was a list that silently got shorter. A screen-reader user got
+   * nothing at all.
+   *
+   * A live region rather than a dialog: this is the most frequent act on the
+   * screen, and a modal would put a dismissal between an officer and every
+   * case they take. The message names the business, so it is an account of
+   * what happened rather than a tick.
+   */
+  const [claimMessage, setClaimMessage] = useState<string | null>(null)
 
   /*
    * See ANY_OFFICE: an office reviewer would be handed a permanently empty tab,
@@ -1133,6 +1205,7 @@ export function QueuePage() {
     if (next === holder) return
     setHolder(next)
     setClaimError(null)
+    setClaimMessage(null)
     restart()
   }
 
@@ -1153,8 +1226,35 @@ export function QueuePage() {
     if (item.assignmentId === null || claimingId !== null) return
     setClaimingId(item.assignmentId)
     setClaimError(null)
+    setClaimMessage(null)
     try {
       await assignments.claim(item.assignmentId)
+      setClaimMessage(`${item.name} is yours — you are now the officer in charge.`)
+      restart()
+      reload()
+    } catch (err) {
+      setClaimError(toApiError(err).message)
+    } finally {
+      setClaimingId(null)
+    }
+  }
+
+  /*
+   * Give it back to the office (client: "unassigned to me").
+   *
+   * Re-read rather than patched, for the reason claim() gives: under "My
+   * assigned" a released row must LEAVE the list, and under "Unassigned" it
+   * must appear — a local edit leaves it under a heading that no longer
+   * describes it.
+   */
+  async function release(item: QueueItem) {
+    if (item.assignmentId === null || claimingId !== null) return
+    setClaimingId(item.assignmentId)
+    setClaimError(null)
+    setClaimMessage(null)
+    try {
+      await assignments.release(item.assignmentId)
+      setClaimMessage(`${item.name} is back with the office. Any officer here can take it.`)
       restart()
       reload()
     } catch (err) {
@@ -1324,30 +1424,59 @@ export function QueuePage() {
    * reason. Pending Payment does not take this branch: `browserType` is '' there
    * because the server did the narrowing, and "Showing 2 of 2" is exactly true.
    */
+
+
+  /**
+   * What to say when the queue comes back with nothing in it.
+   *
+   * ── Assembled, because two branches each added a dimension ───────────
+   *
+   * `dev` named the FILING TYPE here ("No renewals in this queue") and
+   * `mike` named the HOLDER ("You are not holding any filings in this office
+   * yet"). Neither knew about the other, and both wrote their own nest of
+   * ternaries inside the summary — carrying both that way would have been six
+   * levels deep, so the clauses are built rather than enumerated.
+   *
+   * Most specific first, and holder beats type deliberately: an officer who
+   * filtered to "mine" is asking about their own desk, and "you are not
+   * holding any renewals" answers that better than "no renewals here". A
+   * search term beats both — it is the narrowest thing they did.
+   */
+  const emptyLine = ((): string => {
+    const what = browserType ? TYPE_PLURAL[browserType] : 'filings'
+
+    if (needle) return `Nothing in this queue matches “${search.trim()}”.`
+    if (holder === 'mine') return `You are not holding any ${what} in this office yet.`
+    if (holder === 'unassigned') {
+      return `Every one of this office’s ${what} is already with an officer.`
+    }
+    if (holder === 'others') return `No ${what} here are with another officer.`
+    if (browserType) return `No ${what} in this queue.`
+
+    return 'Nothing in this queue right now.'
+  })()
+
   const summary = firstLoad
     ? 'Loading the queue…'
     : error
       ? ''
       : browserType
         ? visible.length === 0
-          ? `No ${TYPE_PLURAL[browserType]} in this queue` +
-            `${needle ? ` match “${search.trim()}”` : ''}.`
+          ? emptyLine
           : `Showing ${visible.length.toLocaleString()} ${TYPE_PLURAL[browserType]} of the ` +
             `${rows.length.toLocaleString()} loaded` +
             `${partial ? ` (${total.toLocaleString()} in this queue)` : ''}, ${sortLabel}.` +
             `${partial ? ' Load more to reach the rest.' : ''}`
         : searchesOnServer
           ? rows.length === 0
-            ? needle
-              ? `Nothing in this queue matches “${search.trim()}”.`
-              : 'Nothing in this queue right now.'
+            ? emptyLine
             : `Showing ${rows.length.toLocaleString()} of ${total.toLocaleString()}` +
               `${needle ? ` matching “${search.trim()}”` : ''}, ${sortLabel}.` +
               // Only a sort the SERVER did not already do leaves the rest
               // unsorted; asking for the order the feed arrives in sorts nothing.
               `${sort !== serverSort && partial ? ' Load more to sort the rest.' : ''}`
           : rows.length === 0
-            ? 'Nothing in this queue right now.'
+            ? emptyLine
             : needle || sort !== serverSort
               ? `Showing ${visible.length.toLocaleString()} of the ${rows.length.toLocaleString()} loaded` +
                 `${partial ? ` (${total.toLocaleString()} in this queue)` : ''}, ${sortLabel}.` +
@@ -1404,26 +1533,39 @@ export function QueuePage() {
         Application Verification
       </PageTitle>
 
+      {/*
+        * ── The two rows stack, and the stage row never goes away ────────────
+        *
+        * The tabs answer WHERE A FILING IS; the sections answer WHOSE DESK IT
+        * IS ON. Crossing them is the useful question — "the filings I hold that
+        * are waiting on my review" — and both rows stay on screen so the reader
+        * can see which two they have chosen.
+        *
+        * They were briefly exclusive, and that was a fix aimed at the wrong
+        * thing. "My assigned" came back empty for a BPLO officer holding four
+        * live filings, and the cause was not the stacking: it was that a paid
+        * filing at `awaiting_other_permits` appeared in NO tab BPLO could see,
+        * so the office's own work was invisible whatever section was chosen.
+        * That is fixed where it belongs — FINAL_STATUSES now carries the paid
+        * stage — and with the stage row honest again the two narrow together
+        * without contradicting each other.
+        *
+        * Pending Payment carries no sections. Those rows are filings no office
+        * has been routed yet: no assignment, so nobody to hold one, and every
+        * section but All would be empty by construction.
+        */}
       <div className="mb-5">
         <FilterPills options={tabs} value={tab} onChange={selectTab} />
       </div>
 
-      {/*
-        * Who holds the case — the client's four sections, as a second row of
-        * pills rather than more tabs.
-        *
-        * They are a different question from the tabs above, and crossing them is
-        * the point: "my assigned filings that are for approval" is the officer's
-        * actual working list, and folding these into the tab row would make the
-        * two mutually exclusive.
-        *
-        * Hidden on Pending Payment, where the rows are filings no office has
-        * been routed yet. There is nothing to hold there, and offering the
-        * narrowing would return an empty list under every heading but "All".
-        */}
       {tab !== 'payment' && (
         <div className="mb-5">
           <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
+          {holder !== '' && (
+            <p className="mt-2 text-xs text-ink-muted">
+              {TAB_LABEL[tab]} — {HOLDER_HINT[holder]}.
+            </p>
+          )}
         </div>
       )}
 
@@ -1440,6 +1582,15 @@ export function QueuePage() {
       <div className="mb-5" role="group" aria-label="Filter by filing type">
         <FilterPills options={TYPE_PILLS} value={filingType} onChange={selectFilingType} />
       </div>
+
+      {claimMessage && (
+        <p
+          role="status"
+          className="mb-4 rounded-lg bg-s-green-tint px-3.5 py-2.5 text-sm font-medium text-s-green"
+        >
+          {claimMessage}
+        </p>
+      )}
 
       {claimError && (
         <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-sm font-medium text-s-red">
@@ -1476,7 +1627,16 @@ export function QueuePage() {
               : tab === 'payment'
                 ? 'No filing is waiting on payment right now.'
                 : tab === 'approval'
-                  ? 'Nothing is waiting on your department’s review right now.'
+                  ? /*
+                     * Points at the sections, because this is where the screen
+                     * misleads. A tab is a STAGE, and an office can own live
+                     * filings while owing nothing at this one — BPLO's
+                     * assignment is marked done the moment it approves the main
+                     * form, months before the filing is decided. An officer
+                     * holding four live filings was landing on "Your queue is
+                     * clear" and reasonably concluding the feature was broken.
+                     */
+                    'Nothing is waiting on your department’s review at this stage. Unassigned and My assigned above cover every stage.'
                   : // Both halves of what this tab now holds: filings this
                     // office has signed off and that have not finished.
                     'Nothing your office has approved is still in progress.'
@@ -1524,6 +1684,7 @@ export function QueuePage() {
                 key={item.key}
                 item={item}
                 onClaim={claim}
+                onRelease={release}
                 claiming={claimingId === item.assignmentId}
               />
             ))}
