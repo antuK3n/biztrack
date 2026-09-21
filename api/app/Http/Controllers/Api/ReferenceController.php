@@ -7,6 +7,7 @@ use App\Models\Barangay;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\PermitType;
+use App\Support\AmendableFields;
 use App\Models\PsicCode;
 use Illuminate\Http\JsonResponse;
 
@@ -61,10 +62,23 @@ class ReferenceController extends Controller
         ]);
     }
 
+    /**
+     * Lines of business, each carrying what the Revenue Code does with it.
+     *
+     * `category` is the Sec. 2J.02 tax class and `category_branch` names the
+     * one follow-up the Code still forces — both are here so the wizard can
+     * show an applicant how their trade is classified and ask nothing for the
+     * 117 codes that classify themselves.
+     *
+     * `permit_category` is deliberately NOT exposed. It selects a Sec. 3A.03
+     * fine category and nothing on the applicant's screen needs it: the fee is
+     * derived server-side in FeeCalculator::classify, which is where it has to
+     * happen anyway, since the browser is not the only way in.
+     */
     public function psicCodes(): JsonResponse
     {
         return response()->json([
-            'data' => PsicCode::orderBy('code')->get(['id', 'code', 'title']),
+            'data' => PsicCode::orderBy('code')->get(['id', 'code', 'title', 'category', 'category_branch']),
         ]);
     }
 
@@ -80,6 +94,49 @@ class ReferenceController extends Controller
         return response()->json([
             'data' => DocumentType::orderBy('name')->get(['id', 'code', 'name', 'help_text']),
         ]);
+    }
+
+    /**
+     * The details an amendment may change — the DEFINITIONS, not the values.
+     *
+     * ── Why this is reference data ────────────────────────────────────────
+     *
+     * `AmendableFields::kinds()` is a constant: the same four boxes, the same
+     * labels, the same control per field, for every business in the city.
+     * Only `current_value` and what has been REQUESTED differ per filing, and
+     * those come from `AmendmentController::index`.
+     *
+     * They used to arrive together, which meant the step could not draw a
+     * single box until a request returned — and on first arrival not until a
+     * draft had been POSTed first. Client, 21 September 2026: *"Why it still
+     * loads? Can't you make it appear instantly, just like in the other
+     * forms?"* The other forms are instant because their fields are markup.
+     * These now are too: the wizard fetches this with the barangays and the
+     * PSIC codes, before it paints, and the per-filing values fill in after.
+     *
+     * `writes`, `column`, `cast` and `validation` are deliberately NOT sent.
+     * They are how the server applies a change, and nothing on the client may
+     * act on them.
+     */
+    public function amendableFields(): JsonResponse
+    {
+        $data = [];
+
+        foreach (AmendableFields::kinds() as $field => $spec) {
+            $group = AmendableFields::GROUPS[$spec['group']];
+
+            $data[] = [
+                'field' => $field,
+                'group' => $spec['group'],
+                'group_label' => $group['label'],
+                'group_paper' => $group['paper'],
+                'label' => $spec['label'],
+                'help' => $spec['help'],
+                'type' => $spec['type'],
+            ];
+        }
+
+        return response()->json(['data' => $data]);
     }
 
     public function permitTypes(): JsonResponse

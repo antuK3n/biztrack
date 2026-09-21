@@ -10,6 +10,7 @@ use App\Models\PermitType;
 use App\Models\User;
 use App\Services\ClearanceService;
 use App\Services\WorkflowService;
+use Illuminate\Validation\ValidationException;
 
 /*
  * A renewal renews what the applicant ticked, and nothing else.
@@ -194,21 +195,33 @@ it('shows the clearance stage only the permits the renewal is for', function () 
         ->toBe(['SANITARY', 'ZONING']);
 });
 
-it('waits for final approval on the ticked permits alone', function () {
+it('closes on the ticked permits alone, and waits on nothing else', function () {
     /*
-     * `refreshReadiness` intersects the required-clearance constant with what
-     * the filing carries, so a renewal of two is ready when those two are
-     * approved — it must not sit in AwaitingOtherPermits waiting on three
-     * clearances that were never part of it.
+     * The property: a renewal of two is DONE when those two are approved. It
+     * must not wait on three clearances that were never part of it.
+     *
+     * ── The route changed on 17 September 2026; the property did not ─────────
+     *
+     * This drove the filing through `approveMainForm` and then a hand-written
+     * transition to AwaitingOtherPermits, and asserted it reached
+     * ForFinalApproval — BPLO's desk. None of that happens any more. A renewal
+     * carrying no business permit is never billed and never reaches BPLO
+     * (*"its office alone, BPLO never sees it"*), so it has no Pending Payment
+     * and no Final Approval to arrive at; `approveMainForm` now refuses it
+     * outright, which is how this test found the change.
+     *
+     * Re-aimed rather than deleted, and the new assertion is the stronger one:
+     * APPROVED, not "waiting for somebody". Under the old flow this test could
+     * not tell "ready for BPLO" from "finished", because a partial renewal
+     * still had a BPLO step in front of it. Now there is nothing in front of
+     * it, so the filing being closed is the whole of the claim.
      */
     $app = renewalOf(['SANITARY', 'ZONING']);
     $workflow = app(WorkflowService::class);
 
-    classifyAsOfficer($app);
-    $workflow->approveMainForm($app->fresh());
-    $app->refresh();
-    $workflow->transition($app, ApplicationStatus::AwaitingOtherPermits, 'Paid.');
-
+    // Both ticked permits granted. Set on the pivot rather than walked through
+    // the offices: what is under test is the READINESS rule, and the route from
+    // paperwork to a passed visit belongs to DeferredPermitFeeTest.
     foreach (['SANITARY', 'ZONING'] as $code) {
         $row = $workflow->pivotFor($app->fresh(), $code);
         $row->forceFill(['status' => ClearanceStatus::Approved, 'decided_at' => now()])->save();
@@ -216,7 +229,28 @@ it('waits for final approval on the ticked permits alone', function () {
 
     $workflow->refreshReadiness($app->fresh());
 
-    expect($app->fresh()->status)->toBe(ApplicationStatus::ForFinalApproval);
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
+
+    // And it never went looking for the three it does not carry.
+    expect(codesOn($app->fresh()))->toBe(['SANITARY', 'ZONING']);
+});
+
+it('does not let BPLO bill a renewal that carries no business permit', function () {
+    /*
+     * The money bug this guard closes. A clearance-only renewal sits at
+     * ForApproval like any other filing, and `approveMainForm`'s only test was
+     * the status — so BPLO could approve it, and approving is what raises the
+     * Tax Order of Payment. That would charge in June for a permit the client's
+     * rule collects in January.
+     */
+    $app = renewalOf(['SANITARY']);
+
+    expect($app->defersPayment())->toBeTrue();
+    expect(fn () => app(WorkflowService::class)->approveMainForm($app->fresh()))
+        ->toThrow(ValidationException::class);
+
+    // Untouched: no bill, no status move.
+    expect($app->fresh()->status)->toBe(ApplicationStatus::ForApproval);
 });
 
 it('leaves the amendment questions off a renewal', function () {

@@ -115,9 +115,34 @@ class PermitType extends Model
         return $this->belongsTo(Department::class, 'issuing_department_id');
     }
 
+    /**
+     * The documentary requirements: certain ones first, conditional ones last.
+     *
+     * The ordering is not decoration, and it is not the paper's printed order
+     * either. Until `display_order` existed the rows came back in insertion
+     * order, which put a requirement BizTrack asks for on its own account (the
+     * Tax Incentive Certificate, from section B item 7) second, between the
+     * paper's items 1 and 3. Sorting by the printed number fixed that and left
+     * a subtler version of it: the printed sequence interleaves rows every
+     * applicant uploads with rows that exist only because of an answer, and
+     * because the screen shows only the rows that apply, an applicant read the
+     * printed list with holes punched through the middle of it.
+     *
+     * So the positions run unconditional → filing-driven → answer-driven, and
+     * then whatever is merely OPTIONAL, which is a different axis and belongs
+     * after all of it: the step exists to say what an applicant still owes, so
+     * the box they may leave empty comes after the boxes they may not. See
+     * ReferenceSeeder for the bands, and migrations 2026_09_16_000070 and
+     * _000080 for why each boundary is where it is.
+     *
+     * The tie-break on id keeps every permit type that has no positions set
+     * exactly where it was.
+     */
     public function documentTypes(): BelongsToMany
     {
         return $this->belongsToMany(DocumentType::class, 'permit_type_requirements')
-            ->withPivot('context', 'is_mandatory', 'notes');
+            ->withPivot('context', 'is_mandatory', 'notes', 'display_order')
+            ->orderBy('permit_type_requirements.display_order')
+            ->orderBy('document_types.id');
     }
 }

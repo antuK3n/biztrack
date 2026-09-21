@@ -369,3 +369,98 @@ it('reads "latest" from the calendar, not from the insertion order', function ()
 
     expect(ownerStatusRow($businessId)['tracking_id'])->toBe($older['tracking_id']);
 });
+
+/*
+ * ── Transfer of ownership (MCG-BPLO-FO-003 section II) ───────────────────
+ *
+ * The half of an approved CHANGE OF OWNERSHIP that a person has to do. The
+ * applicant states a NAME and attaches the Deed of Transfer; the permit prints
+ * the ACCOUNT holder's name, so BPLO names the account having read the deed.
+ *
+ * Before 21 September 2026 there was no way to: `owner_user_id` was written in
+ * exactly one place, from the session, when a business was first registered.
+ */
+
+it('moves a business to another owner account', function () {
+    [$businessId] = ownedBusinessWithDraft('DTI-TRANSFER-1');
+
+    $from = Business::findOrFail($businessId)->owner_user_id;
+    $to = User::where('email', 'juan@biztrack.local')->firstOrFail();
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/businesses/{$businessId}/owner", [
+            'owner_email' => 'juan@biztrack.local',
+            'reason' => 'Deed of Sale attached to the amendment.',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.owner_user_id', $to->id);
+
+    expect(Business::findOrFail($businessId)->owner_user_id)->toBe($to->id)
+        ->and($to->id)->not->toBe($from);
+
+    // Both sides are told: one has gained a business, the other has lost one.
+    expect(AppNotification::where('user_id', $to->id)->where('type', 'business')->exists())
+        ->toBeTrue()
+        ->and(AppNotification::where('user_id', $from)->where('type', 'business')->exists())
+        ->toBeTrue();
+});
+
+it('refuses a transfer to an address no account uses', function () {
+    /*
+     * The commonest dead end, and the reason the message carries the next
+     * step: BPLO cannot create an account for the buyer, so "invalid email"
+     * would leave the officer with nothing to tell them.
+     */
+    [$businessId] = ownedBusinessWithDraft('DTI-TRANSFER-2');
+    $before = Business::findOrFail($businessId)->owner_user_id;
+
+    $message = test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/businesses/{$businessId}/owner", [
+            'owner_email' => 'nobody@example.com',
+            'reason' => 'Deed of Sale attached.',
+        ])
+        ->assertStatus(422)
+        ->json('errors.owner_email.0');
+
+    expect($message)->toContain('register')
+        ->and(Business::findOrFail($businessId)->owner_user_id)->toBe($before);
+});
+
+it('refuses a transfer that moves nothing, and one to a deactivated account', function () {
+    /*
+     * "Transferred" printed over a no-op is the defect the Reassign dialog was
+     * fixed for on 10 September 2026, one office over. And a deactivated
+     * account cannot file, so transferring to one strands the business: nobody
+     * could renew it and the next January would pass in silence.
+     */
+    [$businessId] = ownedBusinessWithDraft('DTI-TRANSFER-3');
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/businesses/{$businessId}/owner", [
+            'owner_email' => 'owner@biztrack.local',
+            'reason' => 'No change.',
+        ])
+        ->assertStatus(422);
+
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->postJson("/api/v1/admin/businesses/{$businessId}/owner", [
+            'owner_email' => 'inactive@biztrack.local',
+            'reason' => 'Deed of Sale attached.',
+        ])
+        ->assertStatus(422);
+
+    expect(Business::findOrFail($businessId)->owner->email)->toBe('owner@biztrack.local');
+});
+
+it('refuses an owner transferring their own business away', function () {
+    // The register's own fact about a business, set by an admin. An owner who
+    // could do this could also hand a blacklisted business to a clean account.
+    [$businessId] = ownedBusinessWithDraft('DTI-TRANSFER-4');
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/admin/businesses/{$businessId}/owner", [
+            'owner_email' => 'juan@biztrack.local',
+            'reason' => 'Trying it on.',
+        ])
+        ->assertForbidden();
+});

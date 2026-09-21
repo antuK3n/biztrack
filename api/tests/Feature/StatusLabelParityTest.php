@@ -106,7 +106,7 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
      * `ClearanceStatus` rather than dropped. The words the LGU signed off did
      * not change; which enum owns them did.
      */
-    expect(ApplicationStatus::ForApproval->label())->toBe('For Approval')
+    expect(ApplicationStatus::ForApproval->label())->toBe('For Initial Approval')
         ->and(ApplicationStatus::PendingPayment->label())->toBe('Pending Payment')
         ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Awaiting Other Permits')
         ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')

@@ -4,7 +4,9 @@ namespace App\Http\Resources;
 
 use App\Enums\ApplicationType;
 use App\Enums\OfficerRequestStatus;
+use App\Support\AmendableFields;
 use App\Support\ApplicationVisibility;
+use App\Support\ClearanceStanding;
 use App\Support\OfficeFormAnswers;
 use App\Support\Ra11032;
 use App\Support\SheetRequirements;
@@ -111,9 +113,10 @@ class ApplicationResource extends JsonResource
                      * Withholding status would replace a privacy defect with a
                      * coordination one.
                      *
-                     * `remarks` and `rejection_reason` are the other thing
+                     * `remarks` and `remarks_target` are the other thing
                      * entirely: free prose one office wrote about someone
-                     * else's premises. The client's instruction is exact — "the
+                     * else's premises, and which of their documents it is
+                     * about. The client's instruction is exact — "the
                      * City Health Office admin must NOT see any application
                      * fields regarding Fire Safety Inspection Certificate
                      * application" — and this is where that lands on a payload
@@ -138,7 +141,23 @@ class ApplicationResource extends JsonResource
                         'status_label' => $pt->pivot?->status?->label(),
                         'mode' => $pt->pivot?->mode,
                         'remarks' => $readsWords ? $pt->pivot?->remarks : null,
-                        'rejection_reason' => $readsWords ? $pt->pivot?->rejection_reason : null,
+                        /*
+                         * Which thing the remarks are about — gated with them,
+                         * not with the status. On its own the pointer is
+                         * harmless ("something about the notarised
+                         * declaration"), but paired with an office's own
+                         * checklist it narrows what another office asked for,
+                         * and the prose and its subject are one disclosure.
+                         */
+                        'remarks_target' => $readsWords ? $pt->pivot?->remarks_target : null,
+                        /*
+                         * WHEN it was sent back, shared like every other piece
+                         * of progress on this payload. "Waiting on the
+                         * applicant for 3 days" is coordination — it is what
+                         * lets an office see the filing has gone quiet — and it
+                         * says nothing about the content of anyone's remarks.
+                         */
+                        'returned_at' => optional($pt->pivot?->returned_at)->toISOString(),
                         'decided_at' => optional($pt->pivot?->decided_at)->toISOString(),
                     ];
                 })->values()
@@ -335,6 +354,80 @@ class ApplicationResource extends JsonResource
                     ))->values()
                 )
                 : [],
+            /*
+             * ── Where the BUSINESS stands on all five clearances ─────────────
+             *
+             * Not the same list as `permits` above, and deliberately so: that
+             * one is what THIS filing issued, this one is what the business
+             * holds. On a January renewal of the business permit alone they
+             * barely overlap, and it is this list that answers the question the
+             * client says Final Approval exists to ask. See ClearanceStanding.
+             *
+             * Gated on `readsEveryOffice`, which is BPLO and the super admin.
+             * This is a cross-office view by construction — five offices'
+             * certificates in one array — so handing it to CHO would undo the
+             * separability the four filters above this line exist to keep, and
+             * it is the fifth time that door has needed closing on this
+             * resource. A clearance office reading its own filing gets null,
+             * not a shorter list: one office's standing on its own permit is
+             * already on its sheet, and a one-row version of this would invite
+             * a reader to treat it as the whole answer.
+             *
+             * Only when `permitTypes` is loaded, because ClearanceStanding asks
+             * it which types are on the filing and an unloaded relation would
+             * answer "none" — reporting every clearance as relied-upon rather
+             * than being renewed.
+             */
+            /*
+             * ── What this amendment asks to change ───────────────────────────
+             *
+             * The officer's half of `AmendmentController::index`, which is
+             * owner-only. BPLO has to read old → new to decide, and the
+             * applicant's endpoint cannot serve them: it authorises on
+             * `applicant_user_id`.
+             *
+             * `current_value` is the register as it stands, so the panel can
+             * show what is being replaced without the browser holding a second
+             * copy of the business record to diff against. After approval
+             * `old_value` and `applied_at` are the record of what actually
+             * happened, which is why both sides are sent rather than just the
+             * request.
+             *
+             * Null rather than `[]` when there is nothing to send, so a reader
+             * can tell "not an amendment" from "an amendment asking for
+             * nothing" — the second is a filing BPLO should refuse.
+             */
+            'requested_changes' => $this->relationLoaded('requestedChanges')
+                && $this->application_type === ApplicationType::Amendment
+                    ? $this->requestedChanges->map(function ($row) {
+                        $current = AmendableFields::current($this->business, $row->field);
+
+                        return [
+                            'field' => $row->field,
+                            'label' => $row->label(),
+                            'current_value' => $current,
+                            'new_value' => $row->new_value,
+                            'old_value' => $row->old_value,
+                            'applied_at' => $row->applied_at?->toISOString(),
+                            /*
+                             * A line of business and a barangay are ids since
+                             * FO-003 was mapped properly, and this panel is
+                             * where BPLO decides. Without these it would read
+                             * "Change of line of business: 1 → 47" — the same
+                             * resolver the applicant's step uses, so the two
+                             * screens cannot name the same code differently.
+                             */
+                            'current_label' => AmendableFields::describe($row->field, $current),
+                            'new_label' => AmendableFields::describe($row->field, $row->new_value),
+                            'old_label' => AmendableFields::describe($row->field, $row->old_value),
+                        ];
+                    })->values()
+                    : null,
+            'clearance_standing' => $this->relationLoaded('permitTypes')
+                && $request->user()
+                && ApplicationVisibility::readsEveryOffice($request->user())
+                    ? ClearanceStanding::forApplication($this->resource)
+                    : null,
             /*
              * What actually happened to this filing, oldest first (the relation
              * orders by created_at).

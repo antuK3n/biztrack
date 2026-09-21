@@ -200,22 +200,50 @@ function assignmentOf(
  * Returns the assignment id the row pointed at, so a caller can say which row
  * it opened when an assertion downstream fails.
  */
+/*
+ * ── The tab is named by STAGE here, not by its caption ────────────────────
+ *
+ * One tab has two captions. BPLO approves twice, so its first tab says "For
+ * Initial Approval"; a clearance office approves once and its says "For
+ * Approval" — the rule status.ts already states for the status itself, applied
+ * to the tab on 17 September 2026 when the client read the wrong one from the
+ * sanitary account.
+ *
+ * Every caller of this helper passed the caption, so every office caller would
+ * now be pressing a button that does not exist — and failing on the row it was
+ * looking for, several assertions later, with a message about the queue. So the
+ * helper takes the stage and matches either wording, ANCHORED: `^For Approval$`
+ * cannot match "For Initial Approval", so this stays a real locator rather than
+ * a substring that would pass against either.
+ *
+ * Being permissive about the wording here is deliberate and is paid for
+ * elsewhere: the caption per seat is asserted directly, once, in the per-office
+ * loop and in the BPLO block, which is where a test can say WHICH word it
+ * expects. A navigation helper that also policed the wording would fail every
+ * stage of the narrative for one label.
+ */
+const TAB_BUTTON: Record<'approval' | 'inspection' | 'final', RegExp> = {
+  approval: /^(For Initial Approval|For Approval)$/,
+  inspection: /^For Inspection$/,
+  final: /^For Final Approval$/,
+}
+
 async function openFromQueue(
   page: Page,
-  tab: 'For Approval' | 'For Inspection' | 'Final Approval',
+  stage: 'approval' | 'inspection' | 'final',
   { trackingId, businessName }: Narrative,
 ): Promise<string> {
   await page.goto('/staff/queue')
   await expect(page.getByRole('heading', { name: 'Application Verification', level: 1 })).toBeVisible({
     timeout: 30_000,
   })
-  await page.getByRole('button', { name: tab }).click()
+  await page.getByRole('button', { name: TAB_BUTTON[stage] }).click()
   await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
 
   const row = page.locator(`a[href^="/staff/queue/"]`).filter({ hasText: businessName })
   await expect(
     row,
-    `${trackingId} is not in this office's ${tab} tab, so the officer cannot reach it`,
+    `${trackingId} is not in this office's ${stage} tab, so the officer cannot reach it`,
   ).toHaveCount(1, { timeout: 20_000 })
 
   const href = (await row.getAttribute('href')) ?? ''
@@ -784,14 +812,15 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
   })
 
   /*
-   * ── Nothing is owed YET, and the row has to say which of the three ────────
+   * ── The row says where the filing IS ──────────────────────────────────────
    *
-   * That block used to be a two-way switch: Pay Online when
-   * `status === 'pending_payment'`, a green "Paid" otherwise. With the bill
-   * moved behind BPLO's approval there is now a stage on the near side of it,
-   * and the else-branch was answering "Paid" for a filing that had never been
-   * charged a peso — the strongest colour on the screen making a false claim
-   * about money.
+   * This block has been three things. It began as a two-way payment switch —
+   * Pay Online when `status === 'pending_payment'`, a green "Paid" otherwise —
+   * and once the bill moved behind BPLO's approval the else-branch started
+   * answering "Paid" for a filing never charged a peso: the strongest colour
+   * on the screen making a false claim about money. A grey "Not billed yet"
+   * was added for the near side of the bill, which was true and nearly
+   * useless — `draft`, `for_approval` and `returned` all landed on it.
    *
    * All three are asserted, not just the one that should be there. A row
    * drawing two of them is the failure nobody looks for, and "Paid is absent"
@@ -811,12 +840,16 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
     'a filing waiting on BPLO’s first read should say that is the stage it is at',
   ).toBeVisible()
   await expect(
-    row.getByRole('link', { name: 'Pay Online' }),
+    row.getByRole('link', { name: /pay online/i }),
     'the applicant was offered a payment before BPLO approved the form',
   ).toHaveCount(0)
   await expect(
     row.getByText('Paid', { exact: true }),
     'an unbilled filing was shown as paid',
+  ).toHaveCount(0)
+  await expect(
+    row.getByText('Not billed yet', { exact: true }),
+    'the retired payment wording is still being drawn',
   ).toHaveCount(0)
 })
 
@@ -850,13 +883,39 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
    * end.
    */
   await asOffice(browser, 'bplo', async (page) => {
-    await openFromQueue(page, 'For Approval', narrative)
+    await openFromQueue(page, 'approval', narrative)
 
     /*
      * The sheet, with a live decision behind Edit. This is the assertion the
      * old version could not make: there was no assignment, so there was nothing
      * to open, so the row had to apologise for itself instead.
      */
+    /*
+     * ── And BPLO's copy of the application is not behind a press (FOLD-1) ──
+     *
+     * The client's rule, 16 September 2026: *"Since we are using BPLO admin,
+     * the application must always be shown."* BPLO's review IS reading the
+     * application, so a disclosure over it is a step, not a choice.
+     *
+     * Asserted here rather than left implicit, because the control came back on
+     * 17 September for the five clearance offices — whose reason is the
+     * opposite: they came to decide one permit and the business permit
+     * application under it is context. One flag decides which seat gets which
+     * (`application.view_any_office`), so the two halves are one line apart in
+     * the source and need asserting from both chairs.
+     *
+     * Section A's heading is the probe: it is inside the folded region, so if a
+     * disclosure ever reappears here it will be hidden and this goes red.
+     */
+    await expect(
+      page.getByRole('button', { name: /^(Show|Hide) the business permit application/ }),
+      'BPLO’s review puts the application behind a disclosure it has to press every time',
+    ).toHaveCount(0)
+    await expect(
+      page.getByText('Business Information & Registration'),
+      'BPLO opened the review and the filed application was not on screen',
+    ).toBeVisible()
+
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(
       page.getByRole('button', { name: 'Approve', exact: true }),
@@ -883,6 +942,47 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
         `${office.code} is offered a Pending Payment tab it can never see anything in`,
       ).toHaveCount(0)
 
+      /*
+       * And Awaiting Other Permits, which is the same stage this office reads
+       * through For Inspection. Offering both would put one filing in two of
+       * an officer's tabs and make the narrower one look like a subset the
+       * wider one had failed to include.
+       */
+      await expect(
+        page.getByRole('button', { name: 'Awaiting Other Permits' }),
+        `${office.code} is offered Awaiting Other Permits, which is BPLO's seat on that stage`,
+      ).toHaveCount(0)
+
+      /*
+       * ── "Initial" is BPLO's word, and this loop is why it is asserted here ─
+       *
+       * The client, from the sanitary account: *"This is still sanitary's
+       * account, so why there is Initial Approval? It should be For Approval
+       * only. Make sure the changes you did here were also applied to other
+       * offices' accounts (excluding BPLO and super admin) because they have
+       * similar functions."*
+       *
+       * So it is asserted inside the loop, which runs every office account
+       * except BPLO — CHO, BFP, CPDO, OBO and CENRO — rather than against the
+       * one seat it was reported from. All five read the queue through the same
+       * flag (`application.view_any_office`, which none of them hold and BPLO
+       * and the super admin do), so one of them being wrong would mean all five
+       * were; a test that only checked sanitary would not have said so.
+       *
+       * Exact, both ways. "For Approval" is a substring of "For Initial
+       * Approval", so a non-exact match on the first would pass against the
+       * second and assert nothing at all.
+       */
+      await expect(
+        page.getByRole('button', { name: 'For Approval', exact: true }),
+        `${office.code} is not offered a For Approval tab`,
+      ).toHaveCount(1)
+      await expect(
+        page.getByRole('button', { name: 'For Initial Approval', exact: true }),
+        `${office.code} is offered "For Initial Approval" — it approves its permit once, so there is no second pass for "initial" to distinguish`,
+      ).toHaveCount(0)
+
+      // The office captions, not BPLO's — see the assertion above.
       for (const tab of ['For Approval', 'For Inspection'] as const) {
         await page.getByRole('button', { name: tab }).click()
         await page.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
@@ -921,7 +1021,7 @@ test('the applicant’s row says which permit is moving and which have not start
    * This was one of this file's standing bug reports, written to FAIL: an
    * unpaid filing was routed to nobody, and the applicant's expanded row said
    * "For Approval" anyway, because `permitChip()` and `fallbackChip()` both fell
-   * through to a hardcoded `{ tone: 'orange', label: 'For Approval' }`. The cost
+   * through to a hardcoded `{ tone: 'orange', label: 'For Initial Approval' }`. The cost
    * named at the time was real — an applicant who reads "For Approval" has no
    * reason to pay, and nobody could move the filing but them.
    *
@@ -983,7 +1083,7 @@ test('the applicant’s row says which permit is moving and which have not start
    * clearances have not been applied for and say so. A row where every chip
    * reads the same thing is the old defect, whichever label it has settled on.
    */
-  const moving = chips.filter((c) => c.includes('For Approval'))
+  const moving = chips.filter((c) => c.includes('For Initial Approval'))
   expect(
     moving.length,
     'the row does not name exactly one permit as being read by an office',
@@ -1020,7 +1120,7 @@ test('BPLO approving the form is what raises the bill', async ({ page, browser }
   expect(before.status, 'the narrative is not where this stage expects it').toBe('for_approval')
 
   await asOffice(browser, 'bplo', async (officePage) => {
-    await openFromQueue(officePage, 'For Approval', narrative)
+    await openFromQueue(officePage, 'approval', narrative)
     await approveOwnReview(officePage)
   })
 
@@ -1217,7 +1317,7 @@ test('paying opens the clearance stage, and applying routes each office', async 
 
   for (const office of OFFICES.filter((o) => o.account !== 'bplo')) {
     await asOffice(browser, office.account, async (officePage) => {
-      await openFromQueue(officePage, 'For Approval', narrative)
+      await openFromQueue(officePage, 'approval', narrative)
       /*
        * The row opens on the review sheet with a live decision behind Edit.
        * Presence, not a press: this test is about routing, and the stage below
@@ -1414,7 +1514,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
   const first = INSPECTING[0]
 
   await asOffice(browser, first.account, async (officePage) => {
-    await openFromQueue(officePage, 'For Approval', narrative)
+    await openFromQueue(officePage, 'approval', narrative)
     await approveOwnReview(officePage)
     // The second half of this office's turn. Approving books nothing — see
     // bookOwnVisit — so without this the visit assertion below reads an empty
@@ -1503,6 +1603,61 @@ test('one office’s approval closes its own review and moves nobody else’s', 
     'one office accepting paperwork told the applicant something was approved',
   ).toHaveCount(0)
 
+  /* ── And BPLO watches the stage from a tab of its own (QUEUE-1) ────────── */
+
+  /*
+   * The client, at the BPLO account, 17 September 2026: *"There should be no
+   * For Inspection anymore since BPLO does not have that. There should be
+   * Awaiting Other Permits too."*
+   *
+   * Both halves in one place, because they are one decision. For Inspection
+   * filters on the reader's own permit being out for a site visit and BPLO's
+   * Business Permit pivot is never `for_inspection` — so that tab could not
+   * hold a row on any filing, ever, and pressing it told BPLO its queue was
+   * clear when eight filings were in flight. Awaiting Other Permits is the
+   * stage BPLO actually waits through, between its two approvals, and it had no
+   * tab at all.
+   *
+   * Asserted HERE rather than in a queue test of its own because this is the
+   * one point in the suite where a filing is genuinely at
+   * `awaiting_other_permits` — one office has accepted its paperwork and the
+   * rest are outstanding. A tab that exists is worth less than a tab with the
+   * right row in it.
+   */
+  await asOffice(browser, 'bplo', async (bploPage) => {
+    await bploPage.goto('/staff/queue')
+    await expect(
+      bploPage.getByRole('heading', { name: 'Application Verification', level: 1 }),
+    ).toBeVisible({ timeout: 30_000 })
+
+    await expect(
+      bploPage.getByRole('button', { name: 'For Inspection' }),
+      'BPLO is offered a For Inspection tab, which its own permit can never enter',
+    ).toHaveCount(0)
+
+    const gathering = bploPage.getByRole('button', { name: 'Awaiting Other Permits' })
+    await expect(gathering, 'BPLO has no tab for the stage it waits through').toHaveCount(1)
+
+    /*
+     * And BPLO keeps "Initial", which is the other half of the rule the office
+     * loop asserts. BPLO approves twice, so the word is doing work here: it
+     * says which of the two approvals this tab is.
+     */
+    await expect(
+      bploPage.getByRole('button', { name: 'For Initial Approval', exact: true }),
+      'BPLO lost the word that distinguishes its first approval from its second',
+    ).toHaveCount(1)
+
+    // And the filing is in it. Searched by tracking ID, server-side, so this is
+    // a claim about the queue rather than about the first page of it.
+    await gathering.click()
+    await bploPage.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
+    await expect(
+      bploPage.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId }),
+      'a filing out with the other offices is missing from BPLO’s Awaiting Other Permits tab',
+    ).toHaveCount(1, { timeout: 20_000 })
+  })
+
   /* ── The approving office's row moves ONE TAB, it does not vanish (INS-2) ─ */
 
   await asOffice(browser, first.account, async (officePage) => {
@@ -1517,13 +1672,50 @@ test('one office’s approval closes its own review and moves nobody else’s', 
      *
      * BPLO used to be the seat for this assertion and cannot be: its Business
      * Permit pivot is never `for_inspection`, so after `approveMainForm` it has
-     * no row in either tab — correctly, because it has nothing to do until
-     * every clearance is in and the filing reaches Final Approval.
+     * no row in either of THESE tabs — correctly, because it has nothing to do
+     * until every clearance is in and the filing reaches Final Approval. It is
+     * not left without a view of the stage, though: BPLO reads it through
+     * Awaiting Other Permits, which is asserted directly above, and For
+     * Inspection is no longer offered to it at all.
      */
-    await openFromQueue(officePage, 'For Inspection', narrative)
+    await openFromQueue(officePage, 'inspection', narrative)
+
+    /*
+     * ── And the row reports THIS OFFICE's permit, not the filing (QUEUE-2) ──
+     *
+     * The client, from the sanitary account, 17 September 2026: *"As someone
+     * from other permits' office, I think I shouldn't care on the other permits
+     * since they are independent of each other, so no need to show Awaiting
+     * Other Permits."*
+     *
+     * Every row in an office's queue is on a filing at
+     * `awaiting_other_permits` — that is the stage the five clearances are
+     * worked in — so the filing's status was the same three words on every row,
+     * describing four offices' work and never the reader's. The permit's own
+     * status is the fact that varies, and it is the vocabulary the applicant is
+     * shown for the same permit.
+     *
+     * Asserted on THIS tab because the divergence is sharpest here: the filing
+     * says Awaiting Other Permits and this office's permit says For Inspection,
+     * so a badge showing the wrong one cannot pass by coincidence.
+     */
+    await officePage.goto('/staff/queue')
+    await officePage.getByRole('button', { name: 'For Inspection' }).click()
+    await officePage.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
+    const inspRow = officePage.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId })
+    await expect(inspRow).toHaveCount(1, { timeout: 20_000 })
+    await expect(
+      inspRow,
+      `${first.code}'s row reports its own permit as something other than For Inspection`,
+    ).toContainText('For Inspection')
+    await expect(
+      inspRow,
+      `${first.code}'s row still reports the FILING's stage, which is four other offices' work`,
+    ).not.toContainText('Awaiting Other Permits')
 
     await officePage.goto('/staff/queue')
-    await officePage.getByRole('button', { name: 'For Approval' }).click()
+    // An office's caption, and exact: 'For Approval' is a substring of BPLO's.
+    await officePage.getByRole('button', { name: 'For Approval', exact: true }).click()
     await officePage.getByRole('searchbox', { name: /Search this queue/ }).fill(trackingId)
     await expect(
       officePage.locator('a[href^="/staff/queue/"]').filter({ hasText: trackingId }),
@@ -1537,7 +1729,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
     (o) => o.account !== 'bplo' && o.account !== first.account,
   )) {
     await asOffice(browser, office.account, async (officePage) => {
-      await openFromQueue(officePage, 'For Approval', narrative)
+      await openFromQueue(officePage, 'approval', narrative)
       await officePage.getByRole('button', { name: 'Edit', exact: true }).click()
       await expect(
         officePage.getByRole('button', { name: 'Approve', exact: true }),
@@ -1580,7 +1772,7 @@ test('a second office’s visit is booked beside the first, not instead of it', 
   const second = INSPECTING[1]
 
   await asOffice(browser, second.account, async (officePage) => {
-    await openFromQueue(officePage, 'For Approval', narrative)
+    await openFromQueue(officePage, 'approval', narrative)
     await approveOwnReview(officePage)
     // Its own visit, booked by the office that just accepted the paperwork —
     // which is what makes "beside the first, not instead of it" a claim about
@@ -1627,7 +1819,7 @@ test('a second office’s visit is booked beside the first, not instead of it', 
        * the paperwork is filed under a heading about site visits and searching
        * For Approval for it answers "Nothing matches", the client's report 4.
        */
-      await openFromQueue(officePage, 'For Approval', narrative)
+      await openFromQueue(officePage, 'approval', narrative)
       await officePage.getByRole('button', { name: 'Edit', exact: true }).click()
       await expect(
         officePage.getByRole('button', { name: 'Approve', exact: true }),
@@ -1672,7 +1864,7 @@ test('approving is confirmed on screen whichever way the filing then moves', asy
    * expects it.
    */
   await asOffice(browser, third.account, async (page) => {
-    await openFromQueue(page, 'For Approval', narrative)
+    await openFromQueue(page, 'approval', narrative)
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
 
     const [response] = await Promise.all([
@@ -1730,7 +1922,7 @@ test('once every office has accepted its paperwork, a visit is booked for each',
   const remaining = OFFICES.filter((o) => !done.has(o.account))
   for (const office of remaining) {
     await asOffice(browser, office.account, async (officePage) => {
-      await openFromQueue(officePage, 'For Approval', narrative)
+      await openFromQueue(officePage, 'approval', narrative)
       await approveOwnReview(officePage)
       // Every office in `remaining` inspects — `done` holds BPLO — so each one
       // books, and the count below is five bookings rather than five approvals.
@@ -1800,7 +1992,7 @@ test('every visit passing issues its clearance, and BPLO’s sign-off issues the
        * filing reading `for_inspection`; it keys on this office having nothing
        * left to do, which is the same seat by a more honest test.
        */
-      await openFromQueue(officePage, 'For Inspection', narrative)
+      await openFromQueue(officePage, 'inspection', narrative)
       await expect(officePage.locator('section[aria-label="Application status"]')).toBeVisible({
         timeout: 30_000,
       })
@@ -1883,7 +2075,7 @@ test('every visit passing issues its clearance, and BPLO’s sign-off issues the
    * which is why that tab carries no assignment-status filter.
    */
   await asOffice(browser, 'bplo', async (officePage) => {
-    await openFromQueue(officePage, 'Final Approval', narrative)
+    await openFromQueue(officePage, 'final', narrative)
     await approveOwnReview(officePage)
   })
 

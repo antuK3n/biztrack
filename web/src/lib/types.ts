@@ -111,6 +111,18 @@ export interface PsicCode {
   id: number
   code: string
   title: string
+  /**
+   * The Sec. 2J.02 tax class this trade is taxed under, derived rather than
+   * asked. Null only for 00000 "Other (not listed)", where the applicant
+   * typed their own line of business and there is nothing to derive from.
+   */
+  category?: string | null
+  /**
+   * Names the one follow-up the Revenue Code still forces. "essentials" means
+   * Sec. 2J.02(c) may halve the rate and no industrial code can tell whether
+   * it does — see FeeProfileStep’s DerivedTaxClass.
+   */
+  category_branch?: string | null
 }
 
 export interface DocumentType {
@@ -145,6 +157,9 @@ export interface PermitType {
 export interface Address {
   line1: string
   line2: string | null
+  /** BPLO item 5, in the paper's own two boxes. `line1` is composed from them. */
+  house_bldg_no?: string | null
+  street?: string | null
   barangay: Barangay
   latitude: number | null
   longitude: number | null
@@ -200,11 +215,41 @@ export type EconomicOrganization =
 export interface Business {
   id: number
   name: string
+  /**
+   * The business permit this shop is trading on right now.
+   *
+   * Absent unless the endpoint eager-loaded it; `null` when the business has
+   * none. Null is not a fault — a business row exists from the first draft, so
+   * a shop still applying for its first permit has no permit yet.
+   *
+   * The amendment chooser names it in the option text, because a business has
+   * exactly one current business permit and asking which one is a question
+   * with a single possible answer.
+   */
+  current_business_permit?: {
+    id: number
+    permit_number: string
+    valid_until: string | null
+  } | null
   trade_name: string | null
   registration_type: string | null
   registration_number: string | null
   tin: string | null
   ban: string | null
+  /**
+   * What the last approved filing declared.
+   *
+   * Written by `WorkflowService::syncDeclaredFigures` at every approval, and
+   * null on a business that has not had one since that started. The office
+   * sheets read them — CENRO's and CHO's papers both print a floor area and a
+   * headcount they expect carried rather than re-asked.
+   */
+  business_area_sqm?: number | null
+  total_employees?: number | null
+  male_employees?: number | null
+  female_employees?: number | null
+  employees_within_lgu?: number | null
+  delivery_units?: number | null
   is_active: boolean
   is_rented?: boolean
   lessor_name?: string | null
@@ -295,7 +340,17 @@ export interface BusinessPayload {
   capital_investment?: string | null
   has_tax_incentives?: boolean
   address: {
-    line1: string
+    /**
+     * BPLO item 5, sent as the paper's own two boxes.
+     *
+     * `line1` is no longer typed by anybody — the API composes it from these
+     * two in syncAddressAndLines, so everything that reads an address as one
+     * line keeps working. It stays optional here for an importer, or a draft
+     * saved before the split, that has only the combined value.
+     */
+    house_bldg_no?: string
+    street?: string
+    line1?: string
     line2?: string
     barangay_id: number
     latitude?: number
@@ -308,7 +363,11 @@ export interface BusinessPayload {
     mobile_number?: string
     email?: string
   }
-  lines: { psic_code_id: number; capitalization?: string; products_services?: string }[]
+  lines: {
+    psic_code_id: number
+    capitalization?: string
+    products_services?: string
+  }[]
   /**
    * BPLO items 11 / 12 — the named person on the form.
    *
@@ -357,7 +416,15 @@ export type ClearanceStatus =
   | 'for_approval'
   | 'for_inspection'
   | 'approved'
-  | 'rejected'
+  /*
+   * 'rejected' was here and is gone with the PHP case, 17 September 2026.
+   *
+   * An office refusing one permit outright was never reachable — neither the
+   * rejection nor the re-file had a route — and the client settled it: Return
+   * is enough. A fixable problem is a Return, which can repeat as often as it
+   * needs to; a business that genuinely cannot have the permit is BPLO
+   * rejecting the FILING, which is `ApplicationStatus` above and still exists.
+   */
   | 'returned'
   | 'available'
 
@@ -388,12 +455,16 @@ export type ClearanceMode = 'apply' | 'upload'
  *  - `status` / `status_label` are null when there is NO PIVOT ROW — the permit
  *    is not on this filing at all. Every required permit is attached at
  *    submission, so on a submitted filing this should not happen.
- *  - `remarks` / `rejection_reason` are null when the reader MAY NOT SEE THEM.
+ *  - `remarks` / `remarks_target` are null when the reader MAY NOT SEE THEM.
  *    An office reads its own words and not the ones beside it
  *    (`ApplicationVisibility::readsOfficeSheet`), so a fire officer's note comes
  *    back null to the sanitary officer and populated to the applicant, BPLO and
  *    the super admin. Never render "no remarks" off a null — you cannot tell it
  *    from "not yours to read".
+ *
+ * `returned_at` is in the first group, not the second: it is progress, shared
+ * across offices like every status on this payload, and says nothing about what
+ * anyone wrote.
  */
 export interface ApplicationPermitType {
   id: number
@@ -405,8 +476,33 @@ export interface ApplicationPermitType {
   status: ServerClearanceStatus | null
   status_label: string | null
   mode: ClearanceMode | null
+  /** What the office asked the applicant to fix, in the officer's own words. */
   remarks: string | null
-  rejection_reason: string | null
+  /**
+   * WHICH document or answer those remarks are about, as a stable code.
+   *
+   * A `document_types.code` for a checklist row, or an office-form answer key
+   * for a field. Null when the officer did not point at anything, which is a
+   * perfectly ordinary return.
+   *
+   * The pointer exists so nothing ever has to read the prose to work out what
+   * it means — matching text against field names fails on synonyms, on
+   * Filipino, on "the second one", and fails silently. See the migration that
+   * added `remarks_target`.
+   */
+  remarks_target: string | null
+  /**
+   * When the office last sent this permit back.
+   *
+   * Elapsed time only — "asked for changes 3 days ago" — never a due date. RA
+   * 11032 fixes the OFFICE's deadlines, not the citizen's, and Malabon has not
+   * given us a Citizen's Charter response window (open question A10).
+   *
+   * Survives the applicant resubmitting: it stops being "how long have they sat
+   * on this" and becomes "this permit was sent back once", which is what an
+   * officer re-reading it wants to know.
+   */
+  returned_at: string | null
   decided_at: string | null
 }
 
@@ -495,8 +591,24 @@ export interface FeeAssessment {
 export interface FeeProfileLine {
   /** Ties the line back to the Part 2 PSIC selection (draft restore). */
   psic_code_id?: number
-  /** Revenue-code business category slug (e.g. retailer, carinderia). */
-  category: string
+  /**
+   * Revenue-code tax class slug (e.g. retailer, restaurant).
+   *
+   * OPTIONAL since 16 September 2026, and normally absent: the class is
+   * derived from psic_code_id server-side in FeeCalculator::classify, which
+   * also supplies the Sec. 3A.03 permit category that this single field could
+   * never carry at the same time. Sent only for 00000 "Other (not listed)",
+   * where there is no code to derive from, and by drafts saved while the
+   * wizard still asked — FeeCalculator leaves an existing class alone so an
+   * applicant's own answer is not overwritten mid-filing.
+   */
+  category?: string
+  /**
+   * Sec. 2J.02(c): the applicant's declaration that they deal mainly in
+   * essential commodities, which halves the rate. The server applies it only
+   * where the line of business genuinely branches on it.
+   */
+  essentials?: boolean
   /** Preceding-calendar-year gross sales (renewals). */
   gross_sales?: number
   /** Initial capital (new businesses). */
@@ -504,10 +616,7 @@ export interface FeeProfileLine {
 }
 
 export type BusinessStructure =
-  | 'sole_proprietorship'
-  | 'partnership'
-  | 'corporation'
-  | 'cooperative'
+  'sole_proprietorship' | 'partnership' | 'corporation' | 'cooperative'
 
 /**
  * Applicant-declared inputs the API's FeeCalculator uses to compute the
@@ -650,6 +759,14 @@ export interface Assignment {
     status_label: string | null
     mode: ClearanceMode | null
     requires_inspection: boolean
+    /**
+     * When this office last sent the permit back, or null.
+     *
+     * Drives "waiting on the applicant for 3 days" on the officer's queue row.
+     * Elapsed time only — RA 11032 fixes the office's clock, not the citizen's,
+     * and Malabon has given us no response window (open question A10).
+     */
+    returned_at: string | null
   } | null
 }
 
@@ -820,7 +937,11 @@ export interface HeldClearance {
    * been given a tracking ID yet. So the common case for a freshly submitted
    * copy is null, not a string.
    */
-  application: { id: number; tracking_id: string | null; status: ApplicationStatus } | null
+  application: {
+    id: number
+    tracking_id: string | null
+    status: ApplicationStatus
+  } | null
 }
 
 /**
@@ -936,6 +1057,136 @@ export interface Application extends ApplicationListItem {
    * with nothing to draw, so neither needs its own branch here.
    */
   status_history: TimelineEntry[]
+  /**
+   * Where the BUSINESS stands on all five required clearances — not this
+   * filing's permits, the register's.
+   *
+   * The two are almost disjoint on a January renewal. A business permit renewed
+   * alone carries one `permit_types` row, while the five certificates BPLO is
+   * meant to be checking at Final Approval sit on last year's filings, because
+   * a clearance still in date is not renewed and so not ticked.
+   *
+   * `null` rather than `[]` when the reader may not see it: this is a
+   * cross-office array by construction, so the API gives it to BPLO and the
+   * super admin only. Null says "not for you"; an empty array would say "this
+   * business holds nothing", which is a different and alarming claim.
+   */
+  clearance_standing: ClearanceStanding[] | null
+  /**
+   * What an amendment asks to change, for the officer deciding it.
+   *
+   * `null` on anything that is not an amendment — and an amendment with an
+   * empty array is a filing asking for nothing, which BPLO should refuse rather
+   * than approve. The two states are worth telling apart, which is why this is
+   * not `[]` when absent.
+   */
+  requested_changes: RequestedChange[] | null
+}
+
+/**
+ * One amendable detail on the applicant's own form.
+ *
+ * Wider than `RequestedChange`: this row exists for every detail that CAN be
+ * amended, whether or not this filing asks about it, so `requested` is what
+ * separates "I want this changed" from "here is what it currently says".
+ */
+/**
+ * One amendable detail, as the reference data describes it.
+ *
+ * The DEFINITION half of an `AmendmentRow`: the same for every business in
+ * the city, so it travels with the barangays and the PSIC codes and is in
+ * hand before the wizard paints. Only the values below it are per-filing.
+ */
+export interface AmendableField {
+  field: string
+  group: 'other' | 'address' | 'ownership' | 'trade_name'
+  group_label: string
+  group_paper: string | null
+  label: string
+  help: string | null
+  type: 'text' | 'number' | 'integer' | 'psic' | 'barangay' | 'pin' | 'note'
+}
+
+export interface AmendmentRow {
+  field: string
+  /**
+   * Which of MCG-BPLO-FO-003's four checkboxes this detail came off.
+   *
+   * The paper prints a requirements list per box, so the box is what the
+   * document rules are indexed by as well as how the step is laid out —
+   * `AmendableFields::GROUPS` is the one definition and this is it on the
+   * wire. `group_paper` is the numeral the form itself prints (I, II, III),
+   * null for the unnumbered box at the top.
+   */
+  group: 'other' | 'address' | 'ownership' | 'trade_name'
+  group_label: string
+  group_paper: string | null
+  label: string
+  help: string | null
+  /**
+   * What control the applicant needs. Half of these stopped being free text
+   * when the paper's boxes were mapped properly: a line of business is a PSIC
+   * code, a barangay is the list zoning is assessed against, a pin is a map.
+   */
+  type: 'text' | 'number' | 'integer' | 'psic' | 'barangay' | 'pin' | 'note'
+  current_value: string | null
+  /** An id resolved to something readable; null when the value reads as itself. */
+  current_label: string | null
+  new_value: string | null
+  new_label: string | null
+  requested: boolean
+  old_value: string | null
+  applied_at: string | null
+}
+
+/** One requested change to one business detail. */
+export interface RequestedChange {
+  field: string
+  /** "Floor area (sqm)" — never the column name, which no applicant knows. */
+  label: string
+  /** The register as it stands, so old → new can be shown without a second copy. */
+  current_value: string | null
+  new_value: string | null
+  /**
+   * What the change actually replaced, captured when it was APPLIED rather than
+   * when it was asked for. Null until BPLO approves.
+   */
+  old_value: string | null
+  applied_at: string | null
+  /**
+   * The three values resolved to something readable, or null when the value
+   * already reads as itself.
+   *
+   * A line of business and a barangay are ids since FO-003's boxes were mapped
+   * properly, and this panel is where BPLO decides — unresolved it would read
+   * "Change of line of business: 1 \u2192 47".
+   */
+  current_label: string | null
+  new_label: string | null
+  old_label: string | null
+}
+
+/** One required clearance, and what the business holds against it. */
+export interface ClearanceStanding {
+  permit_type_code: string
+  permit_type_name: string
+  department_code: string | null
+  /**
+   * `missing` is not `expired`. A business that never held a Fire Safety
+   * certificate and one whose certificate lapsed in March are both gaps, but
+   * the first has never been inspected by that office and the second has.
+   * `unknown` is a certificate with no expiry date on record — rare, early
+   * rows, and not to be read as cover.
+   */
+  state: 'valid' | 'expiring' | 'expired' | 'missing' | 'unknown'
+  /** Negative once lapsed; null when there is no certificate or no date. */
+  days_until_expiry: number | null
+  /** True when this filing is renewing it, rather than relying on the one held. */
+  on_this_filing: boolean
+  permit_id: number | null
+  permit_number: string | null
+  valid_from: string | null
+  valid_until: string | null
 }
 
 export interface TimelineEntry {
@@ -1428,7 +1679,10 @@ export interface RankedShareRow {
 }
 
 export type BarangayShareRow = RankedShareRow & { barangay: string }
-export type LineOfBusinessRow = RankedShareRow & { industry: string; psic_code: string }
+export type LineOfBusinessRow = RankedShareRow & {
+  industry: string
+  psic_code: string
+}
 
 export interface OrganizationFormRow {
   form: string
@@ -1524,7 +1778,11 @@ export interface DashboardReport {
    * goes.
    */
   top_barangays: { rows: BarangayShareRow[]; total: number; groups: number }
-  top_lines_of_business: { rows: LineOfBusinessRow[]; total: number; groups: number }
+  top_lines_of_business: {
+    rows: LineOfBusinessRow[]
+    total: number
+    groups: number
+  }
   organization_forms: {
     rows: OrganizationFormRow[]
     recorded: number
@@ -1538,7 +1796,12 @@ export interface DashboardReport {
     plotted: number
     total_businesses: number
     points: MapPoint[]
-    by_barangay: { barangay: string; businesses: number; active: number; share: number | null }[]
+    by_barangay: {
+      barangay: string
+      businesses: number
+      active: number
+      share: number | null
+    }[]
   }
 }
 
@@ -1829,7 +2092,12 @@ export interface RenewalRiskReport {
   at_risk: RenewalRiskRow[]
   /** The same permits as `scored_permits`, split four ways by state. */
   lifecycle: PermitLifecycle
-  actions: { action: RiskAction; label: string; band: RiskBand; count: number }[]
+  actions: {
+    action: RiskAction
+    label: string
+    band: RiskBand
+    count: number
+  }[]
   rulebook: RiskRule[]
   thresholds: { high: number; moderate: number }
   /** The honesty statement. Rendered verbatim; never paraphrased on screen. */
@@ -2275,11 +2543,7 @@ export type RequestType = 'document' | 'message'
  * asks something of the applicant was the one TypeScript said could not happen.
  */
 export type RequestStatus =
-  | 'pending'
-  | 'submitted'
-  | 'fulfilled'
-  | 'needs_resubmission'
-  | 'rejected'
+  'pending' | 'submitted' | 'fulfilled' | 'needs_resubmission' | 'rejected'
 
 /** One applicant submission; a requirement can collect several. */
 export interface OfficerRequestResponse {
@@ -2485,6 +2749,35 @@ export interface AdminBusiness {
   status: BusinessStatus
   status_label: string
   created_at: string
+  /**
+   * Permit fees this business has been issued and not yet paid for.
+   *
+   * A clearance renewed outside January is issued unbilled — its fee is
+   * collected on the next business permit renewal (client, 17 September 2026).
+   * Until then it is a receivable against the business, and the decision was
+   * that it *"waits indefinitely, and is visible"*: no penalty, no lapsing
+   * permit, but nobody has to remember it either.
+   *
+   * `total` is what the LGU is owed; `items` is what it is owed for, which is
+   * what turns a figure into something an officer can raise with the owner.
+   * `on_a_bill` marks a fee already sitting on a renewal the applicant has been
+   * shown and not yet settled — still outstanding, but a chase already in
+   * flight.
+   *
+   * Optional so a payload built before this existed still type-checks; readers
+   * must cope with its absence rather than assume zero, because zero and
+   * "not sent" are different facts.
+   */
+  unbilled_fees?: {
+    total: number
+    items: {
+      permit_type: string | null
+      permit_code: string | null
+      amount: number
+      incurred_at: string | null
+      on_a_bill: boolean
+    }[]
+  }
 }
 
 /* ── Per-office application forms (UI prototype Parts 4-7, pages 040-043) ── */
@@ -2516,6 +2809,32 @@ export interface OfficeForm {
    * is true of CHO, BFP, OBO and CENRO.
    */
   requirements?: OfficeFormRequirement[] | null
+  /**
+   * Last year's answers, OFFERED to a renewal — not applied.
+   *
+   * A renewal's office form is the same form as a new application's, so the
+   * office wants the same facts about the premises every year. Nothing carried
+   * them forward until 18 September 2026, so applicants re-typed the water
+   * source and the sanitary classification annually.
+   *
+   * ── Why this is not merged into `form_data` ───────────────────────────────
+   *
+   * The client's decision was "filled in and flagged, per field": the applicant
+   * has to be able to see which answers came from last year and confirm them.
+   * Folded into `form_data` a carried answer would be indistinguishable from a
+   * reviewed one the moment the sheet reloaded — and the client would autosave
+   * it straight into the register as the applicant's own words, on a statutory
+   * form they sign.
+   *
+   * So the sheet seeds empty fields from this, flags each one, and writes only
+   * when the applicant saves. An answer already in `form_data` is never offered
+   * here, which is what makes the flag clear itself.
+   *
+   * Never carries a DERIVED answer (it would describe last year's filing), an
+   * OFFICER-written issuance date, or an ATTESTATION — a signature is an act,
+   * not a fact. See `App\Support\RenewalPrefill`.
+   */
+  prefill?: Record<string, unknown>
 }
 
 /**
@@ -2544,6 +2863,21 @@ export interface OfficeFormRequirement {
    */
   source: 'upload' | 'carried' | 'sheet'
   satisfied: boolean
+  /**
+   * Does an unsatisfied row stop the sheet being handed in?
+   *
+   * False for almost all of them, deliberately: CPDD's paper is a counter
+   * checklist and a missing lease is a conversation with the office, not a
+   * reason to refuse the form. The notarised Applicant Declaration is the
+   * exception — its own line is in capitals, MUST BE NOTARIZED PRIOR TO
+   * SUBMISSION OF APPLICATION — and the server owns that judgement so the
+   * applicant's gate and CPDD's review screen cannot disagree about it. See
+   * `App\Support\ZoningRequirements`.
+   *
+   * Optional on the wire so an older API that does not send it reads as "does
+   * not block", which is the behaviour this replaced.
+   */
+  blocking?: boolean
   document: {
     id: number
     filename: string
@@ -2641,7 +2975,34 @@ export interface Clearance {
    * card in a draft used to raise one, which started the office's service-time
    * clock (`assigned_at`) days before the office could have seen the filing.
    */
-  assignment: { id: number; status: string | null; remarks: string | null } | null
+  assignment: {
+    id: number
+    status: string | null
+    remarks: string | null
+  } | null
+  /**
+   * What the office asked the applicant to fix, in the officer's own words.
+   *
+   * ── Not `assignment.remarks`, and that was a real defect ──────────────────
+   *
+   * The returned card read `assignment.remarks`, which is the wrong column.
+   * `WorkflowService::returnClearance` writes the reason to the PIVOT's
+   * `remarks`; nothing writes the assignment's on a return, and
+   * `completeAssignment` writes it on an APPROVAL. So the card could show an
+   * approval note under a heading about changes being requested, or say "no
+   * reason was recorded" beside a reason that was.
+   */
+  return_note: string | null
+  /**
+   * WHICH document or answer the note is about, as a stable code — a
+   * `document_types.code` or an office-form answer key. Null when the officer
+   * pointed at nothing, which is an ordinary return.
+   *
+   * Exists so nothing has to read the prose to work out what it refers to.
+   */
+  return_target: string | null
+  /** When it was last sent back. Elapsed time only, never a due date. */
+  returned_at: string | null
   /**
    * ALREADY FORMATTED — "₱735.00". `PermitFees::peso` puts the sign on
    * server-side, so this is display text, not an amount. Passing it through

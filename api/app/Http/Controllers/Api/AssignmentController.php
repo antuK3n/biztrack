@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ApplicationType;
 use App\Enums\AssignmentStatus;
 use App\Enums\ClearanceStatus;
 use App\Http\Controllers\Controller;
@@ -58,6 +59,20 @@ class AssignmentController extends Controller
             'status' => ['sometimes'],
             // Repeatable or comma-separated: ?application_status=for_approval,returned
             'application_status' => ['sometimes'],
+            /*
+             * Repeatable or comma-separated: ?application_type=renewal
+             *
+             * New, renewal or amendment. `/applications` has taken a `type`
+             * filter since it was written; this feed had none, so the four
+             * assignment-backed queue tabs could not be narrowed by it at all
+             * and an officer looking for renewals had to read every row.
+             *
+             * Spelled `application_type` and not `type` to match
+             * `application_status` beside it: on this endpoint the bare word
+             * would read as the ASSIGNMENT's type, and the two nouns are
+             * already the thing that goes wrong here.
+             */
+            'application_type' => ['sometimes'],
             /*
              * Repeatable or comma-separated: ?clearance_status=for_inspection
              *
@@ -122,6 +137,19 @@ class AssignmentController extends Controller
         $applicationStatuses = $this->applicationStatuses($request);
         if ($applicationStatuses !== []) {
             $query->whereHas('application', fn ($a) => $a->whereIn('status', $applicationStatuses));
+        }
+
+        /*
+         * New / renewal / amendment, on the filing behind the assignment.
+         *
+         * A separate `whereHas` from the status one above rather than folded
+         * into it. Eloquent AND-combines them, which is the wanted meaning, and
+         * keeping them apart means a tab that sends only one of the two does not
+         * carry a closure it has no argument for.
+         */
+        $applicationTypes = $this->applicationTypes($request);
+        if ($applicationTypes !== []) {
+            $query->whereHas('application', fn ($a) => $a->whereIn('application_type', $applicationTypes));
         }
 
         /*
@@ -283,6 +311,23 @@ class AssignmentController extends Controller
     }
 
     /**
+     * The `application_type` filter, as a list of valid enum values.
+     *
+     * Unknown values are dropped rather than 422'd, for the same reason
+     * `applicationStatuses` drops them: the queue sends a fixed list and one of
+     * them going stale should narrow the queue, not break the screen.
+     *
+     * @return list<string>
+     */
+    private function applicationTypes(Request $request): array
+    {
+        return $this->statusList(
+            $request->query('application_type'),
+            array_map(fn (ApplicationType $t) => $t->value, ApplicationType::cases()),
+        );
+    }
+
+    /**
      * The `status` filter — the ASSIGNMENT's own status, not the application's.
      *
      * Checklist item 111, "after approving an application it still shows
@@ -386,7 +431,28 @@ class AssignmentController extends Controller
         $assignment->load([
             'department', 'officer',
             'application.business.address.barangay', 'application.business.lines.psicCode',
+            /*
+             * Items 11 / 12 — the named owner, and the reason the officer sheet
+             * showed "—" for them.
+             *
+             * BusinessResource serialises the owner through
+             * `whenLoaded('owners')`, which OMITS the key when the relation is
+             * not loaded rather than lazy-loading it. That is deliberate — it is
+             * what stops a list endpoint firing a query per row — but it means a
+             * forgotten eager-load reads on screen as an unanswered question
+             * instead of as an error. The applicant had given their surname,
+             * given name and gender; nothing on this path had asked for them.
+             *
+             * The same mistake is already recorded a few lines below, for the
+             * business on the inspection stub: "selecting only id +
+             * tracking_id left that relation unloaded — so the resource
+             * reported the business as null, i.e. removed from the register".
+             * Two instances of one trap, in one load list.
+             */
+            'application.business.owners',
             'application.applicant', 'application.permitTypes',
+            // BPLO reads old -> new on an amendment; empty on anything else.
+            'application.requestedChanges',
             /*
              * Who set the RA 11032 tier, for the For Office Use Only panel. One
              * constant query, and without it the sheet cannot tell an officer
@@ -474,11 +540,21 @@ class AssignmentController extends Controller
         $this->authorizeHolder($request, $assignment);
         $data = $request->validate([
             'remarks' => ['required', 'string', 'max:1000'],
+            /*
+             * Which thing the remarks are about — a checklist row's document
+             * code, or an office-form answer key. Optional, and deliberately
+             * NOT validated against a list: the valid set is the union of
+             * `document_types.code` and the sheets' own field keys, and the
+             * second lives in PHP and in the browser rather than in a table.
+             * A code that matches nothing highlights nothing, which is the same
+             * outcome as sending none, so there is nothing here worth a 422.
+             */
+            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:120'],
         ], [
             'remarks.required' => 'Explain what the applicant needs to fix.',
         ]);
 
-        $this->workflow->returnAssignment($assignment, $data['remarks']);
+        $this->workflow->returnAssignment($assignment, $data['remarks'], $data['remarks_target'] ?? null);
         $this->recordHolder($request, $assignment);
 
         return response()->json([

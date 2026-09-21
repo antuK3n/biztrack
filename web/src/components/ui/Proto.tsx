@@ -315,10 +315,25 @@ export function FilterPills<T extends string>({
             type="button"
             aria-pressed={active}
             onClick={() => onChange(o.value)}
-            className={`rounded-full px-5 py-1.5 text-sm font-semibold transition-colors ${
+            /*
+             * Solid means SELECTED, outlined means not.
+             *
+             * These were the other way round — the active pill white-outlined,
+             * the rest solid royal — which reads as the opposite of what it
+             * means. The client hit it on the status guide, where two of three
+             * pills looked chosen: *"[the] Amendment [pill looked selected]"*
+             * while the panel below was plainly showing the renewal.
+             *
+             * `aria-pressed` above was always right, so this was a defect for
+             * sighted readers only — the worst shape for one, because nothing
+             * in the accessibility tree contradicted it and no test could see
+             * it. Flipped on 19 September 2026 across all nine FilterPills
+             * sites at the client's request.
+             */
+            className={`rounded-full border-2 border-royal px-5 py-1.5 text-sm font-semibold transition-colors ${
               active
-                ? 'border-2 border-royal bg-white text-royal'
-                : 'border-2 border-royal bg-royal text-white hover:bg-royal-hover'
+                ? 'bg-royal text-white'
+                : 'bg-white text-royal hover:bg-royal-tint'
             }`}
           >
             {o.label}
@@ -707,24 +722,55 @@ export function FieldLabel({
 }
 
 /** Royal pill button (primary). */
+/**
+ * ── The two aria props are declared, because TypeScript will not miss them ──
+ *
+ * They were being passed and silently thrown away. A JSX attribute whose name
+ * contains a hyphen is not checked against a component's prop type — it is not
+ * a valid identifier, so `tsc` says nothing — and the props this function
+ * destructures were the only ones that reached the DOM. So
+ * `<PillButton aria-disabled={…} aria-describedby="…">` compiled, read
+ * correctly, reviewed correctly, and rendered a button with neither attribute.
+ *
+ * What that cost, on the clearance sheet's Submit: the guard is in `onClick`,
+ * so the press really was refused, but nothing said so to anyone not looking at
+ * the opacity. A screen reader announced an ordinary, available button, and the
+ * sentence naming what was still missing — `aria-describedby` pointing at
+ * `office-form-state` — was never associated with it. The comment above that
+ * call site explains at length why `aria-disabled` was chosen over `disabled`
+ * (a control removed from the tab order takes its explanation with it), and the
+ * attribute it argues for was not being rendered at all.
+ *
+ * Declared by their real, hyphenated names rather than smuggled in as
+ * `ariaDisabled`: the call sites are already written the accessible way, they
+ * are how every other button in this file spells it, and a second spelling is
+ * one more thing to get wrong. Found by an end-to-end test asserting the
+ * attribute, which is the only kind of test that could have found it.
+ */
 export function PillButton({
   children,
   onClick,
   type = 'button',
   disabled,
   className = '',
+  'aria-disabled': ariaDisabled,
+  'aria-describedby': ariaDescribedBy,
 }: {
   children: ReactNode
   onClick?: () => void
   type?: 'button' | 'submit'
   disabled?: boolean
   className?: string
+  'aria-disabled'?: boolean
+  'aria-describedby'?: string
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
       disabled={disabled}
+      aria-disabled={ariaDisabled}
+      aria-describedby={ariaDescribedBy}
       className={`inline-flex items-center justify-center rounded-full bg-royal px-7 py-2.5 text-sm font-semibold text-white shadow-card transition-colors hover:bg-royal-hover disabled:opacity-60 ${className}`}
     >
       {children}

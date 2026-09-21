@@ -62,17 +62,25 @@ class Application extends Model
          */
         'amendment_from_registration_type', 'amendment_to_registration_type',
         /*
+         * ── RETIRED 18 September 2026. Kept readable, no longer written. ─────
+         *
          * The applicant saying, in as many words, that there is no BizTrack
          * permit to point at — their last one was issued on paper by the old
-         * counter process. That is the ordinary case in year one, and the
-         * renewal flow has always allowed `prior_permit_id` to stay null for it.
+         * counter process. It was built because year one was expected to be
+         * mostly those, and it fixed a real bug: a renewal that named nothing
+         * because the question was skipped used to be indistinguishable from one
+         * that named nothing because there was nothing to name.
          *
-         * What it did not do was tell that apart from never having asked. Both
-         * looked like null, so a renewal that named nothing because the question
-         * was skipped was indistinguishable from one that named nothing because
-         * there was nothing to name — and seven filings in the register are the
-         * first kind wearing the second's clothes. Recording the declaration is
-         * what lets submit refuse silence without also refusing the escape.
+         * The client then ruled the case out entirely — *"There could be no
+         * cases where the permit was renewed on a different/manual system"* — so
+         * a renewal names its permit or it is a mis-filed New Application, and
+         * the flag has nothing left to distinguish.
+         *
+         * Still listed here, and still cast below, because the COLUMN survives:
+         * one approved filing holds it true, which was a real answer honestly
+         * given under the rule of the day, and a dropped column would erase it.
+         * Nothing writes it — the two controllers that did were changed — so it
+         * defaults false on every new filing and reads as history.
          */
         'prior_permit_declared_none',
     ];
@@ -108,12 +116,63 @@ class Application extends Model
      */
     public function amendmentKinds(): array
     {
+        /*
+         * ── An AMENDMENT names itself through its requested changes ──────────
+         *
+         * The four booleans below are Section A of the RENEWAL form — "has
+         * anything changed since last year", four coarse categories. They were
+         * shown on the amendment form too until 19 September 2026, and the
+         * client spotted what that made of it: the applicant answered the same
+         * question twice, in two vocabularies that did not line up. Two of the
+         * four categories (Ownership, Nature of Business) name things the LGU
+         * does not let anybody amend, while three details that ARE amendable —
+         * floor area, employees, trade name — had no category of their own and
+         * hid under "Others".
+         *
+         * So on an amendment the answer is derived from what was actually
+         * asked for, which is the same information said once and precisely.
+         * "Floor area (sqm), Trade name" tells the officer more than "Others:
+         * area and signage" ever did.
+         *
+         * Falls through to the booleans when there are no requested changes,
+         * so a filing made before this existed still describes itself.
+         */
+        if ($this->application_type === ApplicationType::Amendment) {
+            $asked = $this->requestedChanges
+                ->filter(fn (ApplicationAmendment $row) => $row->new_value !== null)
+                ->map(fn (ApplicationAmendment $row) => $row->label())
+                ->values()
+                ->all();
+
+            if ($asked !== []) {
+                return $asked;
+            }
+        }
+
         return array_values(array_filter([
             $this->amendment_ownership ? 'Ownership' : null,
             $this->amendment_location ? 'Location' : null,
             $this->amendment_nature ? 'Nature of Business' : null,
             filled($this->amendment_other) ? 'Others: '.$this->amendment_other : null,
         ]));
+    }
+
+    /**
+     * The business details this amendment asks to change.
+     *
+     * `requestedChanges` and NOT `amendments`, which is already taken twice
+     * over and means something else both times: the four `amendment_*` booleans
+     * on this model are the RENEWAL form's Section A declaration, and
+     * `ApplicationResource` publishes them under an `amendments` key. A third
+     * thing called amendments, carrying the only rows that can actually change
+     * the register, is how a reader picks the wrong one.
+     *
+     * Empty on every filing that is not an amendment, which is the ordinary
+     * case and not a gap.
+     */
+    public function requestedChanges(): HasMany
+    {
+        return $this->hasMany(ApplicationAmendment::class);
     }
 
     public function business(): BelongsTo
@@ -160,7 +219,13 @@ class Application extends Model
     public function permitTypes(): BelongsToMany
     {
         return $this->belongsToMany(PermitType::class, 'application_permit_types')
-            ->withPivot(['status', 'mode', 'submitted_at', 'decided_at', 'remarks', 'rejection_reason'])
+            ->withPivot([
+                'status', 'mode', 'submitted_at', 'decided_at',
+                // The return note, the thing it points at, and when it was sent
+                // back. 'rejection_reason' was here until clearance-level
+                // rejection was removed on 17 September 2026.
+                'remarks', 'remarks_target', 'returned_at',
+            ])
             ->withTimestamps()
             ->using(ApplicationPermitType::class);
     }
@@ -199,6 +264,70 @@ class Application extends Model
         return $this->hasOne(FeeAssessment::class);
     }
 
+    /**
+     * Will this filing ever be asked for money? No, if it is a clearance-only
+     * renewal.
+     *
+     * ── The client's rule, and why it needed a predicate ──────────────────────
+     *
+     * 17 September 2026: *"The payment for each permit will also happen ONLY
+     * WHEN a business permit was renewed on January."* So a sanitary permit
+     * renewed in June is issued unbilled, and its fee is swept onto the next
+     * business-permit renewal (see `WorkflowService::recordDeferredFee`).
+     *
+     * That broke the clearance stage the moment it was tried. TWO places gate
+     * the stage on payment — `WorkflowService::startClearance` and
+     * `ClearanceService::isUnlocked` — and a filing that will never be paid was
+     * refused by both, for ever: *"The other permits open once this application
+     * is paid."* The applicant could not start the very permit the filing
+     * existed to renew. One rule in one place, asked by both, rather than two
+     * copies of a payment test that has now grown an exception.
+     *
+     * Keyed on the PERMIT SET, not the calendar. There is no January lock
+     * ("don't add a lock in our system yet"), so what makes a filing the one
+     * that collects is that it carries the business permit — whenever it is
+     * filed — and what makes this one defer is that it does not.
+     *
+     * A NEW filing is never deferred, whatever it carries: rule 1 of the
+     * September flow bills everything at submission. An AMENDMENT is treated as
+     * new, for the same reason `attachRequiredPermitTypes` leaves it on that
+     * path — its shape is a question the client has said they will take
+     * separately.
+     */
+    public function defersPayment(): bool
+    {
+        /*
+         * ── An AMENDMENT always defers ───────────────────────────────────────
+         *
+         * Client, 19 September 2026: *"All amendment payments will reflect when
+         * a business permit is renewed, just like the payments for other
+         * permits."*
+         *
+         * So the same rule the other permits got in §7 of
+         * docs/renewal-2026-09-17.md, and for the same reason it was a rule
+         * there: the LGU collects once a year, at the January counter, and a
+         * mid-year filing that asked for money separately would be a second
+         * trip nobody wanted. Unconditional here — every amendment defers,
+         * whatever it changes — because the condition is about WHEN the LGU
+         * collects, not about what was filed.
+         *
+         * It also removes a mis-billing: an amendment was priced through the
+         * ordinary permit assessment, which quoted ₱6,425 for a floor-area
+         * correction (measured) — the whole annual permit charged again.
+         */
+        if ($this->application_type === ApplicationType::Amendment) {
+            return true;
+        }
+
+        if ($this->application_type !== ApplicationType::Renewal) {
+            return false;
+        }
+
+        return ! $this->permitTypes()
+            ->where('permit_types.code', PermitType::OUTCOME_CODE)
+            ->exists();
+    }
+
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
@@ -229,9 +358,12 @@ class Application extends Model
      * the primary as well, so a reader wanting the whole list never has to
      * union two sources and hope they agree.
      *
-     * A renewal filed against a paper permit has none of these and
-     * `prior_permit_declared_none` instead; an empty set is an ordinary state,
-     * not a broken one.
+     * An empty set now means the question is unanswered, and a renewal cannot
+     * submit in that state (see ApplicationController's submit gate). It used
+     * to be an ordinary state — a renewal of a permit issued on paper had no
+     * rows here and `prior_permit_declared_none` instead — but the client
+     * retired the paper case on 18 September 2026. Drafts still pass through
+     * empty, because a draft is allowed to be half-answered.
      */
     public function priorPermits(): BelongsToMany
     {

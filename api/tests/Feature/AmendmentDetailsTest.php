@@ -101,13 +101,24 @@ it('does not blank the amendment answers on an unrelated draft save', function (
 });
 
 it('refuses to submit an amendment that amends nothing', function () {
-    $appId = amendmentDraft();
-
-    expect(Application::findOrFail($appId)->has_amendments)->toBeFalse();
+    /*
+     * Same property, refused by a different gate since 19 September 2026.
+     *
+     * It used to be the `has_amendments` tick: Section A said WHICH CATEGORY
+     * changed. The client removed those ticks from the amendment form — they
+     * asked the same question as the new-value fields, in a vocabulary that did
+     * not line up — so the refusal is now about the values themselves, which is
+     * the more precise version of the same question.
+     *
+     * The prior permit is named so this reaches that gate at all: "which permit
+     * are you amending" is the more fundamental question and refuses first.
+     */
+    $permit = Business::where('name', 'like', 'Nena%')->firstOrFail()->permits()->firstOrFail();
+    $appId = amendmentDraft(['prior_permit_id' => $permit->id]);
 
     $this->postJson("/api/v1/applications/{$appId}/submit")
         ->assertStatus(422)
-        ->assertJsonValidationErrors('has_amendments');
+        ->assertJsonValidationErrors('requested_changes');
 
     expect(Application::findOrFail($appId)->status->value)->toBe('draft');
 });
@@ -122,6 +133,20 @@ it('submits once something is actually being amended', function () {
      */
     $permit = Business::where('name', 'like', 'Nena%')->firstOrFail()->permits()->firstOrFail();
     $appId = amendmentDraft(['amendment_nature' => true, 'prior_permit_id' => $permit->id]);
+
+    /*
+     * And it has to say what the detail changes TO, which is the second thing
+     * this fixture grew for the same reason the prior permit was the first:
+     * without it the filing no longer submits at all.
+     *
+     * Section A saying "the nature of business changed" is a declaration.
+     * `application_amendments` is the request, and an amendment carrying only
+     * the declaration would approve having changed nothing — see the submit
+     * gate on `requested_changes`.
+     */
+    $this->postJson("/api/v1/applications/{$appId}/amendments", [
+        'changes' => [['field' => 'trade_name', 'new_value' => 'Amended Trading Name']],
+    ])->assertOk();
 
     $this->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 

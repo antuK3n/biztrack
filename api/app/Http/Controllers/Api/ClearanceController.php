@@ -174,11 +174,16 @@ class ClearanceController extends Controller
          * different application.
          */
         $row = $this->clearances->pivotRow($application, $type);
+        /*
+         * `ClearanceStatus::Rejected` was in this list and is gone with the
+         * state (see the enum). It does not widen or narrow the rule: the three
+         * left are exactly the states in which the office has not yet accepted
+         * the paperwork, which is what "has not acted" means here.
+         */
         $acted = $row !== null && ! in_array($row->status, [
             ClearanceStatus::NotStarted,
             ClearanceStatus::ForApproval,
             ClearanceStatus::Returned,
-            ClearanceStatus::Rejected,
         ], true);
 
         abort_if(

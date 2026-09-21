@@ -391,6 +391,26 @@ export function MessageThreadView({
   // render, and an effect that watches it would re-run for ever.
   const firstOfficeId = offices.length > 0 ? offices[0].department_id : null
   const active = offices.find((o) => o.department_id === officeId) ?? null
+  /**
+   * Who the reader is writing to, in their own words.
+   *
+   * The empty state and the placeholder both named the ACTIVE OFFICE, which is
+   * right for an applicant and wrong for everybody else: BPLO reviewing a
+   * filing was told "Start the conversation with Business Permits and
+   * Licensing Office" and offered a box reading "Write to Business Permits and
+   * Licensing Office…". The app telling BPLO who BPLO is, reported by the
+   * client on 16 September 2026.
+   *
+   * OfficePicker already had this right for the heading — it drops the line
+   * entirely when the one office is the reader's own — and these two strings
+   * simply never got the same treatment.
+   *
+   * An officer's counterparty is the applicant. Named generically rather than
+   * by the business or the person: one filing can have several named owners,
+   * the thread belongs to the filing rather than to any of them, and "the
+   * applicant" is the word the rest of the officer's screens use.
+   */
+  const counterparty = viewerIsOfficer ? 'the applicant' : (active?.name ?? null)
 
   useEffect(() => {
     if (officeId === null && firstOfficeId !== null) setOfficeId(firstOfficeId)
@@ -462,8 +482,8 @@ export function MessageThreadView({
           </p>
         ) : list.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-muted">
-            {active
-              ? `No messages yet. Start the conversation with ${active.name} below.`
+            {counterparty
+              ? `No messages yet. Start the conversation with ${counterparty} below.`
               : 'No messages yet. Start the conversation below.'}
           </p>
         ) : (
@@ -511,7 +531,7 @@ export function MessageThreadView({
             }}
             rows={2}
             disabled={closed}
-            placeholder={active ? `Write to ${active.name}…` : 'Write a message…'}
+            placeholder={counterparty ? `Write to ${counterparty}…` : 'Write a message…'}
             aria-label={active ? `Message to ${active.name}` : 'Message'}
             aria-describedby="message-send-hint"
             onFocus={() => setComposerFocused(true)}

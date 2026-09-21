@@ -218,7 +218,25 @@ it('routes the zoning clearance to the City Planning and Development Office when
 
 /* ── Unified form fields (checklist item 2) ─────────────────────────────── */
 
-it('requires the lessor block only when the premises are rented', function () {
+it('accepts a rented business without any lessor details', function () {
+    /*
+     * The lessor block used to be `required_if:is_rented,true` — name, address
+     * and monthly rental all demanded of a lessee. It is not any more.
+     *
+     * MCG-BPLO-FO-001 item 9 asks one thing, "Do you pay rent for occupying a
+     * place of business?", and nothing about the lessor. The four lessor boxes
+     * came from the national BPLS unified form, and the client removed them
+     * from the wizard on 16 September 2026 as absent from this paper.
+     *
+     * Requiring them on the API after removing them from the screen is the
+     * exact failure this replaces: the applicant met "Enter the lessor's name,
+     * or set the premises to owner-occupied" on a step with no such box and no
+     * way to clear it. A gate and the control that satisfies it go together.
+     *
+     * The lessor's name and address are still asked — on MCG-CPDD-FO-003
+     * items VIII.C and VIII.D, on the zoning sheet, which collects them into
+     * its own form_data rather than into these columns.
+     */
     $payload = [
         'name' => 'Rented Shop',
         'registration_type' => 'sole_proprietorship',
@@ -231,11 +249,9 @@ it('requires the lessor block only when the premises are rented', function () {
 
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', $payload)
-        ->assertStatus(422)
-        ->assertJsonValidationErrors(['lessor_name', 'lessor_address', 'monthly_rental']);
+        ->assertCreated();
 
-    // Owner-occupied: the same payload without the rented flag sails through,
-    // because an owner has no lessor to name.
+    // And owner-occupied still sails through, as it always did.
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', array_merge($payload, ['is_rented' => false, 'name' => 'Owned Shop']))
         ->assertCreated();
@@ -299,4 +315,89 @@ it('defaults the payment mode to annual', function () {
         ])
         ->assertCreated()
         ->assertJsonPath('data.payment_mode', 'annual');
+});
+
+/*
+ * ── BPLO item 5: the House/Bldg. No. and the Street are two boxes ─────────
+ *
+ * They were one question, "House No. & Street Name", written into `line1` —
+ * while `business_addresses.house_bldg_no` and `.street` sat empty on every
+ * row, having been added when the schema was aligned to the paper.
+ *
+ * The cost was not tidiness. The officer's review page had to guess the split
+ * back out of `line1` with a regex, and filings exist whose entire street
+ * address is "17" because the applicant read the label as asking for the
+ * number — which that regex cannot parse, so BPLO was shown Street "17" and
+ * House "—", the two answers reversed.
+ */
+it('stores the house number and the street separately, and composes line1', function () {
+    $owner = authAs('owner@biztrack.local');
+
+    $response = $this->withHeaders($owner)->postJson('/api/v1/businesses', businessPayload([
+        'name' => 'Split Address Trading',
+        'address' => [
+            'house_bldg_no' => '17',
+            'street' => 'Gen. Luna Street',
+            'barangay_id' => Barangay::first()->id,
+        ],
+    ]))->assertCreated();
+
+    $address = Business::find($response->json('data.id'))->address;
+
+    expect($address->house_bldg_no)->toBe('17')
+        ->and($address->street)->toBe('Gen. Luna Street')
+        // Composed, not typed: everything that reads an address as one line —
+        // the office sheets, the permit PDFs, the officer list — is untouched.
+        ->and($address->line1)->toBe('17 Gen. Luna Street');
+
+    // And served back in both shapes, so the wizard can put them into the two
+    // boxes it will save over.
+    $this->withHeaders($owner)
+        ->getJson("/api/v1/businesses/{$response->json('data.id')}")
+        ->assertOk()
+        ->assertJsonPath('data.address.house_bldg_no', '17')
+        ->assertJsonPath('data.address.street', 'Gen. Luna Street');
+});
+
+it('files premises that have no house number', function () {
+    /*
+     * A stall inside a public market, a unit known only by its building's
+     * name. The paper prints a line for the number without marking it
+     * required, so demanding one would be our rule and not the city's.
+     */
+    $owner = authAs('owner@biztrack.local');
+
+    $response = $this->withHeaders($owner)->postJson('/api/v1/businesses', businessPayload([
+        'name' => 'Stall Only Trading',
+        'address' => [
+            'street' => 'Malabon Public Market',
+            'barangay_id' => Barangay::first()->id,
+        ],
+    ]))->assertCreated();
+
+    $address = Business::find($response->json('data.id'))->address;
+
+    expect($address->house_bldg_no)->toBeNull()
+        // No leading space on the composed line.
+        ->and($address->line1)->toBe('Malabon Public Market');
+});
+
+it('leaves a combined address alone when only line1 is sent', function () {
+    /*
+     * An importer, or a draft saved before the split. Two empty parts must not
+     * blank an address somebody already gave — which is what a composed value
+     * written unconditionally would do on the next autosave.
+     */
+    $owner = authAs('owner@biztrack.local');
+
+    $response = $this->withHeaders($owner)->postJson('/api/v1/businesses', businessPayload([
+        'name' => 'Legacy Payload Trading',
+        'address' => ['line1' => '88 Rizal Avenue', 'barangay_id' => Barangay::first()->id],
+    ]))->assertCreated();
+
+    $address = Business::find($response->json('data.id'))->address;
+
+    expect($address->line1)->toBe('88 Rizal Avenue')
+        ->and($address->house_bldg_no)->toBeNull()
+        ->and($address->street)->toBeNull();
 });

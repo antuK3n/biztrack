@@ -117,15 +117,21 @@ it('notifies the applicant when the application is approved', function () use ($
             ->assertOk();
     }
 
-    // The five are in, so BPLO's SECOND act is what makes the filing approved.
-    // That is the only place an application becomes Approved now.
-    $bploAssignmentId = ApplicationAssignment::where('application_id', $appId)
-        ->whereHas('department', fn ($d) => $d->where('code', 'BPLO'))
-        ->value('id');
-    $this->withHeaders(authAs($deptEmail['BPLO']))
-        ->postJson("/api/v1/assignments/{$bploAssignmentId}/approve", ['remarks' => 'All requirements met.'])
-        ->assertOk();
-
+    /*
+     * The fifth office's pass is what makes the filing approved — and therefore
+     * what sends the notification this test is about.
+     *
+     * It was BPLO's second act until 18 September 2026. The client asked what
+     * BPLO was checking when every clearance is applied for and approved inside
+     * BizTrack, and there was no answer, so `refreshReadiness()` issues the
+     * Mayor's Permit as the last clearance lands.
+     *
+     * That matters here beyond the status: the approval notice is now raised
+     * from inside a CLEARANCE OFFICE's request rather than BPLO's. If it were
+     * ever moved to where the pressing user is assumed to be the applicant's
+     * counterpart, the applicant would stop being told, so the notice is
+     * asserted below on the strength of this path and no other.
+     */
     $app = Application::find($appId);
     expect($app->status->value)->toBe('approved');
 

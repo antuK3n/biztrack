@@ -93,6 +93,43 @@ it('asks a lessee for the lease and the lot owner’s consent instead', function
         ->not->toContain('Real Property Tax Clearance');
 });
 
+it('carries the sketch and the authorisation from BPLO rather than asking again', function () {
+    /*
+     * MCG-BPLO-FO-001's documentary requirements list asks for both — item 5
+     * "Sketch and photos of location of business" and item 6 the SPA — so they
+     * are collected there and this sheet marks them carried. Before 16
+     * September 2026 the sketch was an upload slot HERE and the BPLO list did
+     * not ask at all, which meant CPDD held a sketch BPLO had never seen.
+     *
+     * Pinned because a carried row is a CLAIM about another screen: it renders
+     * "attached with your business permit documents" and offers no upload. If
+     * BPLO's list stops asking, these two rows become unsatisfiable with no
+     * way to fix them — which is exactly what happened to the title and lease
+     * rows when LEASE_TITLE was detached, and went unnoticed because nothing
+     * failed loudly.
+     */
+    $app = zoningFiling(rented: false);
+
+    $row = fn (string $key) => collect(ZoningRequirements::forApplication($app->fresh()))
+        ->firstWhere('key', $key);
+
+    foreach (['SKETCH', 'AUTHORIZATION', 'DTI_SEC', 'TCT'] as $key) {
+        $found = $row($key);
+        if ($found === null) {
+            continue; // AUTHORIZATION only appears when a representative is named
+        }
+        expect($found['source'])->toBe('carried')
+            ->and($found['code'])->toBeNull();
+    }
+
+    // And the slots that genuinely have nowhere else to come from still take a
+    // file, so the sheet is not left asking for nothing.
+    expect(ZoningRequirements::accepts('ZONING_REQ_TAX_DECLARATION'))->toBeTrue()
+        ->and(ZoningRequirements::accepts('ZONING_REQ_DECLARATION'))->toBeTrue()
+        // No longer a slot here — BPLO collects it.
+        ->and(ZoningRequirements::accepts('ZONING_REQ_SKETCH'))->toBeFalse();
+});
+
 it('asks everyone for the sketch, the notarised declaration and the registration', function () {
     foreach ([true, false] as $rented) {
         $labels = checklistLabels(zoningFiling($rented));
@@ -101,6 +138,38 @@ it('asks everyone for the sketch, the notarised declaration and the registration
             ->toContain('Applicant Declaration, notarised')
             ->toContain('DTI / SEC Articles of Incorporation')
             ->toContain('Completely filled-up application form');
+    }
+});
+
+it('makes the notarised declaration the one row that blocks a submission', function () {
+    /*
+     * The client, 17 September 2026: *"I wonder how I was able to submit the
+     * Locational Clearance without submitting the Applicant Declaration."*
+     *
+     * They could because this checklist was a counter list with no gate in it,
+     * which is right for every row but one. The paper marks this row alone in
+     * capitals — MUST BE NOTARIZED PRIOR TO SUBMISSION OF APPLICATION — and
+     * the flag is asserted HERE rather than in the browser because both the
+     * applicant's submit button and CPDD's review screen read it. A rule
+     * private to one of two consumers is the defect this class exists to avoid.
+     *
+     * Asserted as "exactly one", not "this one is true". A later row that
+     * quietly arrives blocking would shut the submit button on a document the
+     * applicant is still chasing from another office, and that failure looks
+     * from the outside like the form being broken.
+     */
+    foreach ([true, false] as $rented) {
+        $rows = ZoningRequirements::forApplication(zoningFiling($rented));
+
+        $blocking = collect($rows)->filter(fn (array $row) => $row['blocking'] ?? false);
+
+        expect($blocking->pluck('label')->all())->toBe(['Applicant Declaration, notarised']);
+
+        // And it is a row a file can actually be put into, or the gate would be
+        // one the applicant has no way to clear.
+        expect($blocking->first()['source'])->toBe('upload');
+        expect($blocking->first()['code'])->not->toBeNull();
+        expect($blocking->first()['satisfied'])->toBeFalse();
     }
 });
 
@@ -157,23 +226,23 @@ it('takes a file into a checklist slot and gives it back on the sheet', function
     $owner = authAs('owner@biztrack.local');
 
     $response = $this->withHeaders($owner)->post(
-        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_SKETCH",
-        ['file' => UploadedFile::fake()->image('sketch.jpg')],
+        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
+        ['file' => UploadedFile::fake()->create('tax-declaration.pdf', 40, 'application/pdf')],
     )->assertCreated();
 
-    $sketch = collect($response->json('data.requirements'))->firstWhere('key', 'SKETCH');
-    expect($sketch['satisfied'])->toBeTrue()
-        ->and($sketch['document']['filename'])->toBe('sketch.jpg');
+    $row = collect($response->json('data.requirements'))->firstWhere('key', 'TAX_DECLARATION');
+    expect($row['satisfied'])->toBeTrue()
+        ->and($row['document']['filename'])->toBe('tax-declaration.pdf');
 
     // And it is on the filing as an ordinary document, so the office's own
     // attachment list carries it without knowing this checklist exists.
     $document = ApplicationDocument::where('application_id', $app->id)
-        ->whereHas('documentType', fn ($q) => $q->where('code', 'ZONING_REQ_SKETCH'))
+        ->whereHas('documentType', fn ($q) => $q->where('code', 'ZONING_REQ_TAX_DECLARATION'))
         ->firstOrFail();
     Storage::disk('local')->assertExists($document->stored_path);
 
     $this->withHeaders($owner)->deleteJson(
-        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_SKETCH",
+        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
     )->assertOk();
 
     expect(ApplicationDocument::whereKey($document->id)->exists())->toBeFalse();
@@ -245,7 +314,7 @@ it('refuses a slot the paper does not have, and a sheet with no checklist', func
     )->assertNotFound();
 
     $this->withHeaders($owner)->post(
-        "/api/v1/applications/{$app->id}/office-forms/CEC/requirements/ZONING_REQ_SKETCH",
+        "/api/v1/applications/{$app->id}/office-forms/CEC/requirements/ZONING_REQ_TAX_DECLARATION",
         ['file' => UploadedFile::fake()->create('anything.pdf', 10, 'application/pdf')],
     )->assertNotFound();
 });
@@ -268,8 +337,8 @@ it('does not let a checklist upload delete the certificate the applicant holds',
     );
 
     $this->withHeaders($owner)->post(
-        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_SKETCH",
-        ['file' => UploadedFile::fake()->image('sketch.jpg')],
+        "/api/v1/applications/{$app->id}/office-forms/ZONING/requirements/ZONING_REQ_TAX_DECLARATION",
+        ['file' => UploadedFile::fake()->create('tax-declaration.pdf', 40, 'application/pdf')],
     )->assertCreated();
 
     expect(ApplicationDocument::whereKey($held->id)->exists())->toBeTrue();

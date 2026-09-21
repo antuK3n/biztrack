@@ -130,31 +130,23 @@ it('does not show one office the remarks another office wrote on its own permit'
     expect($sanitary['remarks'])->toContain('food handlers');
 });
 
-it('does not show one office another office’s reason for refusing a permit', function () {
-    $app = paidFilingForScoping();
-    $fsicRow = officeWorksPermit($app, 'FSIC', 'BFP working it.');
-    officeWorksPermit($app, 'SANITARY', 'CHO working it.');
-
-    app(WorkflowService::class)->rejectClearance(
-        $fsicRow,
-        'The premises has no second means of egress.',
-    );
-
-    $payload = test()->withHeaders(authAs('sanitary@biztrack.local'))
-        ->getJson("/api/v1/applications/{$app->id}")
-        ->assertOk()
-        ->json('data.permit_types');
-
-    $fsic = collect($payload)->firstWhere('code', 'FSIC');
-
-    // That it was refused is coordination: the filing cannot reach BPLO's final
-    // approval while it stands, and every office on it is waiting on that.
-    expect($fsic['status'])->toBe(ClearanceStatus::Rejected->value);
-
-    // Why it was refused is the fire office's business with the applicant.
-    expect($fsic['rejection_reason'])
-        ->toBeNull('CHO read the fire office’s reason for refusing');
-});
+/*
+ * ── A rejection test stood here, and the property it guarded survives ───────
+ *
+ * It rejected the FSIC as BFP and asserted that CHO could read the STATUS but
+ * not the REASON — progress is shared across offices, prose is not
+ * (`ApplicationVisibility`).
+ *
+ * Clearance-level rejection was removed on 17 September 2026 (*"I think Return
+ * is enough already"*), so the act it was written around no longer exists. The
+ * rule it protected is untouched and is still covered, one test up: 'does not
+ * show one office another office's remarks' returns the FSIC as BFP and asserts
+ * `$fsic['remarks']` is null for CHO while CHO's own remarks are readable. Same
+ * boundary, same two offices, on the path that is actually reachable.
+ *
+ * Said here rather than silently deleted, because "we used to test that" is the
+ * thing a reader of this file will want to know.
+ */
 
 it('does not hand one office a permit certificate issued by another', function () {
     $app = paidFilingForScoping();
