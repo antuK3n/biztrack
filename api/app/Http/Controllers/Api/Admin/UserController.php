@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\ApplicationAssignment;
 use App\Models\Role;
 use App\Models\User;
 use App\Services\NotificationService;
@@ -346,12 +347,105 @@ class UserController extends Controller
                  * exact figure and the screen says when the list is shorter.
                  */
                 'cases' => Caseload::cases($user),
+                /*
+                 * What NOBODY in their office holds — the other direction the
+                 * Reassign dialog now offers. Kept as its own list rather than
+                 * folded into `cases`, because they are opposite acts: one
+                 * moves work away from this officer, the other gives work to
+                 * them, and a single list would need a flag on every row to
+                 * say which.
+                 */
+                'unassigned' => Caseload::unassignedInOfficeOf($user),
                 'candidates' => $candidates->map(fn (User $c) => [
                     'id' => $c->id,
                     'name' => $c->name,
                     'email' => $c->email,
                     'open_total' => Caseload::summary($c)['total'],
                 ])->all(),
+            ],
+        ]);
+    }
+
+    /**
+     * Give this officer work nobody is holding.
+     *
+     * `reassignCaseload` above moves work AWAY from the officer whose row was
+     * clicked. This is the same act from the other end, asked for by the
+     * client: an office's unassigned filings listed in the same dialog, so a
+     * case nobody has picked up can be handed to whichever officer the admin
+     * opened.
+     *
+     * Same permission, because `oic.assign` names who handles a case whichever
+     * way the case moves. Same office boundary too: an officer may only be
+     * given work their own office was routed, and the check is here rather than
+     * left to the caller because `cases` arrives from a browser.
+     */
+    public function takeCases(Request $request, User $user): JsonResponse
+    {
+        $data = $request->validate([
+            'cases' => ['required', 'array', 'min:1'],
+            'cases.*.kind' => ['required', Rule::in(['review'])],
+            'cases.*.id' => ['required', 'integer'],
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why this work is being handed over — it is recorded against the officer.',
+        ]);
+
+        abort_if(
+            $user->department_id === null,
+            422,
+            'This account belongs to no office, so there is no office queue to take work from.'
+        );
+
+        $ids = collect($data['cases'])->pluck('id');
+
+        /*
+         * Checked against what is ACTUALLY free in that officer's office,
+         * before anything moves. Without this the endpoint would take any id
+         * and move a colleague's case by it — a reassignment nobody asked for,
+         * recorded against an admin who chose a different act entirely.
+         *
+         * Refused whole rather than filtered down to the valid rows: a dialog
+         * that asked to take three and took two, silently, is the "reported
+         * success without acting" defect in a smaller hat.
+         */
+        $free = ApplicationAssignment::whereIn('id', $ids)
+            ->where('department_id', $user->department_id)
+            ->whereNull('officer_user_id')
+            ->get();
+
+        if ($free->count() !== $ids->unique()->count()) {
+            throw ValidationException::withMessages([
+                'cases' => ['Some of those filings are no longer free, or belong to another office. Close this dialog and open it again.'],
+            ]);
+        }
+
+        DB::transaction(function () use ($free, $user, $data) {
+            foreach ($free as $assignment) {
+                $assignment->forceFill([
+                    'officer_user_id' => $user->id,
+                    // The date the OIC register prints. An assignment handed
+                    // out without one shows a holder and a blank column.
+                    'assigned_at' => now(),
+                ])->save();
+
+                Audit::log('assignment.reassigned', $assignment, [
+                    'officer_user_id' => $user->id,
+                    'reason' => $data['reason'],
+                    'from' => 'office queue',
+                ]);
+            }
+
+            Audit::log('user.cases_taken', $user, [
+                'count' => $free->count(),
+                'reason' => $data['reason'],
+            ]);
+        });
+
+        return response()->json([
+            'data' => [
+                'total' => $free->count(),
+                'to' => ['id' => $user->id, 'name' => $user->name],
             ],
         ]);
     }
