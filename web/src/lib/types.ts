@@ -236,6 +236,20 @@ export interface Business {
   registration_number: string | null
   tin: string | null
   ban: string | null
+  /**
+   * What the last approved filing declared.
+   *
+   * Written by `WorkflowService::syncDeclaredFigures` at every approval, and
+   * null on a business that has not had one since that started. The office
+   * sheets read them — CENRO's and CHO's papers both print a floor area and a
+   * headcount they expect carried rather than re-asked.
+   */
+  business_area_sqm?: number | null
+  total_employees?: number | null
+  male_employees?: number | null
+  female_employees?: number | null
+  employees_within_lgu?: number | null
+  delivery_units?: number | null
   is_active: boolean
   is_rented?: boolean
   lessor_name?: string | null
