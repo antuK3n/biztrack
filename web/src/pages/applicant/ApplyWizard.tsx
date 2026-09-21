@@ -1,14 +1,15 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import { PsicPicker, type PsicPickerHandle } from '../../components/PsicPicker'
+import { ZoningSheetPreview, type CarriedOverBusiness } from './OfficeFormStep'
 import { checkPin, withinMalabon } from '../../lib/malabonGeo'
-import { psicSection, psicSectionRank } from '../../lib/psic'
+import { OTHER_PSIC_CODE } from '../../lib/psic'
 import { geocodeInMalabon } from '../../lib/geocode'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
   ClipboardIcon,
-  SearchIcon,
   UploadIcon,
 } from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
@@ -280,15 +281,12 @@ const AUTOSAVE_DELAY_MS = 1200
  */
 const BUSINESS_PERMIT_CODE = 'BUSINESS'
 
-/** Catch-all PSIC row (ReferenceSeeder::OTHER_PSIC_CODE) for trades not listed. */
-const OTHER_PSIC_CODE = '00000'
 
 /*
  * What the BPLO counter sees most, shown before the applicant types anything.
  * The full list is long enough that "the first eight by code" would open on
  * food manufacturing instead of the sari-sari store.
  */
-const COMMON_PSIC_CODES = ['47111', '56101', '47112', '10711', '96110', '96120', '96200', '36000']
 
 /*
  * ── Item 86 · where a pin may be dropped ──────────────────────────────────
@@ -780,6 +778,18 @@ const REGISTRATION_AGENCIES: Record<
   },
 }
 
+/**
+ * Details that have no "current value" by construction.
+ *
+ * Not the same as a value the register happens not to hold. An ADDITIONAL line
+ * of business does not exist until this amendment adds it; a NEW OWNER is the
+ * answer, not a correction of one; the paper's "AMENDMENT OF … DETAILS" blanks
+ * are notes to BPLO and were never fields. Printing "Currently: not recorded"
+ * against these reads as a gap in the register that the applicant ought to
+ * fix, which is the opposite of what it means.
+ */
+const AMEND_NO_CURRENT = ['owner_name']
+
 /** The agency that registers a structure, or null while none is chosen. */
 function agencyFor(registrationType: string): RegistrationAgency | null {
   return REGISTRATION_TYPES.find((rt) => rt.value === registrationType)?.agency ?? null
@@ -1217,7 +1227,26 @@ function FormSheet({
    * the only place the answer appeared was inside the dialog that set it, so
    * five steps later there was nothing on screen saying which shop this was.
    */
-  filing?: { business: string; permit?: string | null } | null
+  filing?: {
+    business: string
+    permit?: string | null
+    /**
+     * The rest of MCG-BPLO-FO-003's header block, when the form has one.
+     *
+     * The paper opens with five lines — Taxpayer's Name, Business Name,
+     * Account Number, Address, Date of Application — and every one of them is
+     * something BizTrack already holds. Client, 21 September 2026: *"This part
+     * in the paper does not exist in the amendment form application in our
+     * system. Make sure this is auto-filled."*
+     *
+     * Optional, because the renewal form's header is its own and the one-line
+     * banner is right there. Present, the block replaces the banner.
+     */
+    taxpayer?: string | null
+    accountNumber?: string | null
+    address?: string | null
+    dated?: string | null
+  } | null
 
   /**
    * Drop the form's identity block — the office line, the title and the form
@@ -1250,13 +1279,65 @@ function FormSheet({
         sections, but WHICH BUSINESS is the one fact worth stating there too.
       */}
       {filing && (
-        <div className="mb-6 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-lg border border-royal/25 bg-royal-tint/40 px-4 py-2.5">
-          <span className="text-[11px] font-bold uppercase tracking-wide text-royal">
+        /*
+          Two lines, not one, and the name at heading weight.
+
+          It was a single tinted row with the business set in 14px beside its
+          own caption, which read as a hint about the form rather than the
+          record the form is about — client, 21 September 2026: *"Make the
+          'This Filing is for...' much more apparent."* The name now carries
+          the size, the caption shrinks to a label above it, and the left rule
+          marks the whole block as stated fact.
+
+          Still two lines tall, because this sits on every step of a seven-part
+          form and a panel that has to be scrolled past six times is a panel
+          that stops being read.
+        */
+        <div className="mb-6 rounded-lg border border-royal/30 border-l-4 border-l-royal bg-royal-tint/60 px-4 py-3">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
             This filing is for
-          </span>
-          <span className="text-sm font-bold text-ink">{filing.business}</span>
-          {filing.permit && (
-            <span className="tnum text-xs text-ink-secondary">{filing.permit}</span>
+          </p>
+          <p className="mt-1 flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-lg font-bold leading-tight text-ink">
+            {filing.business}
+            {filing.permit && (
+              <span className="tnum text-sm font-semibold text-royal">{filing.permit}</span>
+            )}
+          </p>
+
+          {/*
+            ── The paper's header block, filled in ─────────────────────────
+
+            MCG-BPLO-FO-003 opens with Taxpayer's Name, Business Name, Account
+            Number, Address and Date of Application, and it is not INPUT: it
+            is the record being amended, printed at the top so the counter and
+            the applicant are looking at the same shop. BizTrack holds all
+            five, so they are shown rather than asked — the whole point of the
+            client's *"make sure this is auto-filled"*.
+
+            A definition list, because that is what it is: five labels and
+            five facts, read as pairs by a screen reader instead of as ten
+            loose strings.
+
+            Business Name is not repeated here — it is the heading directly
+            above, at four times the size, and printing it twice in four
+            centimetres reads as a rendering fault.
+          */}
+          {(filing.taxpayer ?? filing.accountNumber ?? filing.address ?? filing.dated) && (
+            <dl className="mt-3 grid gap-x-4 gap-y-1 border-t border-royal/20 pt-3 text-xs sm:grid-cols-[auto_1fr]">
+              {[
+                ['Taxpayer’s Name', filing.taxpayer],
+                ['Account Number', filing.accountNumber],
+                ['Address', filing.address],
+                ['Date of Application', filing.dated],
+              ].map(([label, value]) =>
+                value == null || value === '' ? null : (
+                  <Fragment key={label}>
+                    <dt className="font-semibold text-ink-secondary sm:text-right">{label}</dt>
+                    <dd className="min-w-0 text-ink">{value}</dd>
+                  </Fragment>
+                ),
+              )}
+            </dl>
           )}
         </div>
       )}
@@ -1289,138 +1370,7 @@ function LinesStep({
   lines: LineDraft[]
   onChange: (lines: LineDraft[]) => void
 }) {
-  const [query, setQuery] = useState('')
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
-  // The "Change" control below the box reopens the picker, so it needs to put
-  // the caret where the applicant is about to type. Opening the list without
-  // moving focus would leave a keyboard user staring at a list they are not in.
-  const search = useRef<HTMLInputElement>(null)
-
-  /*
-   * "Other (not listed)" is deliberately not offered.
-   *
-   * It looked like a kindness and behaved like a hole. Picking it stored the
-   * catch-all PSIC row (code 00000) with a NULL `category`, and 35 of the 36
-   * business-tax rules match on `business_category` — so a line filed under
-   * Other matched none of them and was assessed no business tax at all. It also
-   * came back from Location Insights as unclassifiable, so that applicant got
-   * no nearby-trade figures either.
-   *
-   * Every business has a line; 135 PSIC codes is enough to find it, and the
-   * search is there to find it with. A trade genuinely missing from the list is
-   * a gap in the reference data to fix at the source, not something to let an
-   * applicant type into a free-text box that nothing downstream can read.
-   *
-   * Rows already filed under it still render below — see the Selected list.
-   */
-  /*
-   * ── Item 104b · every trade is reachable, and nothing is cut in silence ──
-   *
-   * Two caps used to stand between an applicant and the list. With the box
-   * empty they saw the eight-code COMMON_PSIC_CODES shortlist and nothing else,
-   * so browsing simply could not reach trade nine of 135. With a query typed
-   * the matches were sliced to 25 and the slice was never mentioned — "sale"
-   * matches 48 titles, so twenty-three real trades were dropped off the bottom
-   * with no sign they had ever existed. An applicant whose trade was among them
-   * concluded it was not on the list.
-   *
-   * Both are gone. The empty box now opens on the common eight and then
-   * continues into every remaining code, so the shortlist is a head start
-   * rather than a gate; a query returns all of its matches. 135 rows in a
-   * scrolling 16rem box is a list, not a page — the cap was solving a layout
-   * problem the `overflow-y-auto` had already solved.
-   *
-   * `commonCount` is the boundary the "Most common" heading is drawn at, and it
-   * is 0 while searching: relevance, not familiarity, orders a search result.
-   */
-  const { results, commonCount, total } = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const listed = codes.filter((c) => c.code !== OTHER_PSIC_CODE)
-    if (q) {
-      /*
-       * Search results are grouped too, and this is a correction.
-       *
-       * Item 6's headings were drawn only when the box was EMPTY, on the
-       * argument that a query is answered by relevance and a subject heading
-       * would bury the match somebody typed for. That argument does not survive
-       * contact with the list: "sale" matches 48 of the 135 titles, and 48
-       * ungrouped rows is the same wall the item was raised about — with the
-       * added insult that the categories visibly disappear the moment you type,
-       * which reads as the feature being broken rather than withheld.
-       *
-       * There is no relevance ranking here to protect, either. The filter is a
-       * substring test, so the order it returns is the reference table's, not a
-       * score. Sorting by section replaces an arbitrary order with a
-       * navigable one and loses nothing.
-       */
-      const matches = listed
-        .filter((c) => c.title.toLowerCase().includes(q) || c.code.includes(q))
-        .sort((a, b) => {
-          const rank = psicSectionRank(psicSection(a.code)) - psicSectionRank(psicSection(b.code))
-          return rank !== 0 ? rank : a.title.localeCompare(b.title)
-        })
-
-      return { results: matches, commonCount: 0, total: listed.length }
-    }
-
-    const common = COMMON_PSIC_CODES.map((code) => listed.find((c) => c.code === code)).filter(
-      (c): c is PsicCode => c !== undefined,
-    )
-    const promoted = new Set(common.map((c) => c.id))
-
-    /*
-     * Item 6 — the rest is ordered by SECTION so it can carry headings.
-     *
-     * The shortlist answers for eight trades. The other 127 arrived in
-     * reference-table order, which is no order the applicant can use: a single
-     * unbroken scroll where bakeries, clinics and repair shops interleave, and
-     * the only way to find one is to read all of it. Sorting by section is what
-     * makes a heading possible at all — a heading can only be drawn where the
-     * subject actually changes, so the grouping has to exist in the data before
-     * it can exist on the screen.
-     *
-     * Title within section, so the run under each heading is alphabetical and
-     * skimmable rather than arbitrary.
-     *
-     * Only when the box is EMPTY. A query is answered by relevance, and
-     * scattering matches under headings would bury the one the applicant typed
-     * for — which is also why `commonCount` is already 0 while searching.
-     */
-    const rest = listed
-      .filter((c) => !promoted.has(c.id))
-      .sort((a, b) => {
-        const rank = psicSectionRank(psicSection(a.code)) - psicSectionRank(psicSection(b.code))
-        return rank !== 0 ? rank : a.title.localeCompare(b.title)
-      })
-
-    return {
-      results: [...common, ...rest],
-      commonCount: common.length,
-      total: listed.length,
-    }
-  }, [codes, query])
-
-  /*
-   * Closes on a click elsewhere and on Escape. The list used to be permanently
-   * open, so ten trades and a Selected panel pushed the map and everything
-   * under it off the screen — on a step whose whole job is picking a location.
-   */
-  useEffect(() => {
-    if (!open) return
-    function onPointerDown(e: PointerEvent) {
-      if (!box.current?.contains(e.target as Node)) setOpen(false)
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('pointerdown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [open])
+  const pickerRef = useRef<PsicPickerHandle>(null)
 
   /*
    * One trade, not several.
@@ -1456,13 +1406,6 @@ function LinesStep({
    * choice — deliberately not called "Remove", which is the vocabulary of a
    * list you are pruning.
    */
-  function toggle(code: PsicCode) {
-    const already = lines[0]?.psic_code_id === code.id
-    if (already) return
-    onChange([{ psic_code_id: code.id, line_of_business: '', products_services: '' }])
-    setOpen(false)
-  }
-
   /*
    * Named, never counted. A count is the multi-select's vocabulary: "Selected
    * (1)" answers "how many?", which is a question this step does not ask and
@@ -1470,8 +1413,6 @@ function LinesStep({
    * rows in this list differ only by the words in their brackets, so the only
    * confirmation worth showing is the trade's name.
    */
-  const chosenCode =
-    lines.length > 0 ? codes.find((c) => c.id === lines[0].psic_code_id) : undefined
   const selectedTitles = lines
     .map((l) => codes.find((c) => c.id === l.psic_code_id)?.title)
     .filter(Boolean)
@@ -1479,213 +1420,26 @@ function LinesStep({
 
   /** Reopen the picker on the applicant's own terms, caret already in the box. */
   function reopen() {
-    setQuery('')
-    setOpen(true)
-    search.current?.focus()
+    pickerRef.current?.reopen()
   }
 
   return (
     <div className="space-y-4">
-      {/* relative: the results hang over what follows instead of shoving it down. */}
-      <div ref={box} className="relative">
-        <label htmlFor="psic-search" className="block">
-          {/*
-           * "Search for the ONE line" — the instruction is in the field's own
-           * name, where it cannot be scrolled past, rather than only in help
-           * text above it. This is the label a screen reader announces when
-           * the applicant arrives in the box, so it is the last chance to say
-           * how many answers the question takes before they give one.
-           */}
-          <FieldLabel required>Search for the one line of business you are registering</FieldLabel>
-        </label>
-        <div className="relative">
-          <SearchIcon
-            size={18}
-            className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-secondary"
-          />
-          <input
-            id="psic-search"
-            ref={search}
-            role="combobox"
-            aria-expanded={open}
-            aria-controls="psic-results"
-            aria-autocomplete="list"
-            value={query}
-            onFocus={() => setOpen(true)}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setOpen(true)
-            }}
-            placeholder="e.g. retail, food, salon"
-            className={`${inputCls} pl-10`}
-          />
-        </div>
-
-        {open && (
-          /*
-           * z-[1100] rather than a small z-index because the map sits directly
-           * below this and Leaflet builds its own stacking world: tile and
-           * marker panes at 200-600, controls at 1000. At z-20 the list
-           * rendered *under* the map — the results were sliced in half and the
-           * panel's white showed through beneath it, which read as a layout bug
-           * rather than a dropdown.
-           */
-          <div className="absolute z-[1100] mt-1 w-full overflow-hidden rounded-lg border border-input-border bg-white shadow-lg">
-            {/*
-             * ── Item 104a · the confirmation you can actually see ──────────
-             *
-             * "The selected line of business does not reflect after choosing."
-             * It did reflect — in two places the applicant could not see. The
-             * row's checkbox ticks inside a list they are still reading, and
-             * the "Selected (N)" panel is directly BELOW this dropdown, which
-             * is absolutely positioned and up to 16rem tall and therefore
-             * sitting on top of it. `document.elementFromPoint` over the
-             * "Selected (1)" heading returns a result row, not the heading: at
-             * the moment of the click the only confirmation on screen was a
-             * 20px tick inside a list of identical rows.
-             *
-             * So the confirmation is put where the eye already is — pinned to
-             * the top of the open list, against the tinted background, naming
-             * what is now selected. It cannot be covered by the dropdown
-             * because it is part of it, and it needs no scrolling because it
-             * is directly under the box being typed in.
-             *
-             * The panel below takes over the moment the list closes.
-             *
-             * It reads "Your line of business is X" and NOT "Selected (1)":
-             * a running count is what a shopping basket says, and the only
-             * reason to print one is that the number can change. It cannot.
-             * Reopening this list to pick again is a correction, and the
-             * wording says so — "picking another replaces it" — so nobody
-             * arrives at a second trade expecting it to be added.
-             */}
-            {chosenCode && (
-              <p className="border-b border-line bg-royal-tint px-4 py-2.5 text-xs font-semibold text-royal">
-                <span className="mr-1.5 inline-flex h-4 w-4 translate-y-0.5 items-center justify-center rounded-sm bg-royal text-white">
-                  <CheckIcon size={11} />
-                </span>
-                Your line of business is{' '}
-                <span className="font-normal text-ink">{chosenCode.title}</span>
-                <span className="font-normal text-ink-secondary">
-                  {' '}
-                  — picking another replaces it.
-                </span>
-              </p>
-            )}
-
-            <ul
-              id="psic-results"
-              // The rows are radios now, so the list that holds them has to say
-              // so — otherwise a screen reader meets a radio with no group.
-              role="radiogroup"
-              aria-label="Line of business"
-              className="max-h-64 divide-y divide-line overflow-y-auto"
-            >
-              {results.length === 0 ? (
-                <li className="px-4 py-4 text-sm text-ink-secondary">
-                  No trade matches “{query.trim()}”. Try a plainer word — “food” rather than the
-                  dish, “retail” rather than the goods.
-                </li>
-              ) : (
-                results.map((code, index) => {
-                  const selected = lines.some((l) => l.psic_code_id === code.id)
-                  return (
-                    <Fragment key={code.id}>
-                      {/*
-                       * The shortlist is a head start, not a fence, so it says
-                       * which it is and where it ends. Without the second
-                       * heading the ninth row looks like more of the same and
-                       * an applicant who has read eight stops reading.
-                       */}
-                      {commonCount > 0 && index === 0 && (
-                        <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
-                          Most common
-                        </li>
-                      )}
-                      {/*
-                       * Item 6 — a heading wherever the SECTION changes, so the
-                       * 127 trades past the shortlist are skimmed rather than
-                       * read.
-                       *
-                       * "All other trades (127)" used to stand here alone, and
-                       * naming the size of a list is not the same as making it
-                       * navigable: it told the applicant exactly how much
-                       * scrolling was ahead and nothing about where to stop.
-                       *
-                       * Drawn on CHANGE rather than by slicing the array into
-                       * groups, because the rows are one radiogroup and the
-                       * index each row reports is its position in it. Splitting
-                       * the list into per-section arrays would restart that
-                       * count in every group and break the radio semantics for
-                       * the sake of tidier JSX.
-                       *
-                       * Drawn while searching too. `commonCount` is 0 then, so
-                       * `index >= commonCount` is true from the first row and
-                       * the whole result set is headed — which is the point,
-                       * since a query like "sale" returns 48 rows and that is
-                       * the wall this item exists to remove.
-                       */}
-                      {index >= commonCount &&
-                        (index === commonCount ||
-                          psicSection(results[index - 1].code) !== psicSection(code.code)) && (
-                          <li className="bg-shell px-4 py-1.5 text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
-                            {psicSection(code.code)}
-                          </li>
-                        )}
-                      <li>
-                        <button
-                          type="button"
-                          onClick={() => toggle(code)}
-                          /*
-                           * radio, not aria-pressed: these are exclusive
-                           * answers to one question now, and `aria-pressed`
-                           * would announce 134 independent switches.
-                           */
-                          role="radio"
-                          aria-checked={selected}
-                          className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                            selected ? 'bg-input' : 'hover:bg-royal-tint'
-                          }`}
-                        >
-                          <span
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border ${
-                              selected
-                                ? 'border-royal bg-royal text-white'
-                                : 'border-input-border bg-white'
-                            }`}
-                          >
-                            {selected && <CheckIcon size={13} />}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium text-ink">{code.title}</span>
-                            <span className="tnum block text-xs text-ink-secondary">
-                              PSIC {code.code}
-                            </span>
-                          </span>
-                        </button>
-                      </li>
-                    </Fragment>
-                  )
-                })
-              )}
-            </ul>
-
-            {/*
-             * Item 104b — the count, stated. Nothing is cut any more, and
-             * saying so is the half of the fix that stops an applicant giving
-             * up: "8 shown" out of 135 with no total was indistinguishable
-             * from "your trade is not on the list".
-             */}
-            {results.length > 0 && (
-              <p className="border-t border-line bg-white px-4 py-2 text-xs text-ink-secondary">
-                {query.trim()
-                  ? `Showing all ${results.length} of ${total} trades matching “${query.trim()}”.`
-                  : `Showing all ${total} trades — the most common first. Scroll for the rest.`}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
+      <PsicPicker
+        ref={pickerRef}
+        codes={codes}
+        chosenId={lines[0]?.psic_code_id ?? null}
+        /*
+         * Replaces rather than appends, which is the whole of this step's
+         * one-trade rule. See the long note above on why `lines` stays an
+         * array even though this wizard writes exactly one.
+         */
+        onPick={(code) =>
+          onChange([{ psic_code_id: code.id, line_of_business: '', products_services: '' }])
+        }
+        label="Search for the one line of business you are registering"
+        required
+      />
 
       {/*
        * The same confirmation for somebody who cannot see the panel at all.
@@ -2038,6 +1792,41 @@ function IdentifyFilingModal({
         ? [initial.permitId]
         : [],
   )
+
+  /*
+   * ── An amendment's permit follows its business, in the same render ──────
+   *
+   * One business holds one current business permit, and an amendment amends
+   * that one, so there is nothing here for the applicant to choose and no
+   * permit list is rendered for them.
+   *
+   * DERIVED, not state. Two earlier shapes both leaked:
+   *
+   *  - the dropdown's `onChange`, which fires only when somebody picks, so a
+   *    REOPENED draft arrived with its business already set, nothing to fire,
+   *    and an empty `permitIds` that made Confirm refuse with "Tick every
+   *    permit you are amending" — pointing at a list an amendment does not
+   *    render;
+   *  - an effect, which fixed the reopened draft and bought a frame: the
+   *    render between picking a business and the effect running had the
+   *    business set and the permit not, so the dialog's refusal flashed up
+   *    and vanished. Client, 21 September 2026: *"why does [it] appear before
+   *    disappearing when I select a business."*
+   *
+   * A value computed during render cannot disagree with the business it is
+   * computed from, and there is no frame in between for it to disagree in.
+   */
+  const amendmentPermit =
+    applicationType === 'amendment'
+      ? (ownedBusinesses.find((b) => b.id === businessId)?.current_business_permit ?? null)
+      : null
+
+  const effectivePermitIds =
+    applicationType === 'amendment'
+      ? amendmentPermit === null
+        ? []
+        : [amendmentPermit.id]
+      : permitIds
   /*
    * Held and handed back untouched, never edited here any more.
    *
@@ -2051,17 +1840,7 @@ function IdentifyFilingModal({
   const [prefill, setPrefill] = useState<PrefillResult | null>(null)
   const [loadingPermits, setLoadingPermits] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  /*
-   * Whether Confirm has been pressed on an unanswered question. The reason is
-   * always described on the button (aria-describedby, below); this only
-   * decides whether it is also SHOWN, so the dialog does not open scolding
-   * somebody who has not touched anything yet.
-   */
-  const [attempted, setAttempted] = useState(false)
 
-  const businessRef = useRef<HTMLSelectElement | null>(null)
-  const permitsRef = useRef<HTMLUListElement | null>(null)
-  const amendmentRef = useRef<HTMLFieldSetElement | null>(null)
   const reasonId = useId()
 
   /*
@@ -2120,8 +1899,6 @@ function IdentifyFilingModal({
     applicationType === 'amendment'
       ? allPermits.filter((p) => p.permit_type?.code === BUSINESS_PERMIT_CODE)
       : allPermits
-  const amendmentChosen =
-    amendment.ownership || amendment.location || amendment.nature || amendment.other.trim() !== ''
 
   /*
    * Why Confirm will not get you out of here yet — in the order the questions
@@ -2142,52 +1919,80 @@ function IdentifyFilingModal({
    * So the gate is one condition again, and a stricter one than either version
    * before it: at least one permit ticked, always.
    */
-  const answeredPriorPermit = permitIds.length > 0
-  const blocked: { reason: string; focus: () => void } | null =
+  const answeredPriorPermit = effectivePermitIds.length > 0
+  /*
+   * A SENTENCE, not a sentence and a focus closure.
+   *
+   * Each reason used to carry a `focus()` that a press on the blocked dialog
+   * would call. Continue is greyed now (`confirmDisabled`), so ProtoModal
+   * never calls the handler and nothing could ever call those closures — dead
+   * weight that reads as live behaviour.
+   *
+   * Non-null is what greys the button, and the string is what the button's
+   * `aria-describedby` reads out. One value, two jobs, no way for them to
+   * disagree about whether the dialog can go on.
+   */
+  const blocked: string | null =
     businessId === null
-      ? {
-          reason: `Choose the business you are ${verb} first.`,
-          focus: () => businessRef.current?.focus(),
-        }
+      ? `Choose the business you are ${verb} first.`
       : loadingPermits
-        ? { reason: 'Still loading this business’s permits.', focus: () => {} }
+        ? 'Still loading this business’s permits.'
         : !answeredPriorPermit
-          ? {
-              reason:
-                permits.length > 0
-                  ? `Tick every permit you are ${verb}.`
-                  : `This business has no permit to renew. File a New Application instead.`,
-              focus: () => permitsRef.current?.querySelector('input')?.focus(),
-            }
+          ? applicationType === 'amendment'
+            ? /*
+               * An amendment has no permit list to point at, so it must not
+               * borrow the renewal's wording. Only reachable if a business
+               * that passed `choosableBusinesses` has since lost its current
+               * permit; the sentence says that rather than asking for a tick
+               * on a control the applicant cannot see.
+               */
+              'This business has no current business permit to amend.'
+            : permits.length > 0
+              ? `Tick every permit you are ${verb}.`
+              : `This business has no permit to renew. File a New Application instead.`
           : /*
-             * Section A is not asked here any more — it is the wizard's own
-             * step, after Data Privacy, because a No there ends the form and a
-             * question that can end the form does not belong in the dialog
-             * that opens it. This dialog asks one thing: which permits.
+             * ── Nothing else is asked HERE ──────────────────────────────────
+             *
+             * Section A is not asked in this dialog any more — it is the
+             * wizard's own step, after Data Privacy, because a No there ends
+             * the form and a question that can end the form does not belong in
+             * the dialog that opens it. This dialog asks one thing: which
+             * permits, and on an amendment even that rides on the business.
+             *
+             * A gate demanding "tick at least one thing you are amending"
+             * outlived the ticks themselves. It refused Confirm on every
+             * amendment and put the cursor on a fieldset that was not on
+             * screen, so the dialog could not be got past at all.
+             *
+             * What it protected is still asked, where the answer now lives:
+             * the New Details step will not advance without one, and `submit`
+             * refuses on an empty `requested_changes`.
              */
-            applicationType === 'amendment' && !amendmentChosen
-            ? {
-                reason:
-                  'Tick at least one thing you are amending. An amendment that amends nothing is not a filing the BPLO can act on.',
-                focus: () => amendmentRef.current?.querySelector('input')?.focus(),
-              }
-            : null
+            null
 
   function confirm() {
-    // Not `disabled` — see ProtoModal's confirmDescribedBy. A press on a
-    // blocked dialog says why and puts the cursor on the question.
-    if (confirming) return
-    if (blocked) {
-      setAttempted(true)
-      blocked.focus()
-      return
-    }
+    /*
+     * ── The second door, not the first ────────────────────────────────
+     *
+     * Continue is `confirmDisabled` while `blocked`, and ProtoModal already
+     * refuses to call this then — so in practice a blocked press never
+     * arrives here. The guard stays anyway: the two are computed from the
+     * same `blocked` and a future edit that loosens one must not be able to
+     * let a half-answered filing through the other.
+     *
+     * What is GONE is the scolding. It set a flag that turned the reason
+     * below red, and with the button greyed nothing can set it — a mechanism
+     * no press can reach is worse than no mechanism, because the next reader
+     * has to work out that it is dead. The reason is still on the button's
+     * `aria-describedby`, which is how the greyed control explains itself.
+     */
+    if (confirming || blocked) return
     if (businessId === null || !prefill) return
     onConfirm({
       businessId,
       // Primary is the first tick; the set is the whole answer.
-      permitId: permitIds[0] ?? null,
-      permitIds,
+      permitId: effectivePermitIds[0] ?? null,
+      permitIds: effectivePermitIds,
       amendment,
       prefill,
     })
@@ -2196,12 +2001,40 @@ function IdentifyFilingModal({
   return (
     <ProtoModal
       title={
-        applicationType === 'renewal' ? 'WHICH PERMITS ARE YOU RENEWING?' : 'WHAT ARE YOU AMENDING?'
+        applicationType === 'renewal'
+          ? 'WHICH PERMITS ARE YOU RENEWING?'
+          : 'WHICH BUSINESS ARE YOU AMENDING?'
       }
       wide
       cancelLabel={mode === 'entry' ? 'Not now' : 'Keep what I had'}
       confirmLabel={confirming ? 'Opening…' : 'Continue'}
       confirmDescribedBy={blocked ? reasonId : undefined}
+      /*
+       * ── Greyed until the dialog can actually go on ────────────────────
+       *
+       * Client, 21 September 2026: *"Make the Continue not clickable until a
+       * business is selected… grayed out or something. Refer to other modals
+       * for same consistency with colors."*
+       *
+       * `confirmDisabled` is that, and it is the prop every other dialog in
+       * the app already passes — Change Status, Transfer Ownership, Officer
+       * Assignment, Add officer. ProtoModal renders it as `aria-disabled`
+       * with `opacity-60` and a not-allowed cursor, so this dialog now looks
+       * and behaves like the rest of them instead of offering a live button
+       * that silently refuses.
+       *
+       * NOT the native `disabled` attribute — AGENTS.md §6.2. A disabled
+       * button leaves the tab order, taking the one control whose
+       * `aria-describedby` states the reason with it: a screen-reader user
+       * would meet a dialog that had nothing to say about why it was stuck.
+       * ProtoModal moves the guard into the click handler instead.
+       *
+       * Gated on `blocked` and not on `businessId` alone, so the button and
+       * the sentence beneath it can never disagree. All three of its reasons
+       * are real: no business, the prefill still in flight (which `confirm`
+       * genuinely needs), or a business whose current permit has gone.
+       */
+      confirmDisabled={blocked !== null}
       onCancel={onCancel}
       onConfirm={confirm}
     >
@@ -2215,25 +2048,9 @@ function IdentifyFilingModal({
       <label className="mt-5 block">
         <FieldLabel required>Which business are you {verb}?</FieldLabel>
         <select
-          ref={businessRef}
           className={inputCls}
           value={businessId ?? ''}
-          onChange={(e) => {
-            const next = e.target.value ? Number(e.target.value) : null
-            setBusinessId(next)
-
-            /*
-             * On an amendment the permit rides on the business: one current
-             * permit, named in the option just picked, so setting it here
-             * records the choice the applicant already made rather than
-             * making one for them.
-             */
-            if (applicationType === 'amendment') {
-              const permitId = ownedBusinesses.find((b) => b.id === next)?.current_business_permit
-                ?.id
-              setPermitIds(permitId === undefined ? [] : [permitId])
-            }
-          }}
+          onChange={(e) => setBusinessId(e.target.value ? Number(e.target.value) : null)}
           // Momentary, not a field held shut by another answer: there is
           // nothing to choose between until the list has arrived.
           disabled={businessesLoading}
@@ -2303,8 +2120,8 @@ function IdentifyFilingModal({
             // failed to load rather than one with no rows to show.
             permits.length > 0 && (
               <ul
-                ref={permitsRef}
                 aria-label={`Which permits are you ${verb}?`}
+
                 className="divide-y divide-line overflow-hidden rounded-lg border border-input-border bg-white"
               >
                 {permits.map((p) => {
@@ -2475,18 +2292,25 @@ function IdentifyFilingModal({
       */}
 
       {/*
-       * Tied to Confirm by aria-describedby, so pressing it — or simply
-       * tabbing onto it — reads out what is still missing. Rendered
-       * unconditionally once `attempted`, rather than as a live `role="alert"`,
-       * so it is a stable description of the button and not a message that
-       * fires again on every keystroke.
+       * Tied to Confirm by aria-describedby, so tabbing onto the greyed
+       * button reads out what is still missing. A stable description rather
+       * than a live `role="alert"`, so it is not re-announced on every
+       * keystroke.
+       */}
+      {/*
+       * The greyed button's explanation, for the reader who cannot see that
+       * it is greyed.
+       *
+       * `sr-only` always, never red. A disabled-looking control with no
+       * stated reason is WCAG 3.3.1/3.3.3, and `aria-describedby` on the
+       * button is what answers it — this paragraph exists to be that
+       * description. Sighted users get the required marker on the field, the
+       * empty select and the dimmed button, which is what every other dialog
+       * in the app gives them.
        */}
       {blocked && (
-        <p
-          id={reasonId}
-          className={`mt-5 text-xs font-medium ${attempted ? 'text-s-red' : 'sr-only'}`}
-        >
-          {blocked.reason}
+        <p id={reasonId} className="sr-only">
+          {blocked}
         </p>
       )}
       {confirmError && (
@@ -2691,8 +2515,6 @@ export function ApplyWizard() {
    * boolean to drift out of step with it.
    */
   const [amendment, setAmendment] = useState<AmendmentState>(EMPTY_AMENDMENT)
-  const amendmentChosen =
-    amendment.ownership || amendment.location || amendment.nature || amendment.other.trim() !== ''
 
   // OCR-lite suggestion banner (v2) — dismissible; suggestions only.
   const [ocr, setOcr] = useState<OcrSuggestions | null>(null)
@@ -2747,6 +2569,27 @@ export function ApplyWizard() {
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
+  /**
+   * The filing's own date, for FO-003's "Date of Application" line.
+   *
+   * ── Why not `new Date()` ──────────────────────────────────────────────
+   *
+   * Because that is not a date, it is a clock. The header printed
+   * `formatDate(new Date())`, recomputed on every render, so a draft started
+   * today and reopened next week would have said next week — and the line it
+   * fills in is the one the LGU dates the filing by. Client, 21 September
+   * 2026: *"is this dynamically changing? If I continue my draft tomorrow,
+   * would the date be adjusted to Sept. 22?"* It would have.
+   *
+   * `submitted_at` once the filing is in, `created_at` before that — the day
+   * it was begun. Both come off the row, so neither moves when the page is
+   * reopened, and the one that is shown is the one the office would use.
+   *
+   * Null only before the draft exists at all, where there is no filing to
+   * date and today is the honest answer: nothing can reopen it to see the
+   * answer drift.
+   */
+  const [filedAt, setFiledAt] = useState<string | null>(null)
   /*
    * ── The amendable details, and what this filing asks of them ─────────────
    *
@@ -2759,10 +2602,56 @@ export function ApplyWizard() {
    * overwritten by a reload, and so saving can tell an untouched field from one
    * deliberately cleared.
    */
-  const [amendRows, setAmendRows] = useState<AmendmentRow[]>([])
+  /**
+   * The per-filing half of the amendment rows, keyed by field.
+   *
+   * ── Why this is separate from the definitions ─────────────────────────
+   *
+   * The four boxes, their labels and their controls are the same for every
+   * business, so they arrive with the reference data before the wizard paints
+   * (`refs.data.amendableFields`). What is NOT the same is the register's
+   * current value and what this draft has already asked for, and those need
+   * an application id — which on a first visit does not exist until a draft
+   * has been POSTed.
+   *
+   * Held apart so the second never blocks the first. Sent together, the step
+   * could not draw a single box until two round trips had finished, and a
+   * slow answer looked like a broken form. Client, 21 September 2026: *"Why
+   * it still loads? Can't you make it appear instantly, just like in the
+   * other forms?"*
+   */
+  const [amendValues, setAmendValues] = useState<Record<string, AmendmentRow>>({})
   const [amendTyped, setAmendTyped] = useState<Record<string, string>>({})
   const [amendBusy, setAmendBusy] = useState(false)
+  /*
+   * Why a pin was refused, if it was.
+   *
+   * Separate from `amendError`, which is the server talking. This one never
+   * reaches the server: a pin outside Malabon is not a request that failed,
+   * it is a request that was never made.
+   */
+  const [amendPinError, setAmendPinError] = useState<string | null>(null)
   const [amendError, setAmendError] = useState<string | null>(null)
+  /**
+   * Whether the amendable details are still on their way.
+   *
+   * ── Why an empty step is not an honest empty step ─────────────────────
+   *
+   * These rows are fetched, and until they land `amendRows` is `[]` — which
+   * renders as nothing at all: no boxes, no headings, no message. A slow
+   * response is then indistinguishable from a broken form.
+   *
+   * It happened. On 21 September 2026 the API took 43 seconds to answer
+   * (single-threaded dev server, a test suite running against it), and the
+   * client's reaction to the screen was *"What in the world is happening?
+   * Where are the fields?"* — which is the correct reaction to a form with no
+   * fields and nothing to say for itself.
+   *
+   * Starts TRUE, because the first paint happens before the effect has run
+   * and "loading" is the truth at that moment. Starting false would flash the
+   * empty state for one frame on every arrival.
+   */
+  const [amendLoading, setAmendLoading] = useState(true)
   const [amendSaved, setAmendSaved] = useState<string | null>(null)
   // Keyed by document type; the document id is what a removal needs.
   /*
@@ -2905,6 +2794,12 @@ export function ApplyWizard() {
       psic: await reference.psicCodes(),
       permitTypes: await reference.permitTypes(),
       documentTypes: await reference.documentTypes(),
+      /*
+       * The amendment form's four boxes. Here rather than on the step so it
+       * is in hand before the wizard paints — see the endpoint's note on why
+       * the definitions stopped travelling with the values.
+       */
+      amendableFields: await reference.amendableFields(),
     }),
     [],
   )
@@ -3178,6 +3073,34 @@ export function ApplyWizard() {
   }
 
   const permitTypes = refs.data?.permitTypes ?? []
+
+  /**
+   * Definition plus value, one row per amendable detail.
+   *
+   * The definitions are authoritative for WHAT is asked and in what order;
+   * the values are authoritative for what the register holds and what has
+   * been requested. A field with no value yet is a real row with nothing in
+   * it, which is exactly what the applicant should see while the second
+   * request is in flight — the box, ready to type in, rather than a gap.
+   */
+  const amendRows: AmendmentRow[] = useMemo(
+    () =>
+      (refs.data?.amendableFields ?? []).map((def) => {
+        const value = amendValues[def.field]
+
+        return {
+          ...def,
+          current_value: value?.current_value ?? null,
+          current_label: value?.current_label ?? null,
+          new_value: value?.new_value ?? null,
+          new_label: value?.new_label ?? null,
+          requested: value?.requested ?? false,
+          old_value: value?.old_value ?? null,
+          applied_at: value?.applied_at ?? null,
+        }
+      }),
+    [refs.data?.amendableFields, amendValues],
+  )
   /*
    * The Mayor's / Business Permit rides along on every application (it is what
    * the application is for), so BPLO always ends up in the routing. The picker
@@ -3254,21 +3177,62 @@ export function ApplyWizard() {
      * named for an amendment is not asked for, rather than inherited from a
      * form the applicant is not filling in.
      */
-    const amending = (field: string) => amendRows.some((r) => r.field === field && r.requested)
+    /*
+     * Which of FO-003's four checkboxes this filing ticks.
+     *
+     * The paper prints a requirements list PER BOX, so the box is the unit the
+     * rules are written against — `AmendableFields::GROUPS` server-side, the
+     * `group` on every row here. Asking "is any field of this group being
+     * changed" is asking "is this box ticked", which is the question the
+     * paper's own lists are indexed by.
+     */
+    const ticked = (group: string) =>
+      amendRows.some((r) => r.group === group && r.requested)
 
     /*
-     * Corporations, partnerships and cooperatives. `registration_type` is the
-     * DTI/SEC/CDA answer, and only a sole proprietor registers with DTI — so
-     * anything else needs the amended Articles the paper asks for.
+     * The two conditional lines the paper states as conditions rather than as
+     * boxes: "For Single Proprietor – DTI Registration" and "For Corporation –
+     * Amended Articles of Incorporation…".
+     *
+     * Read through `agencyFor`, not off `registration_type` directly. This
+     * compared the raw value to the string 'DTI' — but the column holds a
+     * STRUCTURE ('sole_proprietorship', 'partnership', …) and the agency is
+     * derived from it, so every sole proprietor in the register came out
+     * "incorporated" and was asked for amended Articles of Incorporation they
+     * do not have. Pedro's Snack Bar is `sole_proprietorship`, which is
+     * exactly the case that was wrong.
+     *
+     * Partnerships and cooperatives count as incorporated: all three file
+     * articles, and the paper's "For Corporation" line is the one that covers
+     * them. Only the sole proprietor is the other branch.
      */
-    const isIncorporated =
-      form.registration_type !== '' && form.registration_type.toUpperCase() !== 'DTI'
+    const isSoleProprietor = agencyFor(form.registration_type) === 'DTI'
+    const isIncorporated = form.registration_type !== '' && !isSoleProprietor
+
+    /*
+     * The paper asks for DTI registration and corporate papers on boxes I, II
+     * and III, and not on the unnumbered one — where the corporate line reads
+     * "(if required)" and is covered by "Other documents that may be
+     * required". So a corporation correcting its floor area is not asked for
+     * amended Articles, which is what the previous rule did.
+     */
+    const namedBox = ticked('address') || ticked('ownership') || ticked('trade_name')
 
     const amendmentApplies = (token: string) => {
       if (token === 'amendment') return true
-      if (token === 'amend_address') return amending('address_line1')
-      if (token === 'amend_trade_name') return amending('trade_name')
-      if (token === 'amend_corporate') return isIncorporated
+      if (token === 'amend_address') return ticked('address')
+      if (token === 'amend_owner') return ticked('ownership')
+      if (token === 'amend_trade_name') return ticked('trade_name')
+      /*
+       * "Contract of Lease AND/OR Proof of Ownership" — the paper's and/or,
+       * decided by tenure. Both were demanded of every move before this,
+       * because the two rows shared `amend_address` and an amendment matched
+       * it either way: a shop that rents was told to produce a land title.
+       */
+      if (token === 'amend_address_rented') return ticked('address') && form.is_rented
+      if (token === 'amend_address_owned') return ticked('address') && !form.is_rented
+      if (token === 'amend_sole') return namedBox && isSoleProprietor
+      if (token === 'amend_corporate') return namedBox && isIncorporated
 
       /*
        * SPA/authorisation is `all` and genuinely is: the paper asks for it in
@@ -3922,14 +3886,53 @@ export function ApplyWizard() {
 
     const chosen = (ownedBusinesses.data ?? []).find((b) => b.id === prefillBusinessId)
 
+    if (applicationType !== 'amendment') {
+      return { business: reuseBusinessName, permit: null }
+    }
+
+    /*
+     * FO-003's header, off the register rather than out of the form.
+     *
+     * The business the applicant picked, not the fields they may be part-way
+     * through editing: this block states what is ON RECORD, which is the
+     * thing the amendment is about to change. Reading `form` would show the
+     * new address beside the heading "Address" on a form whose whole purpose
+     * is to ask for a new address.
+     */
+    const owner = chosen?.owner
+    const taxpayer =
+      owner == null
+        ? null
+        : [owner.given_name, owner.middle_name, owner.surname, owner.suffix]
+            .filter((part) => (part ?? '').trim() !== '')
+            .join(' ')
+
+    const address = chosen?.address
+    const onRecord = [address?.line1, address?.line2, address?.barangay?.name, address?.city]
+      .filter((part) => (part ?? '').trim() !== '')
+      .join(', ')
+
     return {
       business: reuseBusinessName,
-      permit:
-        applicationType === 'amendment'
-          ? (chosen?.current_business_permit?.permit_number ?? null)
-          : null,
+      permit: chosen?.current_business_permit?.permit_number ?? null,
+      taxpayer: taxpayer === '' ? null : taxpayer,
+      accountNumber: chosen?.ban ?? null,
+      address: onRecord === '' ? null : onRecord,
+      /*
+       * The filing's own date once there is a filing — see `filedAt`. Today
+       * only while the draft has not been created, which is the one moment
+       * nobody can reopen to watch it change.
+       */
+      dated: formatDate(filedAt ?? new Date().toISOString()),
     }
-  }, [isReuse, reuseBusinessName, ownedBusinesses.data, prefillBusinessId, applicationType])
+  }, [
+    isReuse,
+    reuseBusinessName,
+    ownedBusinesses.data,
+    prefillBusinessId,
+    applicationType,
+    filedAt,
+  ])
 
   /**
    * One of the applicant's OWN businesses already citing this certificate.
@@ -4038,13 +4041,247 @@ export function ApplyWizard() {
       .map((b) => b.name)
   }, [form.registration_number, ownedBusinesses.data, prefillBusinessId])
 
+
+  /**
+   * The amendable details under FO-003's four checkboxes, in the paper's order.
+   *
+   * The server sends one flat list ordered by group, because the group is a
+   * fact about the field and not about the screen — `AmendableFields::GROUPS`
+   * is the single definition and the document rules read the same key. This
+   * only folds the list, so the step and the requirements can never disagree
+   * about which box a detail belongs to.
+   */
+  const amendGroups = useMemo(() => {
+    const out: {
+      key: string
+      label: string
+      paper: string | null
+      rows: AmendmentRow[]
+    }[] = []
+
+    for (const row of amendRows) {
+      const seen = out.find((g) => g.key === row.group)
+      if (seen) {
+        seen.rows.push(row)
+        continue
+      }
+      out.push({
+        key: row.group,
+        label: row.group_label,
+        paper: row.group_paper,
+        rows: [row],
+      })
+    }
+
+    return out
+  }, [amendRows])
+
+  /**
+   * Which of FO-003's boxes the applicant has ticked.
+   *
+   * ── Why the sections collapse ────────────────────────────────────────
+   *
+   * Because the paper's boxes are CHECKBOXES. FO-003 asks you to tick the one
+   * you are filing for and leave the rest alone, and a screen that shows all
+   * four open at once is not the same form — it is eighteen blanks and a map,
+   * and an applicant correcting a floor area meets seventeen questions that
+   * are not theirs. Client's standing note, 19 September 2026: *"Always
+   * consider user-friendliness in the UI."*
+   *
+   * `null` until the rows arrive, so the answer can be seeded from what is
+   * ALREADY requested — a reopened draft must open on the boxes it filled in,
+   * not close them and look empty.
+   */
+  const [openGroups, setOpenGroups] = useState<string[] | null>(null)
+  const seededOpenGroups = useRef(false)
+
+  /*
+   * Seeded once the VALUES have landed, not once the rows exist.
+   *
+   * The rows exist immediately now — they are drawn from reference data — but
+   * every one of them reads `requested: false` until the per-filing fetch
+   * answers. Seeding off the rows therefore opened nothing, and because it
+   * only seeds once, a reopened draft would have shown all four boxes shut
+   * over changes it had already been asked for.
+   *
+   * `amendLoading` going false is the moment the answer is known, whether it
+   * came back with requests or without. The ref makes it once and for all:
+   * after that the boxes are the applicant's to open and close, and a later
+   * save must not reopen one they just shut.
+   */
+  useEffect(() => {
+    if (amendLoading || seededOpenGroups.current) return
+
+    seededOpenGroups.current = true
+    setOpenGroups(amendRows.filter((r) => r.requested).map((r) => r.group))
+  }, [amendLoading, amendRows])
+
+  /**
+   * The barangay the map outlines while the pin is being placed.
+   *
+   * The one being MOVED TO if the applicant has chosen one, otherwise the one
+   * on record — so the outline follows the answer rather than the register.
+   * Placing a pin against a boundary the applicant cannot see is a puzzle
+   * rather than a validation, which is the whole reason MapPicker draws it.
+   */
+  const amendBarangay = useMemo(() => {
+    const row = amendRows.find((r) => r.field === 'address_barangay_id')
+    const asked = amendTyped.address_barangay_id ?? ''
+    const id = asked || (row?.current_value ?? '')
+
+    return {
+      name: barangays.find((b) => String(b.id) === id)?.name ?? null,
+      /*
+       * Whether the applicant NAMED this barangay or the register did.
+       *
+       * The pin is checked against it either way — a house-number correction
+       * must stay inside the barangay it is in — but the two cases have to be
+       * SAID differently. The refusal read "your new address is in Acacia"
+       * over a dropdown still saying "Leave unchanged": Acacia is where the
+       * business already is, and calling the register's own value the
+       * applicant's new address is simply untrue. Client, 21 September 2026:
+       * *"Is it fine that it shows Acacia already in the map, even though I
+       * am trying to change address?"*
+       */
+      chosen: asked !== '',
+    }
+  }, [amendRows, amendTyped, barangays])
+
+  const amendBarangayName = amendBarangay.name
+
+  /**
+   * Whether a DIFFERENT barangay is being asked for.
+   *
+   * Only decides that the pin has to be dropped again and has to land inside
+   * the new barangay — you cannot be in another barangay at the same point.
+   * It is NOT what sends the filing to CPDO; see `amendMovesPremises`.
+   *
+   * Compared against the row's own `current_value`, so picking the barangay
+   * the business is already in is correctly not a change.
+   */
+  const amendChangesBarangay = useMemo(() => {
+    const row = amendRows.find((r) => r.field === 'address_barangay_id')
+    if (row === undefined || !row.requested || row.new_value === null) return false
+
+    return row.new_value !== (row.current_value ?? '')
+  }, [amendRows])
+
+  /**
+   * What CPDD's sheet should say, if this amendment reaches them.
+   *
+   * ── The NEW values, not the register's ───────────────────────────────
+   *
+   * The clearance stage builds this same object from the business record,
+   * which is right there and wrong here: the register still holds the OLD
+   * address until BPLO approves, so a sheet built from it would show the
+   * zoning officer the premises the business is LEAVING. CPDD has to assess
+   * where it is going. Every amendable field the sheet prints is therefore
+   * overlaid with the requested value where one exists.
+   *
+   * Null until the business is known, which is also when there is nothing to
+   * preview.
+   */
+  const amendZoningSheet = useMemo<CarriedOverBusiness | null>(() => {
+    const chosen = (ownedBusinesses.data ?? []).find((b) => b.id === prefillBusinessId)
+    if (chosen === undefined) return null
+
+    /** The requested value for a field, or null if this filing leaves it alone. */
+    const asked = (field: string) => {
+      const row = amendRows.find((r) => r.field === field)
+
+      return row?.requested === true ? (row.new_label ?? row.new_value) : null
+    }
+
+    const address = chosen.address
+    const line = chosen.lines?.[0]
+    const owner = chosen.owner
+    const trade = asked('line_of_business') ?? line?.line_of_business?.trim() ?? line?.psic_code?.title ?? '—'
+
+    /*
+     * Composed the way the register composes it, so the preview and the
+     * approved record read alike: house and street together, then the
+     * barangay. Each part falls back to what is on file, because an
+     * amendment changing only the barangay still has a street.
+     */
+    const house = asked('address_house_bldg_no') ?? address?.house_bldg_no ?? ''
+    const street = asked('address_street') ?? address?.street ?? address?.line1 ?? ''
+    const barangay = asked('address_barangay_id') ?? address?.barangay?.name ?? ''
+
+    return {
+      name: chosen.name,
+      tradeName: asked('trade_name') ?? chosen.trade_name ?? '',
+      address: [`${house} ${street}`.trim(), barangay].filter((p) => p !== '').join(', ') || '—',
+      lineOfBusiness: trade,
+      registrationType: chosen.registration_type ?? '',
+      ownerName:
+        [owner?.surname, owner?.given_name, owner?.middle_name, owner?.suffix]
+          .map((part) => (part ?? '').trim())
+          .filter(Boolean)
+          .join(', ') || '',
+      ownerSex: owner?.gender ?? '',
+      productsServices: line?.products_services ?? '',
+      landline: address?.telephone ?? '',
+      mobile: address?.mobile_number ?? '',
+      businessAreaSqm: asked('business_area_sqm') ?? '',
+      maleEmployees: asked('male_employees') ?? '',
+      femaleEmployees: asked('female_employees') ?? '',
+      proprietorName:
+        (chosen.president_officer_name ?? '').trim() ||
+        [owner?.given_name, owner?.middle_name, owner?.surname, owner?.suffix]
+          .map((part) => (part ?? '').trim())
+          .filter(Boolean)
+          .join(' '),
+      proprietorContact: address?.mobile_number ?? address?.telephone ?? '',
+      proprietorEmail: address?.email ?? '',
+      activity: trade,
+    }
+  }, [ownedBusinesses.data, prefillBusinessId, amendRows])
+
+  /**
+   * Whether the PREMISES are moving, which is what costs a Zoning Clearance.
+   *
+   * The same question `WorkflowService::amendmentMovesPremises` answers, and
+   * deliberately the same shape: the server decides whether the filing carries
+   * the clearance and this decides whether the applicant is warned that it
+   * will. Two callers, one rule — a warning that disagrees with the billing is
+   * worse than no warning.
+   *
+   * The PIN, not the barangay. Zoning belongs to a location and two streets in
+   * one barangay can be zoned differently, so a barangay test would let a
+   * business move to a street that forbids its trade without anyone looking.
+   * BizTrack cannot read the maps — they are images — so it cannot judge that
+   * itself; it can only decide whether to ask CPDO, and a moved pin is the one
+   * honest sign that there is something new to look at. Correcting how an
+   * address is spelled leaves the pin alone.
+   */
+  const amendMovesPremises = useMemo(
+    () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
+    [amendRows],
+  )
+
+  /**
+   * What this filing changes, in one line.
+   *
+   * Two sources, because the two forms ask in different words. A RENEWAL ticks
+   * Section A's categories; an AMENDMENT names the details it is correcting,
+   * and reading its categories — which it never asks — printed "Nothing chosen
+   * yet" over a form that had been filled in. "Floor area (sqm), Trade name"
+   * is also the more useful sentence, and it is the one the officer's summary
+   * chips show, off the same rows.
+   */
   const amendmentSummary: string | null = useMemo(() => {
+    if (applicationType === 'amendment') {
+      const asked = amendRows.filter((r) => r.requested).map((r) => r.label)
+
+      return asked.length === 0 ? null : asked.join(', ')
+    }
+
     const parts = [
       ...AMENDMENT_KINDS.filter((k) => amendment[k.key]).map((k) => k.label),
       ...(amendment.other.trim() ? [amendment.other.trim()] : []),
     ]
     return parts.length === 0 ? null : parts.join(', ')
-  }, [amendment])
+  }, [amendment, amendRows, applicationType])
 
   /*
    * `clearanceDecisions` is gone. Review & Submit used to list which of the six
@@ -4122,15 +4359,12 @@ export function ApplyWizard() {
             )
           }
           /*
-           * Items 82/84 — an amendment amending nothing is not a filing. The
-           * counter would have to send it back to ask the question the form
-           * was supposed to have asked, so it is asked before the wizard opens.
+           * Items 82/84 — an amendment amending nothing is still not a filing,
+           * but the question belongs to the `amendments` case above, which
+           * asks it of the new details the form actually collects. Asked here
+           * too, in the language of the removed category ticks, it sent the
+           * applicant to press a Change button for a control that had gone.
            */
-          if (applicationType === 'amendment' && !amendmentChosen) {
-            missing.push(
-              'What is being amended (ownership, location, nature of business, or other) — press Change above',
-            )
-          }
           if (!form.name.trim()) missing.push('Business Name')
           /*
            * Items 11/12 — the named person the filing is in.
@@ -4486,9 +4720,53 @@ export function ApplyWizard() {
            * cannot disagree about whether the form is done.
            */
           if (applicationType === 'amendment') {
-            return amendRows.some((r) => r.requested)
-              ? []
-              : ['At least one new detail — say what the record should say now']
+            if (!amendRows.some((r) => r.requested)) {
+              return ['At least one new detail — say what the record should say now']
+            }
+
+            /*
+             * ── A move is not stated until the pin states it ────────────────
+             *
+             * The application form will not leave Location & Zoning without a
+             * pin that falls inside Malabon and inside the barangay named, and
+             * an amendment that moves the premises is the same question asked
+             * again — CPDO assesses conformity FROM the pin, and a
+             * cross-barangay move re-applies for the clearance on the strength
+             * of it.
+             *
+             * Client, 21 September 2026: *"apply the zoning validations that we
+             * also have with the zoning in the application form. Make sure they
+             * are equally the same."* They were not: the map was lifted without
+             * any of the rules around it, so a move could be filed with the old
+             * pin, no pin, or one in another city.
+             *
+             * Only when the BARANGAY changes. That is a different question
+             * from whether the premises moved (see `amendMovesPremises`, and
+             * the zoning trigger it drives): this one is simply that a pin
+             * cannot stay where it was if the barangay under it is being
+             * changed. Correcting how a street is spelled demands no new pin,
+             * and demanding one would drag a typo into a re-clearance.
+             */
+            const missingMove: string[] = []
+
+            if (amendChangesBarangay) {
+              const pin = amendRows.find((r) => r.field === 'address_pin')
+              const placed = (pin?.new_value ?? '').split(',')
+
+              if (pin === undefined || !pin.requested || placed.length !== 2) {
+                missingMove.push(
+                  'A map pin for the new address — conformity is assessed from it',
+                )
+              } else if (
+                checkPin(Number(placed[0]), Number(placed[1]), amendBarangayName).kind !== 'ok'
+              ) {
+                missingMove.push(
+                  `A map pin inside ${amendBarangayName ?? 'the barangay you chose'}`,
+                )
+              }
+            }
+
+            return missingMove
           }
 
           if (amendment.hasChanges === null) {
@@ -4541,13 +4819,26 @@ export function ApplyWizard() {
       prefillBusinessId,
       priorPermitId,
       renewablePermits,
-      amendmentChosen,
       /*
-       * The whole object, because the `amendments` case reads five of its
-       * fields and the step's gate is only correct if it recomputes when any
-       * of them move. Memoised on `amendmentChosen` alone, answering No after
-       * Yes left the old "tick at least one box" complaint standing over a
-       * step that no longer asked the question.
+       * What the `amendments` case reads on an AMENDMENT. It was missing, so
+       * the gate could not see a new detail being typed: the step went on
+       * reporting "At least one new detail" until some other dependency
+       * happened to move and let the memo recompute.
+       */
+      amendRows,
+      /*
+       * The two the move check reads. `amendChangesBarangay` is itself memoised
+       * on `amendRows`, but naming it here is what stops a later edit that
+       * changes how it is derived from silently going stale.
+       */
+      amendChangesBarangay,
+      amendBarangayName,
+      /*
+       * And the whole Section A object on a RENEWAL, because that case reads
+       * five of its fields and the step's gate is only correct if it
+       * recomputes when any of them move. Memoised on one derived boolean,
+       * answering No after Yes left the old "tick at least one box" complaint
+       * standing over a step that no longer asked the question.
        */
       amendment,
       priorPermitAnswered,
@@ -4986,8 +5277,37 @@ export function ApplyWizard() {
    * on API errors so callers surface one message). Reused businesses get their
    * edited fields pushed at the same time.
    */
+  /**
+   * The draft POST, once, however many callers reach for it at once.
+   *
+   * ── Why a ref and not just `applicationId` ─────────────────────────────
+   *
+   * `applicationId` is state. Two callers in the same tick both read null and
+   * both POST, and the register holds the proof: amendment drafts #9 and #10,
+   * a minute apart, both empty. The New Details effect reaches for a draft
+   * because its rows are keyed to an application id, and `persistOnLeave`
+   * reaches for one on the way out of the step — neither can see the other's
+   * `setApplicationId` until React commits.
+   *
+   * The promise IS the lock, and it is kept after it resolves rather than
+   * cleared: there is exactly one draft per wizard session, so a later caller
+   * should get that same id even in the window before the state lands. Only a
+   * FAILED create clears it, so a retry can still happen.
+   */
+  const draftInFlight = useRef<Promise<number> | null>(null)
+
   async function ensureDraftRaw(): Promise<number> {
     if (applicationId) return applicationId
+
+    draftInFlight.current ??= createDraft().catch((err: unknown) => {
+      draftInFlight.current = null
+      throw err
+    })
+
+    return draftInFlight.current
+  }
+
+  async function createDraft(): Promise<number> {
     let bid = businessId ?? prefillBusinessId
     if (!bid) {
       bid = (await businesses.create(businessPayload())).id
@@ -5006,6 +5326,8 @@ export function ApplyWizard() {
       ...amendmentPayload(),
     })
     setApplicationId(app.id)
+    setFiledAt(app.submitted_at ?? app.created_at)
+
     return app.id
   }
 
@@ -5132,7 +5454,18 @@ export function ApplyWizard() {
    */
 
   async function next() {
-    if (stepMissing.length > 0) return
+    /*
+     * The amendment step gates on its requested changes, and the box the
+     * applicant was typing in has only just blurred — so flush first and read
+     * the gate off the response. Same question `missingFor('amendments')`
+     * asks; asked of rows that include the save this press triggered.
+     */
+    if (applicationType === 'amendment' && phase === 'amendments') {
+      const rows = await flushAmendments()
+      if (!rows.some((r) => r.requested)) return
+    } else if (stepMissing.length > 0) {
+      return
+    }
     /*
      * Zoning result (p30) — the conformity message, and only that.
      *
@@ -5189,14 +5522,26 @@ export function ApplyWizard() {
     let alive = true
     void (async () => {
       setAmendError(null)
+      setAmendLoading(true)
       try {
         const id = applicationId ?? (canCreateDraft ? await ensureDraftRaw() : null)
-        if (id === null || !alive) return
+        /*
+         * `id === null` is not a load in progress — it is a draft that cannot
+         * be created yet, which the step has to stop claiming to be fetching.
+         * `!alive` is this effect being superseded, and the run that replaced
+         * it owns the flag from here.
+         */
+        if (id === null) {
+          if (alive) setAmendLoading(false)
+
+          return
+        }
+        if (!alive) return
 
         const rows = await applications.amendments(id)
         if (!alive) return
 
-        setAmendRows(rows)
+        setAmendValues(Object.fromEntries(rows.map((r) => [r.field, r])))
         /*
          * Seeded from what was already REQUESTED, never from the current value.
          * Prefilling each box with today's figure would have the applicant
@@ -5206,6 +5551,8 @@ export function ApplyWizard() {
         setAmendTyped(Object.fromEntries(rows.map((r) => [r.field, r.new_value ?? ''])))
       } catch (err) {
         if (alive) setAmendError(toApiError(err).message)
+      } finally {
+        if (alive) setAmendLoading(false)
       }
     })()
 
@@ -5224,15 +5571,331 @@ export function ApplyWizard() {
    * register — "I no longer want this changed" is what clearing an input means
    * to the person doing it.
    */
-  async function saveAmendment(field: string): Promise<void> {
-    if (applicationId === null) return
+  /**
+   * The control one amendable detail needs.
+   *
+   * Driven by `row.type`, which the server sends, because half of FO-003's
+   * blanks stopped being free text the moment they were mapped honestly: a
+   * line of business is a PSIC code the fee is computed from, a barangay is
+   * the list zoning is assessed against, a pin is a point on a map. A text box
+   * for any of those collects something nobody can act on.
+   *
+   * ── When it saves ─────────────────────────────────────────────────────
+   *
+   * A typed box saves on blur; a CHOSEN value saves the moment it is chosen.
+   * Waiting for blur on a select or a map pin means the answer sits unsent
+   * while the applicant looks at it, and the commonest next move after
+   * choosing the last one is to press Continue.
+   */
+  function renderAmendControl(row: AmendmentRow) {
+    const value = amendTyped[row.field] ?? ''
+    const id = `amend-${row.field}`
 
-    const typed = (amendTyped[field] ?? '').trim()
+    const type = (next: string) => setAmendTyped((t) => ({ ...t, [row.field]: next }))
+    const choose = (next: string) => {
+      type(next)
+      /*
+       * Sent with the value in hand rather than read back from state, which
+       * this tick cannot see — the same reason `flushAmendments` returns rows.
+       */
+      void saveAmendment(row.field, next)
+    }
+
+    switch (row.type) {
+      case 'psic': {
+        /*
+         * ── The application form's picker, not a dropdown ─────────────────
+         *
+         * This was a plain `<select>` of all 135 trades: no search, no "most
+         * common" head start, no section headings, in a list where "sale"
+         * alone matches 48 titles. The same question is asked on Location &
+         * Zoning with a real picker, and the two must not differ — client,
+         * 21 September 2026: *"if you will have to copy something, make sure
+         * you do the copy properly."*
+         *
+         * `<PsicPicker>` is now the one control, used by both.
+         */
+        const chosenId = value === '' ? null : Number(value)
+        const chosen = psic.find((c) => c.id === chosenId)
+
+        return (
+          <>
+            <PsicPicker
+              codes={psic}
+              chosenId={Number.isFinite(chosenId) ? chosenId : null}
+              onPick={(code) => choose(String(code.id))}
+              label="Search for the trade you are changing to"
+              /*
+               * Distinct from Location & Zoning's picker, which is on another
+               * step but in the same document: two controls sharing an id
+               * would give one of them a label that points at the other.
+               */
+              inputId={`amend-psic-${row.field}`}
+            />
+
+            {/*
+              The choice, confirmed below the box it was made in — the same
+              shape Location & Zoning uses, because a picker that closes on
+              selection has to say what it closed on somewhere.
+            */}
+            {chosen !== undefined && (
+              <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border border-input-border bg-royal-tint px-4 py-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink">{chosen.title}</span>
+                  <span className="tnum block text-xs text-ink-secondary">{chosen.code}</span>
+                </span>
+                {/*
+                  "Clear" and not "Remove": an empty box withdraws the request,
+                  which is what the server's DELETE means. Nothing is being
+                  pruned from a list.
+                */}
+                <button
+                  type="button"
+                  onClick={() => choose('')}
+                  className="text-xs font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </>
+        )
+      }
+
+      case 'barangay':
+        return (
+          <select
+            id={id}
+            value={value}
+            /*
+             * ── Item 8, again: a new barangay drops a CONTRADICTING pin ────
+             *
+             * The application form's rule, and for the application form's
+             * reason: a pin that survives the change is a pin checked against
+             * a question that has since been answered differently, and
+             * leaving it is how a mismatch gets created after the click
+             * handler has stopped looking.
+             *
+             * Dropped only if it DISAGREES — not unconditionally. Somebody who
+             * placed the pin first and then named the barangay it is already
+             * sitting in should not watch it vanish for agreeing, and that
+             * order is the common one here because the map never waits for
+             * the dropdown.
+             */
+            onChange={(e) => {
+              const next = e.target.value
+              choose(next)
+
+              const pin = amendTyped.address_pin ?? ''
+              if (pin === '') return
+
+              const [pinLat, pinLng] = pin.split(',')
+              const nextName = barangays.find((b) => String(b.id) === next)?.name ?? null
+
+              if (checkPin(Number(pinLat), Number(pinLng), nextName).kind === 'ok') return
+
+              setAmendPinError(
+                `Your pin is not in ${nextName ?? 'that barangay'}, so it has been cleared. Drop a new one inside the highlighted area.`,
+              )
+              // Withdrawn, not just blanked on screen: an empty value IS the
+              // withdrawal, which is what the server's DELETE means.
+              void saveAmendment('address_pin', '')
+            }}
+            disabled={amendBusy}
+            className={inputCls}
+          >
+            <option value="">Leave unchanged</option>
+            {barangays.map((b) => (
+              <option key={b.id} value={String(b.id)}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        )
+
+      case 'pin': {
+        const [lat, lng] = value.split(',')
+        const latitude = lat === undefined || lat === '' ? null : Number(lat)
+        const longitude = lng === undefined || lng === '' ? null : Number(lng)
+
+        return (
+          <>
+            {/*
+              Which barangay the pin is being held to, and on whose say-so.
+
+              The check was only ever announced by refusing a pin, which puts
+              the rule after the mistake and makes the ORDER of this step a
+              trap: the natural move is to drop the pin and then notice the
+              barangay dropdown, and that order cannot work. A sentence costs
+              nothing and removes the trap entirely.
+            */}
+            {amendBarangayName !== null && (
+              <p className="mb-2 text-xs leading-relaxed text-ink-secondary">
+                {amendBarangay.chosen ? (
+                  <>
+                    Pin inside <span className="font-semibold text-ink">{amendBarangayName}</span>,
+                    the barangay you are moving to — the highlighted area.
+                  </>
+                ) : (
+                  <>
+                    Pinning inside <span className="font-semibold text-ink">{amendBarangayName}</span>
+                    , where your business is now. Moving to another barangay? Choose it above
+                    first, then drop the pin.
+                  </>
+                )}
+              </p>
+            )}
+
+            <MapPicker
+              latitude={Number.isFinite(latitude) ? latitude : null}
+              longitude={Number.isFinite(longitude) ? longitude : null}
+              highlightBarangay={amendBarangayName}
+              /*
+               * ── The same guards the application form applies ─────────────
+               *
+               * `checkPin` and nothing of its own, because there is one set of
+               * rules about where a pin in Malabon may go and two screens that
+               * drop one. Client, 21 September 2026: *"apply the zoning
+               * validations that we also have with the zoning in the
+               * application form. Make sure they are equally the same."*
+               *
+               * They were not. This map was lifted from Location & Zoning
+               * without the two refusals around it, so an amendment could pin
+               * its new address in Caloocan, save it, and reach BPLO — on the
+               * one filing whose whole point is moving the premises, and whose
+               * approval re-applies for a zoning clearance against the pin.
+               *
+               * The wording is the application form's, word for word, so the
+               * same mistake reads the same way wherever it is made.
+               */
+              onPick={(pickedLat, pickedLng) => {
+                const verdict = checkPin(pickedLat, pickedLng, amendBarangayName)
+
+                if (verdict.kind === 'outside-city') {
+                  setAmendPinError(
+                    `That point (${pickedLat}, ${pickedLng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                  )
+
+                  return
+                }
+
+                if (verdict.kind === 'wrong-barangay') {
+                  /*
+                   * "your new address is in X" is only true when they picked
+                   * X. Otherwise X is the register's, and the honest sentence
+                   * names it as such and points at the dropdown that changes
+                   * it — which is the thing they actually wanted.
+                   */
+                  const whose = amendBarangay.chosen
+                    ? `the barangay you are moving to (${amendBarangayName})`
+                    : `${amendBarangayName}, where your business is recorded`
+
+                  setAmendPinError(
+                    verdict.actual !== null
+                      ? `That pin is in ${verdict.actual}, but it needs to be in ${whose}. Move it into the highlighted area — or, if you are moving to ${verdict.actual}, choose that barangay above first.`
+                      : `That pin is about ${verdict.metres} m outside ${whose}. Move it into the highlighted area, or choose a different barangay above.`,
+                  )
+
+                  return
+                }
+
+                setAmendPinError(null)
+                choose(`${pickedLat},${pickedLng}`)
+              }}
+            />
+            {amendPinError !== null && (
+              <p
+                role="alert"
+                className="mt-2 rounded-md border border-s-red bg-s-red-tint px-3 py-2 text-sm text-ink"
+              >
+                {amendPinError}
+              </p>
+            )}
+            {value !== '' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAmendPinError(null)
+                  choose('')
+                }}
+                className="mt-2 text-xs font-semibold text-ink-secondary underline underline-offset-2 hover:text-ink"
+              >
+                Clear the pin
+              </button>
+            )}
+          </>
+        )
+      }
+
+      case 'note':
+        return (
+          <textarea
+            id={id}
+            value={value}
+            onChange={(e) => type(e.target.value)}
+            onBlur={() => void saveAmendment(row.field)}
+            placeholder="leave blank if there is nothing to add"
+            maxLength={1000}
+            rows={3}
+            disabled={amendBusy}
+            className={inputCls}
+          />
+        )
+
+      default:
+        return (
+          <input
+            id={id}
+            value={value}
+            onChange={(e) => type(e.target.value)}
+            onBlur={() => void saveAmendment(row.field)}
+            placeholder="leave blank if unchanged"
+            /*
+             * `inputMode` and not `type="number"`: a number input drops what
+             * it cannot parse mid-edit, so a half-typed decimal disappears as
+             * the applicant types it. The server validates the value.
+             */
+            inputMode={
+              row.type === 'integer' ? 'numeric' : row.type === 'number' ? 'decimal' : undefined
+            }
+            maxLength={255}
+            disabled={amendBusy}
+            className={inputCls}
+          />
+        )
+    }
+  }
+
+  async function saveAmendment(field: string, chosen?: string): Promise<void> {
+    await saveAmendmentRaw(field, chosen)
+  }
+
+  /**
+   * As `saveAmendment`, but hands back the rows the server answered with.
+   *
+   * The caller needs them because React state is not readable within the tick
+   * that set it, and the step's gate is computed FROM these rows — see
+   * `flushAmendments`. Null means nothing was sent.
+   */
+  async function saveAmendmentRaw(
+    field: string,
+    /*
+     * The value, when the caller already has it. A select and a map pin set
+     * state and save in the same handler, and state is not readable in the
+     * tick that set it — without this the save would send the value BEFORE
+     * the one just chosen, which is the classic off-by-one-keystroke bug and
+     * silently sends the wrong answer rather than failing.
+     */
+    chosen?: string,
+  ): Promise<AmendmentRow[] | null> {
+    if (applicationId === null) return null
+
+    const typed = (chosen ?? amendTyped[field] ?? '').trim()
     const row = amendRows.find((r) => r.field === field)
     // Untouched and never requested: nothing to send.
-    if (row !== undefined && !row.requested && typed === '') return
+    if (row !== undefined && !row.requested && typed === '') return null
     // Unchanged since the last save.
-    if (row !== undefined && (row.new_value ?? '') === typed) return
+    if (row !== undefined && (row.new_value ?? '') === typed) return null
 
     setAmendBusy(true)
     setAmendError(null)
@@ -5242,13 +5905,42 @@ export function ApplyWizard() {
         typed === ''
           ? await applications.removeAmendment(applicationId, field)
           : await applications.setAmendments(applicationId, [{ field, new_value: typed }])
-      setAmendRows(rows)
+      setAmendValues(Object.fromEntries(rows.map((r) => [r.field, r])))
       setAmendSaved(field)
+
+      return rows
     } catch (err) {
       setAmendError(toApiError(err).message)
+
+      return null
     } finally {
       setAmendBusy(false)
     }
+  }
+
+  /**
+   * Send every box whose contents differ from what the server holds.
+   *
+   * ── Why Continue cannot just read the gate ─────────────────────────────
+   *
+   * Each detail saves on blur, and clicking Continue IS the blur — so the POST
+   * is still in flight when the click handler runs, and `stepMissing` still
+   * says nothing has been asked for. The press did nothing, visibly, with no
+   * message to explain it; a second press would have worked, which is not a
+   * thing an applicant can be expected to discover.
+   *
+   * Returns the rows to gate on, so the answer comes from the response rather
+   * than from state this tick cannot see.
+   */
+  async function flushAmendments(): Promise<AmendmentRow[]> {
+    let rows = amendRows
+
+    for (const row of amendRows) {
+      const sent = await saveAmendmentRaw(row.field)
+      if (sent !== null) rows = sent
+    }
+
+    return rows
   }
 
   const canCreateDraft =
@@ -5285,12 +5977,20 @@ export function ApplyWizard() {
      */
     (!isReuse || priorPermitAnswered) &&
     /*
-     * Items 82/84: same reasoning for an amendment. Prefill fills the business
-     * section in one go, so without this a draft — and its amendment columns,
-     * all false — would be written a second after the business is picked and
-     * before the applicant has said what they are amending.
+     * ── An amendment's draft is written as soon as a business is chosen ────
+     *
+     * This required the Section A ticks, and went on requiring them after the
+     * ticks were removed, so the condition was permanently false and no
+     * amendment draft was ever created. That was the worse half of the bug:
+     * New Details loads its rows against an application id, so with no draft
+     * the step stayed empty and could never be completed — the dialog's own
+     * refusal was merely the first door.
+     *
+     * Nothing replaces it. The business is settled in the dialog before the
+     * wizard opens, which is all a draft needs, and what is being amended is
+     * asked on the step that writes it.
      */
-    (applicationType !== 'amendment' || amendmentChosen)
+    true
 
   /** Push every section entered so far in one go. */
   async function autosave(target: string) {
@@ -5741,6 +6441,7 @@ export function ApplyWizard() {
         const lineIds = (b.lines ?? []).map((l) => l.psic_code.id)
         setApplicationType(app.application_type)
         setApplicationId(app.id)
+        setFiledAt(app.submitted_at ?? app.created_at)
         setTitle(app.title ?? '')
         // A draft that arrives already named was named by somebody. Treat that
         // as the applicant's own words and stop generating over it, even if the
@@ -7024,7 +7725,7 @@ export function ApplyWizard() {
                   <div className="flex gap-2">
                     <dt className="shrink-0 font-semibold text-ink-secondary">Amending</dt>
                     <dd className="min-w-0 text-ink">
-                      {amendmentSummary ?? 'Nothing chosen yet — press Change.'}
+                      {amendmentSummary ?? 'Nothing yet — set the new values on New Details.'}
                     </dd>
                   </div>
                 )}
@@ -8139,9 +8840,44 @@ export function ApplyWizard() {
           <p className="mt-2 text-xs text-ink-muted">
             Upload each requirement as a PDF or image (max 10 MB). Items marked with{' '}
             <span className="font-semibold text-s-red">*</span> are required. You can change files
-            before submitting. What is asked for depends on your answers — whether you rent, whether
-            you hold a tax incentive, and who is filing.
+            before submitting.{' '}
+            {applicationType === 'amendment'
+              ? 'What is asked for is the list MCG-BPLO-FO-003 prints against the boxes you ticked, narrowed by whether you rent and how the business is registered.'
+              : 'What is asked for depends on your answers — whether you rent, whether you hold a tax incentive, and who is filing.'}
           </p>
+
+          {/*
+            ── Which boxes produced this list ──────────────────────────────
+
+            The rules were right and looked ignored. FO-003 prints a separate
+            requirements list against each of its four boxes, and the step
+            already resolved them — but nothing on the screen said so, and the
+            intro still described the new application's rules ("whether you
+            rent, whether you hold a tax incentive"). Client, 21 September
+            2026: *"I also told you that there should be necessary
+            rules/pathing as to what is asked in the documentary requirements
+            DEPENDING ON WHAT IS BEING AMENDED."*
+
+            It already did. Naming the boxes is what makes that checkable
+            without reading the pivot table — and it is the same source the
+            rules read, so the sentence cannot claim a box the list did not
+            actually use.
+          */}
+          {applicationType === 'amendment' && amendGroups.some((g) => g.rows.some((r) => r.requested)) && (
+            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs text-ink-secondary">
+              <span className="font-semibold text-ink">Because you are amending:</span>
+              {amendGroups
+                .filter((g) => g.rows.some((r) => r.requested))
+                .map((g) => (
+                  <span
+                    key={g.key}
+                    className="rounded-md border border-line bg-shell px-2 py-0.5 text-[12px] font-semibold text-ink"
+                  >
+                    {g.paper === null ? g.label : `${g.paper}. ${g.label}`}
+                  </span>
+                ))}
+            </p>
+          )}
 
           {/* OCR-lite suggestion banner (v2) — dismissible, suggestions only. */}
           {ocr && (
@@ -8704,20 +9440,32 @@ export function ApplyWizard() {
             register by hand.
 
             Only the details the LGU has agreed can be amended appear here; the
-            server refuses anything else by name. A change of ownership or line
-            of business is still a counter visit.
+            server refuses anything else by name — see `AmendableFields`, which
+            is laid out as the paper's four checkboxes and is the one place
+            that mapping lives.
           */}
           {applicationType === 'amendment' && (
             <>
-              <h2 className="mt-8 text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
-                B. New Details
-              </h2>
-              <div className="mb-5 mt-2 h-px bg-royal/30" />
+              {/*
+                No letter. Client, 21 September 2026: *"why does 'B. New
+                Details' exist? There is no such section named in the amendment
+                form paper."* — and there is not. The letters on these headings
+                are transcribed from the paper they came off, and this heading
+                came off no paper: it was lettered B to sit under the renewal
+                form's Section A, which an amendment does not render at all. So
+                it was a B with no A above it, claiming to be a section of a
+                form that has no such section.
 
-              <p className="mb-4 max-w-2xl text-xs leading-relaxed text-ink-secondary">
-                Fill in only what is changing and leave the rest blank. BPLO writes these to your
-                business record when they approve — you do not need to change anything yourself.
-                Clearing a box withdraws that request.
+                The BLOCK stays — every box on FO-003 has a blank beside it
+                ("CHANGE OF ADDRESS: (New Address) ____") and the new values
+                have to be typed somewhere. Only the false provenance goes.
+                Awaiting the paper to name it as FO-003 names it.
+              */}
+              <p className="mb-5 max-w-3xl text-xs leading-relaxed text-ink-secondary">
+                The paper form has four boxes and so does this. Tick the ones you are amending and
+                fill in the new values — BPLO writes them to your business record when they
+                approve, so you do not need to change anything yourself. Clearing a value withdraws
+                that request; unticking a box leaves what you typed alone.
               </p>
 
               {amendError !== null && (
@@ -8729,45 +9477,248 @@ export function ApplyWizard() {
                 </p>
               )}
 
-              <div className="max-w-2xl space-y-3">
-                {amendRows.map((row) => (
-                  <label
-                    key={row.field}
-                    className="block rounded-lg border border-input-border bg-white px-4 py-3"
-                  >
-                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                      <span className="text-sm font-medium text-ink">{row.label}</span>
-                      {/*
-                        The current value BESIDE the box, not inside it. In the
-                        box it would read as a request to change the detail to
-                        what it already is; beside it, it is what the applicant
-                        is comparing against.
-                      */}
-                      <span className="text-xs text-ink-secondary">
-                        Currently:{' '}
-                        {row.current_value ?? (
-                          <span className="italic text-ink-muted">not recorded</span>
-                        )}
+              {/*
+                ── One section per checkbox on FO-003 ────────────────────────
+
+                Client, 21 September 2026: *"the fields in paper and in system
+                DOES NOT REALLY MATCH."* It did not — this was a flat list of
+                eight details under a heading ("B. New Details") that is on no
+                paper at all, and three of the form's four boxes were missing
+                from it entirely.
+
+                The numeral is the paper's own, so somebody holding the form
+                beside the screen is reading the same document twice. The
+                unnumbered box at the top of FO-003 has no numeral here either.
+              */}
+              {/*
+                The boxes are already on screen; this is about what goes IN
+                the "Currently:" line beside each one.
+
+                It used to say "Loading the details you can amend", which was
+                true when the whole list was fetched and is now a lie — the
+                list is reference data and arrives with the page. What still
+                takes a round trip is the register's own values, and on a
+                first visit a draft has to be created before they can even be
+                asked for.
+
+                `role="status"`, so a screen reader is told the figures are
+                still coming rather than reading "Currently:" and stopping.
+              */}
+              {amendLoading && (
+                <p role="status" className="max-w-2xl text-xs text-ink-secondary">
+                  Fetching what your record says now — you can start typing.
+                </p>
+              )}
+
+              {/*
+                ── The step uses the width of the sheet ────────────────────
+
+                This was `max-w-2xl` — 42rem — inside a card two-thirds wider
+                again, so seventeen one-per-row fields ran down the left and
+                the right third of every section was empty. Client,
+                21 September 2026: *"please maximize the spacing. You leave so
+                much space at the right side. You may even have two fields
+                side by side if needed."*
+
+                PROSE stays narrow, because a 42rem measure is a readability
+                rule and not wasted space. It is the FIELDS that widen.
+              */}
+              <div className="space-y-8">
+                {amendGroups.map((group) => {
+                  const asked = group.rows.filter((r) => r.requested)
+                  const open = (openGroups ?? []).includes(group.key)
+
+                  return (
+                  <section key={group.key}>
+                    {/*
+                      A real checkbox, because it is one on the paper and
+                      because the thing it controls is a region of the form —
+                      not a button that happens to reveal something.
+                    */}
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <input
+                        type="checkbox"
+                        checked={open}
+                        onChange={(e) =>
+                          setOpenGroups((current) => {
+                            const now = current ?? []
+
+                            return e.target.checked
+                              ? [...now, group.key]
+                              : now.filter((k) => k !== group.key)
+                          })
+                        }
+                        className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
+                          {group.paper === null ? group.label : `${group.paper}. ${group.label}`}
+                        </span>
+                        {/*
+                          What is inside, for a box that is shut. A heading
+                          alone gives an applicant no reason to open one, and
+                          "Floor area (sqm), Trade name" tells somebody who
+                          came back to a draft what they already asked for
+                          without making them open all four.
+                        */}
+                        <span className="mt-0.5 block text-xs text-ink-secondary">
+                          {asked.length > 0
+                            ? asked.map((r) => r.label).join(', ')
+                            : group.rows
+                                .filter((r) => r.type !== 'note')
+                                .map((r) => r.label)
+                                .join(' · ')}
+                        </span>
                       </span>
-                    </span>
-                    <input
-                      value={amendTyped[row.field] ?? ''}
-                      onChange={(e) =>
-                        setAmendTyped((t) => ({ ...t, [row.field]: e.target.value }))
-                      }
-                      onBlur={() => void saveAmendment(row.field)}
-                      placeholder="leave blank if unchanged"
-                      maxLength={255}
-                      disabled={amendBusy}
-                      className={inputCls + ' mt-2'}
-                    />
-                    {row.requested && amendSaved === row.field && (
-                      <span className="mt-1.5 block text-xs font-medium text-s-green">
-                        Saved — BPLO will see this request.
-                      </span>
+                    </label>
+                    <div className="mb-4 mt-2 h-px bg-royal/30" />
+
+                    {/*
+                      Unticked boxes keep whatever was typed in them. Closing
+                      one is not withdrawing a request — the withdrawal is
+                      clearing the box, which is what the server's DELETE
+                      means — so a mis-click cannot lose an answer.
+                    */}
+                    {open && (
+                    <>
+
+                    {/*
+                      What ticking this box will cost, said before it is ticked.
+
+                      A cross-barangay move re-applies for the Zoning Clearance
+                      — `WorkflowService::amendmentCrossesBarangay` is the rule
+                      and this is the warning — and an added line of business
+                      carries a surcharge to the January renewal. Both are
+                      consequences an applicant should meet on the way in, not
+                      on the bill.
+                    */}
+                    {/*
+                      The paper's box that BizTrack does not offer, named
+                      where somebody would look for it. FO-003 has an
+                      "ADDITIONAL LINE OF BUSINESS" line; a business here
+                      holds exactly one trade, and the apply wizard replaces
+                      rather than appends, so a second one is a state no other
+                      path can produce. An absence explains nothing.
+                    */}
+                    {group.key === 'other' && (
+                      <p className="mb-4 text-xs leading-relaxed text-ink-secondary">
+                        Changing your line of business replaces the one on record. BizTrack holds
+                        one trade per business, so taking on a{' '}
+                        <span className="font-semibold text-ink">second</span> trade alongside it
+                        is still done at the BPLO window.
+                      </p>
                     )}
-                  </label>
-                ))}
+
+                    {group.key === 'address' && amendMovesPremises && (
+                      <p className="mb-4 rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
+                        <span className="font-semibold text-ink">
+                          You have moved the pin, so this counts as a move.
+                        </span>{' '}
+                        Your Zoning Clearance is re-applied for as part of this amendment: the City
+                        Planning Office checks the new location against the zoning map, and only
+                        they can say whether your trade is allowed there. Correcting how your
+                        address is written — without moving the pin — does not need one.
+                      </p>
+                    )}
+
+                    {/*
+                      Two to a row on anything wider than a phone. A floor
+                      area, an employee count and a house number are each a
+                      few characters wide; giving them a full row apiece is
+                      what made this step a column of mostly-empty boxes.
+
+                      `items-start`, so a field whose help text runs to two
+                      lines does not stretch the box beside it.
+                    */}
+                    <div className="grid items-start gap-3 sm:grid-cols-2">
+                      {group.rows.map((row) => (
+                        <div
+                          key={row.field}
+                          /*
+                           * The three that cannot share a row: a map, a PSIC
+                           * picker whose results drop down over what follows,
+                           * and a note whose whole point is room to write.
+                           */
+                          className={`rounded-lg border border-input-border bg-white px-4 py-3 ${
+                            row.type === 'pin' || row.type === 'psic' || row.type === 'note'
+                              ? 'sm:col-span-2'
+                              : ''
+                          }`}
+                        >
+                          {/*
+                            ── The field, and what the register already says ──
+
+                            One row: the name of the detail, then the value on
+                            record beside it.
+
+                            It has been three shapes. Small grey text jammed
+                            against the right edge of a half-width box, which
+                            made the one fact the applicant is comparing
+                            against the quietest thing in it. Then a chip on
+                            its own line, which was legible and cost a line per
+                            field — client, 21 September 2026: *"I don't like
+                            the layout. Try putting the current record beside
+                            the title of the field itself."* So: beside the
+                            title, with the chip's weight kept.
+
+                            The word stays small and quiet; the VALUE carries
+                            the weight, because the value is the thing being
+                            read. It wraps to its own line only when it
+                            genuinely will not fit.
+
+                            Nothing is drawn for a detail with no current value
+                            by construction — see AMEND_NO_CURRENT — nor for
+                            the paper's note blanks, where "not recorded" would
+                            read as a gap in the register rather than as the
+                            nature of the question.
+                          */}
+                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                            <label
+                              htmlFor={`amend-${row.field}`}
+                              className="text-sm font-medium text-ink"
+                            >
+                              {row.label}
+                            </label>
+
+                            {row.type !== 'note' && !AMEND_NO_CURRENT.includes(row.field) && (
+                              <span className="inline-flex max-w-full items-baseline gap-1.5 rounded-md border border-line bg-shell px-2 py-0.5">
+                                <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">
+                                  Currently
+                                </span>
+                                {(row.current_label ?? row.current_value) !== null ? (
+                                  <span className="min-w-0 break-words text-[13px] font-semibold text-ink">
+                                    {row.current_label ?? row.current_value}
+                                  </span>
+                                ) : (
+                                  <span className="text-[13px] italic text-ink-muted">
+                                    not recorded
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                          </div>
+
+                          {row.help !== null && (
+                            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                              {row.help}
+                            </p>
+                          )}
+
+                          <div className="mt-2">{renderAmendControl(row)}</div>
+
+                          {row.requested && amendSaved === row.field && (
+                            <span className="mt-1.5 block text-xs font-medium text-s-green">
+                              Saved — BPLO will see this request.
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    </>
+                    )}
+                  </section>
+                  )
+                })}
               </div>
 
               {/*
@@ -8777,27 +9728,78 @@ export function ApplyWizard() {
                 sittings, and refusing to let them leave would lose what they
                 have typed.
               */}
+              {/*
+                ── The Zoning Clearance this amendment applies for ──────────
+
+                Shown when the pin moves, which is exactly when the filing
+                starts carrying a ZONING clearance — same condition the server
+                uses (`WorkflowService::amendmentMovesPremises`), so the
+                section cannot appear on a filing CPDO will never see, or be
+                missing from one they will.
+
+                It is CPDD's own sheet, not a copy of it: `ZoningSheetPreview`
+                exports the component the clearance stage renders. Fed the
+                values this amendment is ASKING for, because the register
+                still holds the old address until BPLO approves and a sheet
+                built from the register would show the officer the premises
+                being left behind.
+
+                Read-only, and that is the honest shape rather than a
+                limitation — MCG-CPDD-FO-003 is almost entirely derived from
+                the BPLO form, so there is nothing on it for the applicant to
+                fill in. Its job here is to show them what the zoning officer
+                will read before they commit to sending it.
+              */}
+              {amendMovesPremises && amendZoningSheet !== null && (
+                <section className="mt-10">
+                  <h2 className="text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
+                    Zoning Clearance — what CPDO will see
+                  </h2>
+                  <div className="mb-4 mt-2 h-px bg-royal/30" />
+
+                  <p className="mb-4 max-w-3xl text-xs leading-relaxed text-ink-secondary">
+                    Because you have moved the pin, this amendment also applies for a fresh Zoning
+                    Clearance. Nothing here needs filling in — the City Planning Office reads it
+                    from the details above, and it is shown so you can check them before you
+                    submit. They handle it as they would any other zoning application.
+                  </p>
+
+                  <div className="rounded-lg border border-input-border bg-white px-5 py-5">
+                    <ZoningSheetPreview business={amendZoningSheet} />
+                  </div>
+                </section>
+              )}
+
               {amendRows.length > 0 && !amendRows.some((r) => r.requested) && (
                 <p className="mt-4 max-w-2xl text-xs font-medium text-ink">
-                  Nothing is being changed yet. Fill in at least one detail above, or this amendment
-                  has nothing for BPLO to act on.
+                  Nothing is being changed yet. Tick a box above and fill in at least one new
+                  value, or this amendment has nothing for BPLO to act on.
                 </p>
               )}
 
               {/*
-                ── What this form cannot change ──────────────────────────────
+                ── What happens after BPLO approves ──────────────────────────
 
-                Named here, where somebody is looking for the field and not
-                finding it, rather than discovered at submission or at the
-                counter. The commonest wrong turn on an amendment is filing one
-                to change something it cannot touch, and an absence explains
-                nothing — the boundary has to be said out loud.
+                This panel used to read "Not on this form: changing who owns
+                the business, your line of business, or moving to another
+                barangay is done at the BPLO window." All three are on the
+                paper and all three are built as of 21 September 2026, so the
+                sentence had become the exact wrong turn it was written to
+                prevent: it would have sent somebody to a counter for a change
+                the boxes above them offer.
+
+                What is genuinely worth saying is what the applicant cannot see
+                from the form — that one of these four boxes finishes at the
+                window even after it is approved, and why.
               */}
-              <p className="mt-5 max-w-2xl rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
-                <span className="font-semibold text-ink">Not on this form.</span> Changing who owns
-                the business, your line of business, or moving to another barangay is done at the
-                BPLO window — those need documents the LGU has to see in person, like a Deed of
-                Transfer or a fresh zoning clearance.
+              <p className="mt-8 max-w-3xl rounded-lg border border-input-border bg-royal-tint/40 px-4 py-3 text-xs leading-relaxed text-ink-secondary">
+                <span className="font-semibold text-ink">After BPLO approves.</span> Most of these
+                are written to your business record straight away and your Business Permit is
+                reprinted with them. A <span className="font-semibold text-ink">change of owner</span>{' '}
+                is the exception: your permit prints the name on the BizTrack account it belongs to,
+                so BPLO moves the business to the new owner’s account by hand once they have seen
+                the Deed of Transfer. The new owner needs a BizTrack account of their own before
+                that can happen.
               </p>
             </>
           )}
@@ -8918,16 +9920,18 @@ export function ApplyWizard() {
                 {priorPermitChoice.permit_number}
               </p>
             )}
-            {/* Items 82/84 — last chance to see what this filing changes. */}
-            {applicationType === 'amendment' && amendmentChosen && (
+            {/*
+             * Items 82/84 — last chance to see what this filing changes.
+             *
+             * Off the requested changes, not the Section A ticks. An
+             * amendment does not ask those, so the condition here was
+             * permanently false and the confirmation page stayed silent about
+             * what had just been filed.
+             */}
+            {applicationType === 'amendment' && amendmentSummary && (
               <>
                 <p className="mt-6 text-lg font-medium text-royal">Amending</p>
-                <p className="text-sm text-ink-muted">
-                  {[
-                    ...AMENDMENT_KINDS.filter((k) => amendment[k.key]).map((k) => k.label),
-                    ...(amendment.other.trim() ? [`Others: ${amendment.other.trim()}`] : []),
-                  ].join(' · ')}
-                </p>
+                <p className="text-sm text-ink-muted">{amendmentSummary}</p>
               </>
             )}
           </div>

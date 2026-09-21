@@ -46,18 +46,45 @@ class AmendmentController extends Controller
         $rows = [];
         foreach (AmendableFields::kinds() as $field => $spec) {
             $row = $requested->get($field);
+            $group = AmendableFields::GROUPS[$spec['group']];
+
+            /*
+             * The register's value, sent alongside every row whether or not a
+             * change was asked for. The screen is "what it is now, what you
+             * want it to be", and a form that shows only the new value asks
+             * somebody to remember what they are replacing.
+             */
+            $current = AmendableFields::current($business, $field);
 
             $rows[] = [
                 'field' => $field,
-                'label' => $spec['label'],
                 /*
-                 * The register's value, sent alongside every row whether or not
-                 * a change was asked for. The screen is "what it is now, what
-                 * you want it to be", and a form that shows only the new value
-                 * asks somebody to remember what they are replacing.
+                 * Which of FO-003's four checkboxes this came off, so the step
+                 * can print them as the paper prints them and the applicant
+                 * holding the form can follow along. The numeral is the
+                 * paper's own (I, II, III), null for the unnumbered top box.
                  */
-                'current_value' => AmendableFields::current($business, $field),
+                'group' => $spec['group'],
+                'group_label' => $group['label'],
+                'group_paper' => $group['paper'],
+                'label' => $spec['label'],
+                'help' => $spec['help'],
+                /*
+                 * What control to draw. Half of these stopped being free text
+                 * when the paper's boxes were mapped properly: a line of
+                 * business is a PSIC code, a barangay is a list zoning is
+                 * assessed against, a pin is a map.
+                 */
+                'type' => $spec['type'],
+                'current_value' => $current,
+                /*
+                 * An id is not a thing to show anybody. Resolved here rather
+                 * than in the client, because the client would need the whole
+                 * PSIC table loaded to print one row.
+                 */
+                'current_label' => AmendableFields::describe($field, $current),
                 'new_value' => $row?->new_value,
+                'new_label' => AmendableFields::describe($field, $row?->new_value),
                 'requested' => $row !== null,
                 /*
                  * Null until BPLO completes it. Once stamped, the pair
@@ -105,9 +132,27 @@ class AmendmentController extends Controller
         if ($unknown->isNotEmpty()) {
             throw ValidationException::withMessages([
                 'changes' => [
+                    /*
+                     * The sentence used to name address, ownership and line of
+                     * business as the things this form could not do. All three
+                     * are on FO-003 and all three are built now, so it named
+                     * the wrong boundary — it would have sent an applicant to
+                     * the window for a change the screen behind them offers.
+                     *
+                     * Named by BOX rather than by field. Listing all eighteen
+                     * labels was accurate and 467 characters long, which is a
+                     * paragraph where an error message should be a sentence.
+                     * The four boxes are what the paper offers and what the
+                     * screen is laid out as, so they are what a reader can act
+                     * on.
+                     */
                     'These details cannot be amended through BizTrack: '.$unknown->join(', ')
-                    .'. Only the business permit’s own details can be changed here — a change of '
-                    .'address, ownership or line of business is handled at the BPLO window.',
+                    .'. The Amendment Form covers '
+                    .collect(AmendableFields::GROUPS)
+                        ->pluck('label')
+                        ->map(fn (string $l) => lcfirst($l))
+                        ->join(', ', ' and ')
+                    .'.',
                 ],
             ]);
         }

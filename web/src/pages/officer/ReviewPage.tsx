@@ -2846,7 +2846,16 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                         already gone by the time the amendment landed.
                       */
                       const applied = row.applied_at !== null
-                      const before = applied ? row.old_value : row.current_value
+                      /*
+                        Resolved first, raw second. `*_label` is null for
+                        anything that already reads as itself — a floor area, a
+                        street — so the fallback is the normal case and the
+                        lookup is the exception.
+                      */
+                      const before = applied
+                        ? (row.old_label ?? row.old_value)
+                        : (row.current_label ?? row.current_value)
+                      const after = row.new_label ?? row.new_value
 
                       return (
                         <li
@@ -2880,7 +2889,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                               <span className="font-normal text-ink-muted">
                                 {applied ? 'Now: ' : 'Asked for: '}
                               </span>
-                              {row.new_value ?? (
+                              {after ?? (
                                 <span className="italic font-normal text-ink-muted">cleared</span>
                               )}
                             </span>

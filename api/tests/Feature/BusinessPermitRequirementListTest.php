@@ -42,9 +42,39 @@ use App\Models\PermitType;
  * filing-driven → answer-driven; migration 2026_09_16_000070 has the reasoning.
  */
 
+/**
+ * The business permit's requirement rows for ONE of its forms.
+ *
+ * ── Why this has to say which form ───────────────────────────────────────
+ *
+ * MCG-BPLO-FO-003, the Amendment Form, prints its own requirements list, and
+ * since 21 September 2026 those rows hang off the same permit type — they are
+ * requirements OF a business permit filing, just not of this one. Read
+ * undifferentiated, the Affidavit and the Deed of Transfer land in the middle
+ * of the new application's list and every ordering rule below reads as broken.
+ *
+ * A row can be on both forms: DTI registration is `new,renewal,amend_sole`,
+ * because the paper asks a sole proprietor for it either way. So the test is
+ * "does this row have a token for my form", not "is it exclusively mine".
+ */
+function requirementRowsFor(string $form)
+{
+    return PermitType::where('code', 'BUSINESS')->firstOrFail()
+        ->documentTypes
+        ->filter(function ($doc) use ($form) {
+            $tokens = array_map('trim', explode(',', (string) $doc->pivot->context));
+            $amendment = array_filter(
+                $tokens,
+                fn (string $t) => $t === 'amendment' || str_starts_with($t, 'amend_'),
+            );
+
+            return $form === 'amendment' ? $amendment !== [] : $amendment !== $tokens;
+        })
+        ->values();
+}
+
 it('lists the certain requirements first and the conditional ones last', function () {
-    $codes = PermitType::where('code', 'BUSINESS')->firstOrFail()
-        ->documentTypes->pluck('code')->all();
+    $codes = requirementRowsFor('new')->pluck('code')->all();
 
     expect($codes)->toBe([
         // Required of everyone, so an applicant can act on these before
@@ -86,7 +116,7 @@ it('lists the certain requirements first and the conditional ones last', functio
  * particular rule that was broken.
  */
 it('puts every answer-driven requirement below every certain one', function () {
-    $rows = PermitType::where('code', 'BUSINESS')->firstOrFail()->documentTypes;
+    $rows = requirementRowsFor('new');
 
     /*
      * *"Those that are 'Yes' dependent should be at the bottom of the list."*
@@ -97,7 +127,16 @@ it('puts every answer-driven requirement below every certain one', function () {
      * make this assertion contradict the next one.
      */
     $answerDriven = ['rented', 'owned', 'tax_incentives'];
-    $isConditional = fn ($doc) => in_array($doc->pivot->context, $answerDriven, true);
+    /*
+     * By token. `context` became comma-separated on 19 September 2026 and the
+     * tenure rows now read 'rented,amend_address_rented', so a whole-string
+     * comparison silently classed them as unconditional — the band this test
+     * exists to police would have been empty and the assertion vacuous.
+     */
+    $isConditional = fn ($doc) => array_intersect(
+        array_map('trim', explode(',', (string) $doc->pivot->context)),
+        $answerDriven,
+    ) !== [];
 
     $certain = $rows->reject($isConditional)->filter(fn ($doc) => (bool) $doc->pivot->is_mandatory);
     $conditional = $rows->filter($isConditional);
@@ -110,7 +149,7 @@ it('puts every answer-driven requirement below every certain one', function () {
 });
 
 it('puts nothing optional above anything required', function () {
-    $rows = PermitType::where('code', 'BUSINESS')->firstOrFail()->documentTypes;
+    $rows = requirementRowsFor('new');
 
     /*
      * The step's whole job is telling an applicant what they still owe, so the
@@ -177,4 +216,31 @@ it('writes apostrophes rather than HTML entities in the help text', function () 
     }
 
     expect($help['LESSOR_PERMIT'])->toContain("lessor's own business permit");
+});
+
+it('gives the amendment form its own list, ordered by the same rules', function () {
+    /*
+     * MCG-BPLO-FO-003's requirements, which had no home until its four boxes
+     * were mapped. The same two ordering rules the new application follows:
+     * certain before conditional, required before optional.
+     */
+    $rows = requirementRowsFor('amendment');
+
+    expect($rows->pluck('code')->all())->toContain(
+        'AMEND_AFFIDAVIT',        // every box asks for it
+        'AMEND_DEED_TRANSFER',    // II
+        'AMEND_CORP_DOCS',        // I–III, for a corporation
+        'DTI_SEC_CDA',            // I–III, for a sole proprietor
+        'LOCATION_SKETCH',        // I
+        'LEASE_CONTRACT',         // I, if renting
+        'LAND_TITLE',             // I, if owned
+    );
+
+    $required = $rows->filter(fn ($doc) => (bool) $doc->pivot->is_mandatory);
+    $optional = $rows->reject(fn ($doc) => (bool) $doc->pivot->is_mandatory);
+
+    expect($required)->not->toBeEmpty()->and($optional)->not->toBeEmpty();
+
+    expect($optional->min(fn ($doc) => $doc->pivot->display_order))
+        ->toBeGreaterThan($required->max(fn ($doc) => $doc->pivot->display_order));
 });

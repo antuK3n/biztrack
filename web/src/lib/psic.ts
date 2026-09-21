@@ -104,3 +104,30 @@ export function psicSectionRank(section: PsicSection): number {
   const i = PSIC_SECTION_ORDER.indexOf(section)
   return i === -1 ? PSIC_SECTION_ORDER.length : i
 }
+
+/**
+ * The catch-all PSIC row (ReferenceSeeder::OTHER_PSIC_CODE) for trades not on
+ * the list.
+ *
+ * Not offered by the picker any more — see PsicPicker for why — but filings
+ * made before it was withdrawn still carry it, so every reader that has to
+ * recognise one needs this.
+ */
+export const OTHER_PSIC_CODE = '00000'
+
+/**
+ * What the BPLO counter sees most, shown before the applicant types anything.
+ *
+ * The full list is long enough that "the first eight by code" would open on
+ * food manufacturing instead of the sari-sari store.
+ */
+export const COMMON_PSIC_CODES = [
+  '47111',
+  '56101',
+  '47112',
+  '10711',
+  '96110',
+  '96120',
+  '96200',
+  '36000',
+]

@@ -308,6 +308,17 @@ class ReferenceSeeder extends Seeder
             ['SPA_AUTHORIZATION', 'SPA / Authorization to Transact, with ID photocopies', 'A special power of attorney or authorisation letter for the person filing on your behalf, together with photocopies of their ID. Only needed if somebody is transacting for you.'],
             // Repeatable "Other Requirements": applicants may attach several files.
             ['OTHER', 'Other Requirements', 'Any other supporting documents. You can add more than one file.'],
+            /*
+             * MCG-BPLO-FO-003's own three, which every one of its four boxes
+             * asks for in some combination. Added here as well as in the
+             * amendment migrations because `$req()` below SYNCS — a fresh
+             * database drops anything a migration added and writes this list
+             * over the top, so a type that lives only in a migration is a type
+             * no test ever sees.
+             */
+            ['AMEND_AFFIDAVIT', 'Affidavit requesting the amendment', 'An affidavit asking BPLO to acknowledge the change you are filing for.'],
+            ['AMEND_CORP_DOCS', 'Amended Articles of Incorporation, Board Resolution and Secretary’s Certification', 'For a corporation, partnership or cooperative: the amended articles together with the board resolution and the secretary’s certification.'],
+            ['AMEND_DEED_TRANSFER', 'Deed of Transfer', 'Deed of Sale or Assignment, Affidavit of Self-Adjudication, or Extra-Judicial Settlement of the estate of a deceased owner.'],
         ];
         foreach ($docs as [$code, $name, $help]) {
             DocumentType::updateOrCreate(['code' => $code], ['name' => $name, 'help_text' => $help]);
@@ -522,8 +533,15 @@ class ReferenceSeeder extends Seeder
              * Gaps are kept so a row can join a band without renumbering. 30 is
              * where another always-required row would go.
              */
-            'DTI_SEC_CDA' => ['order' => 10, 'notes' => 'Paper item 1.'],
-            'LOCATION_SKETCH' => ['order' => 20, 'notes' => 'Paper item 5.'],
+            /*
+             * `amend_sole` and not `amend_trade_name`: FO-003 asks for DTI
+             * registration "For Single Proprietor" on boxes I, II and III, and
+             * a corporation filing any of them owes amended Articles instead.
+             * Asked of everybody, it sent corporations looking for a DTI
+             * certificate they have never held.
+             */
+            'DTI_SEC_CDA' => ['order' => 10, 'context' => 'new,renewal,amend_sole', 'notes' => 'Paper item 1. FO-003 asks it of a sole proprietor on boxes I–III.'],
+            'LOCATION_SKETCH' => ['order' => 20, 'context' => 'new,renewal,amend_address', 'notes' => 'Paper item 5. FO-003 I asks for a picture and sketch map of the new location.'],
             'PRIOR_PERMIT' => ['order' => 40, 'context' => 'renewal', 'notes' => 'Not on the documentary list — required for renewals only.'],
             /*
              * Item 3, all three rows of it, and the tax incentive certificate.
@@ -545,9 +563,17 @@ class ReferenceSeeder extends Seeder
              * absent from the documentary list, so it is the one row a clerk
              * reconciling this screen against the paper will not find there.
              */
-            'LEASE_CONTRACT' => ['order' => 50, 'context' => 'rented', 'notes' => 'Paper item 3 — required when item 8 is Yes.'],
+            /*
+             * The tenure pair carries an amendment token EACH, not one between
+             * them. FO-003 section I asks for "Contract of Lease and/or Proof
+             * of Ownership", and which of the two you owe is decided by
+             * whether you rent — exactly as on a new application. Sharing one
+             * `amend_address` token made an address amendment match both, so
+             * a shop that rents was told to produce a land title.
+             */
+            'LEASE_CONTRACT' => ['order' => 50, 'context' => 'rented,amend_address_rented', 'notes' => 'Paper item 3 — required when item 8 is Yes. FO-003 I asks the same of a move.'],
             'LESSOR_PERMIT' => ['order' => 51, 'context' => 'rented', 'notes' => 'Paper item 3 — asked with the Contract of Lease.'],
-            'LAND_TITLE' => ['order' => 52, 'context' => 'owned', 'notes' => 'Paper item 3 — required when item 8 is No.'],
+            'LAND_TITLE' => ['order' => 52, 'context' => 'owned,amend_address_owned', 'notes' => 'Paper item 3 — required when item 8 is No. FO-003 I asks the same of a move.'],
             'TAX_INCENTIVE_CERT' => ['order' => 60, 'context' => 'tax_incentives', 'notes' => 'Not on the documentary list — section B item 7, required when the answer is Yes.'],
             /*
              * Last, because it is the only row nobody is obliged to fill. Paper
@@ -558,6 +584,31 @@ class ReferenceSeeder extends Seeder
              * almost none of them, which is exactly what belongs at the bottom.
              */
             'SPA_AUTHORIZATION' => ['order' => 70, 'is_mandatory' => false, 'notes' => 'Paper item 6 — attach this if somebody is transacting on your behalf.'],
+            /*
+             * ── MCG-BPLO-FO-003, the Amendment Form ──────────────────────
+             *
+             * Its four boxes each print their own requirements list, and the
+             * `amend_*` tokens are how one pivot says so —
+             * `AmendableFields::GROUPS` names the boxes and
+             * `ApplyWizard::requiredDocs` resolves the tokens.
+             *
+             * Two requirements the paper asks for are deliberately absent:
+             * the "Photocopy of Business/Mayor's Permit", which BizTrack
+             * issued and holds, and the "Zoning clearance", which is a record
+             * here rather than an upload and which a cross-barangay move
+             * re-applies for as part of the amendment. Both decisions are
+             * written up in the 000190 migration.
+             */
+            'AMEND_AFFIDAVIT' => ['order' => 80, 'context' => 'amendment', 'notes' => 'FO-003 — every box asks for it.'],
+            'AMEND_DEED_TRANSFER' => ['order' => 85, 'context' => 'amend_owner', 'notes' => 'FO-003 II.'],
+            'AMEND_CORP_DOCS' => ['order' => 90, 'context' => 'amend_corporate', 'notes' => 'FO-003 I–III, for a corporation, partnership or cooperative.'],
+            /*
+             * "Other documents that may be required" — the paper's own last
+             * line on all four boxes, and optional by definition. It is also
+             * where the unnumbered box's "(if required)" corporate papers land,
+             * since one pivot row cannot be mandatory and optional at once.
+             */
+            'OTHER' => ['order' => 99, 'context' => 'amendment', 'is_mandatory' => false, 'notes' => 'FO-003 — "Other documents that may be required".'],
         ]);
         $req($sanitary, ['SANITARY_REQ' => [], 'VALID_ID' => []]);
         $req($fsic, ['FIRE_REQ' => [], 'VALID_ID' => []]);

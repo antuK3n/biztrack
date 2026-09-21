@@ -12,6 +12,7 @@ import type {
   AnalyticsSummary,
   Application,
   ApplicationListItem,
+  AmendableField,
   AmendmentRow,
   ApplicationType,
   Assignment,
@@ -211,6 +212,14 @@ export const reference = {
   psicCodes: () => unwrap<PsicCode[]>(api.get('/reference/psic-codes')),
   departments: () => unwrap<Department[]>(api.get('/reference/departments')),
   documentTypes: () => unwrap<DocumentType[]>(api.get('/reference/document-types')),
+  /**
+   * The amendment form's field list — definitions only, no business.
+   *
+   * Fetched with the rest of the reference data so the step can draw its four
+   * boxes before any per-filing request returns. The values that go IN them
+   * come from `applications.amendments`.
+   */
+  amendableFields: () => unwrap<AmendableField[]>(api.get('/reference/amendable-fields')),
   permitTypes: () => unwrap<PermitType[]>(api.get('/reference/permit-types')),
 }
 
@@ -1317,6 +1326,22 @@ export const admin = {
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
+  /**
+   * Move a business to another owner account.
+   *
+   * The half of an approved CHANGE OF OWNERSHIP that a person has to do.
+   * MCG-BPLO-FO-003 section II lets an applicant state the new owner and
+   * attach the Deed of Transfer; the permit prints the ACCOUNT holder's name,
+   * so BPLO names the account here having read the deed.
+   *
+   * By email, because that is the identifier BPLO can get from the new owner.
+   * An unknown address is refused with the next step in the message — the new
+   * owner has to register first, and nobody at the counter can do it for them.
+   */
+  transferBusinessOwner: (id: number, ownerEmail: string, reason: string) =>
+    unwrap<{ id: number; owner_user_id: number; owner_name: string }>(
+      api.post(`/admin/businesses/${id}/owner`, { owner_email: ownerEmail, reason }),
+    ),
   /**
    * The roles an officer account may be given, with the labels the API holds.
    *

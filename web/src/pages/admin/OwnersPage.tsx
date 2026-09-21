@@ -40,6 +40,108 @@ const REASON_CODES = [
   'Other (see details)',
 ]
 
+/* ── Transfer of ownership (MCG-BPLO-FO-003 section II) ──────────────── */
+
+/**
+ * Move a business to another owner account.
+ *
+ * ── Why this screen and not the amendment's approval ──────────────────
+ *
+ * An approved CHANGE OF OWNERSHIP states a NAME. An account is a different
+ * thing: it may not exist, and matching a person to one by name is how a
+ * business ends up with the wrong Maria Reyes. So the applicant states the
+ * name, BPLO reads the Deed of Transfer, and the judgement about which
+ * account that is gets made here by a person — client's decision,
+ * 21 September 2026.
+ *
+ * Until this existed the decision had nowhere to land: `owner_user_id` was
+ * written in exactly one place, from the session, when a business was first
+ * registered.
+ */
+function TransferOwnerModal({
+  row,
+  onClose,
+  onTransferred,
+}: {
+  row: AdminBusiness
+  onClose: () => void
+  onTransferred: (owner: { id: number; name: string }) => void
+}) {
+  const [email, setEmail] = useState('')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function confirm() {
+    setBusy(true)
+    setError(null)
+    try {
+      const moved = await admin.transferBusinessOwner(row.id, email.trim(), reason.trim())
+      onTransferred({ id: moved.owner_user_id, name: moved.owner_name })
+    } catch (err) {
+      setError(toApiError(err).message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <ProtoModal
+      title="Transfer Ownership"
+      cancelLabel="Cancel"
+      confirmLabel="Transfer"
+      onCancel={onClose}
+      onConfirm={confirm}
+      confirmDisabled={busy || email.trim() === '' || reason.trim() === ''}
+    >
+      <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
+        {row.name}
+        {row.owner && (
+          <>
+            {' · currently '}
+            <span className="font-semibold text-ink">{row.owner.name}</span>
+          </>
+        )}
+      </p>
+      <div className="space-y-4">
+        <label className="block">
+          <FieldLabel required>New owner’s BizTrack email</FieldLabel>
+          <input
+            type="email"
+            className={inputCls}
+            placeholder="the address they registered with"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          {/*
+            Said before the attempt, not only after it fails. The commonest
+            dead end here is a new owner who has never registered, and an
+            officer who knows that up front can tell them on the phone
+            instead of discovering it at the counter.
+          */}
+          <span className="mt-1.5 block text-xs text-ink-secondary">
+            They must already have a BizTrack account. Filings, permits and deferred fees all move
+            with the business, and the previous owner loses access to it.
+          </span>
+        </label>
+        <label className="block">
+          <FieldLabel required>Reason</FieldLabel>
+          <textarea
+            className={`${inputCls} min-h-20`}
+            placeholder="e.g. Deed of Sale attached to amendment MCB-2026-000012"
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+        </label>
+        {error !== null && (
+          <p role="alert" className="text-sm font-medium text-s-red">
+            {error}
+          </p>
+        )}
+      </div>
+    </ProtoModal>
+  )
+}
+
 /* ── Changing Status (p100) ───────────────────────────────────────────── */
 
 function ChangeStatusModal({
@@ -245,7 +347,7 @@ function HistoryModal({ row, onClose }: { row: AdminBusiness; onClose: () => voi
 
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
-type ModalState = { kind: 'change' | 'history' | 'fees'; row: AdminBusiness } | null
+type ModalState = { kind: 'change' | 'transfer' | 'history' | 'fees'; row: AdminBusiness } | null
 
 /**
  * What a business has been issued and not yet paid for, itemised.
@@ -504,6 +606,13 @@ export function OwnersPage() {
                           </button>
                           <button
                             type="button"
+                            onClick={() => setModal({ kind: 'transfer', row })}
+                            className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                          >
+                            Transfer Ownership
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setModal({ kind: 'history', row })}
                             className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
                           >
@@ -563,6 +672,21 @@ export function OwnersPage() {
           row={modal.row}
           onClose={() => setModal(null)}
           onChanged={applyChange}
+        />
+      )}
+      {modal?.kind === 'transfer' && (
+        <TransferOwnerModal
+          row={modal.row}
+          onClose={() => setModal(null)}
+          onTransferred={(owner) => {
+            /*
+             * The roster row is patched in place rather than refetched. The
+             * owner is the only thing that moved, and a refetch would reset
+             * the page and the filter the admin is working through.
+             */
+            applyChange({ ...modal.row, owner })
+            setModal(null)
+          }}
         />
       )}
       {modal?.kind === 'history' && <HistoryModal row={modal.row} onClose={() => setModal(null)} />}
