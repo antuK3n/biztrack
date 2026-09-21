@@ -74,6 +74,26 @@ class BusinessResource extends JsonResource
             // until the wizard started asking for it.
             'capital_investment' => $this->capital_investment,
             'has_tax_incentives' => (bool) $this->has_tax_incentives,
+            /*
+             * ── The figures the last approved filing declared ────────────
+             *
+             * Dead columns until `WorkflowService::syncDeclaredFigures`
+             * started writing them at every approval. Emitted now because
+             * the office sheets read them: a renewal of the Sanitary or Fire
+             * permit alone is those offices' own forms, and MCG-CENRO-FO-001
+             * and the CHO sheet both print a floor area and a headcount they
+             * expect to be carried rather than re-asked.
+             *
+             * Nullable all the way through. A business registered before the
+             * sync existed has none of these, and a blank on a derived line
+             * is honest where a zero would be a declaration nobody made.
+             */
+            'business_area_sqm' => $this->business_area_sqm,
+            'total_employees' => $this->total_employees,
+            'male_employees' => $this->male_employees,
+            'female_employees' => $this->female_employees,
+            'employees_within_lgu' => $this->employees_within_lgu,
+            'delivery_units' => $this->delivery_units,
             // Owner-visible standing (p006 blacklist modal reads this).
             'status' => $this->status ?? 'active',
             'address' => $this->whenLoaded('address', fn () => $this->address ? [

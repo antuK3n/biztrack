@@ -546,12 +546,24 @@ class AmendableFields
 
         $spec = self::kinds()[$field];
 
+        /*
+         * The new owner is RECORDED rather than applied — `writes` is null —
+         * but the register plainly knows who owns the business today, and a
+         * change of ownership is the one amendment where "who is it now"
+         * matters most. Keyed on the field instead of on `writes`, because
+         * what can be READ and what can be WRITTEN are different questions
+         * and only the second is about `owner_user_id`.
+         */
+        if ($field === 'owner_name') {
+            return $business->owner?->fullName();
+        }
+
         $value = match ($spec['writes']) {
             'business' => $business->getAttribute($spec['column']),
             'address' => $business->address?->getAttribute($spec['column']),
             'pin' => self::pinOf($business),
             'line_primary' => $business->lines()->orderBy('id')->first()?->psic_code_id,
-            // The recorded-only fields, which have no current value.
+            // The paper's note blanks, which were never fields.
             default => null,
         };
 

@@ -2,7 +2,16 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import { PsicPicker, type PsicPickerHandle } from '../../components/PsicPicker'
-import { ZoningSheetPreview, type CarriedOverBusiness } from './OfficeFormStep'
+import {
+  OFFICE_FORM_CODES,
+  OFFICE_FORM_META,
+  OfficeFormSheet,
+  hasOfficeForm,
+  officeFormMissing,
+  type CarriedOverBusiness,
+  type OfficeFormCode,
+  type OfficeFormData,
+} from './OfficeFormStep'
 import { checkPin, withinMalabon } from '../../lib/malabonGeo'
 import { OTHER_PSIC_CODE } from '../../lib/psic'
 import { geocodeInMalabon } from '../../lib/geocode'
@@ -21,21 +30,38 @@ import { Skeleton } from '../../components/ui/primitives'
 import { FieldLabel, PillButton, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { formatBytes, formatDate, formatMoney } from '../../lib/format'
 import { toApiError } from '../../lib/api'
-import { applications, businesses, documents, payments, reference } from '../../lib/resources'
+import {
+  applications,
+  businesses,
+  documents,
+  officeForms,
+  payments,
+  reference,
+} from '../../lib/resources'
 import type { AmendmentAnswers } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
 import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 /*
- * No clearance or office-form imports here any more, and that absence is the
- * whole of this restructure on the import list.
+ * ── One office sheet is imported here, and only one ──────────────────────
  *
- * The six clearances and their office sheets are a STAGE that opens after the
- * first payment (docs/clearances-after-payment.md), not steps of this wizard.
- * <ClearanceStage> mounts them itself on /applications/:id/clearances, and it
- * owns the sheets when no `onOpenOfficeForm` is handed to it — which is now
- * every caller. Re-importing ClearanceStage or OfficeFormSheet here would be
- * the first move back to the arrangement this replaced.
+ * The six clearances and their sheets are a STAGE that opens after the first
+ * payment (docs/clearances-after-payment.md), not steps of this wizard.
+ * <ClearanceStage> mounts them on /applications/:id/clearances and owns them.
+ * Importing ClearanceStage here, or mounting the other five sheets, would be
+ * the first move back to the arrangement that replaced.
+ *
+ * `OfficeFormSheet` is the exception, for ZONING on an AMENDMENT. An
+ * amendment that moves the premises applies for a fresh Locational Clearance
+ * as part of the filing rather than after it — there is no payment stage on
+ * an amendment to open one after — so CPDD's sheet is a step of this wizard,
+ * uploads and notarised declaration included. Client, 21 September 2026:
+ * *"it should be really the same as the application form for zoning
+ * clearance, so it means it is there where you should upload that too."*
+ *
+ * It is the same component the stage renders, not a copy, and it is mounted
+ * for that one code. Widening this to the other five would be the move the
+ * paragraph above warns about.
  */
 import BarangayZoningMap from './BarangayZoningMap'
 import {
@@ -56,6 +82,7 @@ import {
 } from './FeeProfileStep'
 import type {
   AmendmentRow,
+  OfficeFormRequirement,
   ApplicationType,
   Barangay,
   Business,
@@ -81,6 +108,21 @@ type BasePhase =
    * paragraph inside one.
    */
   | 'amendments'
+  /*
+   * CPDD's Locational Clearance, on an amendment that moves the premises.
+   *
+   * A STEP rather than a section at the foot of the amendment form. It is a
+   * different office's form with its own reference number, and burying it
+   * under the last field of somebody else's made it read as an appendix to
+   * the address boxes instead of the second filing it actually is. Client,
+   * 21 September 2026: *"Don't put this here. Instead, there will be a new
+   * added section here"* — pointing at the step bar.
+   *
+   * Conditional, and the only conditional step in the wizard: `sequence`
+   * includes it exactly when the pin has moved, which is exactly when the
+   * filing starts carrying a ZONING clearance.
+   */
+  | 'zoning'
   | 'address'
   | 'business'
   /*
@@ -177,6 +219,35 @@ type BasePhase =
  * comes back wanting them chosen before submission, that is not a reordering
  * of this array: it is the whole flow again, and the argument is in the doc.
  */
+/**
+ * One office's own application form, as a step of this wizard.
+ *
+ * ── Why a renewal can have steps the business permit does not ──────────
+ *
+ * A renewal covers whichever permits the applicant ticked, and the business
+ * permit need not be among them: a shop whose Sanitary Permit expires in
+ * September renews that alone. `WorkflowService` has always known this — "such
+ * a filing has no business-permit row to issue" — and the wizard did not. It
+ * showed every renewal the whole BPLO form, so somebody renewing their Fire
+ * and Sanitary permits was walked through Location & Zoning, Business
+ * Information and Business Operation. Client, 21 September 2026: *"why does
+ * Location & Zoning, Business Information & Registration, etc. are still here
+ * if those sections are part of the business permit application form?"*
+ *
+ * The LGU's answer to what those applicants should see instead: *"we are told
+ * that their renewal form is the same as their application form"* — so each
+ * ticked office contributes its own sheet, the same `OfficeFormSheet` the
+ * clearance stage renders.
+ */
+type OfficeStep = `office:${OfficeFormCode}`
+
+type Phase = BasePhase | OfficeStep
+
+/** The office code inside an office step, or null for an ordinary phase. */
+function officeStepCode(phase: Phase): OfficeFormCode | null {
+  return phase.startsWith('office:') ? (phase.slice('office:'.length) as OfficeFormCode) : null
+}
+
 const BASE_PHASES: BasePhase[] = [
   'privacy',
   'address',
@@ -222,6 +293,11 @@ const BASE_PHASES: BasePhase[] = [
  *    values.
  *  - `documents` — the requirement lists, which the paper prints PER GROUP.
  *  - `review` — before and after, then file.
+ *
+ * `zoning` is NOT in this array and joins it conditionally — see `sequence`.
+ * An amendment that moves the pin applies for a fresh Zoning Clearance, so
+ * CPDD's sheet becomes a step between the changes and the documents; one that
+ * only corrects how an address is written does not, and never sees it.
  */
 const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 'review']
 
@@ -233,9 +309,50 @@ const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 're
  * Operation" is one word apart and easy to misread when you are looking for
  * where you left off.
  */
+/**
+ * What a step is called in the bar and the section map.
+ *
+ * ── An office step is named after the PERMIT, not its paperwork ─────────
+ *
+ * The office sheets carry their papers' own titles, and those titles do not
+ * agree with each other: "Application for Sanitary Permit to Operate", "Fire
+ * Safety Inspection Certificate (FSIC) Application", "Application for
+ * Certificate of Environmental Clearance (CEC)" — two lead with the word
+ * Application and one trails it. Side by side in a step bar that reads as
+ * carelessness, which is what the client saw: *"make the naming consistent
+ * for the sections of the other permits."*
+ *
+ * `permit_types.name` is the fix and not merely a tidier string. It is what
+ * the applicant ticked in the dialog two screens ago, what the register
+ * calls the thing, and what will be printed on the certificate they get —
+ * so the bar agrees with every other surface by construction rather than by
+ * a table somebody has to remember to update.
+ *
+ * "Renewal" is deliberately NOT prefixed. The client offered "Renewal for
+ * Sanitary Permit"; the page is already titled "2026 Renewal — Pedro's Snack
+ * Bar", so the word would repeat down every pill to say something said once
+ * above them, and these labels stay correct if the same steps are ever
+ * reached from a filing that is not a renewal.
+ *
+ * Falls back to the paper's title while the reference data is still loading,
+ * which is a blank bar's worth of milliseconds and better than an empty pill.
+ */
+function phaseLabel(phase: Phase, permitName: (code: OfficeFormCode) => string): string {
+  const code = officeStepCode(phase)
+  if (code !== null) return permitName(code)
+
+  /*
+   * Narrowing on `code` does not narrow `phase`, because the two are only
+   * related through the template literal. The cast is safe by construction:
+   * `officeStepCode` returns null for exactly the phases BASE_LABELS covers.
+   */
+  return BASE_LABELS[phase as BasePhase]
+}
+
 const BASE_LABELS: Record<BasePhase, string> = {
   privacy: 'Data Privacy Consent',
   amendments: 'Changes Since Last Permit',
+  zoning: 'Zoning Clearance',
   business: 'Business Information & Registration',
   operation: 'Business Operation',
   address: 'Location & Zoning',
@@ -778,18 +895,6 @@ const REGISTRATION_AGENCIES: Record<
   },
 }
 
-/**
- * Details that have no "current value" by construction.
- *
- * Not the same as a value the register happens not to hold. An ADDITIONAL line
- * of business does not exist until this amendment adds it; a NEW OWNER is the
- * answer, not a correction of one; the paper's "AMENDMENT OF … DETAILS" blanks
- * are notes to BPLO and were never fields. Printing "Currently: not recorded"
- * against these reads as a gap in the register that the applicant ought to
- * fix, which is the opposite of what it means.
- */
-const AMEND_NO_CURRENT = ['owner_name']
-
 /** The agency that registers a structure, or null while none is chosen. */
 function agencyFor(registrationType: string): RegistrationAgency | null {
   return REGISTRATION_TYPES.find((rt) => rt.value === registrationType)?.agency ?? null
@@ -1016,7 +1121,7 @@ function WizardSection({
   children,
 }: {
   name: BasePhase
-  phase: BasePhase
+  phase: Phase
   reviewing: boolean
   /**
    * Is this section part of the filing's own sequence?
@@ -2213,17 +2318,33 @@ function IdentifyFilingModal({
                           className="h-4 w-4 shrink-0 accent-royal"
                         />
                         {/*
-                         * Number, type and validity dates together, because one
-                         * of them alone does not tell two permits apart: a shop
-                         * renewing late can hold last year's Mayor's Permit and
-                         * this year's, same type, different dates.
+                         * ── The NAME leads, the number identifies ───────────
+                         *
+                         * Name, number and validity dates all stay, because
+                         * one of them alone does not tell two permits apart:
+                         * a shop renewing late can hold last year's Mayor's
+                         * Permit and this year's — same type, different
+                         * dates, different numbers.
+                         *
+                         * But the number led, and that is the wrong way round
+                         * for the question being asked. "MCS-2026-000001" in
+                         * bold above "Sanitary Permit" in grey makes the
+                         * applicant read a reference code to find out which
+                         * permit it is, on a list where the whole task is
+                         * picking the ones they mean. Client, 21 September
+                         * 2026: *"Make sure the title of the permit is at the
+                         * top to make it more prominent, not the ID."*
+                         *
+                         * The number keeps its tabular figures — it is what
+                         * distinguishes two permits of the same type, so it
+                         * has to stay scannable down the column.
                          */}
                         <span className="min-w-0 flex-1">
-                          <span className="tnum block text-sm font-semibold text-ink">
-                            {p.permit_number}
+                          <span className="block text-sm font-semibold text-ink">
+                            {p.permit_type?.name ?? 'Permit'}
                           </span>
                           <span className="block text-xs text-ink-secondary">
-                            {p.permit_type?.name ?? 'Permit'} · {permitValidity(p)}
+                            <span className="tnum">{p.permit_number}</span> · {permitValidity(p)}
                           </span>
                           {reason && (
                             <span className={`mt-1 block text-xs ${reason.cls}`}>
@@ -2631,6 +2752,21 @@ export function ApplyWizard() {
    * it is a request that was never made.
    */
   const [amendPinError, setAmendPinError] = useState<string | null>(null)
+
+  /*
+   * ── CPDD's sheet, as the clearance stage keeps it ─────────────────────
+   *
+   * The amendment's Zoning step is the real MCG-CPDD-FO-003, not a reading
+   * of it: the applicant fills it in and attaches its documents here, the
+   * notarised Applicant Declaration included. That needs the same four
+   * pieces of state ClearanceStagePage holds — the answers, the checklist,
+   * which row is busy, and what went wrong — because it is the same sheet
+   * talking to the same endpoints.
+   */
+  const [officeData, setOfficeData] = useState<Record<string, OfficeFormData>>({})
+  const [officeReqs, setOfficeReqs] = useState<Record<string, OfficeFormRequirement[]>>({})
+  const [officeReqBusy, setOfficeReqBusy] = useState<string | null>(null)
+  const [officeError, setOfficeError] = useState<string | null>(null)
   const [amendError, setAmendError] = useState<string | null>(null)
   /**
    * Whether the amendable details are still on their way.
@@ -2652,7 +2788,6 @@ export function ApplyWizard() {
    * empty state for one frame on every arrival.
    */
   const [amendLoading, setAmendLoading] = useState(true)
-  const [amendSaved, setAmendSaved] = useState<string | null>(null)
   // Keyed by document type; the document id is what a removal needs.
   /*
    * Files per documentary requirement, keyed by document-type id.
@@ -3100,6 +3235,28 @@ export function ApplyWizard() {
         }
       }),
     [refs.data?.amendableFields, amendValues],
+  )
+
+  /**
+   * Whether the PREMISES are moving, which is what costs a Zoning Clearance.
+   *
+   * The same question `WorkflowService::amendmentMovesPremises` answers, and
+   * deliberately the same shape: the server decides whether the filing carries
+   * the clearance and this decides whether the applicant is warned that it
+   * will. Two callers, one rule — a warning that disagrees with the billing is
+   * worse than no warning.
+   *
+   * The PIN, not the barangay. Zoning belongs to a location and two streets in
+   * one barangay can be zoned differently, so a barangay test would let a
+   * business move to a street that forbids its trade without anyone looking.
+   * BizTrack cannot read the maps — they are images — so it cannot judge that
+   * itself; it can only decide whether to ask CPDO, and a moved pin is the one
+   * honest sign that there is something new to look at. Correcting how an
+   * address is spelled leaves the pin alone.
+   */
+  const amendMovesPremises = useMemo(
+    () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
+    [amendRows],
   )
   /*
    * The Mayor's / Business Permit rides along on every application (it is what
@@ -3556,14 +3713,85 @@ export function ApplyWizard() {
    * separately, and it still asks A1/A2/A3. Deleting the step to tidy up the
    * renewal would take the amendment form's only question with it.
    */
-  const sequence: BasePhase[] = useMemo(
-    () => (applicationType === 'amendment' ? AMENDMENT_PHASES : BASE_PHASES),
-    [applicationType],
+  /**
+   * The steps this filing actually has.
+   *
+   * ── The one step that comes and goes ──────────────────────────────────
+   *
+   * An amendment that moves the premises applies for a fresh Zoning
+   * Clearance, so CPDD's sheet joins the wizard as its own step — between
+   * the changes and the documents, which is where it falls in the filing.
+   * Move the pin back and the step leaves again.
+   *
+   * Keyed on `amendMovesPremises`, the same value the warning and the
+   * server's `WorkflowService::amendmentMovesPremises` read, so a step
+   * cannot appear for a clearance the filing will not carry.
+   *
+   * `stepIndex` is clamped against this array's length on every render, so a
+   * step disappearing from under the applicant cannot strand them past the
+   * end — they land on Review rather than on nothing.
+   */
+  /**
+   * The offices whose own form this filing is, when it is not the business
+   * permit's.
+   *
+   * A renewal carries whichever permits were ticked. Tick the business permit
+   * and this is the BPLO form, with the other clearances opening later at the
+   * clearance stage — the arrangement the "other permits come later" note on
+   * Location & Zoning describes. Tick only the others and there is no BPLO
+   * form to fill: the filing IS those offices' applications, so their sheets
+   * are the steps.
+   *
+   * Ordered by `OFFICE_FORM_CODES` rather than by the order they were ticked,
+   * so two applicants renewing the same pair meet them in the same order and
+   * a reopened draft does not reshuffle.
+   *
+   * MARKET has no sheet and is filtered out by `hasOfficeForm`; a renewal of
+   * that alone is privacy → review, which is honest — there is nothing to
+   * fill in, only a fee.
+   */
+  /** A permit's own name, as the register and the tick dialog give it. */
+  const officePermitName = useCallback(
+    (code: OfficeFormCode) =>
+      permitTypes.find((pt) => pt.code === code)?.name ?? OFFICE_FORM_META[code].title,
+    [permitTypes],
   )
+
+  const officeSteps: OfficeStep[] = useMemo(() => {
+    if (applicationType !== 'renewal') return []
+
+    const codes = permitTypes
+      .filter((pt) => form.permit_type_ids.includes(pt.id))
+      .map((pt) => pt.code)
+
+    if (codes.length === 0 || codes.includes(BUSINESS_PERMIT_CODE)) return []
+
+    return OFFICE_FORM_CODES.filter(
+      (code) => codes.includes(code) && hasOfficeForm(code),
+    ).map((code): OfficeStep => `office:${code}`)
+  }, [applicationType, permitTypes, form.permit_type_ids])
+
+  const sequence: Phase[] = useMemo(() => {
+    if (applicationType === 'amendment') {
+      if (!amendMovesPremises) return AMENDMENT_PHASES
+
+      return AMENDMENT_PHASES.flatMap((p) => (p === 'documents' ? ['zoning', p] : [p]))
+    }
+
+    /*
+     * No Documentary Requirements step, deliberately. That step is BPLO's
+     * list, and BPLO is not part of this filing — showing it would be the
+     * same mistake as showing Business Information. Each office's documents
+     * are asked for inside its own sheet, where its paper prints them.
+     */
+    if (officeSteps.length > 0) return ['privacy', ...officeSteps, 'review']
+
+    return BASE_PHASES
+  }, [applicationType, amendMovesPremises, officeSteps])
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
-  const phase: BasePhase = sequence[stepIndex]
+  const phase: Phase = sequence[stepIndex]
 
   /*
    * Review draws every section at once — see the block above where
@@ -3603,10 +3831,35 @@ export function ApplyWizard() {
     if (businessTypeId === null) return
 
     if (applicationType !== 'renewal') {
+      /*
+       * ── An amendment that moves the premises carries ZONING too ─────────
+       *
+       * Not only at submission. `permitTypeIdsAtSubmission` attaches it there
+       * as well and the two agree, but the clearance has to exist on the
+       * DRAFT for the applicant to fill CPDD's sheet in: a file needs a
+       * clearance row to attach to, and `OfficeFormController::upsert`
+       * refuses a permit the filing does not carry.
+       *
+       * Client, 21 September 2026: *"it should be really the same as the
+       * application form for zoning clearance, so it means it is there where
+       * you should upload that too."* This is what makes that possible.
+       *
+       * It leaves again if the pin is withdrawn, because the filing would no
+       * longer carry the clearance at submission and a pivot row nothing
+       * submits is a clearance CPDO would be routed for no reason.
+       */
+      const zoningTypeId =
+        applicationType === 'amendment' && amendMovesPremises
+          ? (permitTypes.find((pt) => pt.code === 'ZONING')?.id ?? null)
+          : null
+
+      const wanted = [businessTypeId, ...(zoningTypeId === null ? [] : [zoningTypeId])]
+
       setForm((f) =>
-        f.permit_type_ids.includes(businessTypeId)
+        f.permit_type_ids.length === wanted.length &&
+        wanted.every((id) => f.permit_type_ids.includes(id))
           ? f
-          : { ...f, permit_type_ids: [businessTypeId, ...f.permit_type_ids] },
+          : { ...f, permit_type_ids: wanted },
       )
 
       return
@@ -4181,7 +4434,7 @@ export function ApplyWizard() {
    * Null until the business is known, which is also when there is nothing to
    * preview.
    */
-  const amendZoningSheet = useMemo<CarriedOverBusiness | null>(() => {
+  const officeSheetBusiness = useMemo<CarriedOverBusiness | null>(() => {
     const chosen = (ownedBusinesses.data ?? []).find((b) => b.id === prefillBusinessId)
     if (chosen === undefined) return null
 
@@ -4222,9 +4475,16 @@ export function ApplyWizard() {
       productsServices: line?.products_services ?? '',
       landline: address?.telephone ?? '',
       mobile: address?.mobile_number ?? '',
-      businessAreaSqm: asked('business_area_sqm') ?? '',
-      maleEmployees: asked('male_employees') ?? '',
-      femaleEmployees: asked('female_employees') ?? '',
+      /*
+       * The amendment's requested figure if there is one, else the
+       * register's. The business record carries the latest declared figures
+       * since `WorkflowService::syncDeclaredFigures`, so a renewal's sheet
+       * shows what the last approved filing said rather than a blank where
+       * the clearance stage would have shown a number.
+       */
+      businessAreaSqm: asked('business_area_sqm') ?? numberOrBlank(chosen.business_area_sqm),
+      maleEmployees: asked('male_employees') ?? numberOrBlank(chosen.male_employees),
+      femaleEmployees: asked('female_employees') ?? numberOrBlank(chosen.female_employees),
       proprietorName:
         (chosen.president_officer_name ?? '').trim() ||
         [owner?.given_name, owner?.middle_name, owner?.surname, owner?.suffix]
@@ -4237,27 +4497,11 @@ export function ApplyWizard() {
     }
   }, [ownedBusinesses.data, prefillBusinessId, amendRows])
 
-  /**
-   * Whether the PREMISES are moving, which is what costs a Zoning Clearance.
-   *
-   * The same question `WorkflowService::amendmentMovesPremises` answers, and
-   * deliberately the same shape: the server decides whether the filing carries
-   * the clearance and this decides whether the applicant is warned that it
-   * will. Two callers, one rule — a warning that disagrees with the billing is
-   * worse than no warning.
-   *
-   * The PIN, not the barangay. Zoning belongs to a location and two streets in
-   * one barangay can be zoned differently, so a barangay test would let a
-   * business move to a street that forbids its trade without anyone looking.
-   * BizTrack cannot read the maps — they are images — so it cannot judge that
-   * itself; it can only decide whether to ask CPDO, and a moved pin is the one
-   * honest sign that there is something new to look at. Correcting how an
-   * address is spelled leaves the pin alone.
-   */
-  const amendMovesPremises = useMemo(
-    () => amendRows.some((r) => r.field === 'address_pin' && r.requested),
-    [amendRows],
-  )
+  /** A figure as the office sheets want it: the digits, or nothing at all. */
+  function numberOrBlank(value: number | null | undefined): string {
+    return value === null || value === undefined ? '' : String(value)
+  }
+
 
   /**
    * What this filing changes, in one line.
@@ -4304,7 +4548,21 @@ export function ApplyWizard() {
    * source of every tick that was showing on an empty section.
    */
   const missingFor = useCallback(
-    (p: BasePhase): string[] => {
+    (p: Phase): string[] => {
+      /*
+       * ── An office step answers from its own sheet ────────────────────
+       *
+       * `officeFormMissing` is the same rule the clearance stage applies,
+       * called on the same data, so a renewal of the other permits alone is
+       * gated exactly as those sheets are gated when they are reached the
+       * usual way. Nothing about being a wizard step changes what the sheet
+       * requires.
+       */
+      const officeCode = officeStepCode(p)
+      if (officeCode !== null) {
+        return officeFormMissing(officeCode, officeData[officeCode] ?? {})
+      }
+
       switch (p) {
         /*
          * There is no 'clearances' branch, and its absence is a rule change
@@ -4783,6 +5041,17 @@ export function ApplyWizard() {
           }
           return []
         }
+        /*
+         * CPDD's sheet asks the applicant nothing.
+         *
+         * MCG-CPDD-FO-003 is almost entirely derived from the BPLO form, and
+         * `officeFormMissing` says the same of it — of the two questions the
+         * paper does ask, it marks neither mandatory. So the step is a
+         * reading, and a gate here would block a filing on a form that
+         * completes itself.
+         */
+        case 'zoning':
+          return []
         case 'documents':
           // One file satisfies a requirement; more are allowed and change
           // nothing here. `?.length` rather than presence because a requirement
@@ -4805,6 +5074,14 @@ export function ApplyWizard() {
         case 'review':
           return sequence.filter((step) => step !== 'review').flatMap((step) => missingFor(step))
       }
+
+      /*
+       * `p` is a Phase and the switch covers every BasePhase, but the office
+       * steps are handled above and TypeScript cannot see that the two sets
+       * are disjoint. Unreachable, and an empty list is the safe answer if it
+       * ever is not: a step with no rule does not block a filing.
+       */
+      return []
     },
     [
       form,
@@ -5563,6 +5840,127 @@ export function ApplyWizard() {
   }, [applicationType, phase, applicationId])
 
   /**
+   * Load CPDD's sheet when the Zoning step opens.
+   *
+   * The clearance has to exist first — the pivot row is what an upload
+   * attaches to — and it does: the draft carries ZONING from the moment the
+   * pin moves (see the permit-type effect), and the wizard's own autosave
+   * pushes `permit_type_ids` to the server.
+   *
+   * Empty answers are a fine starting point. MCG-CPDD-FO-003 derives most of
+   * itself from the BPLO form, so a blank sheet renders complete.
+   */
+  useEffect(() => {
+    const needed = phase === 'zoning' ? 'ZONING' : officeStepCode(phase)
+    if (needed === null || applicationId === null) return
+
+    let alive = true
+    void (async () => {
+      setOfficeError(null)
+      try {
+        const sheets = await officeForms.list(applicationId)
+        if (!alive) return
+
+        /*
+         * Every sheet on the filing, not only the one being opened. The list
+         * is one request either way, and a renewal of three permits walks
+         * three steps — fetching per step would make the same call three
+         * times and flash an empty form at each one.
+         */
+        setOfficeData(
+          Object.fromEntries(sheets.map((sheet) => [sheet.permit_type_code, sheet.form_data ?? {}])),
+        )
+        setOfficeReqs(
+          Object.fromEntries(
+            sheets.map((sheet) => [sheet.permit_type_code, sheet.requirements ?? []]),
+          ),
+        )
+      } catch (err) {
+        if (alive) setOfficeError(toApiError(err).message)
+      }
+    })()
+
+    return () => {
+      alive = false
+    }
+  }, [phase, applicationId])
+
+  /**
+   * Save the sheet's answers.
+   *
+   * Written on every change rather than on a debounce, because CPDD's sheet
+   * is almost all derived: the applicant touches two controls on it, so
+   * "every change" is a handful of requests across the whole step and not a
+   * keystroke storm. `submit: false` — leaving the step is not filing the
+   * clearance, and the API's default is the safe one.
+   */
+  async function saveOfficeForm(code: OfficeFormCode, next: OfficeFormData) {
+    setOfficeData((all) => ({ ...all, [code]: next }))
+    if (applicationId === null) return
+
+    setOfficeError(null)
+    try {
+      await officeForms.save(applicationId, code, next)
+    } catch (err) {
+      setOfficeError(toApiError(err).message)
+    }
+  }
+
+  /**
+   * Attach or remove one of CPDD's required documents.
+   *
+   * The browser-side check runs first, for the reason `uploads.ts` gives: the
+   * API's refusal of an empty PDF is "Upload a PDF, JPG, or PNG file", which
+   * is true of the file and useless to the person holding it.
+   */
+  async function changeOfficeRequirement(
+    code: OfficeFormCode,
+    documentCode: string,
+    file: File | null,
+  ) {
+    if (applicationId === null) return
+
+    setOfficeReqBusy(documentCode)
+    setOfficeError(null)
+    try {
+      if (file !== null) {
+        const rejection = fileRejection(file)
+        if (rejection !== null) {
+          setOfficeError(rejection)
+
+          return
+        }
+      }
+
+      const result =
+        file !== null
+          ? await officeForms.uploadRequirement(applicationId, code, documentCode, file)
+          : await officeForms.removeRequirement(applicationId, code, documentCode)
+
+      setOfficeReqs((all) => ({ ...all, [code]: result.requirements }))
+    } catch (err) {
+      setOfficeError(file !== null ? uploadErrorMessage(err) : toApiError(err).message)
+    } finally {
+      setOfficeReqBusy((busy) => (busy === documentCode ? null : busy))
+    }
+  }
+
+  /** Section X of the CPDD paper, blank, for the applicant to have notarised. */
+  async function downloadZoningDeclaration() {
+    if (applicationId === null) return
+
+    setOfficeError(null)
+    try {
+      await officeForms.declaration(
+        applicationId,
+        'ZONING',
+        'locational-clearance-declaration.pdf',
+      )
+    } catch (err) {
+      setOfficeError(toApiError(err).message)
+    }
+  }
+  /**
    * Send one detail's new value, or withdraw it when the box is emptied.
    *
    * Per field rather than the whole set, matching the endpoint's
@@ -5899,14 +6297,25 @@ export function ApplyWizard() {
 
     setAmendBusy(true)
     setAmendError(null)
-    setAmendSaved(null)
     try {
       const rows =
         typed === ''
           ? await applications.removeAmendment(applicationId, field)
           : await applications.setAmendments(applicationId, [{ field, new_value: typed }])
+      /*
+       * No per-field "Saved" line any more. It appeared under whichever box
+       * had just blurred and said the same thing every time — client,
+       * 21 September 2026: *"Remove this text. No need for this to appear."*
+       *
+       * Nothing is lost by it going: the value stays in the box, the section
+       * summary lists what has been asked for, and Review names every
+       * requested change before submission. A confirmation that repeats what
+       * the screen already shows is noise on a form with seventeen fields.
+       *
+       * `amendSaved` went with it rather than being left as a state nothing
+       * reads.
+       */
       setAmendValues(Object.fromEntries(rows.map((r) => [r.field, r])))
-      setAmendSaved(field)
 
       return rows
     } catch (err) {
@@ -6929,10 +7338,16 @@ export function ApplyWizard() {
       {/* ── Full section map: every step this application requires ─────── */}
       <ol className="mb-8 flex flex-wrap gap-2" aria-label="Application sections">
         {sequence.map((p, i) => {
-          // The phase IS the key: the running order is fixed now, so there is
-          // no longer a synthetic `office:CODE` identity to construct.
+          /*
+           * The phase IS the key, `office:CODE` included. That synthetic
+           * identity went when the clearances left the wizard and came back
+           * on 21 September 2026 for the one filing that needs it: a renewal
+           * of the other permits alone, whose steps ARE those offices' forms.
+           * It is still a key and still unique, so nothing here changes but
+           * the label lookup, which now has two sources.
+           */
           const key = p
-          const label = BASE_LABELS[p]
+          const label = phaseLabel(p, officePermitName)
           const current = i === stepIndex
           const opened = visited.includes(key)
           const blocked = jumpBlocked(i)
@@ -7697,11 +8112,17 @@ export function ApplyWizard() {
                       'Loading this business’s permits…'
                     ) : priorPermitChoice ? (
                       <>
-                        <span className="tnum font-semibold">
-                          {priorPermitChoice.permit_number}
+                        {/*
+                         * Name first here too — same reasoning as the picker
+                         * this summarises. A summary that leads with a
+                         * reference code makes the reader decode it to learn
+                         * what they picked.
+                         */}
+                        <span className="font-semibold">
+                          {priorPermitChoice.permit_type?.name ?? 'Permit'}
                         </span>
                         {' · '}
-                        {priorPermitChoice.permit_type?.name ?? 'Permit'}
+                        <span className="tnum">{priorPermitChoice.permit_number}</span>
                         {' · '}
                         {permitValidity(priorPermitChoice)}
                       </>
@@ -9646,44 +10067,84 @@ export function ApplyWizard() {
                           }`}
                         >
                           {/*
-                            ── The field, and what the register already says ──
+                            ── The detail, and the comparison it is asking ────
 
-                            One row: the name of the detail, then the value on
-                            record beside it.
+                            The field's name, then Current over New.
 
-                            It has been three shapes. Small grey text jammed
-                            against the right edge of a half-width box, which
-                            made the one fact the applicant is comparing
-                            against the quietest thing in it. Then a chip on
-                            its own line, which was legible and cost a line per
-                            field — client, 21 September 2026: *"I don't like
-                            the layout. Try putting the current record beside
-                            the title of the field itself."* So: beside the
-                            title, with the chip's weight kept.
+                            Four shapes, and the first three are worth keeping
+                            a record of because each failed in a way the next
+                            one fixed:
 
-                            The word stays small and quiet; the VALUE carries
-                            the weight, because the value is the thing being
-                            read. It wraps to its own line only when it
-                            genuinely will not fit.
-
-                            Nothing is drawn for a detail with no current value
-                            by construction — see AMEND_NO_CURRENT — nor for
-                            the paper's note blanks, where "not recorded" would
-                            read as a gap in the register rather than as the
-                            nature of the question.
+                            1. small grey text at the right-hand edge of a
+                               half-width box, which made the one fact the
+                               applicant is comparing against the quietest
+                               thing in it;
+                            2. a chip on its own line — legible, and a whole
+                               line per field;
+                            3. that chip beside the title, which was compact
+                               and still read as two unrelated facts: a value
+                               on record, and an empty box that never said it
+                               was where the replacement goes;
+                            4. labelled rows. Client, 21 September 2026: *"put
+                               it something like 'Current:' then 'New:' so that
+                               the comparison is much more visible."*
                           */}
-                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                            <label
-                              htmlFor={`amend-${row.field}`}
-                              className="text-sm font-medium text-ink"
-                            >
-                              {row.label}
-                            </label>
+                          <label
+                            htmlFor={`amend-${row.field}`}
+                            className="text-sm font-medium text-ink"
+                          >
+                            {row.label}
+                          </label>
 
-                            {row.type !== 'note' && !AMEND_NO_CURRENT.includes(row.field) && (
-                              <span className="inline-flex max-w-full items-baseline gap-1.5 rounded-md border border-line bg-shell px-2 py-0.5">
-                                <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">
-                                  Currently
+                          {row.help !== null && (
+                            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
+                              {row.help}
+                            </p>
+                          )}
+
+                          {/*
+                            ── Current above New, on the same rail ───────────
+
+                            The two halves of the question the form is asking,
+                            labelled and stacked so the box reads as one
+                            comparison rather than as a fact and an unrelated
+                            empty input. Client, 21 September 2026: *"what if
+                            we put it something like 'Current:' then 'New:' so
+                            that the comparison is much more visible."*
+
+                            Before this the record sat in a chip beside the
+                            field's name and the input below carried no label
+                            at all, so nothing on screen said the one was what
+                            the other would replace.
+
+                            A fixed rail for the two words, so the values line
+                            up under each other — the whole point is reading
+                            down the pair, and ragged labels put the two
+                            things being compared at different indents.
+                          */}
+                          {/*
+                            Every field gets the pair except the NOTES.
+
+                            There was an exception list beside this test, and
+                            it emptied out: an ADDITIONAL line of business went
+                            when the register turned out to hold one trade per
+                            business, and the NEW OWNER went when it became
+                            clear the register plainly knows who owns the
+                            business today — "Current: Nena Dela Cruz" is the
+                            single most useful comparison on a change of
+                            ownership, and it was the one field suppressing it.
+
+                            What is left is the paper's "AMENDMENT OF …
+                            DETAILS" blanks, which were never fields and have
+                            no current value to compare against. A list with no
+                            entries is a test that always passes, so the type
+                            is the whole condition now.
+                          */}
+                          {row.type !== 'note' ? (
+                            <div className="mt-2 space-y-1.5">
+                              <div className="flex items-baseline gap-2.5">
+                                <span className="w-[3.75rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-ink-muted">
+                                  Current
                                 </span>
                                 {(row.current_label ?? row.current_value) !== null ? (
                                   <span className="min-w-0 break-words text-[13px] font-semibold text-ink">
@@ -9694,23 +10155,32 @@ export function ApplyWizard() {
                                     not recorded
                                   </span>
                                 )}
-                              </span>
-                            )}
-                          </div>
+                              </div>
 
-                          {row.help !== null && (
-                            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
-                              {row.help}
-                            </p>
+                              <div className="flex items-start gap-2.5">
+                                {/*
+                                  Nudged down so the word sits on the input's
+                                  own text rather than on the top of its
+                                  border — `items-start` is right for a map,
+                                  which is 300px tall and must not drag the
+                                  label to its middle.
+                                */}
+                                <span className="mt-2.5 w-[3.75rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-royal">
+                                  New
+                                </span>
+                                <div className="min-w-0 flex-1">{renderAmendControl(row)}</div>
+                              </div>
+                            </div>
+                          ) : (
+                            /*
+                              A note has no "current" to sit above it, so
+                              labelling its box "New" against a blank
+                              "Current" would invent a comparison that is not
+                              being made.
+                            */
+                            <div className="mt-2">{renderAmendControl(row)}</div>
                           )}
 
-                          <div className="mt-2">{renderAmendControl(row)}</div>
-
-                          {row.requested && amendSaved === row.field && (
-                            <span className="mt-1.5 block text-xs font-medium text-s-green">
-                              Saved — BPLO will see this request.
-                            </span>
-                          )}
                         </div>
                       ))}
                     </div>
@@ -9728,47 +10198,6 @@ export function ApplyWizard() {
                 sittings, and refusing to let them leave would lose what they
                 have typed.
               */}
-              {/*
-                ── The Zoning Clearance this amendment applies for ──────────
-
-                Shown when the pin moves, which is exactly when the filing
-                starts carrying a ZONING clearance — same condition the server
-                uses (`WorkflowService::amendmentMovesPremises`), so the
-                section cannot appear on a filing CPDO will never see, or be
-                missing from one they will.
-
-                It is CPDD's own sheet, not a copy of it: `ZoningSheetPreview`
-                exports the component the clearance stage renders. Fed the
-                values this amendment is ASKING for, because the register
-                still holds the old address until BPLO approves and a sheet
-                built from the register would show the officer the premises
-                being left behind.
-
-                Read-only, and that is the honest shape rather than a
-                limitation — MCG-CPDD-FO-003 is almost entirely derived from
-                the BPLO form, so there is nothing on it for the applicant to
-                fill in. Its job here is to show them what the zoning officer
-                will read before they commit to sending it.
-              */}
-              {amendMovesPremises && amendZoningSheet !== null && (
-                <section className="mt-10">
-                  <h2 className="text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
-                    Zoning Clearance — what CPDO will see
-                  </h2>
-                  <div className="mb-4 mt-2 h-px bg-royal/30" />
-
-                  <p className="mb-4 max-w-3xl text-xs leading-relaxed text-ink-secondary">
-                    Because you have moved the pin, this amendment also applies for a fresh Zoning
-                    Clearance. Nothing here needs filling in — the City Planning Office reads it
-                    from the details above, and it is shown so you can check them before you
-                    submit. They handle it as they would any other zoning application.
-                  </p>
-
-                  <div className="rounded-lg border border-input-border bg-white px-5 py-5">
-                    <ZoningSheetPreview business={amendZoningSheet} />
-                  </div>
-                </section>
-              )}
 
               {amendRows.length > 0 && !amendRows.some((r) => r.requested) && (
                 <p className="mt-4 max-w-2xl text-xs font-medium text-ink">
@@ -9804,6 +10233,127 @@ export function ApplyWizard() {
             </>
           )}
         </FormSheet>
+      )}
+
+      {/*
+        ── The Zoning Clearance this amendment applies for ──────────────────
+
+        Its own step, and the only conditional one in the wizard. It joins
+        `sequence` exactly when the pin has moved, which is exactly when the
+        filing starts carrying a ZONING clearance — the same value the server
+        reads (`WorkflowService::amendmentMovesPremises`), so a step cannot
+        appear for a clearance the filing will not carry.
+
+        It was a section at the foot of the amendment form, under the last
+        address field. That made a second office's form with its own reference
+        number read as an appendix to the boxes above it. Client,
+        21 September 2026: *"Don't put this here. Instead, there will be a new
+        added section here"* — the step bar.
+
+        CPDD's own sheet, not a copy: the same `OfficeFormSheet` the
+        clearance stage renders, editable, with its checklist and its
+        notarised Applicant Declaration. It began as a read-only preview of
+        the questions alone, which was half a form — client: *"I can't see the
+        other things like the Applicant Declaration part."*
+
+        Fed the values this amendment is ASKING for, because the register
+        still holds the old address until BPLO approves and a sheet built from
+        the register would show the officer the premises being left behind.
+
+        The uploads work because the draft already carries the ZONING
+        clearance — see the permit-type effect — so there is a pivot row for a
+        file to attach to.
+      */}
+      {phase === 'zoning' && officeSheetBusiness !== null && (
+        <>
+          {/*
+            No masthead here. `OfficeFormSheet` draws its own card, kicker,
+            title and form reference from OFFICE_FORM_META — a second one
+            above it printed the office's name twice, three centimetres
+            apart.
+          */}
+          <p className="mb-4 max-w-3xl text-xs leading-relaxed text-ink-secondary">
+            You have moved the pin, so this amendment also applies for a fresh Zoning Clearance.
+            Most of it is filled in from the details you gave on the last step — what it needs
+            from you is at the bottom:{' '}
+            <span className="font-semibold text-ink">
+              the documents CPDD asks for, including the notarised Applicant Declaration
+            </span>
+            .
+          </p>
+
+          {officeError !== null && (
+            <p
+              role="alert"
+              className="mb-4 max-w-3xl rounded-md border border-s-red bg-s-red-tint px-3 py-2 text-sm text-ink"
+            >
+              {officeError}
+            </p>
+          )}
+
+          <OfficeFormSheet
+            code="ZONING"
+            data={officeData.ZONING ?? {}}
+            business={officeSheetBusiness}
+            onChange={(next) => void saveOfficeForm('ZONING', next)}
+            requirements={officeReqs.ZONING ?? []}
+            requirementBusy={officeReqBusy}
+            onRequirementChange={(documentCode, file) =>
+              void changeOfficeRequirement('ZONING', documentCode, file)
+            }
+            onDeclarationTemplate={() => void downloadZoningDeclaration()}
+          />
+        </>
+      )}
+
+      {/*
+        ── One office's own application form, as a step ─────────────────────
+
+        A renewal of the OTHER permits alone is those offices' applications,
+        so their sheets ARE the steps — the LGU's own words, that *"their
+        renewal form is the same as their application form"*. The same
+        `OfficeFormSheet` the clearance stage renders, not a copy of it, and
+        the same endpoints behind it.
+
+        Only reached when `officeSteps` put this phase in the sequence, which
+        happens only when the business permit is NOT among the ticked permits.
+        Tick it and this is the BPLO form again, with the clearances opening
+        after payment as they always have.
+      */}
+      {officeStepCode(phase) !== null && officeSheetBusiness !== null && (
+        <>
+          {officeError !== null && (
+            <p
+              role="alert"
+              className="mb-4 max-w-3xl rounded-md border border-s-red bg-s-red-tint px-3 py-2 text-sm text-ink"
+            >
+              {officeError}
+            </p>
+          )}
+
+          <OfficeFormSheet
+            code={officeStepCode(phase) as OfficeFormCode}
+            data={officeData[officeStepCode(phase) as string] ?? {}}
+            business={officeSheetBusiness}
+            onChange={(next) =>
+              void saveOfficeForm(officeStepCode(phase) as OfficeFormCode, next)
+            }
+            requirements={officeReqs[officeStepCode(phase) as string] ?? []}
+            requirementBusy={officeReqBusy}
+            onRequirementChange={(documentCode, file) =>
+              void changeOfficeRequirement(
+                officeStepCode(phase) as OfficeFormCode,
+                documentCode,
+                file,
+              )
+            }
+            onDeclarationTemplate={
+              officeStepCode(phase) === 'ZONING'
+                ? () => void downloadZoningDeclaration()
+                : undefined
+            }
+          />
+        </>
       )}
 
       {/*
@@ -9914,10 +10464,18 @@ export function ApplyWizard() {
                 Payment after it approves this form.
               </p>
             </div>
+            {/*
+              Named as well as numbered. This said "Renewing MCB-2026-000003"
+              and nothing else — the one line on the confirmation page that
+              says what was just filed, and it said it in a reference code.
+            */}
             {priorPermitChoice && (
-              <p className="tnum mt-6 text-sm text-ink-secondary">
+              <p className="mt-6 text-sm text-ink-secondary">
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
-                {priorPermitChoice.permit_number}
+                <span className="font-semibold text-ink">
+                  {priorPermitChoice.permit_type?.name ?? 'your permit'}
+                </span>{' '}
+                <span className="tnum">{priorPermitChoice.permit_number}</span>
               </p>
             )}
             {/*
