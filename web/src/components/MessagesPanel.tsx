@@ -228,12 +228,31 @@ function OfficePicker({
     )
   }
 
+  /*
+   * ── The picker is a strip, not a paragraph ───────────────────────────────
+   *
+   * It printed six full office names — "City Environment and Natural Resources
+   * Office", "City Planning and Development Office (Zoning)" — as wrapping
+   * pills. In a pane 630px wide that is three or four rows, and the pane is a
+   * fixed height: every row of pills came straight out of the transcript. An
+   * applicant with three messages was scrolling to read them.
+   *
+   * The CODE is what goes on the pill — except the chosen one, which spells
+   * itself out, because the office the message is actually going to should not
+   * be an abbreviation the reader has to decode. The full name is still in
+   * three more places for the others: the `title` for a hover, the
+   * `aria-label` below, which already spelled it out, and the message box
+   * itself, whose placeholder reads "Write to Bureau of Fire Protection…".
+   *
+   * `name` is the fallback, not a nicety: `code` is nullable on the wire, and a
+   * pill with no label at all would be a button nobody could aim at.
+   */
   return (
-    <div className="mb-3">
-      <p id="message-office-label" className="mb-1.5 text-xs font-semibold text-ink-secondary">
+    <div className="mb-2.5">
+      <p id="message-office-label" className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-muted">
         Which office is this about?
       </p>
-      <div role="group" aria-labelledby="message-office-label" className="flex flex-wrap gap-2">
+      <div role="group" aria-labelledby="message-office-label" className="flex flex-wrap gap-1.5">
         {offices.map((office) => {
           const active = office.department_id === activeId
           return (
@@ -253,13 +272,28 @@ function OfficePicker({
                   ? `${office.name}, ${office.messages_count} messages`
                   : `${office.name}, no messages yet`
               }
-              className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+              title={office.name}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                 active
                   ? 'bg-royal text-white'
                   : 'bg-royal-tint text-royal hover:bg-royal/15'
               }`}
             >
-              {office.name}
+              {/*
+                * The CHOSEN office spells itself out; the rest stay codes.
+                *
+                * The strip was made compact because six full office names wrap
+                * to three or four rows in a 630px pane, and every row of pills
+                * is a row of conversation the reader loses. But the one office
+                * the message is actually going to should not be an
+                * abbreviation the reader has to decode — so the selection is
+                * the exception, and it costs one pill's width rather than six.
+                *
+                * `code ?? name` stays the fallback for the unselected ones:
+                * `code` is nullable on the wire, and a pill with no label is a
+                * button nobody can aim at.
+                */}
+              {active ? office.name : (office.code ?? office.name)}
               {office.messages_count > 0 && (
                 <span className={active ? 'ml-1.5 text-white/80' : 'ml-1.5 text-ink-secondary'}>
                   {office.messages_count}
@@ -339,6 +373,8 @@ export function MessageThreadView({
 
   const [body, setBody] = useState('')
   const [attachment, setAttachment] = useState<File | null>(null)
+  /** Whether the message box has focus — the keystroke hint follows it. */
+  const [composerFocused, setComposerFocused] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState<string | null>(null)
   const endRef = useRef<HTMLDivElement | null>(null)
@@ -478,6 +514,8 @@ export function MessageThreadView({
             placeholder={active ? `Write to ${active.name}…` : 'Write a message…'}
             aria-label={active ? `Message to ${active.name}` : 'Message'}
             aria-describedby="message-send-hint"
+            onFocus={() => setComposerFocused(true)}
+            onBlur={() => setComposerFocused(false)}
             className="min-w-0 flex-1 resize-none rounded-lg border border-input-border bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
           />
           <label
@@ -506,7 +544,19 @@ export function MessageThreadView({
             {sending ? 'Sending…' : 'Send'}
           </button>
         </div>
-        <p id="message-send-hint" className="mt-2 text-[11px] text-ink-muted">
+        {/*
+          * Shown while the box has focus, and read to a screen reader always.
+          *
+          * It is a keystroke hint — useful once, then it is 24px of the
+          * transcript gone on every conversation for the rest of the account's
+          * life. `sr-only` rather than removed, because `aria-describedby`
+          * above points at it: a sighted reader learns the keys by using the
+          * box, and a screen-reader user is told them on arrival either way.
+          */}
+        <p
+          id="message-send-hint"
+          className={`text-[11px] text-ink-muted ${composerFocused ? 'mt-2' : 'sr-only'}`}
+        >
           Press Enter to send. Shift + Enter starts a new line.
         </p>
       </div>

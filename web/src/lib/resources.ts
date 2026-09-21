@@ -869,6 +869,14 @@ export const assignments = {
    * timing. The screen prints who holds it and stops offering the button.
    */
   claim: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/claim`)),
+  /**
+   * Put it back in the office pool — stop being its Officer in Charge.
+   *
+   * Never "hand it to X": choosing somebody else's workload is `oic.assign`,
+   * the super admin's. This returns the case to Unassigned, where any officer
+   * of the office can take it.
+   */
+  release: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/release`)),
   /** Assign a specific officer to this assignment (permission oic.assign; v2). */
   assign: (id: number, officer_user_id: number, reason?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/assign`, { officer_user_id, reason })),
@@ -1295,6 +1303,17 @@ export const admin = {
   /** Move it. `to_user_id: null` releases it to the office queue. */
   reassignCaseload: (id: number, body: CaseloadMovePayload) =>
     unwrap<CaseloadMove>(api.post(`/admin/users/${id}/reassign-caseload`, body)),
+  /**
+   * The other direction: give this officer work nobody in their office holds.
+   *
+   * Same permission as the move above — `oic.assign` names who handles a case
+   * whichever way it travels — and the server checks every id is genuinely
+   * free and genuinely theirs to be given before anything moves.
+   */
+  takeCases: (id: number, body: { cases: { kind: 'review'; id: number }[]; reason: string }) =>
+    unwrap<{ total: number; to: { id: number; name: string } }>(
+      api.post(`/admin/users/${id}/take-cases`, body),
+    ),
   /*
    * The Officer-in-Charge register: every office's caseload in one list.
    *

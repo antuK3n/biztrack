@@ -10,6 +10,7 @@ use App\Models\ApplicationDocument;
 use App\Models\DocumentType;
 use App\Models\OfficerRequest;
 use App\Services\NotificationService;
+use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
@@ -26,7 +27,15 @@ use Illuminate\Validation\ValidationException;
  */
 class OfficerRequestController extends Controller
 {
-    public function __construct(private NotificationService $notify) {}
+    public function __construct(
+        private NotificationService $notify,
+        /*
+         * Raising or settling a requirement changes whether the filing is ready
+         * for BPLO's final approval, so this controller has to be able to say
+         * so — see the calls in store() and close().
+         */
+        private WorkflowService $workflow,
+    ) {}
 
     /** Officer creates a request against an application (request.create). */
     public function store(Request $request, Application $application): JsonResponse
@@ -121,6 +130,18 @@ class OfficerRequestController extends Controller
         ]);
 
         Audit::log('request.created', $officerRequest, ['department_id' => $office]);
+
+        /*
+         * An open requirement holds the filing out of Final Approval, so
+         * raising one has to be able to pull it back.
+         *
+         * `refreshReadiness` already did this for clearances — a permit going
+         * outstanding again returns the filing to the offices — and a
+         * requirement raised after the filing reached BPLO needs the same, or
+         * the office would be asking for a document into a queue BPLO is about
+         * to approve past. The method is a no-op on any other status.
+         */
+        $this->workflow->refreshReadiness($application->fresh());
 
         $application->loadMissing('applicant');
         if ($application->applicant) {
@@ -564,6 +585,15 @@ class OfficerRequestController extends Controller
         Audit::log('request.closed', $officerRequest, [
             'outcome' => $data['outcome'],
         ]);
+
+        /*
+         * And the other end of the same rule: approving the last open
+         * requirement is what frees the filing. Without this it would sit at
+         * `awaiting_other_permits` until some unrelated event happened to call
+         * readiness again — a filing stuck with nothing on it saying why, which
+         * is a worse failure than the one the blocking rule prevents.
+         */
+        $this->workflow->refreshReadiness($officerRequest->application->fresh());
 
         if ($officerRequest->application->applicant) {
             // Same ping either way — the applicant needs to know the office has

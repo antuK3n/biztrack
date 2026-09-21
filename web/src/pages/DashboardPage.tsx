@@ -11,11 +11,8 @@ import {
   UsersIcon,
 } from '../components/icons'
 import { Logo } from '../components/Logo'
-import { AccountRestrictedModal, StatusChip } from '../components/ui/Proto'
-import { businessName } from '../lib/format'
+import { AccountRestrictedModal } from '../components/ui/Proto'
 import { businesses, requests } from '../lib/resources'
-import { REQUIREMENT_CHIP_TONE } from '../lib/status'
-import type { OfficerRequest } from '../lib/types'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 
@@ -24,18 +21,31 @@ type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
 /**
  * White shadow tile + royal label beneath, per the prototype home (PDF p5).
  *
- * `count` draws the same badge the notification bell draws — the red disc with
- * the number in it, capped at 99+, from `UnreadBadge` in components/AppShell.
- * Deliberately copied rather than imported: `UnreadBadge` is private to
- * AppShell, and exporting it would mean editing a file two other people were
- * writing to at the time. If this is touched again, lift ONE badge into
- * components/ui and let both call it — two copies of a badge drift, and a home
- * tile whose count looks unlike the bell's reads as a different kind of thing.
+ * ── The warning on a tile, and where each half came from ─────────────────
  *
- * `countLabel` is what the badge means in words. The bell says "Notifications,
- * 3 unread" for the same reason: a screen reader announcing a link called
- * "Other Requirements" followed by a bare "3" sounds like a position in a list,
- * not a number of documents owed.
+ * `count` draws the badge the notification bell draws — same geometry, same
+ * 99+ cap, from `UnreadBadge` in components/AppShell. Copied rather than
+ * imported: `UnreadBadge` is private to AppShell and exporting it would have
+ * meant editing a file two other people were writing to. If this is touched
+ * again, lift ONE badge into components/ui and let both call it — two copies
+ * of a badge drift, and a home tile whose count looks unlike the bell's reads
+ * as a different kind of thing.
+ *
+ * It is ORANGE where the bell is red, and that is the one deliberate
+ * departure. The bell counts things to read; this counts something the owner
+ * OWES, which is what `s-orange` means everywhere else in this design — the
+ * requirement chips it is summarising included. The shape still matches, so
+ * the two read as the same kind of object.
+ *
+ * `note` and the ring carry the same fact in two more ways, because a dot on
+ * an icon is decoration until something says what it means: a sentence under
+ * the label for a sighted reader, and `countLabel` in the link's accessible
+ * name for one who meets it as a link and nothing else. Colour carries
+ * nothing on its own.
+ *
+ * All three are optional and generic. This tile is one of four drawn by this
+ * component, and the next one to need a badge should not have to unpick
+ * wording about documents from it.
  */
 function HomeCard({
   to,
@@ -43,22 +53,37 @@ function HomeCard({
   label,
   count = 0,
   countLabel,
+  note,
 }: {
   to: string
   icon: IconType
   label: string
+  /** How many things behind this tile are waiting on the owner. 0 = nothing. */
   count?: number
+  /** What the count MEANS, for the link's accessible name. */
   countLabel?: (count: number) => string
+  /** The same fact as a sentence, under the label. */
+  note?: (count: number) => string
 }) {
   const badged = count > 0
+
   return (
     <Link
       to={to}
+      /*
+       * The count belongs in the link's own name, not only in a badge beside
+       * it. A screen reader announcing "Other Requirements" over a tile that
+       * visually shouts would be the same failure as colour-only meaning.
+       */
       aria-label={badged && countLabel ? countLabel(count) : undefined}
       className="group flex w-40 flex-col items-center gap-4 sm:w-48"
     >
       {/* relative: the badge pins itself to this tile's corner. */}
-      <span className="relative flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised">
+      <span
+        className={`relative flex aspect-square w-full items-center justify-center rounded-2xl bg-white text-royal shadow-card transition-shadow group-hover:shadow-raised ${
+          badged ? 'ring-2 ring-s-orange' : ''
+        }`}
+      >
         <Icon size={64} strokeWidth={1.5} />
         {/*
           No badge at zero. Nothing is owed, and a "0" on a tile is a thing to
@@ -67,13 +92,18 @@ function HomeCard({
         {badged && (
           <span
             aria-hidden="true"
-            className="absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-s-red px-1 text-[10px] font-bold leading-none text-white ring-2 ring-canvas"
+            className="tnum absolute -right-2 -top-2 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-s-orange px-1 text-[10px] font-bold leading-none text-white ring-2 ring-canvas"
           >
             {count > 99 ? '99+' : count}
           </span>
         )}
       </span>
       <span className="text-center text-lg font-semibold leading-snug text-royal-deep">{label}</span>
+      {badged && note && (
+        <span aria-hidden="true" className="-mt-2 text-center text-sm font-semibold text-s-orange-ink">
+          {note(count)}
+        </span>
+      )}
     </Link>
   )
 }
@@ -91,21 +121,29 @@ function OwnerHome() {
   const showModal = !dismissed && Boolean(restricted)
 
   /*
-   * One fetch, two readers: the count on the tile and the list below it.
+   * ── The list moved onto the tile ─────────────────────────────────────────
    *
-   * The panel used to fetch this itself. The tile now carries the same number,
-   * and a second `requests.list` would have loaded the page with two identical
-   * calls in flight — and, worse, two answers that can disagree, so the tile
-   * could read 3 above a list of 2. `awaits_applicant` is the API's own
-   * judgement of whose move it is (see the panel's note below); it is not
-   * re-derived here, and it does not fall to zero until the document is
-   * actually submitted, which is what the count promises.
+   * This page used to end with a panel repeating every waiting requirement in
+   * full — subject, business, tracking number, the office that asked, a status
+   * chip and a View link. The client asked for it gone and for the tile to
+   * carry a warning instead, beside the Amendment Form tile.
+   *
+   * It is the right trade. The home page is four large buttons and one thing
+   * to decide — where am I going — and the panel answered a question the
+   * requirements page answers better, in the place the tile already points at.
+   * What the home page owes the reader is that there IS something waiting, and
+   * a count says that in a glance.
+   *
+   * Only what is waiting on the OWNER counts: `awaits_applicant` is the API's
+   * own judgement of whose move it is, and it is Pending and Needs
+   * Resubmission together, because to the person who owes a document those are
+   * one situation. It does not fall to zero until the document is actually
+   * submitted, which is what the count promises. Anything sitting with the
+   * office is deliberately excluded — a badge counting work you cannot act on
+   * teaches people to ignore the badge.
    */
-  const { data: requestData, loading: requestsLoading } = useAsync(
-    () => requests.list({ per_page: 100 }),
-    [],
-  )
-  const waiting = (requestData ?? []).filter((r) => r.awaits_applicant)
+  const { data: openRequests } = useAsync(() => requests.list({ per_page: 100 }), [])
+  const waiting = (openRequests ?? []).filter((r) => r.awaits_applicant).length
 
   return (
     <div className="flex flex-col items-center pt-6 sm:pt-10">
@@ -128,121 +166,16 @@ function OwnerHome() {
           to="/requests"
           icon={ShieldCheckIcon}
           label="Other Requirements"
-          count={requestsLoading ? 0 : waiting.length}
+          count={waiting}
           countLabel={(n) =>
             n === 1
               ? 'Other Requirements, one document waiting on you'
               : `Other Requirements, ${n} documents waiting on you`
           }
+          note={(n) => (n === 1 ? 'One document waiting on you' : `${n} documents waiting on you`)}
         />
       </div>
-
-      <OtherRequirementsPanel waiting={waiting} loading={requestsLoading} />
     </div>
-  )
-}
-
-/**
- * "Other Requirements" on the owner's home page.
- *
- * The tile above has always LINKED to the requirements page; nothing said there
- * was anything waiting behind it. An office asking for a health certificate had
- * no way of reaching the owner except a notification they might have already
- * dismissed, so the document sat unasked-for and the filing sat blocked.
- *
- * Only what is waiting on the OWNER is listed — `awaits_applicant`, which is
- * Pending and Needs Resubmission together, because to the person who owes a
- * document those are one situation. Anything with the office is deliberately
- * absent: a home page that lists work you cannot act on teaches people to
- * ignore it.
- *
- * The rows arrive from OwnerHome rather than being fetched here, because the
- * tile above now shows the same count and the two must not be able to disagree.
- */
-function OtherRequirementsPanel({
-  waiting,
-  loading,
-}: {
-  waiting: OfficerRequest[]
-  loading: boolean
-}) {
-  if (loading || waiting.length === 0) return null
-
-  return (
-    <section className="mt-14 w-full max-w-3xl" aria-labelledby="other-requirements-heading">
-      <div className="mb-3 flex items-baseline justify-between gap-3 border-b-2 border-ink/40 pb-2">
-        <h2 id="other-requirements-heading" className="text-xl font-bold text-ink">
-          Other Requirements
-        </h2>
-        <Link to="/requests" className="text-sm font-semibold text-royal underline hover:text-royal-hover">
-          See all
-        </Link>
-      </div>
-      <p className="mb-4 text-sm text-ink-secondary">
-        {waiting.length === 1
-          ? 'One document is waiting on you.'
-          : `${waiting.length} documents are waiting on you.`}
-      </p>
-
-      <ul className="flex flex-col gap-3">
-        {waiting.map((r) => (
-          <li key={r.id} className="rounded-xl bg-white px-5 py-4 shadow-card">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-base font-bold text-ink">{r.subject}</p>
-                {/*
-                  Business name AND number. One owner can hold two shops, and a
-                  "Health Certificate" with neither on it is a request they
-                  cannot act on without opening every one to find out which.
-                */}
-                <p className="text-sm text-ink-secondary">
-                  {businessName(r.application?.business_name ? { name: r.application.business_name } : null)}
-                </p>
-                <p className="tnum text-xs text-ink-muted">
-                  {r.application?.tracking_id || 'Draft — not yet filed'}
-                </p>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  Requested by:{' '}
-                  <span className="font-semibold text-ink">
-                    {r.from_office?.name ?? r.created_by?.department ?? 'the LGU'}
-                  </span>
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-2">
-                {/*
-                  The same tone map the Other Requirements page uses, not a
-                  hard-coded orange. Every row here is waiting on the owner, so
-                  amber was nearly always right — but a REJECTED document is
-                  also waiting on them, and drawing a refusal in the waiting
-                  colour told them to expect a form to fill rather than a
-                  decision to answer. The page one click away said red.
-
-                  The fallback stays orange rather than the requirements page's
-                  grey: everything on THIS panel is waiting on the owner by
-                  construction, so a status the API adds later is still
-                  something they owe, and grey would read as "nothing to do".
-                */}
-                <StatusChip tone={REQUIREMENT_CHIP_TONE[r.status] ?? 'orange'}>
-                  {r.status_label}
-                </StatusChip>
-                <Link
-                  to="/requests"
-                  className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
-                >
-                  View requirement
-                </Link>
-              </div>
-            </div>
-            {/* The reason it came back, where the owner decides what to do next. */}
-            {r.status === 'needs_resubmission' && r.remarks && (
-              <p className="mt-3 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-xs font-medium text-s-red">
-                {r.remarks}
-              </p>
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
   )
 }
 

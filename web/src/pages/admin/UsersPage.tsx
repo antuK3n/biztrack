@@ -296,6 +296,12 @@ function ReassignModal({
    * had instead of rendering an empty chooser.
    */
   const held = caseload?.cases ?? []
+  /*
+   * Did the SERVER send a list? An empty array means "holding nothing"; a
+   * missing key means a payload from before the list existed, and the two ask
+   * for different screens — see the Scope block below.
+   */
+  const hasList = Array.isArray(caseload?.cases)
   const key = (c: CaseloadCase) => `${c.kind}:${c.id}`
 
   /*
@@ -315,6 +321,52 @@ function ReassignModal({
     if (next.has(key(c))) next.delete(key(c))
     else next.add(key(c))
     setPicked(next)
+  }
+
+  /*
+   * ── The other direction ──────────────────────────────────────────────────
+   *
+   * The dialog could only move work AWAY from this officer. The office's
+   * unheld filings are listed here too, so a case nobody has picked up can be
+   * handed to the officer whose row the admin opened.
+   *
+   * Its own selection, its own button. They are opposite acts — one empties a
+   * desk, the other fills it — and a single confirm would have to send two
+   * different destinations in one request with no rule saying which wins.
+   *
+   * Nothing ticked to begin with, the mirror of the list above: taking work on
+   * is always a deliberate choice about a particular case, never a sweep.
+   */
+  const free = caseload?.unassigned ?? []
+  const [taking, setTaking] = useState<Set<string>>(new Set())
+  const [takeBusy, setTakeBusy] = useState(false)
+
+  function toggleTake(c: CaseloadCase) {
+    const next = new Set(taking)
+    if (next.has(key(c))) next.delete(key(c))
+    else next.add(key(c))
+    setTaking(next)
+  }
+
+  async function take() {
+    if (taking.size === 0 || takeBusy) return
+    setTakeBusy(true)
+    setFormError(null)
+    try {
+      const result = await admin.takeCases(user.id, {
+        cases: free
+          .filter((c) => taking.has(key(c)))
+          .map((c) => ({ kind: 'review' as const, id: c.id })),
+        reason: reason.trim() || 'Taken from the office queue.',
+      })
+      onDone(
+        `${result.total} ${result.total === 1 ? 'filing is' : 'filings are'} now with ${result.to.name}.`,
+      )
+    } catch (err) {
+      setFormError(toApiError(err).message)
+    } finally {
+      setTakeBusy(false)
+    }
   }
 
   async function confirm() {
@@ -447,25 +499,36 @@ function ReassignModal({
         * case and should not cost a dozen clicks.
         */}
       <div>
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-          <FieldLabel required>Scope — the permits {fullName(user)} is holding</FieldLabel>
-          {held.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setPicked(chosen.size === held.length ? new Set() : new Set(held.map(key)))}
-              className="text-xs font-semibold text-royal hover:underline"
-            >
-              {chosen.size === held.length ? 'Clear all' : 'Select all'}
-            </button>
-          )}
-        </div>
+        {/*
+          * ── An empty desk shows the sentence, not an empty chooser ─────────
+          *
+          * When the server says this officer holds nothing, the Scope control
+          * is a dropdown whose only option reads "Everything they are holding
+          * (0)" — a chooser with nothing to choose, over a sentence that
+          * already says so. The sentence is the whole answer; the control was
+          * furniture.
+          *
+          * `hasList` is the distinction that makes this safe. An EMPTY `cases`
+          * array is the server saying "nothing"; an ABSENT one is a payload
+          * from before this shipped, and there the category dropdown is still
+          * the only way an admin can move anything at all.
+          */}
+        {(hasList ? held.length > 0 : true) && (
+          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+            <FieldLabel required>Scope — the permits {fullName(user)} is holding</FieldLabel>
+            {held.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setPicked(chosen.size === held.length ? new Set() : new Set(held.map(key)))}
+                className="text-xs font-semibold text-royal hover:underline"
+              >
+                {chosen.size === held.length ? 'Clear all' : 'Select all'}
+              </button>
+            )}
+          </div>
+        )}
 
-        {held.length === 0 ? (
-          /*
-           * No list to pick from: either the officer holds nothing, or the
-           * payload predates `cases`. The category control stays for the second
-           * case rather than leaving an admin with no way to move anything.
-           */
+        {hasList && held.length === 0 ? null : held.length === 0 ? (
           <select
             className={inputCls}
             value={scope}
@@ -566,6 +629,64 @@ function ReassignModal({
             </p>
           )}
         </label>
+
+        {/*
+          * ── Work nobody holds ────────────────────────────────────────────
+          *
+          * The other direction, in the same dialog and with its own button:
+          * one section empties this officer's desk, the other fills it. A
+          * single confirm would have to send two destinations in one request.
+          *
+          * Nothing ticked to begin with — the mirror of Scope above. Handing a
+          * case to somebody is always a decision about that case; moving a
+          * departing officer's whole load is the sweep.
+          */}
+        {free.length > 0 && (
+          <div>
+            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+              <FieldLabel>Unassigned in {caseload.department?.code ?? 'this office'}</FieldLabel>
+              <span className="text-xs text-ink-muted">Tick to hand to {fullName(user)}</span>
+            </div>
+
+            <ul className="max-h-48 overflow-y-auto rounded-lg border border-line">
+              {free.map((c) => (
+                <li key={key(c)} className="border-b border-line last:border-b-0">
+                  <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 hover:bg-canvas">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 shrink-0 accent-royal"
+                      checked={taking.has(key(c))}
+                      onChange={() => toggleTake(c)}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                        <span className="text-sm font-semibold text-ink">
+                          {c.business ?? c.tracking_id ?? 'Business removed from the register'}
+                        </span>
+                        <span className="tnum text-xs text-ink-muted">{c.tracking_id ?? '—'}</span>
+                      </span>
+                      <span className="mt-0.5 block text-xs text-ink-secondary">
+                        {c.permit ?? 'No permit named'}
+                        {c.status_label && <span className="text-ink-muted"> · {c.status_label}</span>}
+                      </span>
+                    </span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+
+            <button
+              type="button"
+              onClick={() => void take()}
+              aria-disabled={taking.size === 0 || takeBusy || undefined}
+              className="mt-2 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+            >
+              {takeBusy
+                ? 'Assigning…'
+                : `Assign ${taking.size || ''} to ${fullName(user)}`.replace('  ', ' ')}
+            </button>
+          </div>
+        )}
 
         <label className="block">
           <FieldLabel required>Reason</FieldLabel>
@@ -1362,7 +1483,24 @@ export function UsersPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2">
-                        {canReassign && (
+                        {/*
+                          * Not on an account with NO OFFICE.
+                          *
+                          * Reassign moves an officer's caseload to a colleague
+                          * in their own office, and now also hands them work
+                          * from that office's queue. The super admin belongs to
+                          * no department — it oversees the register rather than
+                          * working inside it — so both halves of the dialog are
+                          * empty by construction: nothing to move, no queue to
+                          * move it from, and the take endpoint answers 422 on
+                          * exactly that ground.
+                          *
+                          * Keyed on `department`, not on the role's name. An
+                          * account is offered this because it belongs to an
+                          * office, and that stays true if another
+                          * departmentless role is ever added.
+                          */}
+                        {canReassign && user.department && (
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'reassign', user })}

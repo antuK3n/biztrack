@@ -213,6 +213,10 @@ Route::middleware('auth:sanctum')->group(function () {
          * claim anything.
          */
         Route::post('assignments/{assignment}/claim', [AssignmentController::class, 'claim']);
+        // Give it back to the office. Same group and the same reasoning as
+        // claim: putting down your own case is ordinary review work, and the
+        // power it needs is the office's, not the super admin's.
+        Route::post('assignments/{assignment}/release', [AssignmentController::class, 'release']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
@@ -445,6 +449,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::middleware('permission:oic.assign')->group(function () {
             Route::get('users/{user}/caseload', [UserController::class, 'caseload']);
             Route::post('users/{user}/reassign-caseload', [UserController::class, 'reassignCaseload']);
+            /*
+             * The same act from the other end: give this officer work nobody
+             * holds. On `oic.assign` with its sibling above, because that
+             * permission names who handles a case whichever way it moves.
+             */
+            Route::post('users/{user}/take-cases', [UserController::class, 'takeCases']);
             /*
              * The OIC register: every office's caseload in one list, and the
              * officers one row may be moved to.

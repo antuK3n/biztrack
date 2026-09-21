@@ -872,6 +872,18 @@ export interface Ra11032Standing {
 
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /**
+   * Other Requirements still open on this filing — anything not Fulfilled.
+   *
+   * A filing does not reach BPLO's final approval while one is open
+   * (WorkflowService::refreshReadiness), so the screens that show the stage
+   * need this to explain the wait. A filing that stops moving with nothing on
+   * it saying why is the defect that rule would otherwise introduce.
+   *
+   * Optional: a payload from before this shipped carries no key, and a screen
+   * must read `undefined` as "no information" rather than as zero.
+   */
+  open_requirements?: number
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
   payment_mode?: 'annual' | 'quarterly'
   /**
@@ -2078,6 +2090,15 @@ export interface AdminCaseload {
    * same reason as `finished_reviews`: an older payload still type-checks.
    */
   cases?: CaseloadCase[]
+  /**
+   * The officer's OFFICE queue — open work nobody holds.
+   *
+   * The other direction the Reassign dialog offers: a case nobody has picked
+   * up, handed to the officer whose row was clicked. Kept apart from `cases`
+   * because they are opposite acts, and a single list would need a flag on
+   * every row to say which way it moves.
+   */
+  unassigned?: CaseloadCase[]
   candidates: { id: number; name: string; email: string; open_total: number }[]
 }
 
@@ -2450,6 +2471,16 @@ export type BusinessStatus = 'active' | 'flagged' | 'suspended' | 'blacklisted'
 export interface AdminBusiness {
   id: number
   name: string
+  /**
+   * The business number under the name on the table — a FILING's `BIZ-2026-…`.
+   *
+   * Minted per APPLICATION, so a business that renews or amends holds several;
+   * this is the LATEST, and `applications_count` is what stops it reading as
+   * the only one. Null when the business has never filed.
+   */
+  tracking_id?: string | null
+  /** How many filings this business has. 0 is a real answer. */
+  applications_count?: number
   owner: { id: number; name: string } | null
   status: BusinessStatus
   status_label: string
