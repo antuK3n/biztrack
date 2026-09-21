@@ -43,6 +43,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('departments', [ReferenceController::class, 'departments']);
         Route::get('document-types', [ReferenceController::class, 'documentTypes']);
         Route::get('permit-types', [ReferenceController::class, 'permitTypes']);
+        /*
+         * The amendment form's field list. Reference data because it is the
+         * same for every business — see the controller for why it stopped
+         * travelling with the per-filing values.
+         */
+        Route::get('amendable-fields', [ReferenceController::class, 'amendableFields']);
     });
 
     // Businesses (owner: business.manage_own)
@@ -470,6 +476,14 @@ Route::middleware('auth:sanctum')->group(function () {
             Route::post('users/{user}/toggle-active', [UserController::class, 'toggleActive']);
             Route::get('businesses', [BusinessStatusController::class, 'index']);
             Route::post('businesses/{business}/status', [BusinessStatusController::class, 'updateStatus']);
+            /*
+             * The other half of FO-003's section II. Same permission as the
+             * status change: both are the register's own facts about a
+             * business, set by an admin rather than by its owner, and an
+             * account that may blacklist a business is not meaningfully
+             * restrained by being unable to transfer one.
+             */
+            Route::post('businesses/{business}/owner', [BusinessStatusController::class, 'transferOwner']);
         });
         Route::middleware('permission:audit.view')
             ->get('audit-logs', [AuditLogController::class, 'index']);

@@ -123,8 +123,17 @@ it('refuses a detail that is not the business permit’s to change', function ()
         ->assertStatus(422)
         ->json('errors.changes.0');
 
+    /*
+     * The refusal names what IS on the form, by box. It used to point at "the
+     * BPLO window", which was true when address, ownership and line of
+     * business were all refused — and became a lie the day FO-003 was mapped
+     * properly and all three were built. An error that sends somebody to a
+     * counter for something the screen behind them offers is worse than no
+     * error.
+     */
     expect($message)->toContain('owner_user_id')
-        ->and($message)->toContain('BPLO window');
+        ->and($message)->toContain('change of ownership')
+        ->and($message)->toContain('change of address');
 
     // And the GOOD field in that request was not written either: a partly
     // applied request leaves the applicant to work out which part went missing.
@@ -392,7 +401,7 @@ it('tells the offices that certified this business when its address changes', fu
      * The durable half is `PermitFace::changedSince()`, asserted in the freeze
      * test above — a notification is read once and then gone.
      */
-    [$appId, $businessId] = amendmentFiling(['address_line1' => '99 Moved Avenue']);
+    [$appId, $businessId] = amendmentFiling(['address_street' => 'Moved Avenue']);
     $owner = authAs('owner@biztrack.local');
 
     // A Sanitary Permit this business holds, so CHO has something to be told about.
@@ -428,8 +437,19 @@ it('tells the offices that certified this business when its address changes', fu
 
     bploApprovesForm($appId);
 
-    // The street address actually moved.
-    expect(Business::findOrFail($businessId)->address->line1)->toBe('99 Moved Avenue');
+    /*
+     * The street actually moved, and `line1` was RECOMPOSED from it.
+     *
+     * 'Moved Avenue' and not '99 Moved Avenue': the fixture's business was
+     * created with a bare `line1` and no `house_bldg_no`, so there is no house
+     * number to compose back in. That is the point of the change — `line1` is
+     * derived from the parts, exactly as BusinessController does it, so the
+     * next business write cannot quietly undo the amendment by recomposing
+     * from parts that were never updated.
+     */
+    $moved = Business::findOrFail($businessId)->address;
+    expect($moved->street)->toBe('Moved Avenue')
+        ->and($moved->line1)->toBe('Moved Avenue');
 
     $notice = AppNotification::where('user_id', $officer->id)
         ->where('type', 'amendment')
@@ -439,7 +459,7 @@ it('tells the offices that certified this business when its address changes', fu
     expect(AppNotification::where('user_id', $officer->id)->count())
         ->toBeGreaterThan($before)
         ->and($notice)->not->toBeNull()
-        ->and($notice->body)->toContain('Street address');
+        ->and($notice->body)->toContain('Street');
 });
 
 it('does not pester the offices about a detail they never verified', function () {
@@ -639,14 +659,61 @@ it('carries the zoning clearance when the premises move, and only then', functio
      * MOVING TO, and the register still holds the old address until approval —
      * so the proposed value has to be on the filing CPDO is looking at.
      */
-    [$moveId] = amendmentFiling(['address_line1' => '99 Moved Avenue']);
+    /*
+     * ── The PIN is the trigger, not the barangay ─────────────────────────
+     *
+     * Until 21 September 2026 this keyed on the barangay changing, which
+     * tests the wrong thing: zoning belongs to a LOCATION, and a residential
+     * street and a commercial street sit in one barangay all the time. A
+     * business could move to a street that forbids its trade and never trip
+     * a barangay test. Client: *"what if you changed your street and that
+     * street now prohibits this type of business, but also what if you are
+     * just correcting any typo."*
+     *
+     * BizTrack cannot answer the first question — the zoning sheets are
+     * raster images with no geometry (see `ZoningClassification`) — so it
+     * decides only whether to ASK CPDO, off the one signal it holds.
+     */
+    [$moveId] = amendmentFiling([
+        'address_street' => 'Rizal Avenue',
+        'address_pin' => '14.6600,120.9500',
+    ]);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$moveId}/submit")->assertOk();
 
     expect(Application::findOrFail($moveId)->permitTypes()->pluck('code')->sort()->values()->all())
         ->toBe(['BUSINESS', 'ZONING']);
 
-    // A floor area tells CPDO nothing it assessed, so it carries nothing.
+    /*
+     * And correcting how the address is WRITTEN does not. The premises have
+     * not moved, the pin is untouched, and there is nothing new for CPDO to
+     * look at — charging a fresh clearance for a misspelt street name bills
+     * somebody for fixing a typo.
+     */
+    [$streetId] = amendmentFiling(['address_street' => 'Moved Avenue']);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$streetId}/submit")->assertOk();
+
+    expect(Application::findOrFail($streetId)->permitTypes()->pluck('code')->all())
+        ->toBe([PermitType::OUTCOME_CODE]);
+
+    /*
+     * A barangay change on its own does not either — not because it is
+     * harmless, but because the applicant's step will not let one through
+     * without a pin inside the new barangay, so in practice it always
+     * arrives WITH a moved pin. Asserted so that the two rules are visibly
+     * separate: the barangay decides where the pin must land, the pin
+     * decides whether CPDO is asked.
+     */
+    $elsewhere = Barangay::where('id', '!=', Barangay::first()->id)->firstOrFail();
+    [$brgyOnlyId] = amendmentFiling(['address_barangay_id' => (string) $elsewhere->id]);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$brgyOnlyId}/submit")->assertOk();
+
+    expect(Application::findOrFail($brgyOnlyId)->permitTypes()->pluck('code')->all())
+        ->toBe([PermitType::OUTCOME_CODE]);
+
+    // And a floor area tells CPDO nothing it assessed either.
     [$areaId] = amendmentFiling(['business_area_sqm' => '250']);
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson("/api/v1/applications/{$areaId}/submit")->assertOk();
@@ -659,9 +726,14 @@ it('refuses to approve a move until the new address is cleared', function () {
     // The register must never show a business at premises CPDO has not
     // assessed — and the refusal names what is missing rather than just
     // saying no, because BPLO cannot clear it themselves.
-    [$appId, $businessId] = amendmentFiling(['address_line1' => '99 Moved Avenue']);
+    $elsewhere = Barangay::where('id', '!=', Barangay::first()->id)->firstOrFail();
+    // WITH a pin, because that is what carries the zoning clearance now.
+    [$appId, $businessId] = amendmentFiling([
+        'address_barangay_id' => (string) $elsewhere->id,
+        'address_pin' => '14.6600,120.9500',
+    ]);
     $owner = authAs('owner@biztrack.local');
-    $before = Business::findOrFail($businessId)->address->line1;
+    $before = Business::findOrFail($businessId)->address->barangay_id;
 
     test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
 
@@ -688,6 +760,418 @@ it('refuses to approve a move until the new address is cleared', function () {
     expect($message)->toContain('new address');
 
     // Nothing moved: not the register, not the filing.
-    expect(Business::findOrFail($businessId)->address->line1)->toBe($before)
+    expect(Business::findOrFail($businessId)->address->barangay_id)->toBe($before)
         ->and(Application::findOrFail($appId)->status->value)->not->toBe('approved');
+});
+
+/*
+ * ── The paper, box by box ─────────────────────────────────────────────────
+ *
+ * Client, 21 September 2026: *"the fields in paper and in system DOES NOT
+ * REALLY MATCH. Make sure everything matches up and APPLY RULES WHERE
+ * NECESSARY."* Three of MCG-BPLO-FO-003's four checkboxes were refused
+ * outright and the fourth wrote a composed column. These pin the mapping so
+ * the next edit to `AmendableFields` has to argue with the paper, not just
+ * with a column name.
+ */
+
+it('lays the amendable details out as FO-003’s four boxes', function () {
+    [$appId] = amendmentFiling();
+
+    $rows = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$appId}/amendments")->assertOk()->json('data')
+    );
+
+    /*
+     * I, II, III, then the catch-all — the SCREEN's order, which is not the
+     * paper's. FO-003 prints the unnumbered box first; a collapsed section
+     * list read top to bottom should not lead with the box defined by not
+     * being any of the others. Client's decision, 21 September 2026.
+     */
+    expect($rows->pluck('group')->unique()->values()->all())
+        ->toBe(['address', 'ownership', 'trade_name', 'other']);
+
+    // The numerals are the form's own, so screen and paper read alike.
+    expect($rows->firstWhere('group', 'address')['group_paper'])->toBe('I')
+        ->and($rows->firstWhere('group', 'ownership')['group_paper'])->toBe('II')
+        ->and($rows->firstWhere('group', 'trade_name')['group_paper'])->toBe('III')
+        ->and($rows->firstWhere('group', 'other')['group_paper'])->toBeNull();
+
+    /*
+     * Every box's blanks are present. Before this, "change of line of
+     * business", "additional line of business", the new owner and the paper's
+     * three "AMENDMENT OF … DETAILS" lines existed nowhere in the system.
+     */
+    foreach ([
+        'line_of_business', 'other_amendment',
+        'address_house_bldg_no', 'address_street', 'address_barangay_id',
+        'address_pin', 'address_details',
+        'owner_name', 'ownership_details',
+        'trade_name', 'trade_name_details',
+    ] as $field) {
+        expect($rows->firstWhere('field', $field))->not->toBeNull("missing: {$field}");
+    }
+
+    // A line of business is a PSIC code and a barangay is a list, not free text.
+    expect($rows->firstWhere('field', 'line_of_business')['type'])->toBe('psic')
+        ->and($rows->firstWhere('field', 'address_barangay_id')['type'])->toBe('barangay')
+        ->and($rows->firstWhere('field', 'address_pin')['type'])->toBe('pin')
+        ->and($rows->firstWhere('field', 'address_details')['type'])->toBe('note');
+});
+
+it('resolves an id to something a person can read', function () {
+    // The row carries the PSIC title beside the code, because an id is not a
+    // thing to show anybody and the client would need the whole table to
+    // print one row.
+    $trade = PsicCode::skip(1)->first();
+    [$appId] = amendmentFiling(['line_of_business' => (string) $trade->id]);
+
+    $row = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson("/api/v1/applications/{$appId}/amendments")->assertOk()->json('data')
+    )->firstWhere('field', 'line_of_business');
+
+    expect($row['new_value'])->toBe((string) $trade->id)
+        ->and($row['new_label'])->toBe($trade->title);
+});
+
+it('replaces the one line of business rather than adding to it', function () {
+    /*
+     * ── One business, one line ────────────────────────────────────────
+     *
+     * The paper has both "CHANGE OF LINE OF BUSINESS" and "ADDITIONAL LINE OF
+     * BUSINESS", and both were built on 21 September 2026 — which was reading
+     * the form without checking the system. Client, the same day: *"Is it
+     * possible for a business to have two lines of business? Currently, in our
+     * system, it only has one."*
+     *
+     * It is, and the apply wizard enforces it: picking a trade REPLACES what
+     * is there. So an added line would be a state no other path can produce
+     * and the next filing would undo. The count is asserted, not just the
+     * code, because that is the invariant that was briefly broken.
+     */
+    $replacement = PsicCode::skip(1)->first();
+
+    [$appId, $businessId] = amendmentFiling([
+        'line_of_business' => (string) $replacement->id,
+    ]);
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $lines = Business::findOrFail($businessId)->lines()->orderBy('id')->get();
+
+    expect($lines)->toHaveCount(1)
+        ->and($lines[0]->psic_code_id)->toBe($replacement->id);
+});
+
+it('refuses an additional line of business by name', function () {
+    // Not silently ignored. The applicant asked for something the register
+    // cannot hold, and a request that vanishes is worse than one refused.
+    [$appId] = amendmentFiling();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/amendments", [
+            'changes' => [[
+                'field' => 'additional_line_of_business',
+                'new_value' => (string) PsicCode::skip(2)->first()->id,
+            ]],
+        ])
+        ->assertStatus(422);
+});
+
+it('does not re-rate a change of trade, and says which detail the fee is for', function () {
+    /*
+     * The per-line surcharge was charged here for an added line, and went out
+     * with that field: one business holds one line, so nothing an amendment
+     * can do changes the count the surcharge is charged per.
+     *
+     * A line REPLACED is not re-rated either — the flat schedule does not vary
+     * by trade, and whether the ordinance's own rates do is the open question
+     * about which of the two pricing systems is authoritative. The January
+     * renewal reassesses the business from scratch, as it does every year.
+     */
+    $replacement = PsicCode::skip(1)->first();
+    [$appId] = amendmentFiling(['line_of_business' => (string) $replacement->id]);
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $fee = UnbilledPermitFee::where('application_id', $appId)->firstOrFail();
+
+    expect((float) $fee->amount)->toBe((float) config('biztrack.amendment_fee', 0))
+        ->and($fee->description)->toContain('Change of line of business');
+});
+
+it('records a change of ownership and tells BPLO to move the account', function () {
+    /*
+     * The permit prints `business->owner->fullName()` — the ACCOUNT's name —
+     * and the new owner may hold no BizTrack account at all. Client's
+     * decision, 21 September 2026: *"Write the owner's name, BPLO moves the
+     * account."* So approval must NOT reassign the business on its own, and
+     * must not let the outstanding half go unsaid.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'owner_name' => 'Maria Reyes',
+        'ownership_details' => 'Sold to the buyer named on the attached deed.',
+    ]);
+
+    $ownerBefore = Business::findOrFail($businessId)->owner_user_id;
+    $bplo = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    $noticesBefore = AppNotification::where('user_id', $bplo->id)->count();
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    // The account did NOT move on its own.
+    expect(Business::findOrFail($businessId)->owner_user_id)->toBe($ownerBefore);
+
+    // The request is on the record, so the counter can act on it.
+    expect(
+        ApplicationAmendment::where('application_id', $appId)
+            ->where('field', 'owner_name')
+            ->value('new_value')
+    )->toBe('Maria Reyes');
+
+    // And BPLO was told, by name, that the transfer is theirs to finish.
+    $notice = AppNotification::where('user_id', $bplo->id)
+        ->where('type', 'amendment')
+        ->latest('id')
+        ->first();
+
+    expect(AppNotification::where('user_id', $bplo->id)->count())
+        ->toBeGreaterThan($noticesBefore)
+        ->and($notice->body)->toContain('Maria Reyes');
+});
+
+it('recomposes line1, so a later business edit cannot undo the move', function () {
+    /*
+     * ── The regression that started the rewrite ──────────────────────────
+     *
+     * `line1` is COMPOSED from `house_bldg_no` and `street` by
+     * `BusinessController::syncAddressAndLines`, and the old amendment wrote
+     * `line1` directly. So an approved address amendment stood only until the
+     * next business write recomposed the column from parts nobody had
+     * updated — and silently put the old address back.
+     *
+     * Two failure modes in one test, because they were one bug: the parts
+     * must be written, and the composite must be derived from them.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'address_house_bldg_no' => '99',
+        'address_street' => 'Moved Avenue',
+    ]);
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $address = Business::findOrFail($businessId)->address;
+    expect($address->house_bldg_no)->toBe('99')
+        ->and($address->street)->toBe('Moved Avenue')
+        ->and($address->line1)->toBe('99 Moved Avenue');
+
+    /*
+     * Now the write that used to revert it. The owner edits the business and
+     * sends the address back unchanged, which is what every autosave does.
+     */
+    $business = Business::findOrFail($businessId);
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/businesses/{$businessId}", [
+            'name' => $business->name,
+            'registration_type' => $business->registration_type,
+            'registration_number' => $business->registration_number,
+            'tin' => $business->tin,
+            'address' => [
+                'house_bldg_no' => '99',
+                'street' => 'Moved Avenue',
+                'barangay_id' => $address->barangay_id,
+            ],
+            'lines' => $business->lines->map(fn ($l) => [
+                'psic_code_id' => $l->psic_code_id,
+                'capitalization' => $l->capitalization,
+            ])->all(),
+        ])->assertOk();
+
+    expect(Business::findOrFail($businessId)->address->line1)->toBe('99 Moved Avenue');
+});
+
+it('asks for the documents each box asks for, and no others', function () {
+    /*
+     * FO-003 prints a requirements list PER BOX, and the register now says the
+     * same. These are the four rules that were wrong when measured against the
+     * paper — see the migration's note for the two the paper asks for that
+     * BizTrack deliberately does not.
+     */
+    $business = PermitType::where('code', PermitType::OUTCOME_CODE)->firstOrFail();
+    $rules = $business->documentTypes()->get()->keyBy('code');
+
+    // "Contract of Lease AND/OR Proof of Ownership" — decided by tenure, so
+    // the two rows cannot share one token or a renting shop is told to
+    // produce a land title.
+    expect($rules['LEASE_CONTRACT']->pivot->context)->toContain('amend_address_rented')
+        ->and($rules['LAND_TITLE']->pivot->context)->toContain('amend_address_owned');
+
+    // "For Single Proprietor – DTI Registration", not for everybody.
+    expect($rules['DTI_SEC_CDA']->pivot->context)->toContain('amend_sole')
+        ->and($rules['DTI_SEC_CDA']->pivot->context)->not->toContain('amend_trade_name');
+
+    // II's "Deed of Transfer", which had no document type at all before.
+    expect($rules)->toHaveKey('AMEND_DEED_TRANSFER')
+        ->and($rules['AMEND_DEED_TRANSFER']->pivot->context)->toBe('amend_owner')
+        ->and((bool) $rules['AMEND_DEED_TRANSFER']->pivot->is_mandatory)->toBeTrue();
+
+    // "SPA/Authorization … IF representative processes application" and
+    // "Other documents that may be required" are conditions, never demands.
+    expect((bool) $rules['SPA_AUTHORIZATION']->pivot->is_mandatory)->toBeFalse()
+        ->and((bool) $rules['OTHER']->pivot->is_mandatory)->toBeFalse();
+});
+it('carries what a filing declared onto the business, and lets an amendment override it', function () {
+    /*
+     * ── "Is it human error or system error?" ─────────────────────────────
+     *
+     * System. Floor area and headcount are asked on the Fee Profile step and
+     * stored per filing in `applications.fee_profile`; the matching columns on
+     * `businesses` existed and had never been written by anything in the API,
+     * the seeders, the factories or the tests. So the amendment form read
+     * "Currently: not recorded" against a business whose own application had
+     * declared a floor area of 100, and approving one wrote to a column
+     * nothing reads.
+     *
+     * Client's decision, 21 September 2026: make the business record the live
+     * copy, written at EVERY approval — which answers the original objection
+     * that a copy would otherwise carry the first year's figure forever.
+     *
+     * Driven through a real approval rather than by reaching for the private
+     * method: what matters is that an approval carries the figures, not that a
+     * function can be called.
+     */
+    [$appId, $businessId] = amendmentFiling(['business_area_sqm' => '250']);
+
+    // Dead until something carries them, which is the state the client saw.
+    expect(Business::findOrFail($businessId)->total_employees)->toBeNull();
+
+    Application::findOrFail($appId)->update([
+        'fee_profile' => [
+            'floor_area_sqm' => 100,
+            'employees' => 4,
+            'male_employees' => 2,
+            'female_employees' => 2,
+            'employees_in_lgu' => 3,
+            'delivery_vehicles_motorized' => 1,
+            'delivery_vehicles_other' => 2,
+        ],
+    ]);
+
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $business = Business::findOrFail($businessId);
+
+    expect($business->total_employees)->toBe(4)
+        ->and($business->male_employees)->toBe(2)
+        ->and($business->female_employees)->toBe(2)
+        ->and($business->employees_within_lgu)->toBe(3)
+        // One column, two paper counts — "delivery vehicles" means all of them.
+        ->and($business->delivery_units)->toBe(3);
+
+    /*
+     * And the ORDER holds: the carried figure said 100, the applicant asked
+     * for 250, and the request wins. Reversed, an amendment of the floor area
+     * would be silently overwritten by the figures it was filed to correct —
+     * which is the whole reason the two calls are sequenced rather than
+     * merged.
+     */
+    expect((float) $business->business_area_sqm)->toBe(250.0);
+});
+
+it('does not blank a figure a later filing simply left out', function () {
+    // A renewal that leaves the delivery-vehicle box empty is not declaring
+    // zero vans, and clearing the register on its say-so loses a figure
+    // nobody asked to lose.
+    [$firstId, $businessId] = amendmentFiling(['trade_name' => 'First Sign']);
+
+    Application::findOrFail($firstId)->update([
+        'fee_profile' => ['employees' => 9, 'delivery_vehicles_motorized' => 2],
+    ]);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$firstId}/submit")->assertOk();
+    bploApprovesForm($firstId);
+
+    expect(Business::findOrFail($businessId)->total_employees)->toBe(9);
+
+    // A second filing on the same business, declaring only the floor area.
+    $owner = authAs('owner@biztrack.local');
+    $prior = Permit::where('business_id', $businessId)->latest('id')->firstOrFail();
+
+    $secondId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'amendment',
+        'permit_type_ids' => PermitType::where('code', PermitType::OUTCOME_CODE)->pluck('id')->all(),
+        'prior_permit_id' => $prior->id,
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$secondId}/amendments", [
+        'changes' => [['field' => 'trade_name', 'new_value' => 'Second Sign']],
+    ])->assertOk();
+
+    Application::findOrFail($secondId)->update(['fee_profile' => ['floor_area_sqm' => 55]]);
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$secondId}/submit")->assertOk();
+    bploApprovesForm($secondId);
+
+    $business = Business::findOrFail($businessId);
+
+    expect((float) $business->business_area_sqm)->toBe(55.0)
+        // Untouched by a filing that never mentioned them.
+        ->and($business->total_employees)->toBe(9)
+        ->and($business->delivery_units)->toBe(2);
+});
+it('serves the field list as reference data, without a business', function () {
+    /*
+     * ── Why the definitions travel separately ────────────────────────────
+     *
+     * The four boxes are the same for every business in the city, so they go
+     * out with the barangays and the PSIC codes and are in hand before the
+     * wizard paints. Only the register's values and what a draft has asked
+     * for need an application — and on a first visit, a draft that does not
+     * exist yet and has to be POSTed first.
+     *
+     * Sent together, the step could draw nothing until two round trips had
+     * finished, and a slow answer was indistinguishable from a broken form.
+     * Client, 21 September 2026: *"Why it still loads? Can't you make it
+     * appear instantly, just like in the other forms?"*
+     */
+    $rows = collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
+            ->getJson('/api/v1/reference/amendable-fields')->assertOk()->json('data')
+    );
+
+    expect($rows)->toHaveCount(count(AmendableFields::keys()));
+
+    // The screen's order, and each box's own numeral off the paper.
+    expect($rows->pluck('group')->unique()->values()->all())
+        ->toBe(['address', 'ownership', 'trade_name', 'other']);
+    expect($rows->firstWhere('group', 'address')['group_paper'])->toBe('I');
+
+    // Enough to draw the control before any value exists for it.
+    $trade = $rows->firstWhere('field', 'line_of_business');
+    expect($trade['type'])->toBe('psic')
+        ->and($trade['label'])->toBe('Change of line of business');
+
+    /*
+     * And NOTHING about how a change is applied. `writes`, `column`, `cast`
+     * and `validation` are the server's business; a client that could read
+     * them is a client that could be tempted to act on them.
+     */
+    foreach (['writes', 'column', 'cast', 'validation'] as $secret) {
+        expect($rows->first())->not->toHaveKey($secret);
+    }
 });

@@ -1064,11 +1064,50 @@ export interface Application extends ApplicationListItem {
  * amended, whether or not this filing asks about it, so `requested` is what
  * separates "I want this changed" from "here is what it currently says".
  */
+/**
+ * One amendable detail, as the reference data describes it.
+ *
+ * The DEFINITION half of an `AmendmentRow`: the same for every business in
+ * the city, so it travels with the barangays and the PSIC codes and is in
+ * hand before the wizard paints. Only the values below it are per-filing.
+ */
+export interface AmendableField {
+  field: string
+  group: 'other' | 'address' | 'ownership' | 'trade_name'
+  group_label: string
+  group_paper: string | null
+  label: string
+  help: string | null
+  type: 'text' | 'number' | 'integer' | 'psic' | 'barangay' | 'pin' | 'note'
+}
+
 export interface AmendmentRow {
   field: string
+  /**
+   * Which of MCG-BPLO-FO-003's four checkboxes this detail came off.
+   *
+   * The paper prints a requirements list per box, so the box is what the
+   * document rules are indexed by as well as how the step is laid out —
+   * `AmendableFields::GROUPS` is the one definition and this is it on the
+   * wire. `group_paper` is the numeral the form itself prints (I, II, III),
+   * null for the unnumbered box at the top.
+   */
+  group: 'other' | 'address' | 'ownership' | 'trade_name'
+  group_label: string
+  group_paper: string | null
   label: string
+  help: string | null
+  /**
+   * What control the applicant needs. Half of these stopped being free text
+   * when the paper's boxes were mapped properly: a line of business is a PSIC
+   * code, a barangay is the list zoning is assessed against, a pin is a map.
+   */
+  type: 'text' | 'number' | 'integer' | 'psic' | 'barangay' | 'pin' | 'note'
   current_value: string | null
+  /** An id resolved to something readable; null when the value reads as itself. */
+  current_label: string | null
   new_value: string | null
+  new_label: string | null
   requested: boolean
   old_value: string | null
   applied_at: string | null
@@ -1088,6 +1127,17 @@ export interface RequestedChange {
    */
   old_value: string | null
   applied_at: string | null
+  /**
+   * The three values resolved to something readable, or null when the value
+   * already reads as itself.
+   *
+   * A line of business and a barangay are ids since FO-003's boxes were mapped
+   * properly, and this panel is where BPLO decides — unresolved it would read
+   * "Change of line of business: 1 \u2192 47".
+   */
+  current_label: string | null
+  new_label: string | null
+  old_label: string | null
 }
 
 /** One required clearance, and what the business holds against it. */

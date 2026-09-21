@@ -16,6 +16,7 @@ import {
   OTHER_PERMIT_FLOW,
   OTHER_PERMIT_GUIDE,
   OTHER_PERMIT_NOTE,
+  DRAFT_LEAD,
   RENEWAL_LEAD,
   STATUS_GUIDE,
   TONE_CLASSES,
@@ -756,6 +757,13 @@ function StatusGuide() {
           you have to open twice to see both answers.
         */}
         <FilterPills options={GUIDE_PILLS} value={flow} onChange={setFlow} />
+
+        {/*
+          Where the filing has NOT got to, before the steps it has not
+          started. On every tab, because a draft is a draft whatever it will
+          become, and because the rail no longer carries a step that says so.
+        */}
+        <p className="mt-3 text-[13px] leading-snug text-ink-secondary">{DRAFT_LEAD}</p>
 
         {/*
               What this rail is, BEFORE the reader starts counting steps.

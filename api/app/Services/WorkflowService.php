@@ -330,15 +330,21 @@ class WorkflowService
              * Only for an address change. Amending a floor area or a trade name
              * tells CPDO nothing it assessed, and attaching zoning to those
              * would be the five-clearance mistake again in miniature.
+             *
+             * ── And only when the PREMISES actually move ─────────────────────
+             *
+             * Not when the barangay changes, which was the rule until
+             * 21 September 2026 and tested the wrong thing — zoning belongs to
+             * a location, and two streets in one barangay can be zoned
+             * differently. See `amendmentMovesPremises` for why the pin is the
+             * signal and why BizTrack cannot judge the map itself.
+             *
+             * So: a pin dropped somewhere new sends the filing to CPDO;
+             * correcting the spelling of a street does not.
              */
             $codes = [PermitType::OUTCOME_CODE];
 
-            $movesPremises = $app->requestedChanges()
-                ->where('field', 'address_line1')
-                ->whereNotNull('new_value')
-                ->exists();
-
-            if ($movesPremises) {
+            if (self::amendmentMovesPremises($app)) {
                 $codes[] = 'ZONING';
             }
 
@@ -349,6 +355,46 @@ class WorkflowService
             [PermitType::OUTCOME_CODE],
             PermitType::REQUIRED_CLEARANCE_CODES,
         ))->pluck('id');
+    }
+
+    /**
+     * Whether this amendment MOVES THE PREMISES, and so needs CPDO to look.
+     *
+     * ── Why the pin and not the barangay ─────────────────────────────────
+     *
+     * This asked whether the barangay changed, which is the wrong question.
+     * Zoning is a property of a LOCATION, not of a barangay: a residential
+     * street and a commercial street sit inside the same barangay all the
+     * time, so a business could move to a street that forbids its trade and
+     * never trip a barangay test. Client, 21 September 2026: *"what if you
+     * changed your street and that street now prohibits this type of
+     * business, but also what if you are just correcting any typo."*
+     *
+     * The honest answer to "does the new street allow this?" is that BizTrack
+     * cannot know. `ZoningClassification` says so in as many words — the
+     * barangay sheets are raster images with no geometry, so no conformity
+     * verdict is computable for any point and none is offered. Only a CPDO
+     * officer reading the map can tell.
+     *
+     * So this does not judge zoning. It decides whether to ASK, and the one
+     * signal the register genuinely holds is the pin. Correcting how an
+     * address is WRITTEN does not move the premises and leaves the pin alone;
+     * moving to another street moves it. A barangay change is covered by the
+     * same rule, because the old pin cannot survive `checkPin` against a new
+     * barangay and a new one has to be dropped.
+     *
+     * Static and public because two callers need the same answer and must not
+     * be allowed to differ about it: `permitTypeIdsAtSubmission` decides
+     * whether the filing carries a ZONING clearance, and the applicant's step
+     * warns before they commit to one. A rule wired into one of two callers is
+     * the defect this codebase keeps meeting.
+     */
+    public static function amendmentMovesPremises(Application $app): bool
+    {
+        return $app->requestedChanges()
+            ->where('field', 'address_pin')
+            ->whereNotNull('new_value')
+            ->exists();
     }
 
     /**
@@ -1688,6 +1734,8 @@ class WorkflowService
         DB::transaction(function () use ($app, $remarks) {
             $this->completeAssignment($app, $this->bploDepartmentId(), $remarks);
 
+            $this->syncDeclaredFigures($app);
+
             $row = $this->pivotFor($app, PermitType::OUTCOME_CODE);
             $issuedBusinessPermit = false;
             if ($row !== null && $row->status !== ClearanceStatus::Approved) {
@@ -1716,6 +1764,100 @@ class WorkflowService
             $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
         });
+    }
+
+    /**
+     * Copy what this filing DECLARED onto the business record.
+     *
+     * ── Why the business record has to hold these at all ──────────────────
+     *
+     * Floor area, headcount and delivery vehicles are asked on the Fee Profile
+     * step and stored in `applications.fee_profile` — per filing, because they
+     * are what the assessment was computed from and rewriting them later would
+     * rewrite an assessed bill.
+     *
+     * The matching columns on `businesses` existed and were DEAD: nothing in
+     * the API, the seeders, the factories or the tests had ever written one.
+     * That was defensible while nothing read them — and stopped being so the
+     * day the amendment form offered to change them. Client, 21 September
+     * 2026, having noticed every row reading "Currently: not recorded" on a
+     * business whose application declared a floor area of 100: *"Is it human
+     * error or system error?"* System. The form was amending columns nothing
+     * fills, so its "current" was always blank and its approval wrote where
+     * nothing reads.
+     *
+     * ── The objection this answers ────────────────────────────────────────
+     *
+     * The original note against a business-level copy (see `FeeProfileDraft`
+     * in the web types) was that a headcount belongs to a MOMENT — it is
+     * redeclared every January — and the record "would carry the first year's
+     * figure forever". True of a copy written once. This is written at EVERY
+     * approval, so it carries the latest declaration and the per-filing
+     * history stays intact in `fee_profile` where the assessment can still
+     * point at it.
+     *
+     * ── Absent is not "clear it" ──────────────────────────────────────────
+     *
+     * Only keys the filing actually answered are written. A renewal that
+     * leaves the delivery-vehicle count blank is not declaring zero vans, and
+     * blanking the register on its say-so would lose a figure nobody asked to
+     * lose.
+     */
+    private function syncDeclaredFigures(Application $app): void
+    {
+        $business = $app->business;
+        $profile = $app->fee_profile;
+
+        if ($business === null || ! is_array($profile)) {
+            return;
+        }
+
+        /*
+         * Fee-profile key => column. The names differ on both sides of three
+         * of these, which is exactly why the mapping is written down once
+         * rather than inferred at each call site.
+         */
+        $map = [
+            'floor_area_sqm' => 'business_area_sqm',
+            'employees' => 'total_employees',
+            'male_employees' => 'male_employees',
+            'female_employees' => 'female_employees',
+            'employees_in_lgu' => 'employees_within_lgu',
+        ];
+
+        $changes = [];
+        foreach ($map as $key => $column) {
+            $value = $profile[$key] ?? null;
+            if ($value === null || $value === '') {
+                continue;
+            }
+            $changes[$column] = $value;
+        }
+
+        /*
+         * The paper asks for vehicles as two counts — motorised and other —
+         * and the register holds one column, so the register gets the total.
+         * Summed rather than dropped: "delivery vehicles" on the amendment
+         * form means all of them, and showing only the motorised ones as the
+         * current figure would invite an applicant to correct a number that
+         * was never wrong.
+         */
+        $vans = ($profile['delivery_vehicles_motorized'] ?? null);
+        $other = ($profile['delivery_vehicles_other'] ?? null);
+        if ($vans !== null || $other !== null) {
+            $changes['delivery_units'] = (int) ($vans ?? 0) + (int) ($other ?? 0);
+        }
+
+        if ($changes === []) {
+            return;
+        }
+
+        /*
+         * `forceFill`, because these six are not mass-assignable on `Business`
+         * and should not become so: this is the only writer, and the point of
+         * naming it here is that there is exactly one.
+         */
+        $business->forceFill($changes)->save();
     }
 
     /**
@@ -1798,6 +1940,14 @@ class WorkflowService
         DB::transaction(function () use ($app, $remarks) {
             $this->completeAssignment($app, $this->bploDepartmentId(), $remarks);
 
+            /*
+             * Before `applyAmendments`, so a requested change always wins over
+             * the carried figures. An amendment has no fee profile of its own,
+             * so in practice this is a no-op here — but the ORDER is the
+             * invariant, not the current emptiness of the profile.
+             */
+            $this->syncDeclaredFigures($app);
+
             $changed = $this->applyAmendments($app);
             $this->reissueAmendedPermit($app);
             $this->recordAmendmentFee($app, $changed);
@@ -1810,7 +1960,63 @@ class WorkflowService
             );
             $this->notify->applicationApproved($app);
             $this->tellOfficesAboutAmendment($app, $changed);
+            $this->tellBploToMoveTheAccount($app);
         });
+    }
+
+    /**
+     * A CHANGE OF OWNERSHIP is the one amendment approval cannot finish.
+     *
+     * Client's decision, 21 September 2026: *"Write the owner's name, BPLO
+     * moves the account."* The permit prints `business->owner->fullName()` —
+     * the ACCOUNT's name — and the new owner may hold no BizTrack account at
+     * all, so `AmendableFields` records `owner_name` and applies nothing.
+     *
+     * Which leaves a gap that has to be closed by a person, and a gap closed
+     * by a person is a gap that needs telling. Without this the approval is
+     * silent, the reissued certificate prints the OLD owner, and the only
+     * record that anything is outstanding is a row in
+     * `application_amendments` nobody is looking at.
+     *
+     * Sent to BPLO rather than the applicant: it is BPLO's action, on BPLO's
+     * screen, and the applicant has already been told their amendment was
+     * approved.
+     *
+     * The link is Business Owner Status, which is where the transfer lives.
+     * Worth saying plainly that it did not exist when this was written — the
+     * admin "Reassign" screen moves FILINGS BETWEEN OFFICERS and nothing in
+     * the codebase moved a business between owner accounts, so an approved
+     * ownership amendment landed nowhere. Transferring one is the other half
+     * of this decision, not a nicety.
+     */
+    private function tellBploToMoveTheAccount(Application $app): void
+    {
+        $owner = $app->requestedChanges()
+            ->where('field', 'owner_name')
+            ->whereNotNull('new_value')
+            ->value('new_value');
+
+        if ($owner === null) {
+            return;
+        }
+
+        $name = $app->business?->name ?? 'A business';
+
+        $officers = User::where('department_id', $this->bploDepartmentId())
+            ->where('is_active', true)
+            ->get();
+
+        foreach ($officers as $officer) {
+            $this->notify->push(
+                $officer,
+                'amendment',
+                'An approved amendment needs the account moved',
+                "{$name} was transferred to {$owner}. The permit prints the account holder’s "
+                .'name, so reassign the business on the Reassign screen — until then the '
+                .'certificate still names the previous owner.',
+                '/staff/admin/owners',
+            );
+        }
     }
 
     /**
@@ -1938,6 +2144,22 @@ class WorkflowService
             ->map(fn (string $f) => AmendableFields::label($f))
             ->join(', ');
 
+        /*
+         * ── Nothing here re-rates a change of trade ─────────────────────────
+         *
+         * The per-line surcharge was added here on 21 September 2026 to price
+         * an ADDITIONAL line of business, and went out with it the same day:
+         * one business holds one line, so no amendment can change the count
+         * the surcharge is charged per.
+         *
+         * A line REPLACED is not re-rated either. The flat schedule does not
+         * vary by trade, and whether the ordinance's own rates do is the open
+         * question about which of the two pricing systems is authoritative —
+         * guessing would put a figure on a bill nobody can point at a rule
+         * for. So a change of trade carries the amendment fee and no more,
+         * and the January renewal reassesses the business from scratch as it
+         * does every year.
+         */
         UnbilledPermitFee::updateOrCreate(
             // One fee per amendment, so a replayed approval cannot stack it
             // twice — the same reason `applyAmendments` skips applied rows.
@@ -1950,6 +2172,7 @@ class WorkflowService
                  * fee does not have. Zero until BPLO names a figure — see
                  * config/biztrack.php for what was searched and why the row is
                  * written at zero rather than skipped.
+                 *
                  */
                 'amount' => (float) config('biztrack.amendment_fee', 0),
                 'description' => 'Amendment — '.$what,
@@ -2011,7 +2234,7 @@ class WorkflowService
                 'amendment',
                 'A business you have certified has changed',
                 "{$name} amended its {$what}. A certificate your office issued may describe the previous details — open the business to see what changed.",
-                '/admin/records',
+                '/staff/admin/records',
             );
         }
     }

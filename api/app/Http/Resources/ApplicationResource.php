@@ -375,14 +375,29 @@ class ApplicationResource extends JsonResource
              */
             'requested_changes' => $this->relationLoaded('requestedChanges')
                 && $this->application_type === ApplicationType::Amendment
-                    ? $this->requestedChanges->map(fn ($row) => [
-                        'field' => $row->field,
-                        'label' => $row->label(),
-                        'current_value' => AmendableFields::current($this->business, $row->field),
-                        'new_value' => $row->new_value,
-                        'old_value' => $row->old_value,
-                        'applied_at' => $row->applied_at?->toISOString(),
-                    ])->values()
+                    ? $this->requestedChanges->map(function ($row) {
+                        $current = AmendableFields::current($this->business, $row->field);
+
+                        return [
+                            'field' => $row->field,
+                            'label' => $row->label(),
+                            'current_value' => $current,
+                            'new_value' => $row->new_value,
+                            'old_value' => $row->old_value,
+                            'applied_at' => $row->applied_at?->toISOString(),
+                            /*
+                             * A line of business and a barangay are ids since
+                             * FO-003 was mapped properly, and this panel is
+                             * where BPLO decides. Without these it would read
+                             * "Change of line of business: 1 → 47" — the same
+                             * resolver the applicant's step uses, so the two
+                             * screens cannot name the same code differently.
+                             */
+                            'current_label' => AmendableFields::describe($row->field, $current),
+                            'new_label' => AmendableFields::describe($row->field, $row->new_value),
+                            'old_label' => AmendableFields::describe($row->field, $row->old_value),
+                        ];
+                    })->values()
                     : null,
             'clearance_standing' => $this->relationLoaded('permitTypes')
                 && $request->user()

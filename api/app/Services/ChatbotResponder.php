@@ -560,11 +560,46 @@ class ChatbotResponder
      */
     private function docSuffix(object $doc): string
     {
-        return match ($doc->pivot->context) {
-            'renewal' => ' (renewals only)',
-            'rented' => ' (if you pay rent for the premises)',
-            'owned' => ' (if you own the premises)',
-            'tax_incentives' => ' (if you hold a tax incentive)',
+        /*
+         * ── Matched by TOKEN, not by the whole string ────────────────────
+         *
+         * `context` became comma-separated on 19 September 2026, because the
+         * pivot holds one row per (permit type, document type) and the
+         * contract of lease is wanted by a renting NEW applicant AND by
+         * anybody changing address. A whole-string match then quietly stopped
+         * hitting: 'owned,amend_address_owned' matches neither 'owned' nor
+         * anything else, so the Tax Declaration lost "(if you own the
+         * premises)" and was read out as though everybody needs one.
+         *
+         * Ordered most specific first. A row on both forms — DTI registration
+         * is 'new,renewal,amend_sole' — should be qualified by the answer that
+         * narrows it, not by the form it also happens to appear on.
+         */
+        $tokens = array_map('trim', explode(',', (string) $doc->pivot->context));
+        $has = fn (string $t) => in_array($t, $tokens, true);
+
+        return match (true) {
+            $has('rented') => ' (if you pay rent for the premises)',
+            $has('owned') => ' (if you own the premises)',
+            $has('tax_incentives') => ' (if you hold a tax incentive)',
+            /*
+             * The amendment form's own rows, qualified rather than hidden.
+             *
+             * A general "what do I need" question has no filing behind it, so
+             * this list covers every form the permit has — and without these
+             * it told a first-time applicant to bring a Deed of Transfer.
+             * Naming the form is the same answer "(renewals only)" gives, and
+             * it is the honest one: the row IS a requirement, of a filing they
+             * are not making.
+             */
+            $has('amend_owner') => ' (amendments changing the owner)',
+            $has('amend_address_rented'),
+            $has('amend_address_owned'),
+            $has('amend_address') => ' (amendments changing the address)',
+            $has('amend_corporate') => ' (amendments, for a corporation or cooperative)',
+            $has('amend_sole') => ' (amendments, for a sole proprietor)',
+            $has('amendment') => ' (amendments only)',
+            $has('renewal') && ! $has('new') => ' (renewals only)',
             /*
              * Kept although nothing sets this context any more — the SPA and
              * the representative's ID are plain optional rows now, because the
@@ -573,7 +608,7 @@ class ChatbotResponder
              * bot that recites "(optional)" at a requirement whose own text
              * says who it is for.
              */
-            'representative' => ' (if somebody files on your behalf)',
+            $has('representative') => ' (if somebody files on your behalf)',
             default => $doc->pivot->is_mandatory ? '' : ' (optional)',
         };
     }

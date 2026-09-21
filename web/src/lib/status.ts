@@ -540,7 +540,6 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
  * exist.
  */
 export const STATUS_FLOW: ApplicationStatus[] = [
-  'draft',
   'for_approval',
   'pending_payment',
   'awaiting_other_permits',
@@ -582,7 +581,7 @@ const FLOW_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus[]>
    * (see App\Support\AmendableFields), and the SHAPE of the flow is settled
    * for all of them — which is what this rail describes.
    */
-  amendment: ['draft', 'for_approval', 'approved'],
+  amendment: ['for_approval', 'approved'],
   new: STATUS_FLOW,
   /*
    * A renewal keeps For Final Approval, and it is a normal step rather than an
@@ -594,7 +593,7 @@ const FLOW_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus[]>
    * shorter process, and it gets its own rail rather than a footnote on this
    * one: see OTHER_PERMIT_FLOW.
    */
-  renewal: ['draft', 'for_approval', 'pending_payment', 'for_final_approval', 'approved'],
+  renewal: ['for_approval', 'pending_payment', 'for_final_approval', 'approved'],
 }
 
 /**
@@ -606,6 +605,26 @@ const FLOW_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus[]>
  * interrupts it" — which is exactly what happened to For Final Approval when it
  * left the new path, and what the client noticed: *"I thought we already
  * removed the For Final Approval?"*
+ */
+/**
+ * ── Why `draft` is omitted from all three ────────────────────────────────
+ *
+ * Client, 21 September 2026: *"do you think 'Draft' should be here? I do think
+ * it is not a status."* Right about what the rail is FOR, if not about the
+ * enum: every other step on it is something the BPLO does to the filing, and a
+ * draft is a form nobody has been handed. Numbered first of five, it read as
+ * one fifth of the way through a process it has not entered.
+ *
+ * OMITTED rather than deleted, and that distinction is the whole reason this
+ * table exists: `statusDetoursFor` derives the interruptions as "everything
+ * not on the rail", so a status merely dropped from a flow reappears under
+ * "If something interrupts it" — which would have filed Draft beside Rejected
+ * and Cancelled. That is precisely what happened to For Final Approval, and
+ * what the client caught.
+ *
+ * The word is still explained, above the rail rather than in it: see
+ * `DRAFT_LEAD`. It is a real chip on the applicant's own list, so a guide that
+ * never mentions it leaves a word on screen with nothing to read it against.
  */
 const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus[]> = {
   /*
@@ -622,8 +641,8 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    * explains nothing and worries everyone. The badge still has a label if they
    * ever see it — this only keeps it out of the list of things to expect.
    */
-  new: ['for_final_approval'],
-  renewal: [],
+  new: ['draft', 'for_final_approval'],
+  renewal: ['draft'],
 }
 
 /** The rail for one kind of filing, or null where there is nothing to draw yet. */
@@ -663,6 +682,20 @@ export function statusDetoursFor(flow: GuideFlow): ApplicationStatus[] {
  * not there. Worse, both rails showed five numbered steps, so the reader had to
  * spot that step 4 had changed in KIND rather than in wording.
  */
+/**
+ * What a draft is, said above the rail instead of counted as part of it.
+ *
+ * Shown on all three tabs, because it is true of all three and because the
+ * chip appears on the applicant's list whatever they are filing.
+ *
+ * The second clause is the one that earns its place. Every screen in the
+ * wizard autosaves, which teaches people that their work is safe — and "safe"
+ * is one short step from "filed". Saying where it has NOT got to is the only
+ * part of this a first-time applicant cannot work out for themselves.
+ */
+export const DRAFT_LEAD =
+  'Until you press Submit, your form is a Draft — saved to your account, but not yet with the BPLO.'
+
 export const RENEWAL_LEAD =
   'Your business permit renewal. The other permits are separate filings — renewing this does not renew them, and they do not hold it up.'
 
@@ -674,7 +707,17 @@ export const RENEWAL_LEAD =
  * process shown as a footnote reads as a caveat on the rail above it, which is
  * precisely the confusion this replaces.
  */
-export const OTHER_PERMIT_FLOW: ApplicationStatus[] = ['draft', 'for_approval', 'approved']
+/*
+ * `draft` left this rail with the other three, and for the same reason — it is
+ * drawn by the same numbered <Step>, sits under the renewal tab, and is
+ * already covered by DRAFT_LEAD at the top of that tab. Leaving it here alone
+ * would have made one rail of four count an unsubmitted form as a step.
+ *
+ * Safe to drop outright rather than omit: the detour derivation is keyed on
+ * GuideFlow and never reads this array, so nothing reappears under "If
+ * something interrupts it".
+ */
+export const OTHER_PERMIT_FLOW: ApplicationStatus[] = ['for_approval', 'approved']
 
 /**
  * The other-permit rail's own words, overriding STATUS_GUIDE.
@@ -697,9 +740,18 @@ export const OTHER_PERMIT_GUIDE: Record<'draft' | 'for_approval' | 'approved', s
 export const OTHER_PERMIT_NOTE =
   'Any time of year, not just January. Still valid? Do nothing — BizTrack uses the copy already on file.'
 
-/** What an amendment can and cannot change. */
+/**
+ * What an amendment covers.
+ *
+ * Named by the paper's four boxes, because that is how MCG-BPLO-FO-003 is laid
+ * out and how the form now is. This used to end "a change of ownership, line of
+ * business, or a move to another barangay is still done at the BPLO window" —
+ * true until 21 September 2026, when all three were built, and a sentence that
+ * sends somebody to a counter for something the form offers is worse than
+ * saying nothing.
+ */
 export const AMENDMENT_NOTE =
-  'Only your business permit’s own details — floor area, employees, delivery vehicles, trade name and street address. Nothing to pay now: the fee joins your next January renewal. A change of ownership, line of business, or a move to another barangay is still done at the BPLO window.'
+  'Four things, as on the paper form: your line of business, floor area, employees and vehicles; your address; your owner; your trade name. Nothing to pay now — the fee joins your next January renewal. Moving to another barangay re-applies for your Zoning Clearance, and a change of owner is finished by BPLO at the window once they have seen the Deed of Transfer.'
 
 /**
  * In the union, deliberately not in the guide.
