@@ -260,3 +260,112 @@ it('does not let the type filter reach outside the model namespace', function ()
 
     expect($businessId)->not->toBeNull();
 });
+
+/*
+ * The Owner Status table has to tell two businesses apart.
+ *
+ * Six rows, two owners, and names that share a word: this is the screen where
+ * an admin suspends somebody's livelihood, and "which of these is the one the
+ * complaint is about" must not be answered by the name alone.
+ *
+ * ── The number is a FILING's, and it is minted at SUBMIT ────────────────────
+ *
+ * `BIZ-2026-…` comes from `Numbering::trackingId()` inside
+ * `WorkflowService::submit`, once per application and never rewritten. So a
+ * draft has no number at all, every renewal and amendment takes a new one, and
+ * a business that has filed three times holds three.
+ *
+ * Both halves of that matter here. The row shows the LATEST filing, and it says
+ * how many there are, because a bare number on a business with three filings
+ * reads as the business's own — which is the one thing it is not.
+ *
+ * These tests SUBMIT. An earlier pair did not, and passed while asserting
+ * `null === null`: a created application has no tracking id, so the assertion
+ * was comparing two empty values and calling it agreement.
+ */
+function numberedBusiness(string $name, string $registrationNumber): int
+{
+    return test()->withHeaders(authAs('owner@biztrack.local'))->postJson('/api/v1/businesses', [
+        'name' => $name,
+        'registration_type' => 'DTI',
+        'registration_number' => $registrationNumber,
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '5 Number Street', 'barangay_id' => \App\Models\Barangay::first()->id],
+        'lines' => [['psic_code_id' => \App\Models\PsicCode::first()->id, 'capitalization' => 100000]],
+    ])->assertCreated()->json('data.id');
+}
+
+/** A submitted filing on that business, which is what earns a tracking id. */
+function filedOn(int $businessId, string $type): array
+{
+    $id = test()->withHeaders(authAs('owner@biztrack.local'))->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => $type,
+        'permit_type_ids' => \App\Models\PermitType::where('code', 'BUSINESS')->pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    return test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$id}/submit")->assertOk()->json('data');
+}
+
+/** The Owner Status row for one business. */
+function ownerStatusRow(int $businessId): ?array
+{
+    return collect(test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/admin/businesses?per_page=200')->assertOk()->json('data'))
+        ->firstWhere('id', $businessId);
+}
+
+it('names each business by its latest filing, and says when there are more', function () {
+    $businessId = numberedBusiness('Numbered Store', 'DTI-778899');
+
+    // A business exists from the moment it is created; one that has never
+    // filed genuinely has no number, and the key is present so the screen can
+    // say so rather than printing `undefined`.
+    expect(ownerStatusRow($businessId)['tracking_id'])->toBeNull()
+        ->and(ownerStatusRow($businessId)['applications_count'])->toBe(0);
+
+    $first = filedOn($businessId, 'new');
+    expect($first['tracking_id'])->toStartWith('BIZ-');
+    expect(ownerStatusRow($businessId)['tracking_id'])->toBe($first['tracking_id'])
+        ->and(ownerStatusRow($businessId)['applications_count'])->toBe(1);
+
+    // A second `new`, not an amendment: submitting an amendment demands the
+    // detail of what is being amended, and this test is about the NUMBER a
+    // second filing earns, not about amendment validation.
+    $second = filedOn($businessId, 'new');
+    expect($second['tracking_id'])->not->toBe($first['tracking_id']);
+
+    // The NEWEST, and the count that stops it reading as the only one.
+    expect(ownerStatusRow($businessId)['tracking_id'])->toBe($second['tracking_id'])
+        ->and(ownerStatusRow($businessId)['applications_count'])->toBe(2);
+});
+
+it('reads "latest" from the calendar, not from the insertion order', function () {
+    /*
+     * The client caught this by asking how BIZ-2026-00001 "became"
+     * BIZ-2026-00003.
+     *
+     * It had not: the business holds both. But the row picked the newest by ID,
+     * and an id is the order rows went INTO the table, not the order the
+     * filings happened. On the tester register Nena's Sari-Sari Store carries a
+     * renewal submitted 2026-08-13 as id 1 and the original new filing
+     * submitted 2025-10-02 as id 3 — so the row showed the 2025 one and called
+     * it the latest.
+     *
+     * `submitted_at` is the date the register itself keeps, falling back to
+     * `created_at` for a draft that has never been handed in.
+     */
+    $businessId = numberedBusiness('Out Of Order Store', 'DTI-990011');
+
+    $older = filedOn($businessId, 'new');
+    $newer = filedOn($businessId, 'new');
+
+    // The one inserted FIRST is the one submitted LAST — the shape the seeded
+    // register happens to have, and the shape that broke the column.
+    \App\Models\Application::whereKey($older['id'])->update(['submitted_at' => now()]);
+    \App\Models\Application::whereKey($newer['id'])->update(['submitted_at' => now()->subYear()]);
+
+    expect(ownerStatusRow($businessId)['tracking_id'])->toBe($older['tracking_id']);
+});

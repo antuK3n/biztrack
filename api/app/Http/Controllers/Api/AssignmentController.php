@@ -662,6 +662,45 @@ class AssignmentController extends Controller
     }
 
     /**
+     * Put a case back: stop being its Officer in Charge.
+     *
+     * Claiming is one click, and without this it was irreversible without the
+     * super admin — a mis-click, a case that turns out to be a colleague's
+     * area, or an officer going on leave all needed an admin to unpick. A cheap
+     * action that is expensive to undo is one people stop using, and an office
+     * whose officers will not claim is an office back where it started, with
+     * every case belonging to nobody.
+     *
+     * Released to the office POOL, never handed to a named person. Choosing
+     * somebody else's workload for them is `oic.assign`, the super admin's; an
+     * unheld case is the ordinary state a filing starts in, and the office's
+     * Unassigned section is where it lands.
+     *
+     * Releasing an already-unheld case is not an error. Two tabs, or an admin
+     * who got there first, and the officer's intent — "this should not be
+     * mine" — is already true.
+     */
+    public function release(Request $request, ApplicationAssignment $assignment): JsonResponse
+    {
+        $this->authorizeDepartment($request, $assignment);
+
+        $user = $request->user();
+
+        abort_unless(
+            $assignment->officer_user_id === null || $assignment->officer_user_id === $user->id,
+            403,
+            'This filing is with another officer. Only the system administrator can move it.'
+        );
+
+        if ($assignment->officer_user_id !== null) {
+            $assignment->forceFill(['officer_user_id' => null, 'assigned_at' => null])->save();
+            Audit::log('assignment.released', $assignment, ['released_by_user_id' => $user->id]);
+        }
+
+        return $this->assignmentJson($assignment->fresh());
+    }
+
+    /**
      * Narrow the queue by who holds the case (`?oic=`), client §10.
      *
      * Server-side, like every other narrowing on this list, because the list is
