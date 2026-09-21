@@ -131,8 +131,42 @@ class Inspection extends Model
     public function canBeReinspected(): bool
     {
         return $this->failed()
+            && ! $this->filingIsDecided()
             && $this->permitIsAwaitingInspection()
             && $this->isCurrent();
+    }
+
+    /**
+     * Has the FILING already been decided?
+     *
+     * ── Why the permit's own state is not enough ──────────────────────────
+     *
+     * `permitIsAwaitingInspection` below used to be the whole answer, and it
+     * asked the application's status until 6 September 2026, when
+     * `for_inspection` became a state of one PERMIT rather than of the filing.
+     * Moving the question onto the pivot was right — a filing whose CHO permit
+     * is being re-inspected reads `awaiting_other_permits`, and the old test
+     * refused every legitimate re-inspection.
+     *
+     * But it left nothing asking about the filing at all, and rejecting an
+     * application does not touch the pivot: the BFP row stays `for_inspection`
+     * on a filing that is over, so the guard went on saying yes. BPLO rejected
+     * a filing for unsafe premises and the Fire office could still book a
+     * return visit to it — `WorkflowReinspectionTest` has asserted against
+     * exactly that since before this was merged, and has been failing.
+     *
+     * Both questions, then, and this one first because it is the cheaper of
+     * the two and the more final: a decided filing takes no more visits,
+     * whatever its pivots say.
+     *
+     * Approved counts as decided along with Rejected and Cancelled. A visit
+     * to premises whose permit has already been issued is not a
+     * re-inspection of anything — it is a new filing, or an inspection the
+     * office books through its own route.
+     */
+    private function filingIsDecided(): bool
+    {
+        return $this->application?->status?->isTerminal() ?? false;
     }
 
     /**
