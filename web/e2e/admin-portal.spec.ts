@@ -65,14 +65,48 @@ test('the rail addresses the admin site, so no entry signs the reader out', asyn
    */
   await page.goto('/admin/dashboard')
 
-  const hrefs = await page
-    .getByRole('navigation')
-    .getByRole('link')
-    .evaluateAll((links) => links.map((l) => l.getAttribute('href') ?? ''))
+  // evaluateAll does not wait. Read the rail only once it has drawn, or this
+  // asserts against an empty list and passes or fails on render timing.
+  const rail = page.getByRole('navigation').getByRole('link')
+  await expect(rail.first()).toBeVisible()
+  const hrefs = await rail.evaluateAll((links) => links.map((l) => l.getAttribute('href') ?? ''))
 
   expect(hrefs.length).toBeGreaterThan(0)
   for (const href of hrefs) {
     expect(href, `rail entry ${href} is not on the admin site`).toMatch(/^\/admin\//)
     expect(href, `rail entry ${href} is double-prefixed`).not.toMatch(/^\/admin\/admin\//)
   }
+})
+
+test('the home tiles address the admin site too, and each one actually opens', async ({ page }) => {
+  /*
+   * The rail test above passed while every tile on the same screen was broken.
+   * DashboardPage wrote its cards as absolute '/staff/...' strings from before
+   * /admin was a portal, so Records, Analytics and Officer Assignment all sent
+   * the administrator to the staff tree, where they hold no token — and the
+   * staff site answered with its sign-in page. Reported as "Records crashes".
+   *
+   * Hrefs first, for the same reason the rail test reads hrefs. Then two are
+   * CLICKED, because a correct-looking href can still 404: the rail sent the
+   * super admin to /admin/analytics/offices, which had no route in the admin
+   * tree until this was found.
+   */
+  await page.goto('/admin/dashboard')
+
+  const tiles = page.getByRole('main').getByRole('link')
+  await expect(tiles.first()).toBeVisible()
+  const hrefs = await tiles.evaluateAll((links) => links.map((l) => l.getAttribute('href') ?? ''))
+  expect(hrefs.length).toBeGreaterThan(1)
+  for (const href of hrefs) {
+    expect(href, `home tile ${href} points at another site`).toMatch(/^\/admin\//)
+  }
+
+  await page.getByRole('main').getByRole('link', { name: /^records$/i }).click()
+  await expect(page.getByRole('heading', { name: 'Records', level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/records$/)
+
+  await page.goto('/admin/dashboard')
+  await page.getByRole('main').getByRole('link', { name: /^analytics$/i }).click()
+  await expect(page.getByRole('heading', { name: /office performance/i, level: 1 })).toBeVisible()
+  await expect(page).toHaveURL(/\/admin\/analytics\/offices$/)
 })

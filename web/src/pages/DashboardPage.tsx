@@ -14,6 +14,7 @@ import { Logo } from '../components/Logo'
 import { AccountRestrictedModal } from '../components/ui/Proto'
 import { businesses, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
+import { activePortal, portalPath } from '../lib/api'
 import { useAuth } from '../stores/auth'
 
 type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
@@ -211,18 +212,34 @@ function StaffHome({ permissions }: { permissions: string[] }) {
     anyPermission?: { permission: string; to: string }[]
   }
 
+  /*
+   * Paths are PORTAL-RELATIVE, exactly as nav.ts writes its rail entries, and
+   * `portalPath` adds the prefix for whichever site this home screen is on.
+   *
+   * They were absolute `/staff/...` strings, written when the staff site was
+   * the only place a super admin could stand. Once /admin became its own portal
+   * (item #107) every one of these tiles kept pointing at the staff tree — and
+   * the admin session holds no staff token, so pressing Records, Analytics or
+   * Officer Assignment from /admin/dashboard bounced the administrator to
+   * /staff/login. Reported as "Records crashes". The rail beside these tiles
+   * never had the bug, because it has always gone through portalPath.
+   *
+   * The super admin's Analytics destination matches the rail's: Office
+   * Performance, not Processing Time (issue #102).
+   */
+  const portal = activePortal()
   const cards: Card[] = [
-    { to: '/staff/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
+    { to: '/queue', icon: InboxIcon, label: 'Application Verification', permission: 'application.review' },
     {
-      to: '/staff/analytics',
+      to: '/analytics',
       icon: ChartIcon,
       label: 'Analytics',
       anyPermission: [
-        { permission: 'analytics.view', to: '/staff/analytics' },
-        { permission: 'analytics.processing_time', to: '/staff/analytics/processing-time' },
+        { permission: 'analytics.view', to: '/analytics' },
+        { permission: 'analytics.processing_time', to: '/analytics/offices' },
       ],
     },
-    { to: '/staff/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
+    { to: '/admin/users', icon: UsersIcon, label: 'Officer Assignment', permission: 'user.manage' },
     /*
      * Records was in the rail and not here, and the gap is the bug.
      *
@@ -242,8 +259,12 @@ function StaffHome({ permissions }: { permissions: string[] }) {
      * offers. A card gated more loosely than its route is a tile that bounces
      * the reader back to where they started.
      */
-    { to: '/staff/admin/records', icon: FolderIcon, label: 'Records', permission: 'user.manage' },
-  ]
+    { to: '/admin/records', icon: FolderIcon, label: 'Records', permission: 'user.manage' },
+  ].map((c) => ({
+    ...c,
+    to: portalPath(portal, c.to),
+    anyPermission: c.anyPermission?.map((a) => ({ ...a, to: portalPath(portal, a.to) })),
+  }))
 
   const visible = cards.flatMap((c) => {
     if (c.anyPermission) {

@@ -670,6 +670,21 @@ export default function App() {
               </RequirePermission>
             }
           />
+          {/*
+            * Office Performance, in the admin tree. The rail sends the super
+            * admin here (nav.ts toByPermission → /analytics/offices), and until
+            * this route existed the admin site answered it with NotFound — the
+            * staff tree had it, the admin tree did not, which is the exact trap
+            * the comment above this block warns about.
+            */}
+          <Route
+            path="/admin/analytics/offices"
+            element={
+              <RequirePermission permission="analytics.processing_time">
+                <OfficePerformancePage />
+              </RequirePermission>
+            }
+          />
           {/* Each route carries the SAME permission as its twin in the staff
               tree above, and the same one as its rail entry in nav.ts. See the
               notes there for why each is the permission it is — they are not
