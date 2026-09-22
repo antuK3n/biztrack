@@ -805,6 +805,157 @@ money moves.
 city accepts online payment at all, through which provider, and how a
 BizTrack-issued reference reconciles against the City Treasurer's receipt.
 
+## B15. May the server reach the outside, and which hosts?
+
+Four hosts are called at runtime, all optional: `challenges.cloudflare.com`
+(sign-in captcha), `tile.openstreetmap.org` (street map on the zoning step),
+`server.arcgisonline.com` (satellite view), `nominatim.openstreetmap.org` (pin
+from the typed address). Plus whatever mail relay is named.
+
+**Why it matters.** An egress-blocked server does not fail loudly: the map goes
+blank, the satellite toggle does nothing, the address no longer suggests a pin,
+and the captcha simply is not drawn. Each looks like a bug in the app.
+
+**What we assumed meanwhile.** Outbound is allowed. If it is not, every one of
+the four has a fallback — tiles can be self-hosted, geocoding disabled, the
+captcha left off — and none of them stops a filing.
+
+## B16. May the staff and admin sites be reachable only from City Hall?
+
+`/staff/*` and `/admin/*` are separate sign-in doors with separate tokens.
+Restricting them to the City Hall network or a VPN is a firewall rule, not a
+code change.
+
+**Why it matters.** It removes the officer and administrator surfaces from the
+public internet at no cost to business owners, who never use them.
+
+**What we assumed meanwhile.** All three doors are public, protected by
+sign-in, the five-attempt lockout, and the per-IP limiter.
+
+## B17. Docker on the MISD box, or native installs?
+
+The production runbook is Docker Compose: nginx, php-fpm, a queue worker, a
+scheduler, PostgreSQL 16.
+
+**Why it matters.** If Docker is not permitted, MISD installs PHP 8.3+, nginx
+and PostgreSQL natively and the runbook is rewritten for their OS. On Windows
+Server that is a different document.
+
+**What we assumed meanwhile.** Docker is available, on Linux.
+
+## B18. What are the real volumes — and what happens in January?
+
+Active businesses in the registry, filings per month, and specifically the
+count inside the statutory renewal window of 1–20 January. Officers per office.
+
+**Why it matters.** The January rush is the load the system must survive; the
+annual average says nothing about it. Sizing the box, the queue worker count
+and the upload storage all follow from this number.
+
+**What we assumed meanwhile.** The seeded register — a few hundred businesses,
+a few thousand permits — is the shape, not the size. Nothing has been
+load-tested against a January.
+
+## B19. Is there any channel to verify a DTI, SEC, CDA or BIR number?
+
+The form asks for the registration number of whichever agency the structure
+implies, and can only warn when a value looks unlike that agency's usual
+shape. No agency publishes a format; a hard rule would refuse real
+certificates.
+
+**Why it matters.** A lookup — even a manual one MISD already has — would turn
+an advisory note into a check, and end the client's twice-asked request for
+"validation rules for DTI/SEC/CDA".
+
+**What we assumed meanwhile.** No lookup exists. The note warns and accepts.
+
+## B20. What does the City report to ARTA under RA 11032, and in what format?
+
+BizTrack classifies every filing into the 3 / 7 / 20 working-day tiers and
+records when each office received and finished its part.
+
+**Why it matters.** If a report is due, it is nearly free to export — the
+figures exist. If the format is a spreadsheet template, we need the template.
+
+**What we assumed meanwhile.** Nothing is exported. Office Performance shows
+the figures on screen for the administrator only.
+
+## B21. Where is the City's public-holiday calendar kept?
+
+The RA 11032 clock counts working days by excluding weekends. It does not know
+a holiday.
+
+**Why it matters.** Every holiday inside a filing's window is counted against
+the office, so turnaround and breach figures are overstated — generous to the
+citizen, unfair to the office, wrong either way.
+
+**What we assumed meanwhile.** Weekends only. The analytics say so in their
+definitions.
+
+## B22. Is the business registry public?
+
+Every issued certificate carries a QR that opens a public verification page.
+The administrator also has a map of every business with its permit state.
+
+**Why it matters.** Freedom of information and RA 10173 pull in opposite
+directions. The verification page discloses one permit's validity to whoever
+holds the certificate; a public map would disclose every business's address
+and standing to anyone.
+
+**What we assumed meanwhile.** Verification is public; the map is the
+administrator's alone.
+
+## B23. Who supports the citizen after handover, and how does a bug reach us?
+
+A named counterpart, a channel, hours, and an escalation path from "my upload
+failed" to the team that can read a log.
+
+**Why it matters.** Without it the first support ticket goes to whoever's phone
+number is on the permit — which today is nobody's.
+
+**What we assumed meanwhile.** The development team answers directly during
+the pilot.
+
+## B24. What are the pilot's rules?
+
+Which barangays or business types; whether paper and BizTrack run in parallel
+and which is authoritative when they disagree; how long; what ends it; who
+signs off.
+
+**Why it matters.** A parallel run without a rule for disagreement produces
+two registers. An open-ended pilot never ends.
+
+**What we assumed meanwhile.** BizTrack is authoritative for whatever is in
+the pilot, and the pilot is a fixed period with a written exit.
+
+## B25. Do inspectors carry devices, and what does the counter need?
+
+Phones or tablets for site visits; a printer for the permit face; a scanner
+for citizens who arrive with paper and no device.
+
+**Why it matters.** The inspection flow is built for a browser; whether that
+browser is a desk PC or a phone in the field changes the screen. There is an
+Expo owner app in the repository — that is not a field inspection app.
+
+**What we assumed meanwhile.** Desktop browsers throughout, the permit printed
+at BPLO.
+
+## B26. What makes an electronic filing valid here, and who owns the code afterwards?
+
+Is there an ordinance or executive order authorising electronic filing and
+electronic permits? Are uploaded copies acceptable in lieu of originals, and
+when are originals inspected? Is e-notarisation accepted for the CPDD
+declaration? What kind of electronic signature is recognised for the permit
+face? And after the capstone: which repository, what licence, who maintains.
+
+**Why it matters.** Without the legal basis a BizTrack-issued permit is a
+PDF. Without an owner it is an orphan.
+
+**What we assumed meanwhile.** Uploads are accepted and "verified against the
+original" by the office; the permit is signed by the configured office
+signatory (B6); the repository is handed over as a clone with the team named
+as maintainers during the pilot.
+
 ---
 
 # C. For CPDO — zoning
