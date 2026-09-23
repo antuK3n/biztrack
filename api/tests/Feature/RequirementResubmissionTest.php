@@ -37,6 +37,7 @@ function requirementApplication(string $businessName, string $registrationNumber
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => $businessName,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',
@@ -212,7 +213,7 @@ it('lets the applicant answer again after a rejection', function () {
         ->firstWhere('id', $requestId);
 
     // Refused, and back with the applicant rather than shut.
-    expect($seen()['status_label'])->toBe('Rejected')
+    expect($seen()['status_label'])->toBe('Disapproved')
         ->and($seen()['accepts_response'])->toBeTrue()
         ->and($seen()['awaits_applicant'])->toBeTrue()
         ->and($seen()['is_closed'])->toBeFalse()
@@ -288,7 +289,7 @@ it('tells the client which statuses an office may set', function () {
     expect(collect($meta['office_statuses'])->pluck('value')->all())
         ->toBe(['pending', 'fulfilled', 'rejected']);
     expect(collect($meta['office_statuses'])->pluck('label')->all())
-        ->toBe(['Pending', 'Approved', 'Rejected']);
+        ->toBe(['Pending', 'Approved', 'Disapproved']);
 });
 
 it('shows the applicant an approved requirement as fulfilled', function () {

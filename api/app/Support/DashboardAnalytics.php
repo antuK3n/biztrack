@@ -430,7 +430,7 @@ final class DashboardAnalytics
         return [
             ['outcome' => 'approved', 'label' => 'Approved', 'count' => $approved, 'decisioned' => true],
             ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => $returned, 'decisioned' => true],
-            ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => $rejected, 'decisioned' => true],
+            ['outcome' => 'rejected', 'label' => 'Disapproved', 'count' => $rejected, 'decisioned' => true],
             ['outcome' => 'pending', 'label' => 'Pending', 'count' => $pending, 'decisioned' => false],
             ['outcome' => 'cancelled', 'label' => 'Cancelled', 'count' => $cancelled, 'decisioned' => false],
         ];

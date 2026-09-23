@@ -148,7 +148,7 @@ final class AnalyticsDefinitions
 
             'decisions.approval_rate' => [
                 'label' => 'Approval rate',
-                'formula' => 'Approved filings ÷ decided filings (approved + returned + rejected) × 100.',
+                'formula' => 'Approved filings ÷ decided filings (approved + returned + disapproved) × 100.',
                 'covers' => 'Decided filings only. Pending and cancelled filings are left out — a withdrawn filing is not a decision the office made.',
                 'why' => 'Measures how the office decides, not how fast. Leaving pending filings out is why a growing backlog does not move it.',
             ],
@@ -580,7 +580,7 @@ final class AnalyticsDefinitions
             'lifecycle.near_expiry' => [
                 'label' => 'Near Expiry',
                 'formula' => 'Expires within 30 days, with no renewal submitted against it.',
-                'covers' => 'Thirty days is the mark the first automatic reminder goes out on, and the same mark the score starts counting a missing renewal from. A renewal saved as a draft, or one that was rejected, counts as nothing submitted.',
+                'covers' => 'Thirty days is the mark the first automatic reminder goes out on, and the same mark the score starts counting a missing renewal from. A renewal saved as a draft, or one that was disapproved, counts as nothing submitted.',
                 'why' => 'The chase list. This is a different thing from the risk levels in the table above: those rank how much is wrong with a permit, this says where the permit stands.',
             ],
 

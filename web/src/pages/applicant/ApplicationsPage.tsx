@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { ChevronRightIcon, TrackIcon } from '../../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import {
@@ -28,6 +28,7 @@ import {
   type StatusTone,
 } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
+import { PaymentHistory } from './PaymentsPage'
 import type {
   Application,
   ApplicationListItem,
@@ -39,7 +40,8 @@ import type {
 } from '../../lib/types'
 
 /*
- * Permit Tracking (PDF p48–49): a collapsible status guide, type filter
+ * Business Application Status (PDF p48–49, drawn there as "Permit Tracking"
+ * and on the rail as "Track" until the client renamed both): a collapsible status guide, type filter
  * pills, white accordion rows per application with a status badge in that
  * status's own colour, and expanded per-permit rows with a status chip +
  * submitted date + message icon.
@@ -53,6 +55,13 @@ import type {
  * left, so it moves to Profile, where the permits it produced are listed under
  * "Approved Businesses" (tester item 44). The count of what moved is shown
  * below the list so nothing silently disappears.
+ *
+ * Payments sit at the foot of this screen. They were a rail entry of their own
+ * ("Payment History"); the client asked for payment information here instead,
+ * since paying is a stage of the filing this screen already follows. The
+ * section covers every filing, approved ones included, because an approved
+ * filing leaves the list above and its receipt must not leave with it. The
+ * filing's own page lists that filing's payments too.
  */
 
 type TypeFilter = '' | 'new' | 'renewal' | 'amendment'
@@ -466,7 +475,7 @@ function RejectionNote({
      * seventh card rather than as a note about the sixth.
      */
     <div className="mt-1! rounded-xl border border-s-red/30 bg-s-red-tint px-5 py-3.5">
-      <p className="text-sm font-bold text-s-red">Rejected</p>
+      <p className="text-sm font-bold text-s-red">Disapproved</p>
       {detail === undefined ? (
         <p className="mt-1 text-sm text-ink-secondary">Loading the reason…</p>
       ) : detail.rejection_reason ? (
@@ -480,7 +489,7 @@ function RejectionNote({
         to={`/applications/${app.id}`}
         // Named for the filing it opens: a list of links all reading "Open
         // this application" is a list a screen reader user cannot choose from.
-        aria-label={`Open the rejected application for ${businessName(app.business)}`}
+        aria-label={`Open the disapproved application for ${businessName(app.business)}`}
         className="mt-1.5 inline-block text-sm font-semibold text-royal underline underline-offset-2 hover:no-underline"
       >
         Open this application
@@ -890,6 +899,24 @@ function ApplicationRow({
    */
   const meta = applicationStatusMeta(app.status)
   /*
+   * ── One wording that is not the chip's: `returned` reads "Back to you" ────
+   *
+   * `for_approval` already reads "For Initial Approval" from the status table,
+   * which is the client's wording (testing-checklist, "Business owner — Track
+   * applications" item 3). `returned` is the one state where the badge should
+   * NOT repeat the chip. "Returned" names the state; what the row needs to say
+   * is whose desk the filing is on — BPLO has read it, sent it back, and is
+   * waiting on the applicant. "Back to you" points at the person reading it.
+   *
+   * The colour still comes from the status's own tone, so the badge and the
+   * guide above still match on the one thing a glance reads. The chip text in
+   * `lib/status.ts` is mirrored from the PHP enum and checked by
+   * StatusLabelParityTest, so it stays "Returned" and this is the only place
+   * the wording differs. If the guide is ever reworded to say whose turn it
+   * is, this override can go.
+   */
+  const badgeLabel = app.status === 'returned' ? 'Back to you' : meta.label
+  /*
    * Layout only. The colour — background, text AND border — comes from
    * TONE_CLASSES at each use, so `text-white` cannot live here: two
    * same-specificity Tailwind utilities are resolved by stylesheet order, not
@@ -1048,8 +1075,8 @@ function ApplicationRow({
             * announced itself by the one thing that had not happened.
             *
             * The filing's own status instead. "For Initial Approval" says a
-            * person is reading the form; "Returned" says it is back with the
-            * applicant; "Draft" says it was never submitted. Each is the
+            * person is reading the form; "Back to you" says it is back with the
+            * applicant (see `badgeLabel`); "Draft" says it was never submitted. Each is the
             * answer to the question the row is actually asked.
             *
             * A terminal filing gets a badge now, where it got nothing. The
@@ -1060,7 +1087,7 @@ function ApplicationRow({
             * a red badge beside the rejection note is the clearest the row has
             * ever been about what happened.
             */
-          <span className={`${badgeCls} ${TONE_CLASSES[meta.tone]} border-l`}>{meta.label}</span>
+          <span className={`${badgeCls} ${TONE_CLASSES[meta.tone]} border-l`}>{badgeLabel}</span>
         )}
       </div>
 
@@ -1244,6 +1271,16 @@ export function ApplicationsPage() {
   const [sort, setSort] = useState<SortKey>('newest')
   const [status, setStatus] = useState('')
   const { data, loading, error, reload } = useAsync(() => applications.list(), [])
+  /*
+   * /payments redirects here with #payments, so an old Payment History link
+   * lands on the receipts rather than the top of a long list. The router does
+   * not scroll to a hash on its own. Waits for the list: scrolling while it
+   * is a skeleton lands short once the rows arrive above the section.
+   */
+  const { hash } = useLocation()
+  useEffect(() => {
+    if (hash === '#payments' && !loading) document.getElementById('payments')?.scrollIntoView()
+  }, [hash, loading])
   // Reference permit types carry `department` + `requires_inspection`, which we
   // need to map each permit type to its issuing department's assignment.
   const permitTypesRef = useAsync(() => reference.permitTypes(), [])
@@ -1347,7 +1384,16 @@ export function ApplicationsPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
+          /*
+           * A named group, because the Payments section below has its own Sort
+           * and Filter: two "Sort" buttons on one screen are two identical
+           * stops unless something says which list each one orders.
+           */
+          <span
+            role="group"
+            aria-label="Search, sort and filter applications"
+            className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1"
+          >
             {/*
              * Labelled, not just placeheld: a placeholder disappears the moment
              * the field is used and is not an accessible name, so the field
@@ -1371,7 +1417,7 @@ export function ApplicationsPage() {
           </span>
         }
       >
-        Permit Tracking
+        Business Application Status
       </PageTitle>
 
       {/*
@@ -1444,7 +1490,10 @@ export function ApplicationsPage() {
         </>
       ) : (
         <>
-          <ul className="space-y-4">
+          {/* Named, because this screen now holds a second list of expanding
+              rows — the Payments section below — and "the list" stopped
+              being one thing. */}
+          <ul aria-label="Your applications" className="space-y-4">
             {items.map((app) => (
               <ApplicationRow
                 key={app.id}
@@ -1458,6 +1507,8 @@ export function ApplicationsPage() {
           {movedNote}
         </>
       )}
+
+      <PaymentHistory />
     </div>
   )
 }

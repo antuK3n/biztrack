@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { SVGProps } from 'react'
+import type { ReactNode, SVGProps } from 'react'
 import { ArrowLeftIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import {
@@ -27,6 +27,13 @@ import type {
 
 /*
  * Other Requirements — PDF p23–25, now wired to the real /requests feed.
+ *
+ * Two homes. An officer reaches it from their own rail at /staff/requests. An
+ * owner reaches it as the Requirements tab of Messages (MessagesPage renders
+ * this component with `embedded`): the client asked for it off the owner's
+ * home screen and "merged into Messages", since an office asking for a
+ * document is an office writing to them. /requests redirects owners there.
+ *
  * Owner view: read a request letter, then respond (textarea + optional file).
  * A request accepts MANY responses — one requirement often needs several
  * uploads or a follow-up note — so replies render as a chronological thread
@@ -129,11 +136,14 @@ function LetterView({
   request,
   isOfficer,
   officeStatuses,
+  backLabel,
   onBack,
   onUpdated,
 }: {
   request: OfficerRequest
   isOfficer: boolean
+  /** Where the back link returns to, in words. */
+  backLabel: string
   /** What this office may set the status to, and the words for it. From the API. */
   officeStatuses: OfficeStatusOption[]
   onBack: () => void
@@ -216,7 +226,7 @@ function LetterView({
         onClick={onBack}
         className="mb-4 inline-flex items-center gap-2 text-sm font-semibold text-ink-secondary hover:text-ink"
       >
-        <ArrowLeftIcon size={18} /> Other Requirements
+        <ArrowLeftIcon size={18} /> {backLabel}
       </button>
 
       <div className="rounded-2xl bg-white px-6 py-8 shadow-card sm:px-10">
@@ -735,8 +745,26 @@ function ComposeModal({
   )
 }
 
+/**
+ * How the list is framed when it is a tab of Messages rather than a page.
+ *
+ * The page keeps ONE h1 — "Messages", with the tabs under it — so a screen
+ * reader's heading list does not name the screen twice, and the list's own
+ * controls ride in the title row as they do on the standalone page.
+ */
+export interface RequestsEmbedding {
+  /** The page's h1 (the host page's name). */
+  title: ReactNode
+  /** Drawn between the title and the list: the host's tab strip. */
+  above: ReactNode
+  /** What the letter view's back link says it returns to. */
+  backLabel: string
+  /** Told whenever a response is sent, so the host can refresh its count. */
+  onChanged?: () => void
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────── */
-export function RequestsPage() {
+export function RequestsPage({ embedded }: { embedded?: RequestsEmbedding } = {}) {
   const user = useAuth((s) => s.user)
   const isOfficer = Boolean(user?.permissions.includes('request.create'))
 
@@ -832,6 +860,7 @@ export function RequestsPage() {
 
   function patch(updated: OfficerRequest) {
     setList((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+    embedded?.onChanged?.()
 
     /*
      * A row that stops answering the question being asked has to leave, and the
@@ -854,6 +883,7 @@ export function RequestsPage() {
         request={open}
         isOfficer={isOfficer}
         officeStatuses={officeStatuses}
+        backLabel={embedded?.backLabel ?? 'Other Requirements'}
         onBack={() => setOpenId(null)}
         onUpdated={patch}
       />
@@ -892,8 +922,10 @@ export function RequestsPage() {
           </span>
         }
       >
-        Other Requirements
+        {embedded?.title ?? 'Other Requirements'}
       </PageTitle>
+
+      {embedded?.above}
 
       {firstLoad ? (
         <SkeletonList rows={4} />

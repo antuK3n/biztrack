@@ -66,6 +66,7 @@ function assignmentHeldBy(User $officer, string $registrationNumber): Applicatio
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Caseload Cafe',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',

@@ -17,6 +17,7 @@ import { useAsync } from '../../lib/useAsync'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { GenerateReportButton } from './GenerateReportButton'
+import { DENSE_PAGE } from './dense'
 
 /*
  * Business Growth Analysis — docs/r-integration-spec.md §4, "(Admin - BPLO)".
@@ -278,8 +279,9 @@ export function BusinessGrowthPage() {
   }
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex items-center gap-3 pb-1">
             <FilterMenu

@@ -39,6 +39,7 @@ function payingApplication(string $businessName, string $registrationNumber): in
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => $businessName,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',
@@ -168,7 +169,7 @@ it('notifies the applicant when the application is approved', function () use ($
     )->toBe(0);
 });
 
-it('notifies the applicant with the reason when the application is rejected', function () {
+it('notifies the applicant with the reason when the application is disapproved', function () {
     $appId = payingApplication('Notify Test Cantina', 'DTI-88002');
 
     $this->withHeaders(authAs('bplo@biztrack.local'))
@@ -181,7 +182,7 @@ it('notifies the applicant with the reason when the application is rejected', fu
     $owner = User::where('email', 'owner@biztrack.local')->first();
     $rejection = AppNotification::where('user_id', $owner->id)
         ->where('type', 'decision')
-        ->where('title', 'Application rejected')
+        ->where('title', 'Application disapproved')
         ->first();
 
     expect($rejection)->not->toBeNull()

@@ -18,6 +18,7 @@ import type {
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
+import { DENSE_PAGE } from './dense'
 
 /*
  * Permit Processing Time Monitoring — "R INTEGRATION DRAFTS" §6, the super
@@ -174,7 +175,7 @@ function distil(
 function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
   return (
     <div className="mb-2 flex items-center">
-      <h2 className="text-lg font-semibold text-ink">{children}</h2>
+      <h2 className="text-base font-semibold text-ink">{children}</h2>
       {metric && <Info metric={metric} />}
     </div>
   )
@@ -434,11 +435,11 @@ function NotedDelays({ department }: { department: ProcessingTimeDepartment }) {
           Weeks where {department.name} went beyond its normal range, with the size of the gap
         </caption>
         <thead>
-          <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-muted">
-            <th scope="col" className="px-4 py-2 font-semibold">
+          <tr className="border-b border-line text-xs uppercase tracking-wide text-ink-muted">
+            <th scope="col" className="whitespace-nowrap px-3 py-1.5 font-semibold">
               Week of
             </th>
-            <th scope="col" className="px-4 py-2 text-right font-semibold">
+            <th scope="col" className="whitespace-nowrap px-3 py-1.5 text-right font-semibold">
               Beyond the range
             </th>
           </tr>
@@ -456,11 +457,11 @@ function NotedDelays({ department }: { department: ProcessingTimeDepartment }) {
             const breach = (week.rule_hit ?? '').includes('beyond_limits')
             return (
               <tr key={week.week_start} className="border-b border-line/60 last:border-0">
-                <th scope="row" className="px-4 py-2 align-top font-normal">
+                <th scope="row" className="whitespace-nowrap px-3 py-1 align-top font-normal">
                   <span className="block text-[14px] font-semibold text-ink">
                     {spcWeekDate(week.week_start)}
                   </span>
-                  <span className="block text-[11px] text-ink-muted">
+                  <span className="block text-xs text-ink-muted">
                     {breach && drift
                       ? 'past the edge, and drifting'
                       : drift
@@ -468,14 +469,14 @@ function NotedDelays({ department }: { department: ProcessingTimeDepartment }) {
                         : 'past the edge of the range'}
                   </span>
                 </th>
-                <td className="px-4 py-2 text-right align-top">
+                <td className="whitespace-nowrap px-3 py-1 text-right align-top">
                   <span
                     className={`tnum block text-[14px] font-semibold ${slower ? 'text-s-red' : 'text-ink'}`}
                   >
                     {spcSignedDays(week.deviation_days)} days
                   </span>
                   {/* The sign alone would carry this; the words carry it too. */}
-                  <span className="block text-[11px] text-ink-muted">
+                  <span className="block text-xs text-ink-muted">
                     {slower ? 'slower than usual' : 'faster than usual'}
                   </span>
                 </td>
@@ -533,7 +534,13 @@ function SlowdownWarnings({ departments }: { departments: ProcessingTimeDepartme
           ? 'No department is drifting slower week on week.'
           : `${slowing.map((d) => d.code).join(', ')} ${slowing.length === 1 ? 'is' : 'are'} drifting slower week on week.`}
       </p>
-      <ul className="divide-y divide-line/60">
+      {/*
+        One line per office, two columns (compact, client 2026-09: "fits without
+        scrolling"). The trend word and the day figure used to stack in a 36px
+        column, which made seven bars cost ~450px — more than the chart above.
+        The word still comes first, so the direction is never colour alone.
+      */}
+      <ul className="grid gap-x-8 lg:grid-cols-2">
         {reported.map((department) => {
           const direction = department.trend.direction
           const rising = direction === 'rising'
@@ -541,7 +548,7 @@ function SlowdownWarnings({ departments }: { departments: ProcessingTimeDepartme
           // improving move is not one, however long its bar.
           const warn = rising && department.trend.drift_flagged
           return (
-            <li key={department.code} className="flex items-center gap-3 py-2">
+            <li key={department.code} className="flex items-center gap-3 border-b border-line/60 py-1">
               <span className="w-24 shrink-0 text-[13px] font-bold text-ink">{department.code}</span>
               {/*
                * The bar is decoration for a number already written out beside
@@ -554,13 +561,11 @@ function SlowdownWarnings({ departments }: { departments: ProcessingTimeDepartme
                   style={{ width: `${Math.max(4, (department.trend.magnitude ?? 0) * 100)}%` }}
                 />
               </span>
-              <span className="w-36 shrink-0 text-right">
-                <span
-                  className={`block text-[13px] font-semibold ${rising ? 'text-s-red' : 'text-ink-secondary'}`}
-                >
+              <span className="w-52 shrink-0 text-right text-[13px]">
+                <span className={`font-semibold ${rising ? 'text-s-red' : 'text-ink-secondary'}`}>
                   {TREND_LABEL[direction] ?? 'Holding steady'}
                 </span>
-                <span className="tnum block text-[11px] text-ink-muted">
+                <span className="tnum ml-1.5 text-xs text-ink-muted">
                   {spcSignedDays(department.trend.deviation_days)} days
                   {warn && <span className="font-semibold text-s-red"> · watch</span>}
                 </span>
@@ -652,8 +657,9 @@ export function ProcessingTimePage() {
   }
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex items-center gap-3 pb-1">
             <FilterMenu
@@ -673,7 +679,7 @@ export function ProcessingTimePage() {
               onClick={generateReport}
               aria-disabled={downloading}
               aria-busy={downloading}
-              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card transition-colors hover:bg-royal-hover aria-disabled:cursor-wait aria-disabled:bg-royal/60"
+              className="h-8 rounded-lg bg-royal px-4 text-[13px] font-semibold text-white shadow-card transition-colors hover:bg-royal-hover aria-disabled:cursor-wait aria-disabled:bg-royal/60"
             >
               {downloading ? 'Generating…' : 'Generate Report'}
             </button>

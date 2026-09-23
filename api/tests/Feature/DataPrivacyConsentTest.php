@@ -39,6 +39,7 @@ function draftWithConsent(bool $consent): int
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Consent Cafe '.random_int(10000, 99999),
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-'.random_int(10000, 99999),
         'tin' => '123-456-789-000',

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDownIcon, DownloadIcon, PaymentsIcon, SearchIcon } from '../../components/icons'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { PageTitle, SortFilter } from '../../components/ui/Proto'
+import { SortFilter } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatDate, formatMoney } from '../../lib/format'
 import { applications, payments } from '../../lib/resources'
@@ -10,10 +10,31 @@ import { useAsync } from '../../lib/useAsync'
 import type { FeeAssessment, Payment } from '../../lib/types'
 
 /*
- * Payment History (PDF p21–22): white shadow rows with bold "Ref No. :",
- * italic "Paid:" date, a serif peso amount + chevron; expanding a row reveals
- * that payment's serif Tax Order of Payment card (fetched lazily from the
- * payment's application via the existing applications resource).
+ * Payments — what the owner paid, and the receipt for each (PDF p21–22's rows:
+ * bold "Ref No. :", italic "Paid:" date, a serif peso amount + chevron;
+ * expanding a row reveals that payment's Tax Order of Payment card).
+ *
+ * ── This is no longer a page ─────────────────────────────────────────────────
+ *
+ * It was "Payment History", its own rail entry at /payments. The client asked
+ * for it off the rail and onto the status screen: "put payment information on
+ * the tracking screen instead". Payment is a stage of a filing, not a separate
+ * place an owner goes, and a rail entry for it was a fifth door to what is one
+ * story per business.
+ *
+ * So this file now exports two pieces and no route:
+ *
+ *   - `PaymentRows` — the rows themselves, with View Receipt and Save. The
+ *     filing's own detail page draws it for that filing's payments.
+ *   - `PaymentHistory` — the same rows for every filing, with the sort, status
+ *     and date controls, as a section at the foot of Business Application
+ *     Status. It has to exist as well as the per-filing list: an approved
+ *     filing leaves that screen for Profile, and its receipt must not leave
+ *     with it.
+ *
+ * /payments redirects to that section (App.tsx), so a link already sent out
+ * still lands on the receipts. If Payment History is ever wanted back as a
+ * page, `PaymentHistory` under a PageTitle is the whole of it.
  */
 
 /** Serif peso rendering like the prototype ("P 100.00"). */
@@ -122,26 +143,22 @@ function TaxOrderCard({ payment, detail }: { payment: Payment; detail: FeeDetail
   )
 }
 
-export function PaymentsPage() {
-  const { data, loading, error, reload } = useAsync(() => payments.history(), [])
-  const list = data ?? []
-
-  const [sortKey, setSortKey] = useState('date_desc')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-
-  const visible = sortPayments(
-    list.filter((p) => {
-      if (statusFilter !== 'all' && p.status !== statusFilter) return false
-      const day = paidDay(p)
-      if (dateFrom && (!day || day < dateFrom)) return false
-      if (dateTo && (!day || day > dateTo)) return false
-      return true
-    }),
-    sortKey,
-  )
-
+/**
+ * One row per payment: reference, date, amount, the two receipt actions, and a
+ * chevron that opens the Tax Order of Payment the payment settled.
+ *
+ * `fee`, when given, is that Tax Order — the detail page already holds it, so
+ * fetching the filing again per row would be a second request for a value on
+ * screen. Without it (the cross-filing history) each row fetches its own
+ * filing's assessment lazily, on first open.
+ */
+export function PaymentRows({
+  payments: list,
+  fee: knownFee,
+}: {
+  payments: Payment[]
+  fee?: FeeAssessment | null
+}) {
   const [openId, setOpenId] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, FeeDetail>>({})
   /*
@@ -157,7 +174,7 @@ export function PaymentsPage() {
    *
    * The screen could only hand over a file, because the receipt endpoint is
    * behind a Bearer token and an anchor cannot carry one. But the ordinary
-   * reason to open Payment History is to check a charge — how much, when, on
+   * reason to look at a payment is to check a charge — how much, when, on
    * what — and answering that should not leave a PDF in the Downloads folder
    * every time. Downloading remains for the case that wants a copy to keep or
    * to attach to something.
@@ -201,39 +218,173 @@ export function PaymentsPage() {
       return
     }
     setOpenId(p.id)
-    if (details[p.id] === undefined) {
-      if (!p.application) {
-        setDetails((d) => ({ ...d, [p.id]: 'none' }))
-        return
-      }
-      setDetails((d) => ({ ...d, [p.id]: 'loading' }))
-      applications
-        .get(p.application.id)
-        .then((app) => setDetails((d) => ({ ...d, [p.id]: app.fee_assessment ?? 'none' })))
-        .catch(() => setDetails((d) => ({ ...d, [p.id]: 'none' })))
+    if (knownFee !== undefined || details[p.id] !== undefined) return
+    if (!p.application) {
+      setDetails((d) => ({ ...d, [p.id]: 'none' }))
+      return
     }
+    setDetails((d) => ({ ...d, [p.id]: 'loading' }))
+    applications
+      .get(p.application.id)
+      .then((app) => setDetails((d) => ({ ...d, [p.id]: app.fee_assessment ?? 'none' })))
+      .catch(() => setDetails((d) => ({ ...d, [p.id]: 'none' })))
   }
 
   return (
-    <div>
-      <PageTitle
-        right={
-          <SortFilter
-            sort={{ value: sortKey, options: SORT_OPTIONS, onChange: setSortKey }}
-            filter={{ value: statusFilter, options: STATUS_OPTIONS, onChange: setStatusFilter }}
-            dateRange={{
-              from: dateFrom,
-              to: dateTo,
-              onChange: (from, to) => {
-                setDateFrom(from)
-                setDateTo(to)
-              },
-            }}
-          />
-        }
-      >
-        Payment History
-      </PageTitle>
+    <>
+      {receiptError && (
+        <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+          {receiptError}
+        </p>
+      )}
+      <ul className="space-y-5">
+        {list.map((p) => {
+          const open = openId === p.id
+          return (
+            <li key={p.id} className="space-y-3">
+              {/*
+                * Wraps below sm. The reference, the serif amount, the chevron
+                * and the Receipt button need ~430px between them; forced onto
+                * one line at 390 the reference column was squeezed to zero
+                * width, the date broke into four lines, and the amount printed
+                * over it. Stacked, the row keeps its reading order and every
+                * edge lines up with the card.
+                */}
+              <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-white px-7 py-5 shadow-card">
+                <button
+                  type="button"
+                  onClick={() => toggle(p)}
+                  aria-expanded={open}
+                  className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-x-5 gap-y-2 text-left sm:basis-auto"
+                >
+                  <span className="min-w-0 flex-1 basis-full sm:basis-auto">
+                    <span className="block truncate text-lg font-bold text-ink">
+                      Ref No. : <span className="tnum">{p.reference_number}</span>
+                    </span>
+                    <span className="mt-0.5 block text-sm italic text-ink-muted">
+                      Paid: {formatDate(p.paid_at)}
+                      {/* Which filing, in the cross-filing list. The detail
+                          page passes rows of one filing and says so above. */}
+                      {p.application?.tracking_id && knownFee === undefined && (
+                        <span className="not-italic"> · {p.application.tracking_id}</span>
+                      )}
+                    </span>
+                  </span>
+                  <span className="display-serif tnum shrink-0 text-2xl text-ink">
+                    {serifPeso(p.amount)}
+                  </span>
+                  <ChevronDownIcon
+                    size={26}
+                    className={`shrink-0 text-ink-secondary transition-transform ${open ? 'rotate-180' : ''}`}
+                  />
+                </button>
+                {/*
+                  * Two actions, and the reading one leads.
+                  *
+                  * "Receipt" used to be a single button that saved a file,
+                  * which answered the rarer need. Checking a charge is the
+                  * common one, and it should cost a look rather than a
+                  * download. So View Receipt is the filled control and Save is
+                  * the quiet one beside it.
+                  *
+                  * Both name the noun. "View" and "Save" alone would read as
+                  * being about the ROW — its breakdown is what the chevron
+                  * opens — and two controls a few pixels apart doing different
+                  * things under the same verb is how a receipt gets mistaken
+                  * for the expander.
+                  */}
+                <span className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => viewReceipt(p)}
+                    disabled={receiptBusy?.id === p.id}
+                    aria-label={`View receipt ${p.reference_number}`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
+                  >
+                    <SearchIcon size={14} />
+                    {receiptBusy?.id === p.id && receiptBusy.act === 'view'
+                      ? 'Opening…'
+                      : 'View Receipt'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => downloadReceipt(p)}
+                    disabled={receiptBusy?.id === p.id}
+                    aria-label={`Save receipt ${p.reference_number} as a PDF`}
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
+                  >
+                    <DownloadIcon size={14} />
+                    {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
+                  </button>
+                </span>
+              </div>
+              {open && (
+                <div className="pl-4 sm:pl-8">
+                  <TaxOrderCard
+                    payment={p}
+                    detail={knownFee !== undefined ? (knownFee ?? 'none') : details[p.id]}
+                  />
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+    </>
+  )
+}
+
+/**
+ * Every payment the owner has made, across every filing, as a section of
+ * Business Application Status. `id="payments"` is the anchor /payments
+ * redirects to.
+ */
+export function PaymentHistory() {
+  const { data, loading, error, reload } = useAsync(() => payments.history(), [])
+  const list = data ?? []
+
+  const [sortKey, setSortKey] = useState('date_desc')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  const visible = sortPayments(
+    list.filter((p) => {
+      if (statusFilter !== 'all' && p.status !== statusFilter) return false
+      const day = paidDay(p)
+      if (dateFrom && (!day || day < dateFrom)) return false
+      if (dateTo && (!day || day > dateTo)) return false
+      return true
+    }),
+    sortKey,
+  )
+
+  return (
+    <section id="payments" aria-labelledby="payments-heading" className="mt-12 scroll-mt-6">
+      {/* PageTitle's row, one level down: this is a section of the status
+          screen, and a second h1 on it would be two pages claiming one. */}
+      <div className="mb-6 border-b-2 border-ink/50 pb-2">
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+          <h2 id="payments-heading" className="text-2xl font-bold text-ink">
+            Payments
+          </h2>
+          {/* Named: the applications list above has its own Sort and Filter. */}
+          <span role="group" aria-label="Sort and filter payments">
+            <SortFilter
+              sort={{ value: sortKey, options: SORT_OPTIONS, onChange: setSortKey }}
+              filter={{ value: statusFilter, options: STATUS_OPTIONS, onChange: setStatusFilter }}
+              dateRange={{
+                from: dateFrom,
+                to: dateTo,
+                onChange: (from, to) => {
+                  setDateFrom(from)
+                  setDateTo(to)
+                },
+              }}
+            />
+          </span>
+        </div>
+      </div>
 
       {loading ? (
         <SkeletonList rows={3} />
@@ -245,104 +396,13 @@ export function PaymentsPage() {
           title="No payments yet"
           description="Once an application reaches the payment stage and you pay, receipts appear here."
         />
+      ) : visible.length === 0 ? (
+        <p className="rounded-xl bg-white px-6 py-5 text-sm text-ink-secondary shadow-card">
+          No payments match the current filter.
+        </p>
       ) : (
-        <>
-        {receiptError && (
-          <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
-            {receiptError}
-          </p>
-        )}
-        {visible.length === 0 && (
-          <p className="rounded-xl bg-white px-6 py-5 text-sm text-ink-secondary shadow-card">
-            No payments match the current filter.
-          </p>
-        )}
-        <ul className="space-y-5">
-          {visible.map((p) => {
-            const open = openId === p.id
-            return (
-              <li key={p.id} className="space-y-3">
-                {/*
-                  * Wraps below sm. The reference, the serif amount, the chevron
-                  * and the Receipt button need ~430px between them; forced onto
-                  * one line at 390 the reference column was squeezed to zero
-                  * width, the date broke into four lines, and the amount printed
-                  * over it. Stacked, the row keeps its reading order and every
-                  * edge lines up with the card.
-                  */}
-                <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-3 rounded-xl bg-white px-7 py-5 shadow-card">
-                  <button
-                    type="button"
-                    onClick={() => toggle(p)}
-                    aria-expanded={open}
-                    className="flex min-w-0 flex-1 basis-full flex-wrap items-center gap-x-5 gap-y-2 text-left sm:basis-auto"
-                  >
-                    <span className="min-w-0 flex-1 basis-full sm:basis-auto">
-                      <span className="block truncate text-lg font-bold text-ink">
-                        Ref No. : <span className="tnum">{p.reference_number}</span>
-                      </span>
-                      <span className="mt-0.5 block text-sm italic text-ink-muted">
-                        Paid: {formatDate(p.paid_at)}
-                      </span>
-                    </span>
-                    <span className="display-serif tnum shrink-0 text-2xl text-ink">
-                      {serifPeso(p.amount)}
-                    </span>
-                    <ChevronDownIcon
-                      size={26}
-                      className={`shrink-0 text-ink-secondary transition-transform ${open ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                  {/*
-                    * Two actions, and the reading one leads.
-                    *
-                    * "Receipt" used to be a single button that saved a file,
-                    * which answered the rarer need. Checking a charge is what
-                    * brings somebody to this screen, and it should cost a look
-                    * rather than a download. So View Receipt is the filled
-                    * control and Save is the quiet one beside it.
-                    *
-                    * Both name the noun. "View" and "Save" alone would read as
-                    * being about the ROW — its breakdown is what the chevron
-                    * opens — and two controls a few pixels apart doing
-                    * different things under the same verb is how a receipt gets
-                    * mistaken for the expander.
-                    */}
-                  <span className="flex shrink-0 items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => viewReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover disabled:opacity-60"
-                    >
-                      <SearchIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'view'
-                        ? 'Opening…'
-                        : 'View Receipt'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => downloadReceipt(p)}
-                      disabled={receiptBusy?.id === p.id}
-                      aria-label={`Save receipt ${p.reference_number} as a PDF`}
-                      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal-tint disabled:opacity-60"
-                    >
-                      <DownloadIcon size={14} />
-                      {receiptBusy?.id === p.id && receiptBusy.act === 'save' ? 'Preparing…' : 'Save'}
-                    </button>
-                  </span>
-                </div>
-                {open && (
-                  <div className="pl-4 sm:pl-8">
-                    <TaxOrderCard payment={p} detail={details[p.id]} />
-                  </div>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-        </>
+        <PaymentRows payments={visible} />
       )}
-    </div>
+    </section>
   )
 }

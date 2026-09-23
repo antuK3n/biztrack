@@ -18,6 +18,7 @@ import {
 import type { ChipTone } from '../../components/ui/Proto'
 import { BuildingIcon } from '../../components/icons'
 import { BUSINESS_STATUS } from '../../lib/status'
+import { DENSE_PAGE, dBtn, dFoot, dInput, dPager, dTable, dTd, dTh, dTheadRow } from './dense'
 
 /*
  * Business Owner Status (PDF p99–101): the real /admin/businesses roster with
@@ -411,8 +412,15 @@ function FeesModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }
   )
 }
 
-/** Rows per request. The roster is 705 businesses and grows with the city. */
-const PAGE_SIZE = 25
+/**
+ * Rows per request. The roster is 705 businesses and grows with the city.
+ *
+ * 20, down from 25, when the table went compact (dense.ts, client 2026-09:
+ * "make it so every detail fits without scrolling"). Every row carries three
+ * 24px action pills, so a row is 33px at the least, and twenty is what fits a
+ * 1440×900 screen with the title and pager. Paging is server-side.
+ */
+const PAGE_SIZE = 20
 
 /** The roster filter: every status, or exactly one. */
 type StatusFilter = 'all' | BusinessStatus
@@ -485,40 +493,40 @@ export function OwnersPage() {
   }
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {/*
+              A real status filter, replacing the decorative Sort/Filter pair.
+              The whole point of this screen is finding the businesses under
+              sanction, and they were indistinguishable from the 700 that are
+              not without paging the register and reading chips. It sits in the
+              title row since the compact pass (2026-09): a row of its own cost
+              the height of two businesses.
+            */}
+            <FilterPills
+              options={STATUS_FILTERS}
+              value={status}
+              onChange={(next) => {
+                setStatus(next)
+                setPage(1)
+              }}
+            />
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search business or owner…"
               aria-label="Search businesses or owners"
-              className="w-56 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-56`}
             />
           </span>
         }
       >
         Business Owner Status
       </PageTitle>
-
-      {/*
-        A real status filter, replacing the decorative Sort/Filter pair. The
-        whole point of this screen is finding the businesses under sanction, and
-        they were indistinguishable from the 700 that are not without paging the
-        register and reading chips.
-      */}
-      <div className="mb-5">
-        <FilterPills
-          options={STATUS_FILTERS}
-          value={status}
-          onChange={(next) => {
-            setStatus(next)
-            setPage(1)
-          }}
-        />
-      </div>
 
       {loading ? (
         <SkeletonList rows={7} />
@@ -537,12 +545,12 @@ export function OwnersPage() {
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[44rem] text-left text-sm">
+            <table className={`${dTable} min-w-[44rem]`}>
               <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  <th className="px-5 py-3">Business</th>
-                  <th className="px-5 py-3">Owner</th>
-                  <th className="px-5 py-3">Status</th>
+                <tr className={dTheadRow}>
+                  <th className={dTh}>Business</th>
+                  <th className={dTh}>Owner</th>
+                  <th className={dTh}>Status</th>
                   {/*
                     Deferred permit fees. Client's decision, 17 September 2026:
                     a clearance renewed outside January is issued unbilled and
@@ -555,8 +563,8 @@ export function OwnersPage() {
                     and a reader scanning for the largest debt does it by eye
                     rather than by reading each one.
                   */}
-                  <th className="px-5 py-3 text-right">Unbilled fees</th>
-                  <th className="px-5 py-3">Actions</th>
+                  <th className={`${dTh} text-right`}>Unbilled fees</th>
+                  <th className={dTh}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -564,8 +572,8 @@ export function OwnersPage() {
                   const meta = STATUS_META[row.status] ?? { label: row.status_label, tone: 'tint-gray' as ChipTone }
                   return (
                     <tr key={row.id} className="border-t border-line">
-                      <td className="px-5 py-3.5">
-                        <span className="block font-bold text-ink">{row.name}</span>
+                      <td className={dTd}>
+                        <span className="font-bold text-ink">{row.name}</span>
                         {/*
                           * The number under the name, because this is the
                           * screen where an admin suspends somebody's
@@ -604,16 +612,21 @@ export function OwnersPage() {
                           * the register from the moment it is created, and a
                           * blank line under its name would read as a value that
                           * failed to load.
+                          *
+                          * Beside the name rather than under it since the
+                          * compact pass (2026-09): the stacked pair doubled
+                          * every row, and the number reads just as well muted
+                          * on the same line.
                           */}
-                        <span className="tnum mt-0.5 block text-xs text-ink-muted">
+                        <span className="tnum ml-2 text-xs text-ink-muted">
                           {row.tracking_id ?? <span className="italic">No filing yet</span>}
                         </span>
                       </td>
-                      <td className="px-5 py-3.5 text-ink-secondary">{row.owner?.name ?? '—'}</td>
-                      <td className="px-5 py-3.5">
+                      <td className={`${dTd} whitespace-nowrap text-ink-secondary`}>{row.owner?.name ?? '—'}</td>
+                      <td className={`${dTd} whitespace-nowrap`}>
                         <StatusChip tone={meta.tone}>{meta.label}</StatusChip>
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className={`${dTd} text-right`}>
                         {/*
                           Three states, and they are genuinely different:
                           the key absent (an older payload — say nothing rather
@@ -636,29 +649,29 @@ export function OwnersPage() {
                           </button>
                         )}
                       </td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-2">
+                      <td className={dTd}>
+                        <div className="flex items-center gap-1.5">
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'change', row })}
                             // Transparent border, not no border: its outlined
                             // neighbour carries a 1px one, so without this the
                             // filled button stands 2px shorter than its row.
-                            className="rounded-full border border-transparent bg-s-red px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                            className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded-full border border-transparent bg-s-red px-2.5 text-xs font-semibold text-white hover:brightness-110"
                           >
                             Change Status
                           </button>
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'transfer', row })}
-                            className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                            className={dBtn}
                           >
                             Transfer Ownership
                           </button>
                           <button
                             type="button"
                             onClick={() => setModal({ kind: 'history', row })}
-                            className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                            className={dBtn}
                           >
                             View Status History
                           </button>
@@ -670,8 +683,8 @@ export function OwnersPage() {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
-            <p className="text-sm text-ink-muted">
+          <div className={dFoot}>
+            <p className="text-[13px] text-ink-muted">
               Showing {rows.length.toLocaleString()} of {total.toLocaleString()} businesses
               {query && ' matching your search'}
             </p>
@@ -688,7 +701,7 @@ export function OwnersPage() {
                  */
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-disabled={page <= 1 || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ‹
               </button>
@@ -702,7 +715,7 @@ export function OwnersPage() {
                 // nothing — see the note on Previous.
                 onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
                 aria-disabled={page >= lastPage || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ›
               </button>

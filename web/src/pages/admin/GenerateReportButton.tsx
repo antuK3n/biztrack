@@ -49,7 +49,7 @@ export function GenerateReportButton({
         onClick={run}
         disabled={busy}
         aria-busy={busy}
-        className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
+        className="h-8 rounded-lg bg-royal px-4 text-[13px] font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
       >
         {busy ? 'Generating…' : label}
       </button>

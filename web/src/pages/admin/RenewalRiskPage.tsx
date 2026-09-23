@@ -17,6 +17,7 @@ import type {
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
+import { DENSE_PAGE } from './dense'
 
 /*
  * Renewal Risk — the four elements the client's FINAL DRAFT asks for.
@@ -249,7 +250,7 @@ function SectionHeading({
     // its Info when `right` is absent, so every other use of this renders
     // exactly as it did.
     <div className="mb-2 flex flex-wrap items-center">
-      <h2 className="text-lg text-ink">{children}</h2>
+      <h2 className="text-base text-ink">{children}</h2>
       {metric && <Info metric={metric} />}
       {right && <span className="ms-auto ps-3">{right}</span>}
     </div>
@@ -1221,8 +1222,9 @@ export function RenewalRiskPage() {
   }
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex items-center gap-3 pb-1">
             {/*
@@ -1265,7 +1267,7 @@ export function RenewalRiskPage() {
               type="button"
               onClick={generateReport}
               aria-disabled={downloading}
-              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover aria-disabled:opacity-60"
+              className="h-8 rounded-lg bg-royal px-4 text-[13px] font-semibold text-white shadow-card hover:bg-royal-hover aria-disabled:opacity-60"
             >
               {downloading ? 'Generating…' : 'Generate Report'}
             </button>

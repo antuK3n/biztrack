@@ -111,7 +111,7 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
         ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Awaiting Other Permits')
         ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')
         ->and(ApplicationStatus::Approved->label())->toBe('Approved')
-        ->and(ApplicationStatus::Rejected->label())->toBe('Rejected');
+        ->and(ApplicationStatus::Rejected->label())->toBe('Disapproved');
 
     expect(ClearanceStatus::ForInspection->label())->toBe('For Inspection');
 });

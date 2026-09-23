@@ -395,7 +395,11 @@ class BusinessController extends Controller
 
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            // Trade name stays optional: most sole proprietors have none.
+            /*
+             * Required since 23 September 2026 (client), but at SUBMIT — see
+             * ApplicationController::submit. Nullable here because drafts save
+             * half-answered and a renewal's prefilled row may predate the rule.
+             */
             'trade_name' => ['nullable', 'string', 'max:255'],
             'registration_type' => ['required', 'string', Rule::in(self::ORGANIZATION_FORMS)],
             'form_of_organization' => ['nullable', 'string', Rule::in(self::ORGANIZATION_FORMS)],
@@ -511,9 +515,17 @@ class BusinessController extends Controller
                     }
                 },
             ],
-            // Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
-            // the taxpayer has one. Normalised above into hyphenated groups.
-            'tin' => ['required', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
+            /*
+             * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
+             * the taxpayer has one. Normalised above into hyphenated groups.
+             *
+             * Optional here since 23 September 2026: a NEW business may not
+             * have registered with BIR yet (client). A renewal or amendment
+             * still needs one, and that is enforced at submit, where the
+             * filing's type is known — this endpoint saves a business, not a
+             * filing, and cannot tell which it is for.
+             */
+            'tin' => ['nullable', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
             'address' => ['required', 'array'],
             /*
              * Not 'required' any more: `line1` is COMPOSED from item 5's two
@@ -536,6 +548,15 @@ class BusinessController extends Controller
              */
             'address.house_bldg_no' => ['nullable', 'string', 'max:120'],
             'address.street' => ['sometimes', 'required', 'string', 'max:255'],
+            /*
+             * Block, Lot and lot area (client, 23 September 2026). Optional:
+             * a market stall or a unit on a numbered street has no block or
+             * lot. The area is the LOT, not the floor the fee engine assesses
+             * (`fee_profile.floor_area_sqm`) — see the migration.
+             */
+            'address.block' => ['nullable', 'string', 'max:40'],
+            'address.lot' => ['nullable', 'string', 'max:40'],
+            'address.lot_area_sqm' => ['nullable', 'numeric', 'min:0', 'max:10000000'],
             'address.barangay_id' => ['required', 'exists:barangays,id'],
             'address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
@@ -752,6 +773,16 @@ class BusinessController extends Controller
         if (! array_key_exists('owner', $data) || ! is_array($data['owner'])) {
             return;
         }
+        /*
+         * Only a sole proprietorship names an owner (client, 23 September
+         * 2026). A corporation, partnership or cooperative is named by its
+         * President / OIC (items 13-15) and the wizard no longer asks the
+         * owner block of them — so an `owner` sent for one is ignored rather
+         * than written, and an older row is left as it was.
+         */
+        if (($data['registration_type'] ?? $business->registration_type) !== 'sole_proprietorship') {
+            return;
+        }
 
         $owner = $data['owner'];
         $clean = fn (string $key) => filled($owner[$key] ?? null) ? trim((string) $owner[$key]) : null;
@@ -844,6 +875,19 @@ class BusinessController extends Controller
         }
         if (array_key_exists('street', $data['address'])) {
             $address->street = $street !== '' ? $street : null;
+        }
+        // Same only-when-sent rule, so a caller that predates these three
+        // cannot blank them on its next save.
+        foreach (['block', 'lot'] as $part) {
+            if (array_key_exists($part, $data['address'])) {
+                $value = trim((string) ($data['address'][$part] ?? ''));
+                $address->{$part} = $value !== '' ? $value : null;
+            }
+        }
+        if (array_key_exists('lot_area_sqm', $data['address'])) {
+            $address->lot_area_sqm = filled($data['address']['lot_area_sqm'])
+                ? (float) $data['address']['lot_area_sqm']
+                : null;
         }
         $address->telephone = filled($data['address']['telephone'] ?? null)
             ? trim($data['address']['telephone'])

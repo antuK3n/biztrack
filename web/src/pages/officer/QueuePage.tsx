@@ -11,6 +11,7 @@ import {
 import { toApiError } from '../../lib/api'
 import { applications, assignments } from '../../lib/resources'
 import { formatDateTime } from '../../lib/format'
+import { DENSE_PAGE, dBtn, dBtnPrimary, dInput } from '../admin/dense'
 import { TONE_CLASSES, applicationStatusMeta, clearanceStatusMeta } from '../../lib/status'
 import { useAsync } from '../../lib/useAsync'
 import { useAuth } from '../../stores/auth'
@@ -826,7 +827,48 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
   return `${item.trackingId} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
 }
 
-const CARD = 'flex items-stretch overflow-hidden rounded-lg bg-white shadow-card'
+/*
+ * ── One line per filing (client, 2026-09) ───────────────────────────────────
+ *
+ * "When viewing the admin page there's so much space … make it so every detail
+ * fits without scrolling." Each filing was a ~180px card — four stacked lines
+ * and a separate holder strip — so a page of 25 ran to nearly 5,000px. The same
+ * facts now sit in columns on one ~31px row, and a page fits a 1440×900 screen.
+ *
+ * Still a `<ul>` of `<li>`, not a table, because the specs read it as a list
+ * (`getByRole('listitem')` filtered by business name) and because the row is
+ * two interactive regions side by side — the review-sheet link and the
+ * holder's buttons — which a table row would have to nest or split anyway.
+ * The column template is shared with the header strip above the list so the
+ * two line up; the header is `aria-hidden` because every cell's meaning is
+ * already in its own words.
+ *
+ * Below ~1280px wide the columns no longer fit, and the card scrolls sideways
+ * inside itself (`min-w-[72rem]`, 1152px) rather than squeezing the name and permit
+ * columns to nothing. That includes a phone, where the old stacked card read
+ * better; this screen is worked at a desk, and the trade was the client's ask.
+ */
+const ROW_COLS =
+  'grid grid-cols-[minmax(0,1.8fr)_8.5rem_9.5rem_minmax(0,1.8fr)_12rem] items-center gap-x-3 text-[13px] leading-[18px]'
+/** FilterPills at the compact size — see the note where the pill rows render. */
+const PILLS_COMPACT =
+  '[&>div]:gap-1.5 [&_button]:px-3 [&_button]:py-0.5 [&_button]:text-xs [&_button]:leading-4'
+/** Holder column: fixed, so the Assign to Me buttons line up down the page. */
+const HOLDER_COL = 'w-[19rem] shrink-0'
+
+/** "Sep 11, 2026, 12:09 AM": the long form wrapped onto two lines in a column. */
+const shortDateTime = new Intl.DateTimeFormat('en-PH', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+function formatShort(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : shortDateTime.format(d)
+}
 
 function QueueRow({
   item,
@@ -881,8 +923,9 @@ function QueueRow({
 
   const body = (
     <>
-      <div className="min-w-0 flex-1 px-6 py-4">
-        <p className="truncate text-[17px] font-bold text-ink">{item.name}</p>
+      <span className="truncate font-bold text-ink" title={item.name}>
+        {item.name}
+      </span>
         {/*
           * The tracking ID, on the row, in its own right.
           *
@@ -895,35 +938,19 @@ function QueueRow({
           *
           * One slot holding one of two captions, deliberately, rather than a line
           * added beside the existing one. When the business is gone `nameOf` has
-          * already promoted the tracking ID into the heading above; printing it
-          * again here would say the same thing twice AND leave the heading looking
+          * already promoted the tracking ID into the name column; printing it
+          * again here would say the same thing twice AND leave the name looking
           * like an ID with no explanation. The caption that earns the space in
           * that case is the one that explains the heading. Either way the row
           * carries the tracking ID exactly once.
           */}
-        <p className="mt-0.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-          {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
-        </p>
-        <p className="mt-0.5 text-sm italic text-ink-muted">
-          {item.href ? formatDateTime(item.at) : `Filed ${formatDateTime(item.at)}`}
-        </p>
-        {/*
-          * Why this row does not open, said on the row.
-          *
-          * Every other row on this screen is a link to a review sheet, so one
-          * that is not needs to explain itself rather than read as broken. And
-          * the explanation is the answer to the question the tab raises: there
-          * is no review sheet because there is no assignment, and there is no
-          * assignment because nobody has been routed the filing yet. Nothing
-          * here is an officer's to act on — the applicant settles the Tax Order
-          * of Payment and WorkflowService routes it on the way through.
-          */}
-        {!item.href && (
-          <p className="mt-1 text-sm text-ink-muted">
-            Waiting on the applicant’s payment. It reaches an office for review once BPLO has
-            approved the form and the fees are settled.
-          </p>
-        )}
+      <span className="tnum truncate text-xs font-semibold uppercase tracking-wide text-ink-muted">
+        {item.nameIsFallback ? 'Business removed from the register' : item.trackingId}
+      </span>
+      {/* Short form; the full date and time is the cell's tooltip. */}
+      <span className="tnum truncate text-xs text-ink-muted" title={formatDateTime(item.at)}>
+        {item.href ? formatShort(item.at) : `Filed ${formatShort(item.at)}`}
+      </span>
         {/*
           * Which permit this row is, and where it has got to.
           *
@@ -937,8 +964,9 @@ function QueueRow({
           * belongs to the reader's office, so printing it would repeat the same
           * word down the page; the PERMIT is what varies.
           */}
-        {item.clearance && (
-          <p className="mt-1 text-sm text-ink-secondary">
+        <span className="truncate text-xs text-ink-secondary">
+          {item.clearance ? (
+            <>
             {item.clearance.name}
             {/*
               * The status comes off this line when the badge is carrying it —
@@ -959,9 +987,11 @@ function QueueRow({
             {item.clearance.mode === 'upload' && (
               <span className="text-ink-muted"> · copy on file</span>
             )}
-          </p>
-        )}
-      </div>
+            </>
+          ) : (
+            <span className="text-ink-muted">—</span>
+          )}
+        </span>
       {/*
         * Whether the fees are settled — and NOT the filing's stage, which is
         * what it looked like it was saying.
@@ -991,7 +1021,8 @@ function QueueRow({
         unpredictably instead of the later one winning.
       */}
       <span
-        className={`flex w-36 shrink-0 items-center justify-center self-stretch border-l px-3 text-center text-sm font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
+        className={`truncate rounded-full border px-2 py-0.5 text-center text-xs font-bold leading-4 ${TONE_CLASSES[badge.tone]}`}
+        title={badge.label}
       >
         {badge.label}
       </span>
@@ -999,16 +1030,19 @@ function QueueRow({
   )
 
   return (
-    <li>
+    <li className="flex items-center border-t border-line first:border-t-0">
       {item.href ? (
-        <Link to={item.href} className={`${CARD} transition-shadow hover:shadow-raised`}>
+        <Link
+          to={item.href}
+          className={`${ROW_COLS} min-h-7 min-w-0 flex-1 px-3 py-0.5 hover:bg-royal-tint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal`}
+        >
           {body}
         </Link>
       ) : (
-        <div className={CARD}>{body}</div>
+        <div className={`${ROW_COLS} min-h-7 min-w-0 flex-1 px-3 py-0.5`}>{body}</div>
       )}
       {/*
-        * Who holds the case, under the row rather than inside it.
+        * Who holds the case, beside the link rather than inside it.
         *
         * Outside the Link on purpose: Claim is a button and the row is an
         * anchor, and a button inside an anchor is both invalid markup and a
@@ -1018,9 +1052,26 @@ function QueueRow({
         * nothing here — there is no office holding it yet, and "Unassigned"
         * would read as work waiting to be taken.
         */}
+      {item.assignmentId === null && !item.href && (
+        /*
+         * Why this row does not open, said on the row.
+         *
+         * Every other row on this screen is a link to a review sheet, so one
+         * that is not needs to explain itself rather than read as broken. And
+         * the explanation is the answer to the question the tab raises: there
+         * is no review sheet because there is no assignment, and there is no
+         * assignment because nobody has been routed the filing yet. Nothing
+         * here is an officer's to act on — the applicant settles the Tax Order
+         * of Payment and WorkflowService routes it on the way through.
+         */
+        <p className={`${HOLDER_COL} border-l border-line px-3 py-0.5 text-xs leading-4 text-ink-muted`}>
+          Waiting on the applicant’s payment. It reaches an office for review once BPLO has
+          approved the form and the fees are settled.
+        </p>
+      )}
       {item.assignmentId !== null && (
-        <div className="-mt-px flex flex-wrap items-center justify-between gap-3 rounded-b-xl border-t border-line bg-white px-6 py-2.5">
-          <p className="text-sm text-ink-secondary">
+        <div className={`${HOLDER_COL} flex min-h-7 items-center justify-between gap-2 border-l border-line px-3 py-0.5`}>
+          <p className="min-w-0 truncate text-xs text-ink-secondary">
             {item.officer ? (
               <>
                 <span className="text-ink-muted">Officer in charge: </span>
@@ -1036,7 +1087,7 @@ function QueueRow({
               type="button"
               onClick={() => onClaim(item)}
               aria-disabled={claiming || undefined}
-              className="rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className={`${dBtnPrimary} shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
             >
               {claiming ? 'Assigning…' : 'Assign to Me'}
             </button>
@@ -1059,7 +1110,7 @@ function QueueRow({
               type="button"
               onClick={() => onRelease(item)}
               aria-disabled={claiming || undefined}
-              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+              className={`${dBtn} shrink-0 aria-disabled:cursor-not-allowed aria-disabled:opacity-60`}
             >
               {claiming ? 'Releasing…' : 'Unassign from me'}
             </button>
@@ -1641,10 +1692,15 @@ export function QueuePage() {
   const nothingToShow = visible.length === 0
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
-          <span className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            {/* Filing type first — see "The pill rows" below for why it is up here. */}
+            <div className={PILLS_COMPACT} role="group" aria-label="Filter by filing type">
+              <FilterPills options={typePills} value={filingType} onChange={selectFilingType} />
+            </div>
             {/*
               * A placeholder is not an accessible name — it vanishes on the
               * first keystroke — so the field carries a real label, hidden
@@ -1659,7 +1715,7 @@ export function QueuePage() {
               value={search}
               onChange={(e) => changeSearch(e.target.value)}
               placeholder="Search tracking ID or business…"
-              className="w-64 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-64`}
             />
             <SortFilter
               sort={{ value: sort, options: SORTS, onChange: (v) => changeSort(v as SortKey) }}
@@ -1715,49 +1771,69 @@ export function QueuePage() {
         * who meets them one button at a time has nothing to tell them apart
         * by at all. The label is what says which question this row answers.
         */}
-      <div className="mb-3" role="group" aria-label="Filter by filing type">
-        <FilterPills options={typePills} value={filingType} onChange={selectFilingType} />
-      </div>
-
-      <div className="mb-5">
-        <FilterPills options={tabs} value={tab} onChange={selectTab} />
-      </div>
-
-      {tab !== 'payment' && (
-        <div className="mb-5">
-          <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
-          {holder !== '' && (
-            <p className="mt-2 text-xs text-ink-muted">
-              {tabLabel(tab, !canReadEveryOffice)} — {HOLDER_HINT[holder]}.
-            </p>
-          )}
+      {/*
+        * ── The pill rows (compact, 2026-09) ─────────────────────────────────
+        *
+        * They were three rows of full-size pills, ~150px of height before the
+        * first filing. Type now sits in the title row, ahead of the search, and
+        * stage and holder share the one line below it with the result count.
+        * The order is still the one the client set — type first (item 97),
+        * then stage, then holder — in reading order as well as on screen, so
+        * a screen reader meets them in the sequence it always did.
+        *
+        * `PILLS_COMPACT` shrinks FilterPills from the outside rather than
+        * through a prop: the component is shared with the applicant side,
+        * which stays roomy. The descendant selector outranks the pill's own
+        * single-class padding. Border-2 plus py-0.5 plus a 16px line is a 24px
+        * target — the WCAG 2.5.8 floor, not below it.
+        */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <div className={PILLS_COMPACT}>
+          <FilterPills options={tabs} value={tab} onChange={selectTab} />
         </div>
+
+        {tab !== 'payment' && (
+          <>
+            <span aria-hidden="true" className="h-5 w-px bg-ink/25" />
+            <div className={PILLS_COMPACT}>
+              <FilterPills options={HOLDER_PILLS} value={holder} onChange={selectHolder} />
+            </div>
+          </>
+        )}
+
+        {/*
+          * Mounted unconditionally, not tucked inside the list branch: an
+          * aria-live region only announces changes to text it already owns, so
+          * one that is unmounted whenever the list is empty stays silent on the
+          * single result that matters most — the search that found nothing.
+          * At the end of the pill line, right-aligned, because it is the answer
+          * to the filters beside it and a line of its own cost a row of filings.
+          */}
+        <p role="status" aria-live="polite" className="ml-auto text-xs text-ink-muted">
+          {summary}
+        </p>
+      </div>
+      {tab !== 'payment' && holder !== '' && (
+        <p className="mb-1 text-xs text-ink-muted">
+          {tabLabel(tab, !canReadEveryOffice)} — {HOLDER_HINT[holder]}.
+        </p>
       )}
 
       {claimMessage && (
         <p
           role="status"
-          className="mb-4 rounded-lg bg-s-green-tint px-3.5 py-2.5 text-sm font-medium text-s-green"
+          className="mb-2 rounded-lg bg-s-green-tint px-3 py-1.5 text-[13px] font-medium text-s-green"
         >
           {claimMessage}
         </p>
       )}
 
       {claimError && (
-        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-3.5 py-2.5 text-sm font-medium text-s-red">
+        <p role="alert" className="mb-2 rounded-lg bg-s-red-tint px-3 py-1.5 text-[13px] font-medium text-s-red">
           {claimError}
         </p>
       )}
 
-      {/*
-        * Mounted unconditionally, not tucked inside the list branch: an
-        * aria-live region only announces changes to text it already owns, so
-        * one that is unmounted whenever the list is empty stays silent on the
-        * single result that matters most — the search that found nothing.
-        */}
-      <p role="status" aria-live="polite" className={summary ? 'mb-3 text-sm text-ink-muted' : ''}>
-        {summary}
-      </p>
 
       {firstLoad ? (
         <SkeletonList rows={5} />
@@ -1877,7 +1953,20 @@ export function QueuePage() {
         </>
       ) : (
         <>
-          <ul className="space-y-4">
+          <div className="overflow-x-auto rounded-xl bg-white shadow-card">
+          <div className="min-w-[72rem]">
+          {/* Column captions for sighted readers; see ROW_COLS for why hidden. */}
+          <div aria-hidden="true" className="flex items-center bg-canvas/50 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+            <div className={`${ROW_COLS} min-w-0 flex-1 px-3 py-1.5`}>
+              <span>Business</span>
+              <span>Tracking ID</span>
+              <span>Date</span>
+              <span>Permit</span>
+              <span>Status</span>
+            </div>
+            <span className={`${HOLDER_COL} px-3 py-1.5`}>Officer in charge</span>
+          </div>
+          <ul className="border-t border-line">
             {visible.map((item) => (
               <QueueRow
                 key={item.key}
@@ -1889,12 +1978,14 @@ export function QueuePage() {
               />
             ))}
           </ul>
+          </div>
+          </div>
           {hasMore && (
             <button
               type="button"
               onClick={() => setPage((p) => p + 1)}
               disabled={loading}
-              className="mt-5 w-full rounded-xl border border-line bg-white py-3 text-sm font-semibold text-royal transition-colors hover:bg-canvas disabled:cursor-wait disabled:text-ink-muted"
+              className="mt-2 w-full rounded-xl border border-line bg-white py-1.5 text-[13px] font-semibold text-royal transition-colors hover:bg-canvas disabled:cursor-wait disabled:text-ink-muted"
             >
               {loading ? 'Loading…' : 'Load more'}
             </button>

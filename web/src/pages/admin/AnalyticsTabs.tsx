@@ -119,14 +119,16 @@ export function AnalyticsTabs() {
   if (tabs.length < 2) return null
 
   return (
-    <nav aria-label="Analytics sections" className="mb-5 flex flex-wrap gap-2">
+    // Compact (pages/admin/dense.ts): 28px pills, 12px below. These tabs head
+    // work screens only, so they take the staff side's tighter scale.
+    <nav aria-label="Analytics sections" className="mb-3 flex flex-wrap gap-1.5">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}
           to={tab.to}
           end={tab.end}
           className={({ isActive }) =>
-            `rounded-full border px-5 py-1.5 text-sm font-semibold transition-colors ${
+            `rounded-full border px-3.5 py-1 text-[13px] font-semibold leading-5 transition-colors ${
               isActive
                 ? 'border-royal bg-royal text-white'
                 : 'border-line bg-white text-ink-secondary hover:border-royal hover:text-royal'

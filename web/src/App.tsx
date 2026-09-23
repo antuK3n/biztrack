@@ -26,7 +26,6 @@ import { ApplicationDetailPage } from './pages/applicant/ApplicationDetailPage'
 import { ApplyWizard } from './pages/applicant/ApplyWizard'
 import { ClearanceStagePage } from './pages/applicant/ClearanceStagePage'
 import { DraftsPage } from './pages/applicant/DraftsPage'
-import { PaymentsPage } from './pages/applicant/PaymentsPage'
 import { PayPage } from './pages/applicant/PayPage'
 import { PermitsPage } from './pages/applicant/PermitsPage'
 import { PermitDetailPage } from './pages/applicant/PermitDetailPage'
@@ -339,16 +338,22 @@ export default function App() {
           */}
           <Route path="/applications/:id/clearances" element={<ClearanceStagePage />} />
           <Route path="/drafts" element={<DraftsPage />} />
-          <Route path="/payments" element={<PaymentsPage />} />
+          {/* Payment History left the rail for the status screens (client
+              feedback): each filing's page lists its own payments, and
+              Business Application Status ends with all of them. The address
+              stays so a link already sent out lands on the receipts. */}
+          <Route path="/payments" element={<Navigate to="/applications#payments" replace />} />
           <Route path="/permits" element={<PermitsPage />} />
           <Route path="/permits/:id" element={<PermitDetailPage />} />
           <Route path="/messages" element={<MessagesPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings" element={<SettingsPage />} />
-          {/* Owners reach this from the "Other Requirements" home card, so it
-              is a citizen route as well as a staff one. */}
-          <Route path="/requests" element={<RequestsPage />} />
+          {/* An owner's Other Requirements live in Messages now, as its
+              Requirements tab (client feedback: "merge it into Messages"). The
+              address stays for notifications and links already sent, and
+              lands on that tab. Officers keep /staff/requests below. */}
+          <Route path="/requests" element={<Navigate to="/messages?tab=requirements" replace />} />
         </Route>
 
         {/*
@@ -360,7 +365,7 @@ export default function App() {
           the note in lib/api.ts.
 
           The screens both sides share — Home, Messages, Notifications,
-          Profile, Settings, Other Requirements — are mounted in both trees
+          Profile, Settings — are mounted in both trees
           rather than being one shared branch. They render per-user anyway, and
           a single copy would have had to sit outside the prefix, which is the
           one thing the portal split cannot allow.

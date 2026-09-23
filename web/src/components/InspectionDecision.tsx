@@ -202,7 +202,7 @@ export function InspectionRemarksModal({
 
   return (
     <ProtoModal
-      title="REMARKS FOR REJECTION"
+      title="REMARKS FOR DISAPPROVAL"
       tone="red"
       wide
       cancelLabel="Cancel"
@@ -413,7 +413,7 @@ export function InspectionDecisionCard({
    * so it is not being reintroduced one section further down.
    */
   const approveLabel = `Approve the ${office} inspection`
-  const rejectLabel = `Reject the ${office} inspection with remarks`
+  const rejectLabel = `Disapprove the ${office} inspection with remarks`
   const rescheduleLabel = `Reschedule the ${office} inspection`
 
   return (
@@ -519,7 +519,7 @@ export function InspectionDecisionCard({
              * replacement, not an apology for it.
              */
             <p className="max-w-md text-sm text-ink-secondary">
-              {office} records this result. Your office cannot approve or reject it.
+              {office} records this result. Your office cannot approve or disapprove it.
             </p>
           ) : reinspect ? (
             /*

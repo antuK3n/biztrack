@@ -172,26 +172,32 @@ test('the composer names who the request is going to, readably', async ({ page }
 })
 
 /*
- * Issue 88 — "the Other Requirements icon on Home should carry a count, like
+ * An owner's requirements live in Messages, and so does their count.
+ *
+ * Issue 88 put a count on the home screen's Other Requirements tile — "like
  * notifications, which does not reduce until the requirement is submitted".
+ * The client then asked for the tile gone: "Other Requirements — remove it
+ * from the homepage; merge it into Messages." So the rules these tests hold
+ * the screen to are now:
  *
- * Two claims, and they fail in different ways.
+ *   - the home screen draws no Other Requirements tile, and no link to one;
+ *   - the Messages rail entry carries the count, and its accessible name says
+ *     what the number is — a bare "2" after "Messages" reads as two unread
+ *     conversations;
+ *   - Messages has a Requirements tab listing the requests with their letter
+ *     and Respond flow, and the old /requests address lands on it.
  *
- * The count itself is `awaits_applicant`, the API's own answer to whose move it
- * is. Pending and Needs Resubmission are one situation to the owner — you owe
- * us a document — so both count, and neither stops counting until a response is
- * actually filed. A count derived in the browser from `status` would have to
- * re-guess that, and the two screens would eventually disagree.
- *
- * The badge is also the ONLY place the number appears before the owner scrolls,
- * so it has to be announced. A bare "3" after a link called "Other
- * Requirements" is read as a position in a list.
+ * The count is still `awaits_applicant`, the API's own answer to whose move it
+ * is: Pending and Needs Resubmission count, a submission waiting on the office
+ * does not. A count derived in the browser from `status` would have to
+ * re-guess that.
  *
  * Stubbed, not seeded: the owner's real register has whatever it has, and a
- * test that asserted "3" against it would pass today and fail the first time an
- * office raises a fourth request.
+ * test that asserted "2" against it would pass today and fail the first time
+ * an office raises a third request. The unread-message count is stubbed to
+ * zero so the badge's name is about requirements alone.
  */
-test.describe('the Other Requirements tile carries a count', () => {
+test.describe('an owner answers requirements from Messages', () => {
   test.use({ storageState: sessionFor('owner') })
 
   const ownerRequirement = (id: number, subject: string, status: string, label: string) => ({
@@ -247,62 +253,66 @@ test.describe('the Other Requirements tile carries a count', () => {
     return calls
   }
 
-  test('the badge counts what is owed, and says so out loud', async ({ page }) => {
-    const calls = await serve(page, [
-      ownerRequirement(70001, 'Health certificate', 'pending', 'Pending'),
-      ownerRequirement(70002, 'Water potability test', 'needs_resubmission', 'Needs Resubmission'),
-      // Already answered — it is with the office, so it must NOT be counted.
-      ownerRequirement(70003, 'Fire safety plan', 'submitted', 'For Review'),
-      ownerRequirement(70004, 'Barangay clearance', 'fulfilled', 'Fulfilled'),
-    ])
+  /** Pin the unread-message half of the Messages badge to zero. */
+  async function noUnreadMessages(page: Page) {
+    await page.route('**/api/v1/unread-summary*', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { messages: 0, notifications: 0 } }),
+      }),
+    )
+  }
+
+  const OWED_AND_NOT = () => [
+    ownerRequirement(70001, 'Health certificate', 'pending', 'Pending'),
+    ownerRequirement(70002, 'Water potability test', 'needs_resubmission', 'Needs Resubmission'),
+    // Already answered — it is with the office, so it must NOT be counted.
+    ownerRequirement(70003, 'Fire safety plan', 'submitted', 'For Review'),
+    ownerRequirement(70004, 'Barangay clearance', 'fulfilled', 'Fulfilled'),
+  ]
+
+  test('the home screen has no Other Requirements tile', async ({ page }) => {
+    await serve(page, OWED_AND_NOT())
+    await noUnreadMessages(page)
 
     await page.goto('/')
-
-    /*
-     * By accessible name, because the name IS the feature. Asserting on the
-     * "2" alone would pass for a badge that announces nothing.
-     */
-    const tile = page.getByRole('link', { name: 'Other Requirements, 2 documents waiting on you' })
-    await expect(tile).toBeVisible({ timeout: 15_000 })
-    await expect(tile).toContainText('2')
-
-    /*
-     * Needs Resubmission still counts. If it were ever dropped from
-     * `awaits_applicant` this reads 1 and the owner is told they owe nothing
-     * for a document that was handed back to them.
-     */
-    await expect(page.getByText('2 documents are waiting on you.')).toBeVisible()
-
-    /*
-     * One fetch for two readers. The tile and the panel below it show the same
-     * number; fetching separately would put two answers on one screen that can
-     * differ by whatever happened between the calls.
-     *
-     * Counted as "at most two", not "exactly one", because `<StrictMode>` in
-     * main.tsx double-invokes every effect in development and the e2e stack
-     * serves the dev build — so ONE `useAsync` is one call in production and
-     * two here. Two readers each fetching for themselves would be four either
-     * way, which is what this catches.
-     *
-     * It was never four: the panel's fetch was LIFTED to feed the tile, not
-     * duplicated. This guards the next edit, where adding a count somewhere
-     * else on this page by giving it its own `requests.list` is the obvious
-     * and wrong move.
-     */
-    expect(
-      calls.length,
-      `the page asked for /requests ${calls.length} times: ${calls.join(' | ')}`,
-    ).toBeLessThanOrEqual(2)
+    // The three tiles that remain, so the absence below is not a page that
+    // failed to render.
+    await expect(page.getByRole('link', { name: 'New Business Permit', exact: true })).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByRole('link', { name: /Other Requirements/ })).toHaveCount(0)
+    await expect(page.locator('a[href="/requests"]')).toHaveCount(0)
   })
 
-  test('one waiting document is counted in words, not as "1 documents"', async ({ page }) => {
-    await serve(page, [ownerRequirement(70005, 'Health certificate', 'pending', 'Pending')])
+  test('the Messages rail entry counts what is owed, and says so out loud', async ({ page }) => {
+    await serve(page, OWED_AND_NOT())
+    await noUnreadMessages(page)
 
     await page.goto('/')
 
-    const tile = page.getByRole('link', { name: 'Other Requirements, one document waiting on you' })
-    await expect(tile).toBeVisible({ timeout: 15_000 })
-    await expect(tile).toContainText('1')
+    /*
+     * By accessible name, because the name IS the feature. Needs Resubmission
+     * still counts: if it were ever dropped from `awaits_applicant` this reads
+     * 1 and the owner is told they owe one document fewer than they do.
+     */
+    const rail = page.getByRole('navigation', { name: 'Main' })
+    const messages = rail.getByRole('link', { name: 'Messages, 2 requirements waiting on you' })
+    await expect(messages).toBeVisible({ timeout: 15_000 })
+    await expect(messages).toContainText('2')
+  })
+
+  test('one waiting requirement is counted as one', async ({ page }) => {
+    await serve(page, [ownerRequirement(70005, 'Health certificate', 'pending', 'Pending')])
+    await noUnreadMessages(page)
+
+    await page.goto('/')
+
+    const messages = page
+      .getByRole('navigation', { name: 'Main' })
+      .getByRole('link', { name: 'Messages, 1 requirement waiting on you' })
+    await expect(messages).toBeVisible({ timeout: 15_000 })
   })
 
   test('nothing owed draws no badge at all', async ({ page }) => {
@@ -310,16 +320,67 @@ test.describe('the Other Requirements tile carries a count', () => {
       ownerRequirement(70006, 'Fire safety plan', 'submitted', 'For Review'),
       ownerRequirement(70007, 'Barangay clearance', 'fulfilled', 'Fulfilled'),
     ])
+    await noUnreadMessages(page)
 
     await page.goto('/')
 
     /*
-     * The plain name, and no digit anywhere on the tile. A "0" badge is a thing
-     * to read and dismiss on every visit, which is how a badge stops meaning
+     * The plain name, and no digit on the entry. A "0" badge is a thing to
+     * read and dismiss on every visit, which is how a badge stops meaning
      * anything.
      */
-    const tile = page.getByRole('link', { name: 'Other Requirements', exact: true })
-    await expect(tile).toBeVisible({ timeout: 15_000 })
-    await expect(tile).not.toContainText(/\d/)
+    const messages = page
+      .getByRole('navigation', { name: 'Main' })
+      .getByRole('link', { name: 'Messages', exact: true })
+    await expect(messages).toBeVisible({ timeout: 15_000 })
+    await expect(messages).not.toContainText(/\d/)
+  })
+
+  test('the old /requests address opens the Requirements tab, and a request can be answered there', async ({
+    page,
+  }) => {
+    await serve(page, OWED_AND_NOT())
+    await noUnreadMessages(page)
+
+    await page.goto('/requests')
+    await expect(page).toHaveURL(/\/messages\?tab=requirements$/)
+    await expect(page.getByRole('heading', { name: 'Messages', level: 1 })).toBeVisible({
+      timeout: 15_000,
+    })
+
+    // The tab says where the reader is, and carries the same count as the rail.
+    const tabs = page.getByRole('navigation', { name: 'Messages sections' })
+    await expect(tabs.getByRole('link', { name: 'Requirements 2 waiting on you' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+    await expect(tabs.getByRole('link', { name: 'Conversations' })).not.toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+
+    // Every request is listed, owed or not — the tab is the whole register.
+    for (const subject of [
+      'Health certificate',
+      'Water potability test',
+      'Fire safety plan',
+      'Barangay clearance',
+    ]) {
+      await expect(page.getByRole('cell', { name: new RegExp(subject) })).toBeVisible()
+    }
+
+    // And the existing letter-and-respond flow is behind each row.
+    await page
+      .getByRole('row', { name: /Health certificate/ })
+      .getByRole('button', { name: 'View' })
+      .click()
+    await expect(page.getByRole('heading', { name: 'Health certificate', level: 1 })).toBeVisible()
+    await page.getByRole('button', { name: 'Respond' }).click()
+    await expect(page.getByRole('textbox', { name: 'Response' })).toBeVisible()
+    await expect(page.getByLabel('Attach a document')).toBeAttached()
+
+    // Back returns to the list inside Messages, not to a page that is gone.
+    await page.getByRole('button', { name: 'All requirements' }).click()
+    await expect(page.getByRole('navigation', { name: 'Messages sections' })).toBeVisible()
   })
 })

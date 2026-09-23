@@ -37,6 +37,7 @@ function uploadedRequirement(): array
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Document Test Store',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-55123',
         'tin' => '123-456-789-000',
@@ -95,6 +96,7 @@ it('returns the uploaded bytes, typed and dispositioned as a file', function () 
 
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Byte For Byte Store',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-96001',
         'tin' => '123-456-789-000',

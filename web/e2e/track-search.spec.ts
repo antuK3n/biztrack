@@ -53,7 +53,7 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'rejected',
-    status_label: 'Rejected',
+    status_label: 'Disapproved',
     business: { id: 3, name: 'Cielo Bakeshop' },
     submitted_at: '2026-05-01T00:00:00.000000Z',
     deadline_at: null,
@@ -83,10 +83,15 @@ const REJECTION_REASON =
  *
  * Scoped to the row shape rather than to `[aria-expanded]` alone: the header
  * menu and the Sort/Filter buttons carry that attribute too, and a bare
- * attribute selector quietly counted them as applications.
+ * attribute selector quietly counted them as applications. And scoped to the
+ * applications list by name, because the Payments section at the foot of the
+ * screen draws its rows in the same shape and was being counted as filings.
  */
 async function trackRowNames(page: import('@playwright/test').Page): Promise<string[]> {
-  return page.locator('li > div > button[aria-expanded]').allInnerTexts()
+  return page
+    .getByRole('list', { name: 'Your applications' })
+    .locator(':scope > li > div > button[aria-expanded]')
+    .allInnerTexts()
 }
 
 test.describe('applicant Track page', () => {
@@ -129,7 +134,7 @@ test.describe('applicant Track page', () => {
     })
 
     await page.goto('/applications')
-    await expect(page.getByRole('heading', { name: 'Permit Tracking', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Business Application Status', level: 1 })).toBeVisible()
   })
 
   test('searches by tracking ID, business name and the applicant’s own title', async ({ page }) => {
@@ -172,6 +177,9 @@ test.describe('applicant Track page', () => {
   })
 
   test('Sort reorders the list and Filter narrows it by status', async ({ page }) => {
+    // The applications' own controls: the Payments section below has a Sort
+    // and Filter too, in a group of its own.
+    const controls = page.getByRole('group', { name: 'Search, sort and filter applications' })
     // Default is newest first: Dagupan (Jul 20) … Cielo (May 1).
     expect(await trackRowNames(page)).toEqual([
       'Dagupan Auto Supply',
@@ -180,7 +188,7 @@ test.describe('applicant Track page', () => {
       'Cielo Bakeshop',
     ])
 
-    await page.getByRole('button', { name: /^Sort/ }).click()
+    await controls.getByRole('button', { name: /^Sort/ }).click()
     await page.getByRole('option', { name: 'Oldest first' }).click()
     expect(await trackRowNames(page)).toEqual([
       'Cielo Bakeshop',
@@ -191,7 +199,7 @@ test.describe('applicant Track page', () => {
 
     // Deadline order is not date order: Cielo has none and must sort last
     // rather than heading the list as an epoch-zero timestamp.
-    await page.getByRole('button', { name: /^Sort/ }).click()
+    await controls.getByRole('button', { name: /^Sort/ }).click()
     await page.getByRole('option', { name: 'Deadline (soonest)' }).click()
     expect(await trackRowNames(page)).toEqual([
       'Bayanihan Hardware',
@@ -200,8 +208,8 @@ test.describe('applicant Track page', () => {
       'Cielo Bakeshop',
     ])
 
-    await page.getByRole('button', { name: /^Filter/ }).click()
-    await page.getByRole('option', { name: 'Rejected' }).click()
+    await controls.getByRole('button', { name: /^Filter/ }).click()
+    await page.getByRole('option', { name: 'Disapproved' }).click()
     expect(await trackRowNames(page)).toEqual(['Cielo Bakeshop'])
   })
 

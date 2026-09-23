@@ -379,9 +379,22 @@ export function StatusChip({
 }
 
 /** Page heading with the thin underline rule (p11/p19/p21). */
-export function PageTitle({ children, right }: { children: ReactNode; right?: ReactNode }) {
+export function PageTitle({
+  children,
+  right,
+  compact = false,
+}: {
+  children: ReactNode
+  right?: ReactNode
+  /**
+   * The staff and admin work screens' tighter heading (pages/admin/dense.ts):
+   * 18px title, 12px below the rule instead of 24. Opt-in, because the
+   * applicant side is deliberately roomy and shares this component.
+   */
+  compact?: boolean
+}) {
   return (
-    <div className="mb-6 border-b-2 border-ink/50 pb-2">
+    <div className={compact ? 'mb-3 border-b-2 border-ink/50 pb-1.5' : 'mb-6 border-b-2 border-ink/50 pb-2'}>
       {/*
        * Wraps rather than overflows. The `right` slot carries a search field and
        * the Sort/Filter pair — together ~410px, more than a phone is wide — and
@@ -396,7 +409,7 @@ export function PageTitle({ children, right }: { children: ReactNode; right?: Re
        * The rule itself stays full width — only its contents inset.
        */}
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pr-12 lg:pr-0">
-        <h1 className="text-2xl font-bold text-ink">{children}</h1>
+        <h1 className={compact ? 'text-lg font-bold leading-8 text-ink' : 'text-2xl font-bold text-ink'}>{children}</h1>
         {right}
       </div>
     </div>

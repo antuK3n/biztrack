@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ApplicationStatus;
+use App\Jobs\SendDisapprovalNotice;
 use App\Models\Application;
 use App\Models\AppNotification;
 use App\Models\Business;
@@ -10,8 +11,10 @@ use App\Models\OfficerRequest;
 use App\Models\Permit;
 use App\Models\User;
 use App\Services\Sms\SmsChannel;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 /**
  * In-app notification fan-out (master plan §4 — polling, no websockets). Status
@@ -58,7 +61,7 @@ class NotificationService
         if (! $app->applicant) {
             return;
         }
-        // The two end states get their own message (approved/rejected below),
+        // The two end states get their own message (approved/disapproved below),
         // so the applicant is not told the same thing twice.
         if ($to === ApplicationStatus::Approved || $to === ApplicationStatus::Rejected) {
             return;
@@ -91,7 +94,19 @@ class NotificationService
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is approved. Your permit is ready under Permits.");
     }
 
-    /** End state: BPLO or the super admin ended the application. */
+    /**
+     * End state: BPLO or the super admin disapproved the application.
+     *
+     * "Disapproved", not "rejected", on the client's instruction of 23 September
+     * 2026 — Approve / Disapprove is the LGU's own pair. Only the words moved:
+     * the status is still `rejected` in the database, the enum and the route.
+     *
+     * The in-app notice is written here and now; e-mail and SMS go through the
+     * queue (SendDisapprovalNotice), because they are the two that leave the
+     * building and either can fail. Each dispatch is guarded on its own so a
+     * queue that cannot even accept the job — a missing table, a dead Redis —
+     * is logged and does not turn the officer's recorded decision into a 500.
+     */
     public function applicationRejected(Application $app, ?string $reason = null): void
     {
         $app->loadMissing('applicant');
@@ -101,12 +116,25 @@ class NotificationService
         $this->push(
             $app->applicant,
             'decision',
-            'Application rejected',
-            "{$app->tracking_id} was rejected.".($reason ? " Reason: {$reason}" : '')
+            'Application disapproved',
+            "{$app->tracking_id} was disapproved.".($reason ? " Reason: {$reason}" : '')
                 .' You can message the office about it, or file a new application once the issue is settled.',
             "/applications/{$app->id}",
         );
-        $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} was rejected. Open BizTrack for the reason.");
+
+        foreach (['mail', 'sms'] as $channel) {
+            try {
+                // Bus::dispatch, not the static ::dispatch(): that one queues
+                // from a destructor, which is a poor place to be catching in.
+                Bus::dispatch(new SendDisapprovalNotice($app, $reason, $channel));
+            } catch (Throwable $e) {
+                Log::warning('Disapproval notice was not queued', [
+                    'application_id' => $app->id,
+                    'channel' => $channel,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
     }
 
     public function permitsIssued(Application $app): void

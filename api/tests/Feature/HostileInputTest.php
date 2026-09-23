@@ -24,6 +24,7 @@ it('rejects an array in a scalar field on the business form instead of crashing'
     test()->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', [
             'name' => ['an', 'array'],
+            'trade_name' => 'Test Trade Name',
             'registration_type' => ['an', 'array'],
             'registration_number' => ['an', 'array'],
             'tin' => ['an', 'array'],
@@ -51,6 +52,7 @@ it('caps the opaque fee profile the way it caps the opaque office form', functio
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Payload Bakery',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-77001',
         'tin' => '123-456-789-000',

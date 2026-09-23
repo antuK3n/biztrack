@@ -473,6 +473,32 @@ class ApplicationController extends Controller
         }
 
         /*
+         * Trade Name, and the TIN on anything but a new filing (client,
+         * 23 September 2026).
+         *
+         * Checked at submit rather than on the business write. Drafts autosave
+         * half-answered, and a renewal's business arrives prefilled from a row
+         * that may hold neither — requiring them on every business save would
+         * refuse the Location step's autosave before the applicant ever reaches
+         * the box that asks. The wizard gates the same two on its own step.
+         *
+         * A new business may not have its TIN yet (BIR registration often
+         * follows the LGU permit); a renewing or amending one has been trading
+         * and has one.
+         */
+        $business = $application->business;
+        $missing = [];
+        if (! filled($business?->trade_name)) {
+            $missing['trade_name'] = ['Enter the Trade Name / Franchise on Business Information.'];
+        }
+        if ($application->application_type !== ApplicationType::New && ! filled($business?->tin)) {
+            $missing['tin'] = ['Enter the business’s TIN on Business Information — it is required when renewing or amending.'];
+        }
+        if ($missing !== []) {
+            throw ValidationException::withMessages($missing);
+        }
+
+        /*
          * ── An amendment must say what the detail changes TO ─────────────────
          *
          * Ordered AFTER the prior-permit gate deliberately. "Which permit are
@@ -666,7 +692,7 @@ class ApplicationController extends Controller
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:1000'],
         ], [
-            'reason.required' => 'A rejection reason is required.',
+            'reason.required' => 'A reason for disapproval is required.',
         ]);
 
         if ($application->status->isTerminal()) {

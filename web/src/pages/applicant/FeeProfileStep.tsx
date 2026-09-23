@@ -302,6 +302,21 @@ function toInt(raw: string): number | undefined {
   return n === undefined ? undefined : Math.round(n)
 }
 
+/**
+ * B2's total, worked out from its two halves (client, 23 September 2026:
+ * male and female asked first, the total computed).
+ *
+ * CENRO's paper prints "TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE ___" — the
+ * halves ARE the total — so asking for all three only ever produced a third
+ * answer that could disagree. Falls back to the stored total while either half
+ * is blank, so a draft saved before the split was required still reads back.
+ */
+function employeeTotal(draft: FeeProfileDraft): number | undefined {
+  const male = toInt(draft.male_employees)
+  const female = toInt(draft.female_employees)
+  return male !== undefined && female !== undefined ? male + female : toInt(draft.employees)
+}
+
 /* ── Money & count inputs ───────────────────────────────────────────────── */
 
 /*
@@ -538,18 +553,11 @@ export function feeProfileIssues(
      * Nothing validates `draft.storeys` any more, and nothing writes it. It
      * stays on the type so a filing saved while it was asked still hydrates.
      */
-    push(
-      numericIssue({
-        key: 'employees',
-        label: '2. Total Number of Employees',
-        value: draft.employees,
-        required: true,
-        blankMessage: 'Enter how many people you employ. Enter 0 if you work alone.',
-        integer: true,
-        max: MAX_COUNT,
-        maxMessage: 'Enter a headcount below 100,000.',
-      }),
-    )
+    /*
+     * No issue for the total itself: it is computed from the two halves below
+     * (see `employeeTotal`) and cannot be typed, so an error on it would name
+     * a box the applicant has no way to fix. The halves carry the requirement.
+     */
     /*
      * ── B2 and B3 became REQUIRED on 9 September 2026 ──────────────────────
      *
@@ -601,24 +609,14 @@ export function feeProfileIssues(
         maxMessage: 'Enter a headcount below 100,000.',
       }),
     )
-    const total = toInt(draft.employees)
+    const total = employeeTotal(draft)
     const inLgu = toInt(draft.employees_in_lgu)
     /*
-     * The split has to reconcile with the headcount typed three fields above
-     * it. Checked only when all three parse, so a half-filled step reports
-     * "this is missing" rather than "these do not add up" — being told your
-     * arithmetic is wrong before you have finished typing it is worse than
-     * being told nothing.
+     * "Male and female must add up to the total" was checked here. It cannot
+     * fail any more — the total IS their sum — so it went with the typed total.
+     * The API keeps its own copy of the rule (`$splitFitsTotal`), which the
+     * computed total satisfies by construction.
      */
-    const male = toInt(draft.male_employees)
-    const female = toInt(draft.female_employees)
-    if (total !== undefined && male !== undefined && female !== undefined && male + female !== total) {
-      issues.push({
-        key: 'male_employees',
-        label: '2. Number of Male and Female Employees',
-        message: `These must add up to your total of ${total}. You have entered ${male + female}.`,
-      })
-    }
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
@@ -823,7 +821,7 @@ export function buildFeeProfile(
     ...(has('BUSINESS')
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
-          employees: toInt(draft.employees),
+          employees: employeeTotal(draft),
           male_employees: toInt(draft.male_employees),
           female_employees: toInt(draft.female_employees),
           employees_in_lgu: toInt(draft.employees_in_lgu),
@@ -1314,6 +1312,13 @@ export function FeeProfileStep({
     onChange({ ...value, [key]: v })
   }
 
+  /** Writes one half of B2 and the total it implies, in one change. */
+  function setHeadcount(key: 'male_employees' | 'female_employees', next: string) {
+    const split = { ...value, [key]: next }
+    const total = employeeTotal(split)
+    onChange({ ...split, employees: total === undefined ? '' : formatCountInput(String(total)) })
+  }
+
   function setCategory(id: number, patch: Partial<FeeCategoryDraft>) {
     const current = value.categories[id] ?? { category: '', gross_sales: '', capitalization: '' }
     set('categories', { ...value.categories, [id]: { ...current, ...patch } })
@@ -1740,27 +1745,21 @@ export function FeeProfileStep({
             </p>
 
             {/*
-              MCG-CENRO-FO-001 prints "TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE
-              ___", so the two halves ARE the total — which is why they must add
-              up to it below rather than merely not exceed it.
+              Male and Female first, the Total worked out from them (client,
+              23 September 2026). MCG-CENRO-FO-001 prints "TOTAL NO. OF
+              EMPLOYEES: MALE ___ FEMALE ___", so the halves ARE the total; a
+              typed total was a third answer that could only disagree.
+
+              The total is `locked` — read-only, never disabled — so a screen
+              reader still reaches it and hears the sum.
             */}
             <div className="mt-2 grid gap-4 sm:grid-cols-3">
-              <NumberField
-                label="Total"
-                required
-                kind="count"
-                value={value.employees}
-                onChange={(next) => set('employees', next)}
-                onBlur={() => touch('employees')}
-                error={errorFor('employees', value.employees)}
-                placeholder="e.g. 3"
-              />
               <NumberField
                 label="Male"
                 required
                 kind="count"
                 value={value.male_employees}
-                onChange={(next) => set('male_employees', next)}
+                onChange={(next) => setHeadcount('male_employees', next)}
                 onBlur={() => touch('male_employees')}
                 error={errorFor('male_employees', value.male_employees)}
               />
@@ -1769,14 +1768,23 @@ export function FeeProfileStep({
                 required
                 kind="count"
                 value={value.female_employees}
-                onChange={(next) => set('female_employees', next)}
+                onChange={(next) => setHeadcount('female_employees', next)}
                 onBlur={() => touch('female_employees')}
                 error={errorFor('female_employees', value.female_employees)}
               />
+              <NumberField
+                label="Total"
+                kind="count"
+                locked
+                value={(() => {
+                  const total = employeeTotal(value)
+                  return total === undefined ? '' : formatCountInput(String(total))
+                })()}
+                onChange={() => {}}
+                onBlur={() => {}}
+                error=""
+              />
             </div>
-            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
-              Male and female together must add up to the total.
-            </p>
           </fieldset>
 
           {/* Item 3 is its own box on the paper, so it is its own field here. */}

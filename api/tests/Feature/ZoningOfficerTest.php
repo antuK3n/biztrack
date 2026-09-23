@@ -33,6 +33,7 @@ it('shows the zoning officer the CPDO queue and nothing else', function () {
 
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Zoning Queue Hardware',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-88101',
         'tin' => '123-456-789-000',
@@ -91,6 +92,7 @@ it('lets the zoning officer clear its own assignment but not end the application
 
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Zoning Review Bakery',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-88102',
         'tin' => '123-456-789-000',

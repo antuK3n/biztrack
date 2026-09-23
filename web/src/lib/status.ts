@@ -150,7 +150,7 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
   for_final_approval: { label: 'For Final Approval', tone: 'verify', icon: ClockIcon },
   approved: { label: 'Approved', tone: 'success', icon: CheckCircleIcon },
   issued: { label: 'Permit Issued', tone: 'success', icon: ShieldCheckIcon },
-  rejected: { label: 'Rejected', tone: 'danger', icon: XCircleIcon },
+  rejected: { label: 'Disapproved', tone: 'danger', icon: XCircleIcon },
   // Grey like a draft, because both are inert — but dashed, so the two are
   // not one swatch. A draft is yours to finish; a cancelled filing is over.
   cancelled: { label: 'Cancelled', tone: 'muted', icon: XCircleIcon },
@@ -392,7 +392,7 @@ export const NEXT_ACTION: Partial<Record<ApplicationStatus, string>> = {
   for_final_approval: 'Every other permit is in. BPLO is approving the application.',
   approved: 'Everything checks out. Your permit is being issued.',
   issued: 'Your permit is ready. Download it from your permit vault.',
-  rejected: 'This application was rejected. See the reason below.',
+  rejected: 'This application was disapproved. See the reason below.',
   cancelled: 'You cancelled this application.',
 }
 

@@ -38,6 +38,7 @@ function ownedBusinessWithDraft(string $registrationNumber): array
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Status Test Store',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',
@@ -287,6 +288,7 @@ function numberedBusiness(string $name, string $registrationNumber): int
 {
     return test()->withHeaders(authAs('owner@biztrack.local'))->postJson('/api/v1/businesses', [
         'name' => $name,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',

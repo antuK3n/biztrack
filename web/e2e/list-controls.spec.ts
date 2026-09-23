@@ -286,7 +286,7 @@ const STATUSES = [
   { value: 'submitted', label: 'For Review' },
   { value: 'fulfilled', label: 'Approved' },
   { value: 'needs_resubmission', label: 'Needs Resubmission' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'rejected', label: 'Disapproved' },
 ]
 
 /** One requirement row, in the shape OfficerRequestResource emits. */
@@ -322,7 +322,7 @@ function requirement(id: number, subject: string, status: string, label: string)
 const REQUIREMENTS = [
   requirement(60001, 'Sanitary permit', 'pending', 'Pending'),
   requirement(60002, 'Water potability test', 'submitted', 'For Review'),
-  requirement(60003, 'Health cards', 'rejected', 'Rejected'),
+  requirement(60003, 'Health cards', 'rejected', 'Disapproved'),
 ]
 
 test.describe('Other Requirements list controls', () => {
@@ -360,7 +360,7 @@ test.describe('Other Requirements list controls', () => {
             office_statuses: [
               { value: 'pending', label: 'Pending' },
               { value: 'fulfilled', label: 'Approved' },
-              { value: 'rejected', label: 'Rejected' },
+              { value: 'rejected', label: 'Disapproved' },
             ],
             statuses: STATUSES,
           },
@@ -430,7 +430,7 @@ test.describe('Other Requirements list controls', () => {
      * is one instance of it; the fix is in the shared component.
      */
     await page.locator('tbody tr', { hasText: 'Water potability test' }).getByRole('button').click()
-    await page.getByRole('button', { name: 'Mark Rejected' }).click()
+    await page.getByRole('button', { name: 'Mark Disapproved' }).click()
 
     const confirm = page.getByRole('button', { name: 'Save status' })
     await expect(confirm).toBeVisible()
@@ -471,7 +471,7 @@ test.describe('Other Requirements list controls', () => {
  * Two screens disagreeing about what a status looks like is worse than either
  * choice on its own: the owner learns the colour on one page and is then told
  * something different by the other. Colour is not the only carrier here — the
- * word "Rejected" is on the chip — but it is the part a reader takes in first,
+ * word "Disapproved" is on the chip — but it is the part a reader takes in first,
  * and amber for a refusal reads as "waiting", which is precisely wrong.
  *
  * The tokens are read off the document rather than typed as hex, so this
@@ -485,18 +485,18 @@ test.describe('Other Requirements list controls', () => {
  * REJECTED document in the same amber as a Pending one, which is what these
  * assertions were written against.
  *
- * The client has had the panel removed (the tile carries a count instead), so
- * the screen they were watching is gone. The RULE is not: `REQUIREMENT_CHIP_TONE`
- * is shared, and the Other Requirements page still draws every one of these
- * chips. Retiring the tests with the panel would have quietly dropped the only
- * cover on a colour that has been wrong once already, so they follow the chips
- * to the page that still prints them.
+ * The client has had the panel removed, and then the tile, so the screen they
+ * were watching is gone. The RULE is not: `REQUIREMENT_CHIP_TONE` is shared,
+ * and the owner's requirements list — now the Requirements tab of Messages —
+ * still draws every one of these chips. Retiring the tests with the panel
+ * would have quietly dropped the only cover on a colour that has been wrong
+ * once already, so they follow the chips to the screen that still prints them.
  */
 test.describe('a refusal is named as a refusal, not as something still waiting', () => {
   test.use({ storageState: sessionFor('owner') })
 
   const OWNER_REQUIREMENTS = [
-    requirement(60011, 'Health cards', 'rejected', 'Rejected'),
+    requirement(60011, 'Health cards', 'rejected', 'Disapproved'),
     requirement(60012, 'Sanitary permit', 'pending', 'Pending'),
   ]
 
@@ -519,13 +519,14 @@ test.describe('a refusal is named as a refusal, not as something still waiting',
       })
     })
 
+    // /requests lands an owner on the Requirements tab of Messages now.
     await page.goto('/requests')
-    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 1 })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Messages', level: 1 })).toBeVisible({
       timeout: 30_000,
     })
   })
 
-  test('a rejected requirement is red, not orange', async ({ page }) => {
+  test('a disapproved requirement is red, not orange', async ({ page }) => {
     const token = (name: string) =>
       page.evaluate(
         (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim(),
@@ -540,7 +541,7 @@ test.describe('a refusal is named as a refusal, not as something still waiting',
     expect(red, 'the theme gives red and orange the same value').not.toBe(orange)
 
     const row = page.locator('tbody tr').filter({ hasText: 'Health cards' }).first()
-    const chip = row.getByText('Rejected', { exact: true })
+    const chip = row.getByText('Disapproved', { exact: true })
     await expect(chip).toBeVisible()
 
     const background = await chip.evaluate((el) => getComputedStyle(el).backgroundColor)
@@ -626,8 +627,9 @@ test.describe('the owner is told which office is asking', () => {
       })
     })
 
+    // /requests lands an owner on the Requirements tab of Messages now.
     await page.goto('/requests')
-    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 1 })).toBeVisible({
+    await expect(page.getByRole('heading', { name: 'Messages', level: 1 })).toBeVisible({
       timeout: 30_000,
     })
   })
@@ -654,18 +656,19 @@ test.describe('the owner is told which office is asking', () => {
   })
 })
 
-/* ── The owner's home page, after the panel came off ─────────────────────── */
+/* ── The owner's waiting count, now on the Requirements tab ──────────────── */
 
 /*
- * The home page is four large buttons and one thing to decide: where am I
- * going. The panel that used to sit under them answered a question the Other
- * Requirements page answers better, in the place the tile already points at.
+ * The home page carried this count on an Other Requirements tile until the
+ * client asked for the tile gone and the requirements "merged into Messages".
+ * The count went with them: onto the Requirements tab of Messages (and the
+ * Messages rail badge — see requests.spec.ts).
  *
- * What the home page still owes the reader is that there IS something waiting.
- * That is a count and a sentence on the tile — not a bare dot, which is a
- * decoration until something says what it means, and not colour alone.
+ * What the tab owes the reader is the same thing the tile did: that there IS
+ * something waiting, as a number with words, never a bare dot and never colour
+ * alone.
  */
-test.describe('the owner’s home page warns on the tile', () => {
+test.describe('the owner’s Requirements tab counts what is waiting on them', () => {
   test.use({ storageState: sessionFor('owner') })
 
   const stubRequests = async (page: import('@playwright/test').Page, rows: unknown[]) => {
@@ -688,49 +691,47 @@ test.describe('the owner’s home page warns on the tile', () => {
     )
   }
 
+  const requirementsTab = (page: import('@playwright/test').Page) =>
+    page
+      .getByRole('navigation', { name: 'Messages sections' })
+      .getByRole('link', { name: /^Requirements/ })
+
   test('counts what is waiting on the owner, and says so in words', async ({ page }) => {
     await stubRequests(page, [
       requirement(60021, 'Health cards', 'pending', 'Pending'),
       requirement(60022, 'Fire plan', 'needs_resubmission', 'Needs Resubmission'),
     ])
+    await page.goto('/messages')
+
+    const tab = requirementsTab(page)
+    await expect(tab).toBeVisible({ timeout: 30_000 })
+    // Not colour alone, and not a bare dot: the number and the words are text
+    // inside the link, so they are its accessible name too.
+    await expect(tab).toHaveAccessibleName('Requirements 2 waiting on you')
+
+    // And the home page lists nothing and links nowhere for them.
     await page.goto('/dashboard')
-
-    const tile = page.getByRole('link', { name: /other requirements/i })
-    await expect(tile).toBeVisible({ timeout: 30_000 })
-
-    // Not colour alone, and not a bare dot: the number is on the tile and the
-    // sentence is under it.
-    await expect(tile).toContainText('2')
-    await expect(tile).toContainText('2 documents waiting on you')
-    // …and in the link's own accessible name, for a reader who never sees it.
-    await expect(tile).toHaveAttribute('aria-label', /2 documents waiting on you/i)
-
-    // The panel is gone: no list of requirements on the home page.
-    await expect(page.getByRole('heading', { name: 'Other Requirements', level: 2 })).toHaveCount(0)
-  })
-
-  test('says "One document" rather than "1 documents"', async ({ page }) => {
-    await stubRequests(page, [requirement(60023, 'Health cards', 'pending', 'Pending')])
-    await page.goto('/dashboard')
-
-    const tile = page.getByRole('link', { name: /other requirements/i })
-    await expect(tile).toContainText('One document waiting on you', { timeout: 30_000 })
+    await expect(page.getByRole('link', { name: 'New Business Permit', exact: true })).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(page.getByRole('link', { name: /other requirements/i })).toHaveCount(0)
+    await expect(page.getByRole('heading', { name: 'Other Requirements' })).toHaveCount(0)
   })
 
   test('stays quiet when the waiting is the office’s, not the owner’s', async ({ page }) => {
     /*
-     * `awaits_applicant` is the test, not "there is a requirement". A badge
-     * counting work the owner cannot act on — submitted, under review, already
-     * approved — teaches them to ignore the badge.
+     * `awaits_applicant` is the test, not "there is a requirement". A count of
+     * work the owner cannot act on — submitted, under review, already
+     * approved — teaches them to ignore the count.
      */
     await stubRequests(page, [
       requirement(60024, 'Submitted already', 'submitted', 'For Review'),
       requirement(60025, 'Long done', 'fulfilled', 'Approved'),
     ])
-    await page.goto('/dashboard')
+    await page.goto('/messages')
 
-    const tile = page.getByRole('link', { name: /other requirements/i })
-    await expect(tile).toBeVisible({ timeout: 30_000 })
-    await expect(tile).not.toContainText(/waiting on you/i)
+    const tab = requirementsTab(page)
+    await expect(tab).toBeVisible({ timeout: 30_000 })
+    await expect(tab).toHaveAccessibleName('Requirements')
   })
 })

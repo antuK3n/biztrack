@@ -123,7 +123,7 @@ enum OfficerRequestStatus: string
             self::Submitted => 'For Review',
             self::Fulfilled => 'Approved',
             self::NeedsResubmission => 'Needs Resubmission',
-            self::Rejected => 'Rejected',
+            self::Rejected => 'Disapproved',
         };
     }
 }

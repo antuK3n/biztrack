@@ -357,10 +357,10 @@ test.describe('the dashboard answers to the register', () => {
      * panel that double-counted, and a double-counted decision is worse than a
      * frozen one: it is confidently wrong.
      */
-    expect(after['Rejected'] ?? 0, 'the rejection did not reach Decision Outcomes').toBe(
-      (before['Rejected'] ?? 0) + 1,
+    expect(after['Disapproved'] ?? 0, 'the rejection did not reach Decision Outcomes').toBe(
+      (before['Disapproved'] ?? 0) + 1,
     )
-    expect(after['Pending'] ?? 0, 'the filing left Pending for somewhere other than Rejected').toBe(
+    expect(after['Pending'] ?? 0, 'the filing left Pending for somewhere other than Disapproved').toBe(
       (before['Pending'] ?? 0) - 1,
     )
 

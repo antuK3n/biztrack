@@ -72,7 +72,12 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
   }
 
   if (n.type === 'decision') {
-    return /reject/i.test(n.title)
+    /*
+     * Both words. The client's wording is "Disapproved" (23 September 2026),
+     * but rows already stored say "rejected" and keep their colour. The check
+     * cannot be a bare /approv/ for success: "disapproved" contains it.
+     */
+    return /reject|disapprov/i.test(n.title)
       ? { tone: 'warning', Glyph: XCircleIcon }
       : { tone: 'success', Glyph: CheckCircleIcon }
   }
@@ -85,7 +90,8 @@ function appearanceOf(n: Notification): { tone: Tone; Glyph: Glyph } {
     switch (statusLabelIn(n.body)) {
       case 'Approved':
         return { tone: 'success', Glyph: CheckCircleIcon }
-      case 'Rejected':
+      case 'Disapproved':
+      case 'Rejected': // the label before 23 September 2026, still in stored rows
       case 'Cancelled':
         return { tone: 'warning', Glyph: XCircleIcon }
       /*

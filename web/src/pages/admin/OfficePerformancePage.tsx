@@ -12,6 +12,7 @@ import type {
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
+import { DENSE_PAGE } from './dense'
 
 /*
  * Office Performance — all six offices on one screen (issue #102).
@@ -115,7 +116,7 @@ function distil(
 function SectionHeading({ children, metric }: { children: ReactNode; metric?: string }) {
   return (
     <div className="mb-2 flex items-center">
-      <h2 className="text-lg font-semibold text-ink">{children}</h2>
+      <h2 className="text-base font-semibold text-ink">{children}</h2>
       {metric && <Info metric={metric} />}
     </div>
   )
@@ -157,12 +158,12 @@ function OfficeRow({ office }: { office: OfficePerformanceRow }) {
 
   return (
     <tr className="border-b border-line/60 last:border-0 align-top">
-      <th scope="row" className="px-4 py-3 text-left font-normal">
+      <th scope="row" className="px-3 py-1.5 text-left font-normal">
         <span className="block whitespace-nowrap text-[14px] font-bold text-ink">{office.code}</span>
         <span className="block text-[11px] leading-snug text-ink-muted">{office.name}</span>
       </th>
 
-      <td className="px-4 py-3 text-right">
+      <td className="px-3 py-1.5 text-right">
         <span className="tnum text-[14px] font-semibold text-ink">{office.handled}</span>
         {office.test_holds > 0 && (
           /*
@@ -176,7 +177,7 @@ function OfficeRow({ office }: { office: OfficePerformanceRow }) {
         )}
       </td>
 
-      <td className="px-4 py-3 text-right">
+      <td className="px-3 py-1.5 text-right">
         <span className="tnum text-[14px] font-semibold text-ink">{office.open}</span>
         {office.oldest_open_working_days !== null && (
           /*
@@ -197,7 +198,7 @@ function OfficeRow({ office }: { office: OfficePerformanceRow }) {
 
       {office.turnaround_comparable ? (
         <>
-          <td className="px-4 py-3 text-right">
+          <td className="px-3 py-1.5 text-right">
             <span className="text-[14px] font-semibold text-ink">
               <Days value={office.mean_working_days} />
             </span>
@@ -214,7 +215,7 @@ function OfficeRow({ office }: { office: OfficePerformanceRow }) {
             </span>
           </td>
 
-          <td className="px-4 py-3 text-right">
+          <td className="px-3 py-1.5 text-right">
             <span
               className={`tnum text-[14px] font-semibold ${breaching ? 'text-s-red' : 'text-ink'}`}
             >
@@ -238,7 +239,7 @@ function OfficeRow({ office }: { office: OfficePerformanceRow }) {
          * gone wrong with this office. What is wrong is what the register
          * records about it.
          */
-        <td colSpan={2} className="px-4 py-3">
+        <td colSpan={2} className="px-3 py-1.5">
           <span className="block max-w-md text-[12px] leading-snug text-ink-secondary">
             {office.not_comparable_reason}
           </span>
@@ -265,20 +266,20 @@ function OfficeTable({ offices }: { offices: OfficePerformanceRow[] }) {
             outran the RA 11032 allowance on their own
           </caption>
           <thead>
-            <tr className="border-b border-line text-[10px] uppercase tracking-wide text-ink-muted">
-              <th scope="col" className="px-4 py-2.5 font-semibold">
+            <tr className="border-b border-line text-xs uppercase tracking-wide text-ink-muted">
+              <th scope="col" className="px-3 py-1.5 font-semibold">
                 Office
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+              <th scope="col" className="px-3 py-1.5 text-right font-semibold">
                 Handled
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+              <th scope="col" className="px-3 py-1.5 text-right font-semibold">
                 Open now
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+              <th scope="col" className="px-3 py-1.5 text-right font-semibold">
                 Working days held
               </th>
-              <th scope="col" className="px-4 py-2.5 text-right font-semibold">
+              <th scope="col" className="px-3 py-1.5 text-right font-semibold">
                 Past allowance alone
               </th>
             </tr>
@@ -416,7 +417,7 @@ function DataQualityNote({
   if (testBusinesses === 0) return null
 
   return (
-    <ProtoCard className="mb-4 px-4 py-3">
+    <ProtoCard className="mb-3 px-3 py-2">
       <p className="text-[13px] leading-relaxed text-ink-secondary">
         <span className="font-semibold text-ink">These averages include test data.</span>
         <Info metric="data_quality" />{' '}
@@ -470,8 +471,9 @@ export function OfficePerformancePage() {
   const definitions = useMemo(() => distil(meta?.definitions), [meta?.definitions])
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex items-center gap-3 pb-1">
             <FilterMenu

@@ -27,6 +27,7 @@ function fileWithCapital(array $headers, float $capital): array
 
     $businessId = test()->withHeaders($headers)->postJson('/api/v1/businesses', [
         'name' => 'Aling Rosa Carinderia',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'sole_proprietorship',
         'registration_number' => 'DTI-2026-4410',
         'tin' => '123-456-789-000',

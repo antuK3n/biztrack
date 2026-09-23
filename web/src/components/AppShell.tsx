@@ -7,7 +7,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
  */
 import { loginPathFor, portalPath } from '../lib/api'
 import { navItemsFor } from '../lib/nav'
-import { unread as unreadApi } from '../lib/resources'
+import { requests as requestsApi, unread as unreadApi } from '../lib/resources'
 import type { User } from '../lib/types'
 import { useAuth } from '../stores/auth'
 import { useNotifications } from '../stores/notifications'
@@ -36,7 +36,16 @@ export function roleLabel(user: User): string {
  * same request, and two components each polling would double the traffic for
  * one answer.
  */
-function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) {
+function Rail({
+  user,
+  unreadMessages,
+  waitingRequirements,
+}: {
+  user: User
+  unreadMessages: number
+  /** Requirements awaiting the owner; they live in Messages. 0 for officers. */
+  waitingRequirements: number
+}) {
   const navigate = useNavigate()
   const logout = useAuth((s) => s.logout)
   /*
@@ -74,6 +83,11 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
             <NavLink
               key={item.label}
               to={item.to}
+              aria-label={
+                item.to.endsWith('/messages')
+                  ? messagesLabel(item.label, unreadMessages, waitingRequirements)
+                  : undefined
+              }
               className="group flex w-20 flex-col items-center gap-0.5 py-1.5"
             >
               {({ isActive }) => (
@@ -86,7 +100,12 @@ function Rail({ user, unreadMessages }: { user: User; unreadMessages: number }) 
                     style={{ position: 'relative' }}
                   >
                     <item.icon size={22} className={isActive ? 'text-royal' : 'text-white'} />
-                    {item.to?.endsWith('/messages') && <UnreadBadge count={unreadMessages} />}
+                    {/* One badge for everything waiting in Messages: unread
+                        conversations and, for an owner, requirements they
+                        owe. The link's name above says which is which. */}
+                    {item.to?.endsWith('/messages') && (
+                      <UnreadBadge count={unreadMessages + waitingRequirements} />
+                    )}
                   </span>
                   {/* Two lines' worth of box on every item, wrapped or not, so
                       the icons above them stay on one pitch down the rail.
@@ -239,8 +258,8 @@ const UNREAD_POLL_MS = 30_000
  * there: the timer keeps it current, the page corrects it instantly, and there
  * is one number. Messages have no such store, so they stay local.
  */
-function useUnread() {
-  const [counts, setCounts] = useState({ messages: 0, notifications: 0 })
+function useUnread(answersRequirements: boolean) {
+  const [counts, setCounts] = useState({ messages: 0, notifications: 0, requirements: 0 })
   const setUnread = useNotifications((s) => s.setUnread)
 
   useEffect(() => {
@@ -251,11 +270,34 @@ function useUnread() {
         .summary()
         .then((next) => {
           if (cancelled) return
-          setCounts(next)
+          setCounts((prev) => ({ ...prev, ...next }))
           setUnread(next.notifications)
         })
         .catch(() => {
           /* keep the last known counts */
+        })
+      /*
+       * Requirements waiting on the owner, which now live inside Messages (its
+       * Requirements tab) and so count on the Messages badge. The home tile
+       * that carried this number is gone.
+       *
+       * A second request rather than a field on /unread-summary: that endpoint
+       * is the API's, and this change was the frontend's to make. Owners only —
+       * `request.respond` is the permission that answers a requirement, and no
+       * office holds it. `awaits_applicant` is the API's own "your move", the
+       * same predicate the tab counts, so the two cannot disagree. If this ever
+       * moves server-side, fold it into the summary and drop this call.
+       */
+      if (!answersRequirements) return
+      requestsApi
+        .list({ per_page: 100 })
+        .then((rows) => {
+          if (cancelled) return
+          const requirements = rows.filter((r) => r.awaits_applicant).length
+          setCounts((prev) => ({ ...prev, requirements }))
+        })
+        .catch(() => {
+          /* keep the last known count */
         })
     }
 
@@ -265,9 +307,26 @@ function useUnread() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [setUnread])
+  }, [setUnread, answersRequirements])
 
   return counts
+}
+
+/**
+ * The Messages entry's accessible name when something is waiting in it.
+ *
+ * The badge is one number over two kinds of thing, so the name says which:
+ * "Messages, 2 unread, 1 requirement waiting on you". It starts with the
+ * visible label so speech input can still target it by what it shows.
+ */
+function messagesLabel(label: string, messages: number, requirements: number): string | undefined {
+  const parts = [
+    messages > 0 ? `${messages} unread` : null,
+    requirements > 0
+      ? `${requirements} ${requirements === 1 ? 'requirement' : 'requirements'} waiting on you`
+      : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? `${label}, ${parts.join(', ')}` : undefined
 }
 
 /**
@@ -313,7 +372,15 @@ function Bell({ count }: { count: number }) {
   )
 }
 
-function MobileTabBar({ user }: { user: User }) {
+function MobileTabBar({
+  user,
+  unreadMessages,
+  waitingRequirements,
+}: {
+  user: User
+  unreadMessages: number
+  waitingRequirements: number
+}) {
   const portal = useAuth((s) => s.portal)
   const items = navItemsFor(user, portal)
     .filter((i) => i.mobile && i.to)
@@ -324,25 +391,46 @@ function MobileTabBar({ user }: { user: User }) {
       className="fixed inset-x-0 bottom-0 z-20 bg-royal pb-[env(safe-area-inset-bottom)] lg:hidden"
     >
       <ul className="grid" style={{ gridTemplateColumns: `repeat(${items.length}, 1fr)` }}>
-        {items.map((item) => (
-          <li key={item.label}>
-            <NavLink
-              to={item.to!}
-              className={({ isActive }) =>
-                `flex h-14 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium ${
-                  isActive ? 'text-white' : 'text-white/65'
-                }`
-              }
-            >
-              <item.icon size={21} />
-              {/* Same two-line box as the desktop rail. "Payment History" wraps,
-                  and at the inherited 24px line-height that pushed the item past
-                  the bar's 56px and clipped its icon off the top edge while the
-                  other four sat 5px lower. */}
-              <span className="min-h-6 text-center leading-3">{item.label}</span>
-            </NavLink>
-          </li>
-        ))}
+        {items.map((item) => {
+          const isMessages = item.to!.endsWith('/messages')
+          /*
+           * The full label is the link's name wherever the tab shows a
+           * shorter one. `mobileLabel` is a part of `label` by rule (nav.ts),
+           * so what is spoken still contains what is shown.
+           */
+          const name = isMessages
+            ? messagesLabel(item.label, unreadMessages, waitingRequirements)
+            : item.mobileLabel
+              ? item.label
+              : undefined
+          return (
+            <li key={item.label}>
+              <NavLink
+                to={item.to!}
+                aria-label={name}
+                className={({ isActive }) =>
+                  `flex h-14 flex-col items-center justify-center gap-0.5 px-1 text-[10px] font-medium ${
+                    isActive ? 'text-white' : 'text-white/65'
+                  }`
+                }
+              >
+                {/* relative: the badge pins itself to the icon's corner, as on
+                    the desktop rail. The tab bar had no badge before, which
+                    left a phone with no sign anything was waiting. */}
+                <span className="relative">
+                  <item.icon size={21} />
+                  {isMessages && <UnreadBadge count={unreadMessages + waitingRequirements} />}
+                </span>
+                {/* Same two-line box as the desktop rail. A label that wraps
+                    to a third line at the inherited 24px line-height pushes the
+                    item past the bar's 56px and clips its icon off the top edge
+                    ("Payment History" did); a long label takes a
+                    `mobileLabel` instead. */}
+                <span className="min-h-6 text-center leading-3">{item.mobileLabel ?? item.label}</span>
+              </NavLink>
+            </li>
+          )
+        })}
       </ul>
     </nav>
   )
@@ -352,7 +440,7 @@ export function AppShell() {
   const user = useAuth((s) => s.user)
   // Hooks run before the early return: a conditional hook changes the order
   // between renders and React refuses the second one.
-  const counts = useUnread()
+  const counts = useUnread(Boolean(user?.permissions.includes('request.respond')))
   /*
    * The bell reads the store, not `counts.notifications`. `useUnread` feeds the
    * store on every poll, so this is the same number thirty seconds out of date
@@ -366,7 +454,11 @@ export function AppShell() {
 
   return (
     <div className="min-h-dvh bg-canvas">
-      <Rail user={user} unreadMessages={counts.messages} />
+      <Rail
+        user={user}
+        unreadMessages={counts.messages}
+        waitingRequirements={counts.requirements}
+      />
       <Bell count={unreadNotifications} />
       {isOwner && <ChatBubble />}
 
@@ -379,12 +471,27 @@ export function AppShell() {
           * address is verified. If it ever becomes a real gate, block the action
           * that needs it — don't put the nag back on top of every page.
           */}
-        <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16">
+        {/*
+          * The `has-[[data-density=compact]]` classes are an opt-in, not a new
+          * default. A staff or admin work screen that renders
+          * `data-density="compact"` (pages/admin/dense.ts) gets the full width
+          * and a 16px top margin, because the client asked for those screens
+          * to fit on one screen without scrolling (2026-09) and the centred
+          * 6xl column left ~270px of canvas unused on a 1440px display, which
+          * wrapped dates and names onto second lines. `lg:pr-20` keeps the
+          * title row clear of the fixed bell at the top right. Every other
+          * page, the applicant side above all, keeps the roomy column.
+          */}
+        <div className="mx-auto w-full max-w-6xl px-4 pb-28 pt-8 lg:px-10 lg:pb-16 has-[[data-density=compact]]:max-w-none has-[[data-density=compact]]:pt-4 lg:has-[[data-density=compact]]:pb-4 lg:has-[[data-density=compact]]:pl-6 lg:has-[[data-density=compact]]:pr-20">
           <Outlet />
         </div>
       </main>
 
-      <MobileTabBar user={user} />
+      <MobileTabBar
+        user={user}
+        unreadMessages={counts.messages}
+        waitingRequirements={counts.requirements}
+      />
     </div>
   )
 }

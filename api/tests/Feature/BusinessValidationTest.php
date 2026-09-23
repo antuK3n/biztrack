@@ -20,6 +20,7 @@ function businessPayload(array $overrides = []): array
 {
     return array_replace([
         'name' => 'Tester Trading',
+        'trade_name' => 'Tester Trading',
         'registration_type' => 'sole_proprietorship',
         'registration_number' => 'DTI-55123',
         'tin' => '123-456-789-000',
@@ -38,11 +39,12 @@ it('requires the DTI / SEC / CDA registration number and type', function () {
         ->assertJsonValidationErrors(['registration_number', 'registration_type']);
 });
 
-it('requires a TIN', function () {
+it('saves a business with no TIN yet, because a new one may not have registered with BIR', function () {
+    // Required again at submit for a renewal or amendment — see SubmitIdentityGateTest.
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', businessPayload(['tin' => '']))
-        ->assertStatus(422)
-        ->assertJsonValidationErrors('tin');
+        ->assertCreated()
+        ->assertJsonPath('data.tin', null);
 });
 
 it('rejects a malformed TIN', function (string $tin) {
@@ -261,6 +263,7 @@ it('stores and returns the lessor and emergency contact block', function () {
     $res = $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', [
             'name' => 'Lessor Detail Shop',
+            'trade_name' => 'Test Trade Name',
             'registration_type' => 'sole_proprietorship',
             'registration_number' => 'DTI-2026-5002',
             'tin' => '123-456-789-000',
@@ -400,4 +403,35 @@ it('leaves a combined address alone when only line1 is sent', function () {
     expect($address->line1)->toBe('88 Rizal Avenue')
         ->and($address->house_bldg_no)->toBeNull()
         ->and($address->street)->toBeNull();
+});
+
+it('stores block, lot and lot area on the address and reads them back', function () {
+    $address = ['house_bldg_no' => '', 'street' => 'Gen. Luna Street', 'block' => '5', 'lot' => '12',
+        'lot_area_sqm' => 120.5, 'barangay_id' => Barangay::first()->id];
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload(['address' => $address]))
+        ->assertCreated()
+        ->assertJsonPath('data.address.block', '5')
+        ->assertJsonPath('data.address.lot', '12')
+        ->assertJsonPath('data.address.lot_area_sqm', 120.5);
+});
+
+it('names an owner only for a sole proprietorship', function () {
+    $owner = ['surname' => 'Dela Cruz', 'given_name' => 'Juan', 'gender' => 'M'];
+    $headers = authAs('owner@biztrack.local');
+
+    $corp = $this->withHeaders($headers)->postJson('/api/v1/businesses', businessPayload([
+        'registration_type' => 'corporation',
+        'registration_number' => 'CS201912345',
+        'owner' => $owner,
+    ]))->assertCreated()->json('data.id');
+    expect(Business::find($corp)->owners()->count())->toBe(0);
+
+    $sole = $this->withHeaders($headers)->postJson('/api/v1/businesses', businessPayload([
+        'name' => 'Sole Trading',
+        'registration_number' => 'DTI-55999',
+        'owner' => $owner,
+    ]))->assertCreated()->json('data.id');
+    expect(Business::find($sole)->owners()->value('surname'))->toBe('Dela Cruz');
 });

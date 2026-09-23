@@ -66,6 +66,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import BarangayZoningMap from './BarangayZoningMap'
 import {
   LocationInsightsPanel,
+  ZoningConformanceNote,
   useLocationInsights,
   type LocationInsightsQuery,
 } from './LocationInsightsPanel'
@@ -381,6 +382,117 @@ const BASE_LABELS: Record<BasePhase, string> = {
  * clearance and the clearance is not applied for here any more.
  */
 
+/*
+ * ── Field numbering (checklist item 23) ───────────────────────────────────
+ *
+ * "Implement numbering so that the user can easily see which number they are
+ * missing if they look at the missing fields list at the bottom near the Next
+ * button." Both ends of that sentence read their number from here: the label
+ * beside the field (FieldLabel / the TIN, landline and mobile legends, via
+ * `number`), the "still needed" line through `need`, and the review summary.
+ * One list, so the three cannot disagree.
+ *
+ * ── The numbers are the PAPER's, not a count ──────────────────────────────
+ *
+ * This list first numbered each step 1..n. The business step has since been
+ * laid out as MCG-BPLO-FO-002's own boxes, and it prints the paper's item
+ * numbers, so an applicant with the paper beside them reads the same "8." on
+ * both. A second, counted numbering over the same fields would have printed
+ * two different numbers for one question. So the gaps are real: item 5 (Main
+ * Office Address) is asked on Location & Zoning with the map, item 12 is no
+ * longer asked (see `ownerNameAsked`), and item 16 is not collected.
+ *
+ * Item 11 is one question on the paper — a row with Surname, Given Name,
+ * Middle Name, Suffix and Gender across it — so the number is drawn ONCE, on
+ * the "Sole Proprietor" heading. Surname, Given Name and Gender are listed
+ * under the same number so the "still needed" line can send the applicant to
+ * item 11 for them; they are not numbered where they are drawn.
+ *
+ * Only the business step is listed. Business Operation's numbers (items 1 to 8
+ * of the paper's Section B) are printed by FeeProfileStep and the operation
+ * block themselves, and its messages already carry them. Location & Zoning has
+ * no paper numbers to borrow — the whole step is the paper's item 5 — and a
+ * counted "1." there would contradict the "1." on the next step. Data Privacy
+ * Consent is one tick, Documentary Requirements names each document, and
+ * Review asks nothing.
+ *
+ * Conditional fields keep their number whether or not they are drawn, so the
+ * number beside a field is stable for one applicant through one filing.
+ *
+ * KEEP IN RENDER ORDER. `the numbers on a step run in the order the fields are
+ * read` in apply-wizard.spec.ts walks the rendered step and fails if the
+ * numbers stop ascending or two drawn fields share one.
+ */
+const STEP_FIELDS: Partial<Record<BasePhase, ReadonlyArray<readonly [label: string, no: number]>>> = {
+  business: [
+    ['Registration Number', 1],
+    ['Tax Identification Number (TIN)', 2],
+    ['Business Name', 3],
+    ['Trade Name / Franchise', 4],
+    ['Telephone (Landline)', 6],
+    ['Mobile Number', 7],
+    ['E-mail Address', 8],
+    ['Website Address', 9],
+    ['Type of Registration', 10],
+    ['Sole Proprietor', 11],
+    ['Surname', 11],
+    ['Given Name', 11],
+    ['Gender', 11],
+    ['Name of President / Officer in Charge', 13],
+    ['Citizenship (of President/OIC)', 14],
+    ['Capital Participation (% Filipino)', 15],
+  ],
+}
+
+/** The number printed beside a field, or undefined when it has none. */
+function fieldNo(phase: BasePhase, label: string): number | undefined {
+  return STEP_FIELDS[phase]?.find(([l]) => l === label)?.[1]
+}
+
+/**
+ * One entry for the "still needed" line, numbered to match the field.
+ *
+ * The label must be the one printed on the field. It was not, in several
+ * places — the validator said "Owner’s Family Name" at a field labelled
+ * "Surname" — and that mismatch is half of what sent applicants hunting.
+ * `fieldNo` returning undefined for an unknown label is deliberate: an entry
+ * that names something which is not a numbered field (a pin on the map, a
+ * validation message) still reads correctly, just without a number.
+ */
+function need(phase: BasePhase, label: string): string {
+  const n = fieldNo(phase, label)
+
+  return n === undefined ? label : `${n}. ${label}`
+}
+
+/**
+ * A step's "still needed" list, in the order the fields appear.
+ *
+ * `missingFor` builds its list in the order the CHECKS run, which is not the
+ * order the questions are asked — the business step reported "3. Business
+ * Name, 10. Type of Registration, 1. …" because the name is validated before
+ * the registration block. Numbered and shuffled is a worse sentence than the
+ * unnumbered one it replaced.
+ *
+ * Entries with no number sort last and keep their relative order: they are
+ * the things that are not a numbered field — a pin on the map, "A valid TIN" —
+ * and read as a tail of caveats rather than interleaved among the fields they
+ * qualify. Stable for equal numbers, so the three item-11 entries keep the
+ * order the paper prints them in.
+ */
+function byFieldNo(entries: string[]): string[] {
+  const leading = (entry: string): number => {
+    const m = /^(\d+)\. /.exec(entry)
+
+    return m === null ? Number.POSITIVE_INFINITY : Number(m[1])
+  }
+
+  return entries
+    .map((text, index) => ({ text, index }))
+    .sort((a, b) => leading(a.text) - leading(b.text) || a.index - b.index)
+    .map((e) => e.text)
+}
+
 /** Document-type code for the repeatable "Other Requirements" uploads. */
 const OTHER_DOC_CODE = 'OTHER'
 
@@ -554,6 +666,14 @@ interface FormState {
    */
   house_bldg_no: string
   street: string
+  /*
+   * Block, Lot and the lot's area (client, 23 September 2026). Optional —
+   * plenty of premises have no block or lot. The area is the LOT; the floor
+   * area the fee engine assesses is Business Operation's item 1.
+   */
+  block: string
+  lot: string
+  lot_area_sqm: string
   line1: string
   line2: string
   barangay_id: string
@@ -599,6 +719,9 @@ const EMPTY: FormState = {
   owner_gender: '',
   house_bldg_no: '',
   street: '',
+  block: '',
+  lot: '',
+  lot_area_sqm: '',
   line1: '',
   line2: '',
   barangay_id: '',
@@ -805,6 +928,29 @@ const ECONOMIC_ORGANIZATIONS: { value: string; label: string; hint: string }[] =
  */
 function hasPresidentOrOfficer(_registrationType: string): boolean {
   return true
+}
+
+/**
+ * Who is asked items 11 / 12 — the owner's name and sex.
+ *
+ * A sole proprietorship only (client, 23 September 2026: the section "must
+ * follow Type of Registration"). A corporation, partnership or cooperative is
+ * an entity, not a person; it is named on the form by its President / OIC,
+ * items 13-15, and asking for an owner's surname and sex as well put the
+ * account holder's name on the filing as if they owned the company.
+ *
+ * Nothing before a structure is chosen, for the same reason: the question
+ * depends on the answer. The hidden fields keep their numbers, so 11 simply
+ * does not appear for a corporation and the list jumps from 10 to 13.
+ */
+function ownerNameAsked(registrationType: string): boolean {
+  return registrationType === 'sole_proprietorship'
+}
+
+/** A lot area in sq. m.: a positive number, commas allowed. Blank is not checked here. */
+function lotAreaValid(raw: string): boolean {
+  const n = Number(plainAmount(raw))
+  return plainAmount(raw) !== '' && Number.isFinite(n) && n > 0 && n <= 10_000_000
 }
 
 /**
@@ -1636,7 +1782,7 @@ function LinesStep({
            * people, and a step where the only escape is picking something
            * else is a trap.
            */}
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+          <p className="text-xs font-bold uppercase tracking-[0.1em] text-ink-secondary">
             Your line of business
           </p>
           <div className="mt-2 space-y-3">
@@ -1674,7 +1820,7 @@ function LinesStep({
                           <p className="truncate text-sm text-ink">
                             {line.line_of_business.trim() || 'Unclassified line'}
                           </p>
-                          <p className="mt-0.5 text-xs text-s-red">
+                          <p className="mt-0.5 text-sm text-s-red">
                             Not on the PSIC list, so this line cannot be assessed. Change it for the
                             closest trade on the list.
                           </p>
@@ -1729,7 +1875,7 @@ function LinesStep({
                     </div>
                   </div>
                   {needsText && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       Type the line of business you want registered.
                     </p>
                   )}
@@ -1760,7 +1906,7 @@ function LinesStep({
                    * objected to.
                    */}
                   <label className="mt-2.5 block">
-                    <span className="text-xs font-medium text-ink-secondary">
+                    <span className="text-sm font-medium text-ink-secondary">
                       Products / Services <span className="text-s-red">*</span>
                     </span>
                     <input
@@ -1809,7 +1955,7 @@ function LinesStep({
            * to the extras the moment the applicant touches the picker.
            */}
           {lines.length > 1 && (
-            <p className="mt-3 text-xs text-ink-secondary">
+            <p className="mt-3 text-sm text-ink-secondary">
               Carried over from an earlier filing, which declared {lines.length} lines. A filing
               declares one now — picking a trade above replaces all of these with the one you pick.
             </p>
@@ -2547,11 +2693,12 @@ export function ApplyWizard() {
 
   const isReuse = applicationType === 'renewal' || applicationType === 'amendment'
   /*
-   * The wizard does not evaluate zoning; CPDO does, during processing. The
-   * default modal only confirms the pin was recorded. The red non-conforming
-   * modal (p031) is reachable with a `?zoning=deny` debug query param.
+   * The TIN is optional on a NEW filing and required on a renewal or an
+   * amendment (client, 23 September 2026): a new business may not have
+   * registered with BIR yet, and one that is renewing has been trading. The
+   * API holds the same line at submit — ApplicationController::submit.
    */
-  const zoningDenied = searchParams.get('zoning') === 'deny'
+  const tinRequired = applicationType !== 'new'
 
   const [step, setStep] = useState(0)
   /*
@@ -3011,7 +3158,6 @@ export function ApplyWizard() {
       target.scrollIntoView({ block: 'start', behavior: 'smooth' })
     })
   }
-  const [showZoning, setShowZoning] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
 
@@ -3125,6 +3271,9 @@ export function ApplyWizard() {
         // Falls back to the whole line for a business saved before the split,
         // so its street is editable rather than silently empty.
         street: b.address.street ?? b.address.line1 ?? '',
+        block: b.address.block ?? '',
+        lot: b.address.lot ?? '',
+        lot_area_sqm: b.address.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
         line1: b.address.line1 ?? '',
         line2: b.address.line2 ?? '',
         barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
@@ -3537,8 +3686,7 @@ export function ApplyWizard() {
    * The whole row, not just the name: the zoning step now also needs the
    * barangay's CPDO map path and the classifications drawn on it, and both ride
    * along on the same reference payload. `barangayName` stays as the narrower
-   * thing the zoning modal already reads, rather than making that dialog reach
-   * into an object for one field.
+   * thing the pin checks and the zoning note read.
    */
   const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
   const barangayName = selectedBarangay?.name
@@ -3613,27 +3761,6 @@ export function ApplyWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streetAddress, form.lines.length, barangayName, autoPinned])
 
-  /*
-   * The first line of business the applicant declared, when they have one. It
-   * is chosen on the zoning step itself now (item 69), so by the time the
-   * zoning modal opens there is always one to name.
-   */
-  const declaredLine = psic.find((c) => c.id === form.lines[0]?.psic_code_id)
-
-  /*
-   * What the zoning modal says the verdict is ABOUT. The mockup underlines the
-   * line of business ("The new business for Cafe"), which is what a zoning
-   * decision actually turns on — a use, not a trade name. The business name is
-   * the fallback, and on a fresh filing neither exists yet at Part 1, so the
-   * sentence still has to read as English with no subject at all.
-   *
-   * PSIC titles carry the colloquial name in brackets, and that is the half a
-   * shop owner recognises: "sari-sari store", not "Retail sale in
-   * non-specialized stores (sari-sari store)". Prefer the bracketed name so the
-   * sentence reads like the mockup's "Cafe" instead of a statistical class.
-   */
-  const zoningSubject: string | null =
-    declaredLine?.title.match(/\(([^)]+)\)\s*$/)?.[1] ?? declaredLine?.title ?? (form.name || null)
 
   /*
    * The business as every office sheet carries it is built by the LGU
@@ -3731,7 +3858,10 @@ export function ApplyWizard() {
       insightsQuery.latitude !== livePin.latitude ||
       insightsQuery.longitude !== livePin.longitude ||
       insightsQuery.psicCodeId !== livePin.psicCodeId ||
-      insightsQuery.businessId !== livePin.businessId)
+      insightsQuery.businessId !== livePin.businessId ||
+      // The zoning note reads this response too, and it is keyed on the
+      // barangay — a changed dropdown is a question not yet answered.
+      insightsQuery.barangayId !== livePin.barangayId)
 
   /*
    * The radius the ring on the map is drawn at — the API's own `radius_m`, never
@@ -3837,8 +3967,7 @@ export function ApplyWizard() {
    *
    * A renewal carries whichever permits were ticked. Tick the business permit
    * and this is the BPLO form, with the other clearances opening later at the
-   * clearance stage — the arrangement the "other permits come later" note on
-   * Location & Zoning describes. Tick only the others and there is no BPLO
+   * clearance stage after payment. Tick only the others and there is no BPLO
    * form to fill: the filing IS those offices' applications, so their sheets
    * are the steps.
    *
@@ -4043,6 +4172,9 @@ export function ApplyWizard() {
       address: [
         { label: 'House / Bldg. No.', value: form.house_bldg_no },
         { label: 'Street', value: form.street },
+        { label: 'Block', value: form.block },
+        { label: 'Lot', value: form.lot },
+        { label: 'Lot Area (sq. m.)', value: form.lot_area_sqm },
         { label: 'Barangay', value: barangay },
         {
           label: 'Map pin',
@@ -4059,52 +4191,67 @@ export function ApplyWizard() {
             .filter(Boolean)
             .join('; '),
         },
+        /*
+         * Under Location & Zoning because that is the section that asks them.
+         * They were summarised under Business Information, whose Change opens
+         * a form that does not contain them.
+         */
+        { label: 'Emergency Contact Person', value: form.emergency_contact_name },
+        { label: 'Emergency Contact Number', value: form.emergency_contact_number },
       ],
       business: [
+        /*
+         * Numbered from STEP_FIELDS, the list the labels and the "still
+         * needed" line read, so the summary cannot print a different number
+         * from the field it summarises.
+         */
         {
-          label: `1. ${structure ? `${structure.agency} Registration Number` : 'Registration Number'}`,
+          label: `${fieldNo('business', 'Registration Number')}. ${structure ? `${structure.agency} Registration Number` : 'Registration Number'}`,
           value: form.registration_number,
         },
-        { label: '2. Tax Identification Number (TIN)', value: form.tin },
-        { label: '3. Business Name', value: form.name },
-        { label: '4. Trade Name / Franchise', value: form.trade_name },
+        { label: need('business', 'Tax Identification Number (TIN)'), value: form.tin },
+        { label: need('business', 'Business Name'), value: form.name },
+        { label: need('business', 'Trade Name / Franchise'), value: form.trade_name },
         /*
          * Items 5 and 16 are absent on purpose — Main Office Address is asked
          * on Location & Zoning with the map, and Residential Address is not
          * collected at all. The gaps in the numbering are the record of that.
          */
-        { label: '6. Telephone (Landline)', value: form.telephone },
-        { label: '7. Mobile Number', value: form.mobile_number },
-        { label: '8. E-mail Address', value: form.email },
-        { label: '9. Website Address', value: form.website },
-        { label: '10. Type of Registration', value: structure?.label ?? '' },
-        { label: '11 / 12. Owner / Representative', value: owner },
-        { label: '11 / 12. Gender', value: form.owner_gender },
+        { label: need('business', 'Telephone (Landline)'), value: form.telephone },
+        { label: need('business', 'Mobile Number'), value: form.mobile_number },
+        { label: need('business', 'E-mail Address'), value: form.email },
+        { label: need('business', 'Website Address'), value: form.website },
+        { label: need('business', 'Type of Registration'), value: structure?.label ?? '' },
+        // Omitted, not blanked, for any structure but a sole proprietorship.
+        ...(ownerNameAsked(form.registration_type)
+          ? [
+              { label: need('business', 'Sole Proprietor'), value: owner },
+              {
+                label: need('business', 'Gender'),
+                // The word on the button, not the letter under it — 'F' is what
+                // the register stores and not what the applicant chose.
+                value:
+                  form.owner_gender === 'M' ? 'Male' : form.owner_gender === 'F' ? 'Female' : '',
+              },
+            ]
+          : []),
         /* A15-A17 are asked only of the structures that have a president. */
         ...(form.president_officer_name || form.citizenship || form.capital_participation_filipino
           ? [
               {
-                label: '13. Name of President / Officer in Charge',
+                label: need('business', 'Name of President / Officer in Charge'),
                 value: form.president_officer_name,
               },
               {
-                label: '14. Citizenship (of President/OIC)',
+                label: need('business', 'Citizenship (of President/OIC)'),
                 value: form.citizenship,
               },
               {
-                label: '15. Capital Participation (% Filipino)',
+                label: need('business', 'Capital Participation (% Filipino)'),
                 value: form.capital_participation_filipino,
               },
             ]
           : []),
-        {
-          label: 'Emergency Contact Person',
-          value: form.emergency_contact_name,
-        },
-        {
-          label: 'Emergency Contact Number',
-          value: form.emergency_contact_number,
-        },
       ],
       operation: [
         {
@@ -4723,7 +4870,9 @@ export function ApplyWizard() {
            * too, in the language of the removed category ticks, it sent the
            * applicant to press a Change button for a control that had gone.
            */
-          if (!form.name.trim()) missing.push('Business Name')
+          if (!form.name.trim()) missing.push(need('business', 'Business Name'))
+          // Required since 23 September 2026 (client); the API checks it at submit.
+          if (!form.trade_name.trim()) missing.push(need('business', 'Trade Name / Franchise'))
           /*
            * Items 11/12 — the named person the filing is in.
            *
@@ -4738,9 +4887,17 @@ export function ApplyWizard() {
            * one. Gender is required because CENRO's paper prints a SEX box and
            * nothing else on the filing answers it.
            */
-          if (!form.owner_surname.trim()) missing.push('Owner’s Family Name')
-          if (!form.owner_given_name.trim()) missing.push('Owner’s First Name')
-          if (!form.owner_gender.trim()) missing.push('Owner’s Sex')
+          /*
+           * Asked of a sole proprietorship only (client, 23 September 2026) —
+           * see `ownerNameAsked`. A corporation, partnership or cooperative is
+           * named by its President / OIC below, so nothing here is listed for
+           * one.
+           */
+          if (ownerNameAsked(form.registration_type)) {
+            if (!form.owner_surname.trim()) missing.push(need('business', 'Surname'))
+            if (!form.owner_given_name.trim()) missing.push(need('business', 'Given Name'))
+            if (!form.owner_gender.trim()) missing.push(need('business', 'Gender'))
+          }
           /*
            * Item 94 — the structure is listed FIRST, and the number is named
            * after the agency that structure implies.
@@ -4756,16 +4913,21 @@ export function ApplyWizard() {
            * Asking the mapping instead means only a real structure counts.
            */
           const agency = agencyFor(form.registration_type)
-          if (agency === null) missing.push('Type of Registration')
+          if (agency === null) missing.push(need('business', 'Type of Registration'))
           const numberLabel = agency
             ? REGISTRATION_AGENCIES[agency].label
-            : 'Your registration number'
-          if (!form.registration_number.trim()) missing.push(numberLabel)
+            : 'Registration Number'
+          if (!form.registration_number.trim()) {
+            // The agency's own name for the number, under item 1's number.
+            missing.push(`${fieldNo('business', 'Registration Number')}. ${numberLabel}`)
+          }
           else if (!registrationNumberValid(form.registration_number)) {
             missing.push(`A valid ${numberLabel}`)
           }
-          if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
-          else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
+          // Optional on a new filing — see `tinRequired` — but checked when filled.
+          if (!form.tin.trim()) {
+            if (tinRequired) missing.push(need('business', 'Tax Identification Number (TIN)'))
+          } else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
           /*
            * ── The blanket "paper fields are optional" rule ended here ────────
            *
@@ -4789,15 +4951,16 @@ export function ApplyWizard() {
            *    carinderias and market stalls genuinely have none, so requiring
            *    one buys a false answer rather than a real one (client's
            *    decision, 9 September 2026).
-           *  OPTIONAL — Website and Trade Name: the same, more so.
+           *  OPTIONAL — Website: the same, more so. (Trade Name was here
+           *    too until the client made it required, 23 September 2026.)
            *
            * Anything still optional is validated when filled and never demanded
            * when blank, which is what these three checks were doing for
            * everything.
            */
-          if (!form.mobile_number.trim()) missing.push('Mobile Number')
+          if (!form.mobile_number.trim()) missing.push(need('business', 'Mobile Number'))
           else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
-          if (!form.email.trim()) missing.push('E-mail Address')
+          if (!form.email.trim()) missing.push(need('business', 'E-mail Address'))
           else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
@@ -4824,11 +4987,11 @@ export function ApplyWizard() {
            */
           if (hasPresidentOrOfficer(form.registration_type)) {
             if (!form.president_officer_name.trim()) {
-              missing.push('Name of President / OIC')
+              missing.push(need('business', 'Name of President / Officer in Charge'))
             }
-            if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
+            if (!form.citizenship.trim()) missing.push(need('business', 'Citizenship (of President/OIC)'))
             if (!form.capital_participation_filipino.trim()) {
-              missing.push('Capital Participation (Filipino)')
+              missing.push(need('business', 'Capital Participation (% Filipino)'))
             }
           }
           if (!percentValid(form.capital_participation_filipino)) {
@@ -4917,8 +5080,8 @@ export function ApplyWizard() {
            * Item 69 — the whole Line of Business question is answered here now,
            * and these three checks are the ones the deleted `lines` step used to
            * make. Required on this step, as the mockup marks it, and not merely
-           * because Location Insights wants it: the zoning modal this step opens
-           * into announces conformity *for a named trade*, and CPDO's locational
+           * because Location Insights wants it: the zoning note on this step
+           * reads the ordinance *for a named trade*, and CPDO's locational
            * clearance is a judgment about a use, not about a coordinate.
            */
           if (form.lines.length === 0) missing.push('Line of Business')
@@ -4969,7 +5132,12 @@ export function ApplyWizard() {
            * one would be our rule, not the city's.
            */
           if (!form.street.trim()) missing.push('Street')
-          if (!form.barangay_id) missing.push('Barangay')
+          // Optional, so listed only when what is in it is not an area.
+          if (form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)) {
+            missing.push('A valid Lot Area')
+          }
+          // The field's own label, so the list names something on the screen.
+          if (!form.barangay_id) missing.push('Barangay Name')
           // CPDO rules on the zoning clearance from where the business actually
           // is, so the pin is part of the answer, not a nicety.
           if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
@@ -5172,7 +5340,11 @@ export function ApplyWizard() {
          * written and drift afterwards.
          */
         case 'review':
-          return sequence.filter((step) => step !== 'review').flatMap((step) => missingFor(step))
+          // Sorted within each section, never across: "3." on one step and
+          // "5." on the next are different papers' items, not a sequence.
+          return sequence
+            .filter((step) => step !== 'review')
+            .flatMap((step) => byFieldNo(missingFor(step)))
       }
 
       /*
@@ -5190,6 +5362,7 @@ export function ApplyWizard() {
       consent,
       feeDraft,
       applicationType,
+      tinRequired,
       feeLines,
       psic,
       isReuse,
@@ -5241,8 +5414,14 @@ export function ApplyWizard() {
     ],
   )
 
-  /** What is still missing on the step being displayed. */
-  const stepMissing: string[] = useMemo(() => missingFor(phase), [missingFor, phase])
+  /*
+   * What is still missing on the step being displayed, in field order (see
+   * `byFieldNo`). Review is already sorted section by section in `missingFor`.
+   */
+  const stepMissing: string[] = useMemo(
+    () => (phase === 'review' ? missingFor(phase) : byFieldNo(missingFor(phase))),
+    [missingFor, phase],
+  )
 
   /*
    * Which sections are finished, asked of every section rather than inferred
@@ -5425,6 +5604,8 @@ export function ApplyWizard() {
 
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
+    trade_name:
+      touched.trade_name && !form.trade_name.trim() ? 'Enter your trade name or franchise.' : '',
     /*
      * Nothing to complain about before a structure is chosen: the field is not
      * being asked yet, and an error on a question that has not been put is just
@@ -5456,7 +5637,13 @@ export function ApplyWizard() {
         ? tinValid(form.tin)
           ? ''
           : TIN_ERROR
-        : 'Enter your Tax Identification Number.',
+        : tinRequired
+          ? 'Enter your Tax Identification Number.'
+          : '',
+    lot_area_sqm:
+      form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)
+        ? 'Enter the lot area in square metres, like 120.'
+        : '',
     /*
      * Both optional, so neither can complain about being empty — only about
      * being wrong. `phoneValid` already accepts a landline with or without its
@@ -5557,13 +5744,20 @@ export function ApplyWizard() {
        * ABSENT `owner` key as "this request is not about the owner" and leaves
        * the row alone, which is what a fee-profile-only save wants.
        */
-      owner: {
-        surname: form.owner_surname.trim() || undefined,
-        given_name: form.owner_given_name.trim() || undefined,
-        middle_name: form.owner_middle_name.trim() || undefined,
-        suffix: form.owner_suffix.trim() || undefined,
-        gender: form.owner_gender || undefined,
-      },
+      /*
+       * Only for a sole proprietorship — see `ownerNameAsked`. Omitted
+       * otherwise, which the API reads as "not about the owner"; it also
+       * ignores an owner sent for any other structure.
+       */
+      owner: ownerNameAsked(form.registration_type)
+        ? {
+            surname: form.owner_surname.trim() || undefined,
+            given_name: form.owner_given_name.trim() || undefined,
+            middle_name: form.owner_middle_name.trim() || undefined,
+            suffix: form.owner_suffix.trim() || undefined,
+            gender: form.owner_gender || undefined,
+          }
+        : undefined,
       economic_organization:
         (form.economic_organization as BusinessPayload['economic_organization']) || undefined,
       // Only meaningful against "Others"; sending it with any of the other five
@@ -5591,6 +5785,10 @@ export function ApplyWizard() {
         // The API composes `line1` from these two — see syncAddressAndLines.
         house_bldg_no: form.house_bldg_no.trim(),
         street: form.street.trim(),
+        // Sent even when blank, so clearing one is stored as the blank it is.
+        block: form.block.trim(),
+        lot: form.lot.trim(),
+        lot_area_sqm: plainAmount(form.lot_area_sqm) || null,
         line2: form.line2.trim() || undefined,
         barangay_id: Number(form.barangay_id),
         latitude: form.latitude ?? undefined,
@@ -5843,22 +6041,9 @@ export function ApplyWizard() {
     } else if (stepMissing.length > 0) {
       return
     }
-    /*
-     * Zoning result (p30) — the conformity message, and only that.
-     *
-     * Location Insights used to be primed here, because the modal was where it
-     * rendered. It is on the step itself now and follows the pin on its own, so
-     * leaving the step is no longer an event the lookup cares about.
-     */
-    if (phase === 'address') {
-      setShowZoning(true)
-      return
-    }
+    // Location & Zoning used to stop here for the zoning dialog; the answer is
+    // inline on the step now, so every step leaves the same way.
     await advance()
-  }
-
-  function closeZoning() {
-    setShowZoning(false)
   }
 
   function back() {
@@ -6465,7 +6650,9 @@ export function ApplyWizard() {
      */
     registrationAgency !== null &&
     registrationNumberValid(form.registration_number) &&
-    tinValid(form.tin) &&
+    // Blank is a legal TIN on a new filing (the API accepts it); a typed one
+    // must still be whole, or the business save would answer 422.
+    (form.tin.trim() === '' ? !tinRequired : tinValid(form.tin)) &&
     form.lines.length > 0 &&
     form.street.trim() !== '' &&
     form.barangay_id !== '' &&
@@ -6724,6 +6911,9 @@ export function ApplyWizard() {
         lines: [],
         house_bldg_no: '',
         street: '',
+        block: '',
+        lot: '',
+        lot_area_sqm: '',
         line1: '',
         line2: '',
         barangay_id: '',
@@ -7007,6 +7197,9 @@ export function ApplyWizard() {
           owner_gender: b.owner?.gender || account?.gender || '',
           house_bldg_no: b.address?.house_bldg_no ?? '',
           street: b.address?.street ?? b.address?.line1 ?? '',
+          block: b.address?.block ?? '',
+          lot: b.address?.lot ?? '',
+          lot_area_sqm: b.address?.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
           line1: b.address?.line1 ?? '',
           line2: b.address?.line2 ?? '',
           barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
@@ -7590,40 +7783,19 @@ export function ApplyWizard() {
           <h1 className="mb-1 text-2xl font-bold text-ink">
             Zoning Clearance - Selecting Business Location
           </h1>
-          <div className="mb-2 h-px bg-ink/40" />
-          <p className="mb-6 text-xs text-ink-secondary">
-            Pin your location and enter your address. The pin must fall inside Malabon, and inside
-            the barangay you select below. CPDO evaluates your zoning clearance from it during
-            processing.
-          </p>
+          <div className="mb-6 h-px bg-ink/40" />
 
           {/*
-           * Says where the other five clearances went, on the step where they
-           * are missed.
+           * No introduction and no "the other permits come later" box.
            *
-           * A tester reported them "missing" and asked for them back. They
-           * were not deleted — they moved out of this wizard and onto
-           * /applications/:id/clearances when payment went first, which Review
-           * & Submit does explain. But Review is the LAST step, and this is
-           * the step whose heading says "Zoning Clearance", so this is where
-           * somebody looking for the clearances looks and concludes they are
-           * gone. Answering only at the end answers after the alarm.
-           *
-           * The six are named rather than counted, because "six LGU
-           * clearances" does not let an applicant check whether the one THEY
-           * need is among them. Not a link: there is no application to link to
-           * until this filing is submitted.
+           * Both stood here: a paragraph restating the pin rules the map
+           * already enforces, and a note naming the five clearances that open
+           * after payment. The client, 23 September 2026: "no need to mention
+           * once BPLO is approved, clearance sanitary etc on the zoning tab. So
+           * much clutter, user-unfriendly." This step keeps only what is needed
+           * to answer it. The other permits are named where they open, on
+           * the clearance stage after payment.
            */}
-          <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
-            <p className="text-xs text-ink-secondary">
-              <span className="font-semibold text-ink">The other permits come later.</span> Fire,
-              Sanitary, Building/Occupancy, Environmental and this Zoning clearance are not part of
-              this form. Once BPLO approves your application and you have paid, all five open under{' '}
-              <span className="font-semibold text-ink">Other Permits</span> — you need every one of
-              them, and for each you either fill in that office’s sheet or hand in the permit you
-              already hold.
-            </p>
-          </div>
 
           {/*
            * Item 69 — the one and only Line of Business question.
@@ -7659,9 +7831,8 @@ export function ApplyWizard() {
              * "Lines". Keep both singular if this is ever reworded.
              */}
             <FieldLabel required>Line of Business</FieldLabel>
-            <p className="mb-3 text-xs text-ink-secondary">
-              What this location will be used for. Choose one trade — the zoning verdict is given
-              against a single line of business, so a filing declares one.
+            <p className="mb-3 text-sm text-ink-secondary">
+              What this location will be used for. Choose one.
             </p>
             <LinesStep
               codes={psic}
@@ -7669,11 +7840,10 @@ export function ApplyWizard() {
               onChange={(lines) => update('lines', lines)}
             />
             {form.lines.length === 0 && (
-              <p className="mt-2.5 text-xs font-medium text-s-red">
+              <p className="mt-2.5 text-sm font-medium text-s-red">
                 {/* "at least one" was the multi-select's phrasing and implied a
                     minimum with no maximum. There is exactly one. */}
-                Required: choose your line of business. The zoning verdict is about a trade, not a
-                coordinate.
+                Required: choose your line of business.
               </p>
             )}
           </div>
@@ -7704,6 +7874,24 @@ export function ApplyWizard() {
              * filing, which is exactly the state the client was looking at.
              */}
             <div className="self-start space-y-6">
+              {/*
+               * Why the pin has to be right, said before it is placed (client,
+               * 23 September 2026). CPDO inspects the spot the pin names; a
+               * wrong one can get the filing disapproved, and fees already
+               * paid are not returned.
+               *
+               * Amber, not red: nothing is wrong yet, and #bd0000 is for errors
+               * (DESIGN.md, Red Means Stop). The bold lead-in carries it in
+               * words, so it survives with colour off.
+               */}
+              <p
+                id="pin-accuracy-note"
+                className="rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
+              >
+                <span className="font-bold">Place the pin exactly on your business.</span> A wrong
+                location can get your application disapproved, and any fees you paid will be
+                forfeited.
+              </p>
               <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
                 <MapPicker
                   latitude={form.latitude}
@@ -7789,7 +7977,7 @@ export function ApplyWizard() {
                   }}
                 />
                 {form.latitude !== null ? (
-                  <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
+                  <p className="tnum bg-white px-4 py-2 text-sm text-ink-secondary">
                     Pinned at {form.latitude}, {form.longitude}
                     {/*
                      * Item 7 — a suggested pin says it is a suggestion.
@@ -7807,7 +7995,7 @@ export function ApplyWizard() {
                      */}
                     {autoPinned !== null && (
                       <span className="mt-0.5 block text-ink-muted">
-                        Placed from your address. Drag the pin or click the map if it is not exactly
+                        Placed from your address. Drag it or click the map if it is not exactly
                         right.
                       </span>
                     )}
@@ -7826,13 +8014,12 @@ export function ApplyWizard() {
                      */}
                     {insightsRadiusM !== null && (
                       <span className="mt-0.5 block text-ink-muted">
-                        The circle around it covers {insightsRadiusM} m — the area the figures below
-                        count.
+                        The circle is the {insightsRadiusM} m the figures below count.
                       </span>
                     )}
                   </p>
                 ) : (
-                  <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
+                  <p className="bg-white px-4 py-2 text-sm font-medium text-s-red">
                     {/* Two states, because telling somebody to click a map that is
                       not taking clicks yet sends them to a control that will not
                       answer. The lock's own sentence says what to do about it;
@@ -7843,7 +8030,7 @@ export function ApplyWizard() {
                   </p>
                 )}
                 {pinError && (
-                  <p role="alert" className="bg-white px-4 pb-2 text-xs font-medium text-s-red">
+                  <p role="alert" className="bg-white px-4 pb-2 text-sm font-medium text-s-red">
                     {pinError}
                   </p>
                 )}
@@ -7875,7 +8062,7 @@ export function ApplyWizard() {
                     const verdict = checkPin(form.latitude, form.longitude, barangayName)
                     if (verdict.kind !== 'wrong-barangay') return null
                     return (
-                      <p className="bg-white px-4 pb-2.5 text-xs text-ink-secondary">
+                      <p className="bg-white px-4 pb-2.5 text-sm text-ink-secondary">
                         <span className="font-semibold text-ink">Check this location.</span> The
                         saved pin sits in {verdict.actual ?? 'no barangay we can identify'}, but
                         this application says {barangayName}. Click the map to move the pin, or
@@ -7884,14 +8071,11 @@ export function ApplyWizard() {
                     )
                   })()}
                 {/*
-                 * The pin locates the premises; it does not clear them. Said
-                 * plainly so the boundary check above is not mistaken for a
-                 * verdict on the site itself — there are no zone polygons and no
-                 * water layer here, and CPDO looks at the actual location.
+                 * "CPDO checks the actual site during processing." stood here.
+                 * It went with the rest of the step's explanatory copy
+                 * (client, 23 September 2026); CPDO's final say is now stated
+                 * once, in the zoning note under the map.
                  */}
-                <p className="bg-white px-4 pb-2.5 text-xs text-ink-muted">
-                  CPDO checks the actual site during processing.
-                </p>
               </div>
 
               {/*
@@ -7909,6 +8093,24 @@ export function ApplyWizard() {
                * fetch's state says. That is the whole reason the flag exists —
                * see where it is computed.
                */}
+              {/*
+               * The zoning answer, inline and live (client, 23 September 2026:
+               * "Zoning must not be a popup").
+               *
+               * It was a CONGRATULATIONS / SORRY dialog that opened on Next and
+               * stood between the applicant and the next step, saying the same
+               * thing whatever the ordinance said. This note reads the
+               * ordinance lookup that already rides on the insights response,
+               * so it follows the pin, the barangay and the trade as they
+               * change, and Next simply moves on. It renders nothing while the
+               * lookup is undetermined — see ZoningConformanceNote.
+               */}
+              {livePin !== null && !insights.loading && !insightsStale && (
+                <ZoningConformanceNote
+                  zoning={insights.data?.zoning ?? null}
+                  barangayName={barangayName ?? null}
+                />
+              )}
               {livePin !== null && (
                 <LocationInsightsPanel
                   insights={insights.data}
@@ -7963,9 +8165,56 @@ export function ApplyWizard() {
                       />
                     </label>
                     {fieldErrors.street && (
-                      <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.street}</p>
+                      <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.street}</p>
                     )}
                   </div>
+                </div>
+              </div>
+              {/*
+               * Block, Lot and the lot's area (client, 23 September 2026).
+               * Optional: a market stall or a unit on a numbered street has no
+               * block or lot. "Lot Area" rather than "Area" because Business
+               * Operation asks the FLOOR area the fee engine assesses, and one
+               * word for two quantities is how the same question gets asked
+               * twice by mistake.
+               */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="block">
+                  <FieldLabel>Block</FieldLabel>
+                  <input
+                    value={form.block}
+                    onChange={(e) => update('block', e.target.value)}
+                    maxLength={40}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <FieldLabel>Lot</FieldLabel>
+                  <input
+                    value={form.lot}
+                    onChange={(e) => update('lot', e.target.value)}
+                    maxLength={40}
+                    className={inputCls}
+                  />
+                </label>
+                <div>
+                  <label className="block">
+                    <FieldLabel>Lot Area (sq. m.)</FieldLabel>
+                    <input
+                      inputMode="decimal"
+                      value={form.lot_area_sqm}
+                      onChange={(e) => update('lot_area_sqm', e.target.value)}
+                      onBlur={() => touch('lot_area_sqm')}
+                      className={`${inputCls} tnum`}
+                      aria-invalid={Boolean(fieldErrors.lot_area_sqm)}
+                      aria-describedby={fieldErrors.lot_area_sqm ? 'lot-area-error' : undefined}
+                    />
+                  </label>
+                  {fieldErrors.lot_area_sqm && (
+                    <p id="lot-area-error" className="mt-1 text-sm font-medium text-s-red">
+                      {fieldErrors.lot_area_sqm}
+                    </p>
+                  )}
                 </div>
               </div>
               <div>
@@ -8066,7 +8315,7 @@ export function ApplyWizard() {
                   </select>
                 </label>
                 {fieldErrors.barangay_id && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
+                  <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
 
@@ -8110,7 +8359,7 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_name && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       {fieldErrors.emergency_contact_name}
                     </p>
                   )}
@@ -8129,7 +8378,7 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_number && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       {fieldErrors.emergency_contact_number}
                     </p>
                   )}
@@ -8305,12 +8554,14 @@ export function ApplyWizard() {
                  * automatically — there is no stale `aria-label` to forget.
                  */}
                 {/*
-                Item 1, numbered here and not on `registrationNumberLabel` —
-                that string also builds the validation messages, which would
-                have read "Enter your 1. DTI Business Name registration
-                number."
+                Item 1, numbered through `number` and not on
+                `registrationNumberLabel` — that string also builds the
+                validation messages, which would have read "Enter your 1. DTI
+                Business Name registration number."
               */}
-                <FieldLabel required>1. {registrationNumberLabel}</FieldLabel>
+                <FieldLabel required number={fieldNo('business', 'Registration Number')}>
+                  {registrationNumberLabel}
+                </FieldLabel>
                 <input
                   value={form.registration_number}
                   onChange={(e) => update('registration_number', e.target.value)}
@@ -8454,6 +8705,8 @@ export function ApplyWizard() {
                */}
               <div>
                 <TinInput
+                  number={fieldNo('business', 'Tax Identification Number (TIN)')}
+                  required={tinRequired}
                   value={form.tin}
                   onChange={(tin) => update('tin', tin)}
                   onBlur={() => touch('tin')}
@@ -8473,7 +8726,9 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                  <FieldLabel required>3. Business Name</FieldLabel>
+                  <FieldLabel required number={fieldNo('business', 'Business Name')}>
+                    Business Name
+                  </FieldLabel>
                   <input
                     value={form.name}
                     onChange={(e) => update('name', e.target.value)}
@@ -8487,15 +8742,35 @@ export function ApplyWizard() {
                 )}
               </div>
             </div>
-            <div>
-              <label className="block">
-                <FieldLabel>4. Trade Name / Franchise</FieldLabel>
-                <input
-                  value={form.trade_name}
-                  onChange={(e) => update('trade_name', e.target.value)}
-                  className={inputCls}
-                />
-              </label>
+            {/*
+              * Half width, in the same two-column grid as every pair around it.
+              *
+              * A full-bleed row for one short answer made it the widest input
+              * on the step and broke the column rhythm between Business Name
+              * above and Telephone below. The empty second cell is the point:
+              * the eye keeps the left edge it has been following.
+              */}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <label className="block">
+                  <FieldLabel required number={fieldNo('business', 'Trade Name / Franchise')}>
+                    Trade Name / Franchise
+                  </FieldLabel>
+                  <input
+                    value={form.trade_name}
+                    onChange={(e) => update('trade_name', e.target.value)}
+                    onBlur={() => touch('trade_name')}
+                    className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.trade_name)}
+                    aria-describedby={fieldErrors.trade_name ? 'trade-name-error' : undefined}
+                  />
+                </label>
+                {fieldErrors.trade_name && (
+                  <p id="trade-name-error" className="mt-1 text-xs font-medium text-s-red">
+                    {fieldErrors.trade_name}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/*
@@ -8532,7 +8807,8 @@ export function ApplyWizard() {
                  * box answer to two names at once.
                  */}
                 <LandlineInput
-                  legend="6. Telephone (Landline)"
+                  legend="Telephone (Landline)"
+                  number={fieldNo('business', 'Telephone (Landline)')}
                   value={form.telephone}
                   onChange={(v) => update('telephone', v)}
                   onBlur={() => touch('telephone')}
@@ -8566,7 +8842,8 @@ export function ApplyWizard() {
                  * businessPayload for why the two are validated apart.
                  */}
                 <MobileNumberInput
-                  legend="7. Mobile Number"
+                  legend="Mobile Number"
+                  number={fieldNo('business', 'Mobile Number')}
                   value={form.mobile_number}
                   onChange={(v) => update('mobile_number', v)}
                   onBlur={() => touch('mobile_number')}
@@ -8603,7 +8880,9 @@ export function ApplyWizard() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="block">
-                    <FieldLabel required>8. E-mail Address</FieldLabel>
+                    <FieldLabel required number={fieldNo('business', 'E-mail Address')}>
+                      E-mail Address
+                    </FieldLabel>
                     <input
                       inputMode="email"
                       value={form.email}
@@ -8617,7 +8896,9 @@ export function ApplyWizard() {
               </div>
               <div>
                 <label className="block">
-                  <FieldLabel>9. Website Address</FieldLabel>
+                  <FieldLabel number={fieldNo('business', 'Website Address')}>
+                    Website Address
+                  </FieldLabel>
                   <input
                     inputMode="url"
                     value={form.website}
@@ -8662,7 +8943,9 @@ export function ApplyWizard() {
              * corporation, CDA for a cooperative.
              */}
             <div>
-              <FieldLabel required>10. Type of Registration</FieldLabel>
+              <FieldLabel required number={fieldNo('business', 'Type of Registration')}>
+                Type of Registration
+              </FieldLabel>
               <p className="mb-2 text-xs text-ink-secondary">
                 Which agency you registered with. It narrows the label on item 1 above to that next.
               </p>
@@ -8721,101 +9004,106 @@ export function ApplyWizard() {
               plural on both sides so the second needs no migration when it is
               asked for.
             */}
-            <div>
-              {/*
+            {ownerNameAsked(form.registration_type) && (
+              <div>
+                {/*
                 Numbered on the GROUP, not on each of the five boxes. Item 11
                 is one question on the paper — a row with Surname, Given Name,
                 Middle Name, Suffix and Gender across it — and numbering each
                 box would print "11." five times for one item. Same reasoning
                 as the employee counts on Business Operation.
 
-                11 or 12 depending on the answer to item 10: the paper routes a
-                sole proprietor to 11 and a corporation, partnership or
-                cooperative to 12, and this is the same question either way.
+                Only item 11 now. Item 12 — "Name on the Registration" for a
+                corporation, partnership or cooperative — was this same block
+                under another number; it is not asked any more, because the
+                President / OIC below is how the paper names an entity (client,
+                23 September 2026). See `ownerNameAsked`.
               */}
-              <p className="text-sm font-bold text-ink">
-                {form.registration_type === 'sole_proprietorship'
-                  ? '11. Sole Proprietor'
-                  : '12. Name on the Registration'}
-              </p>
-              <p className="mb-2 text-xs text-ink-secondary">
-                Filled in from your account. Change it if the business is registered in another
-                name.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <FieldLabel required>Surname</FieldLabel>
-                  <input
-                    value={form.owner_surname}
-                    onChange={(e) => update('owner_surname', e.target.value)}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <FieldLabel required>Given Name</FieldLabel>
-                  <input
-                    value={form.owner_given_name}
-                    onChange={(e) => update('owner_given_name', e.target.value)}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <FieldLabel>Middle Name</FieldLabel>
-                  <input
-                    value={form.owner_middle_name}
-                    onChange={(e) => update('owner_middle_name', e.target.value)}
-                    className={inputCls}
-                  />
-                </label>
-                <label className="block">
-                  <FieldLabel>Suffix</FieldLabel>
-                  <input
-                    value={form.owner_suffix}
-                    onChange={(e) => update('owner_suffix', e.target.value)}
-                    placeholder="Jr., III"
-                    className={inputCls}
-                  />
-                </label>
-              </div>
-              <div className="mt-4">
-                <FieldLabel required>Gender</FieldLabel>
-                {/*
+                {/* Styled as FieldLabel's number, so the step-order test and a
+                    sighted reader both see it as item 11 and not as prose. */}
+                <p className="text-sm font-bold text-ink">
+                  <span className="tnum text-ink-muted">{fieldNo('business', 'Sole Proprietor')}. </span>
+                  Sole Proprietor
+                </p>
+                <p className="mb-2 text-xs text-ink-secondary">
+                  Filled in from your account. Change it if the business is registered in another
+                  name.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="block">
+                    <FieldLabel required>Surname</FieldLabel>
+                    <input
+                      value={form.owner_surname}
+                      onChange={(e) => update('owner_surname', e.target.value)}
+                      className={inputCls}
+                    />
+                  </label>
+                  <label className="block">
+                    <FieldLabel required>Given Name</FieldLabel>
+                    <input
+                      value={form.owner_given_name}
+                      onChange={(e) => update('owner_given_name', e.target.value)}
+                      className={inputCls}
+                    />
+                  </label>
+                  <label className="block">
+                    <FieldLabel>Middle Name</FieldLabel>
+                    <input
+                      value={form.owner_middle_name}
+                      onChange={(e) => update('owner_middle_name', e.target.value)}
+                      className={inputCls}
+                    />
+                  </label>
+                  <label className="block">
+                    <FieldLabel>Suffix</FieldLabel>
+                    <input
+                      value={form.owner_suffix}
+                      onChange={(e) => update('owner_suffix', e.target.value)}
+                      placeholder="Jr., III"
+                      className={inputCls}
+                    />
+                  </label>
+                </div>
+                <div className="mt-4">
+                  <FieldLabel required>Gender</FieldLabel>
+                  {/*
                   Two options, as the paper's M / F boxes print. A radiogroup
                   rather than toggles, so a screen reader announces that picking
                   one unpicks the other — the same treatment Type of Registration
                   and Economic Organization get above.
                 */}
-                <div role="radiogroup" aria-label="Gender" className="flex flex-wrap gap-2">
-                  {[
-                    { value: 'M', label: 'Male' },
-                    { value: 'F', label: 'Female' },
-                  ].map((opt) => {
-                    const selected = form.owner_gender === opt.value
-                    return (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        onClick={() => update('owner_gender', selected ? '' : opt.value)}
-                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                          selected
-                            ? 'border-royal bg-input text-ink'
-                            : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                        }`}
-                      >
-                        <span
-                          className={`h-3.5 w-3.5 rounded-full border-2 ${
-                            selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                  <div role="radiogroup" aria-label="Gender" className="flex flex-wrap gap-2">
+                    {[
+                      { value: 'M', label: 'Male' },
+                      { value: 'F', label: 'Female' },
+                    ].map((opt) => {
+                      const selected = form.owner_gender === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          onClick={() => update('owner_gender', selected ? '' : opt.value)}
+                          className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                            selected
+                              ? 'border-royal bg-input text-ink'
+                              : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
                           }`}
-                        />
-                        {opt.label}
-                      </button>
-                    )
-                  })}
+                        >
+                          <span
+                            className={`h-3.5 w-3.5 rounded-full border-2 ${
+                              selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                            }`}
+                          />
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
 
             {/*
              * ── Items 13, 14, 15 — asked of every structure ────────────────
@@ -8846,8 +9134,11 @@ export function ApplyWizard() {
                   </p>
                   <div>
                     <label className="block">
-                      <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                        13. Name of President / Officer in Charge
+                      <FieldLabel
+                        required={hasPresidentOrOfficer(form.registration_type)}
+                        number={fieldNo('business', 'Name of President / Officer in Charge')}
+                      >
+                        Name of President / Officer in Charge
                       </FieldLabel>
                       <input
                         value={form.president_officer_name}
@@ -8868,8 +9159,11 @@ export function ApplyWizard() {
                         in a place the eye reaches after the input. On the label
                         it is read before the field it qualifies.
                       */}
-                        <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                          14. Citizenship (of President/OIC)
+                        <FieldLabel
+                        required={hasPresidentOrOfficer(form.registration_type)}
+                        number={fieldNo('business', 'Citizenship (of President/OIC)')}
+                      >
+                          Citizenship (of President/OIC)
                         </FieldLabel>
                         <input
                           value={form.citizenship}
@@ -8881,8 +9175,11 @@ export function ApplyWizard() {
                     </div>
                     <div>
                       <label className="block">
-                        <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                          15. Capital Participation (% Filipino)
+                        <FieldLabel
+                        required={hasPresidentOrOfficer(form.registration_type)}
+                        number={fieldNo('business', 'Capital Participation (% Filipino)')}
+                      >
+                          Capital Participation (% Filipino)
                         </FieldLabel>
                         <input
                           inputMode="decimal"
@@ -10728,96 +11025,31 @@ export function ApplyWizard() {
         </ProtoModal>
       )}
 
-      {/* ── Zoning result (p30/p31) — presentational, ?zoning=deny flips it ── */}
-      {showZoning &&
-        (zoningDenied ? (
-          <ProtoModal title="SORRY." tone="red" cancelLabel="Back" onCancel={closeZoning}>
-            <p className="text-base leading-relaxed">
-              The declared use for{' '}
-              <span className="font-bold underline underline-offset-2">
-                {zoningSubject ?? 'your new business'}
-              </span>{' '}
-              appears non-conforming for{' '}
-              <span className="font-bold uppercase underline underline-offset-2">
-                {barangayName ?? 'Area Location'}
-              </span>
-              . The Zoning Office (CPDO) makes the final determination on your zoning clearance.
-            </p>
-          </ProtoModal>
-        ) : (
-          <ProtoModal
-            /*
-             * The mockup's wording (spec §5, screens 124/125). An earlier build
-             * said "Location recorded" instead, on the grounds that the system
-             * holds no zone polygons and therefore determines nothing — the
-             * client's paper overruled that, so the headline is restored.
-             *
-             * The one line kept from the cautious version is CPDO's final say.
-             * The applicant is told the use is conforming AND told who actually
-             * decides, which is the part that stops "CONGRATULATIONS!" reading
-             * as an issued clearance.
-             */
-            title="CONGRATULATIONS!"
-            tone="green"
-            cancelLabel="Back"
-            confirmLabel="Proceed to Application"
-            wide
-            onCancel={closeZoning}
-            onConfirm={() => {
-              closeZoning()
-              void advance()
-            }}
-          >
-            <p className="text-base leading-relaxed">
-              {/*
-               * "The new business for X" is the mockup's sentence and it is right
-               * for a new filing. A renewal is not a new business, so the word
-               * drops out rather than telling someone renewing a ten-year-old
-               * carinderia that it is new.
-               */}
-              {zoningSubject ? (
-                <>
-                  {isReuse ? 'The business for' : 'The new business for'}{' '}
-                  <span className="font-bold underline underline-offset-2">{zoningSubject}</span> is
-                </>
-              ) : (
-                `Your ${isReuse ? 'business' : 'new business'} is`
-              )}{' '}
-              conforming / within the allowed use for{' '}
-              <span className="font-bold uppercase underline underline-offset-2">
-                {barangayName ?? 'Area Location'}
-              </span>
-              . You may now proceed with the processing of your Business Permit Application.
-            </p>
-            {/*
-             * This CPDO line is not decoration and must not be trimmed. It is
-             * the only thing on this dialog that stops "CONGRATULATIONS!" from
-             * reading as an issued clearance — and it is now also the standing
-             * condition under which LocationInsightsPanel's removed disclaimer
-             * would have to come back. See the comment at the foot of that
-             * file before touching either.
-             */}
-            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
-              The Zoning Office (CPDO) makes the final determination on your zoning clearance during
-              processing.
-            </p>
+      {/*
+        ── The zoning result dialog (p30/p31) is gone ──────────────────────
 
-            {/*
-             * Business Location Insights used to render here, and does not any
-             * more (client instruction). Behind this modal the figures arrived
-             * after the location was chosen, which is the wrong order for
-             * decision support — they are on the map step now, visible from the
-             * moment a pin is dropped and while it can still be moved.
-             */}
-          </ProtoModal>
-        ))}
+        It opened on Next from Location & Zoning: CONGRATULATIONS, or SORRY
+        under the `?zoning=deny` debug parameter, and it said the same thing
+        whatever the ordinance said. The client asked for it inline instead
+        (23 September 2026: "Zoning must not be a popup"), so the live
+        ZoningConformanceNote under the map carries the answer and Next just
+        moves on. CPDO's final say — the line this dialog existed to keep — is
+        in that note.
+      */}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}
       {showConfirm && (
         <ProtoModal
           title="CONFIRMATION"
-          cancelLabel="Cancel"
-          confirmLabel="Proceed"
+          /*
+           * The two answers are the two things the applicant can actually do,
+           * named. "Cancel" and "Proceed" describe the dialog; these describe
+           * the filing — and the cancel side is the one that needed it, because
+           * on a question about reviewing, "Cancel" reads as "cancel my
+           * application" to somebody who has just spent an hour on it.
+           */
+          cancelLabel="Keep reviewing"
+          confirmLabel="Yes, submit"
           confirmDisabled={saving}
           onCancel={() => setShowConfirm(false)}
           onConfirm={() => {
@@ -10826,43 +11058,36 @@ export function ApplyWizard() {
           }}
         >
           {/*
-           * Back to naming one action, because the press takes one. It named a
-           * payment method while it also charged; a confirmation that
-           * over-describes what it confirms is as misleading as one that
-           * under-describes it, and this one would have promised a debit that
-           * the API now refuses at this stage.
-           */}
-          <p className="pt-4 text-center text-lg">Submit this application to BPLO for approval?</p>
-          {/*
-            ── What the press costs, said before it is pressed ────────────────
+            * Checklist item 14 — "a modal stating if the applicant is already
+            * done reviewing his/her information".
             *
-            * Requested by the client, 16 September 2026, alongside the editable
-            * review: the modal confirmed an action without saying that the
-            * action is one-way.
+            * It has twice been "Submit this application to BPLO for approval?",
+            * a question about the NEXT step and one the Submit button has
+            * already answered. The client asked for a question about the step
+            * just finished, and the difference is the point of having the
+            * dialog at all: the last chance to go back is worth nothing if the
+            * prompt does not mention going back.
             *
-            * Written for somebody filing their own permit, not for a lawyer.
-            * Short sentences, no "hereby" and no "irrevocable"; "you will not
-            * be able to change your answers yourself" rather than "submission
-            * is final", because final is vague about WHAT ends — and what ends
-            * is self-service editing, not the application. BPLO can still
-            * return it, and saying so is what keeps the warning honest instead
-            * of frightening.
+            * What the press costs is said under it, because the client also
+            * asked (16 September 2026) that the modal say the action is
+            * one-way. Plain words for somebody filing their own permit — no
+            * "hereby", no "irrevocable" — and "you cannot change it yourself"
+            * rather than "submission is final", because what ends is
+            * self-service editing, not the application.
             *
-            * It names the way out, too. A warning that only closes a door
-            * makes people abandon the form; this one points at the door that
-            * stays open.
+            * And it names the door that stays open: BPLO can return the filing
+            * with a note. A warning that only closes a door makes people
+            * abandon the form; this one is honest about both. It names no
+            * payment, which the API refuses at this stage.
             */}
-          <div className="mb-2 rounded-lg border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm text-amber-900">
-            <p className="font-bold">Please check your answers first.</p>
-            <p className="mt-1">
-              Once you submit, you will not be able to change your answers yourself. If BPLO needs a
-              correction, they will return the application to you with a note saying what to fix.
-            </p>
-            <p className="mt-2">
-              Press <span className="font-semibold">Cancel</span> if you would like to look over
-              your application again.
-            </p>
-          </div>
+          <p className="py-4 text-center text-lg">Have you finished reviewing your information?</p>
+          <p className="-mt-2 pb-2 text-center text-sm text-ink-secondary">
+            Once submitted, BPLO reviews this application and you cannot change it yourself.
+          </p>
+          <p className="pb-4 text-center text-sm text-ink-secondary">
+            If BPLO needs a correction, they will return the application to you with a note saying
+            what to fix.
+          </p>
         </ProtoModal>
       )}
 

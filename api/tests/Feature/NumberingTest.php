@@ -61,6 +61,7 @@ it('creates a business through the API after a soft deletion', function () {
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', [
             'name' => 'Post Deletion Store',
+            'trade_name' => 'Test Trade Name',
             'registration_type' => 'sole_proprietorship',
             'registration_number' => 'DTI-2026-7788',
             'tin' => '123-456-789-000',

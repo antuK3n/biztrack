@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { MailIcon, SearchIcon, XIcon } from '../components/icons'
 import { MessageThreadView } from '../components/MessagesPanel'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
 import { PageTitle, SortFilter } from '../components/ui/Proto'
 import { formatDate } from '../lib/format'
-import { messages as messagesApi } from '../lib/resources'
+import { messages as messagesApi, requests } from '../lib/resources'
 import { useAsync } from '../lib/useAsync'
 import { useAuth } from '../stores/auth'
 import type { MessageThreadSummary } from '../lib/types'
+import { RequestsPage } from './RequestsPage'
 
 /*
  * Messages (revised GUI screens 8-10 applicant, 101-102 staff): the dedicated
@@ -36,6 +37,69 @@ import type { MessageThreadSummary } from '../lib/types'
  * not in offices, so the filing is the right thing to scan for and the office
  * is the right thing to choose once you are inside it.
  */
+
+/*
+ * ── Requirements are a tab of Messages, for the owner ────────────────────────
+ *
+ * The client: "Other Requirements — remove it from the homepage; merge it into
+ * Messages." An office asking a business owner for a document IS that office
+ * writing to them, and the owner had two places to watch for it — a home tile
+ * and a Messages rail entry — with nothing on either saying the other might
+ * hold something.
+ *
+ * So an owner's Messages has two tabs: Conversations (the inbox below) and
+ * Requirements (the Other Requirements list and letter, unchanged — the same
+ * component the officers use, with its respond and upload flow). The tab is in
+ * the address, ?tab=requirements, so /requests can redirect straight to it and
+ * a notification about a requirement lands on the right half.
+ *
+ * Owners only, decided by `request.respond`: the one permission that answers
+ * a requirement, which no office role holds. Officers CREATE requirements and
+ * keep their own Other Requirements rail entry for that; a Requirements tab in
+ * their inbox would be a second door to the same register.
+ */
+type Tab = 'conversations' | 'requirements'
+
+/**
+ * The two tabs, as links: each half has its own address, and Back returns to
+ * the half you came from. `aria-current` marks the one on screen, and the
+ * waiting count is text inside the link — never a coloured dot alone.
+ */
+function MessagesTabs({ tab, waiting }: { tab: Tab; waiting: number }) {
+  const cls = (active: boolean) =>
+    `inline-flex items-center gap-2 border-b-2 px-1 pb-2 text-sm font-semibold transition-colors ${
+      active ? 'border-royal text-royal' : 'border-transparent text-ink-secondary hover:text-ink'
+    }`
+  return (
+    <nav aria-label="Messages sections" className="-mt-3 mb-5 flex gap-6 border-b border-line">
+      <Link
+        to="/messages"
+        aria-current={tab === 'conversations' ? 'page' : undefined}
+        className={cls(tab === 'conversations')}
+      >
+        Conversations
+      </Link>
+      <Link
+        to="/messages?tab=requirements"
+        aria-current={tab === 'requirements' ? 'page' : undefined}
+        className={cls(tab === 'requirements')}
+      >
+        Requirements
+        {/*
+          Only what the OWNER owes — `awaits_applicant`, the API's own
+          judgement of whose move it is. A count of requirements sitting with
+          the office would be a number the reader cannot bring down, and a
+          badge like that teaches people to ignore it.
+        */}
+        {waiting > 0 && (
+          <span className="tnum rounded-full bg-s-orange px-2 py-0.5 text-[11px] font-bold text-white">
+            {waiting} waiting on you
+          </span>
+        )}
+      </Link>
+    </nav>
+  )
+}
 
 type Sort = 'recent' | 'oldest'
 
@@ -273,6 +337,43 @@ function ThreadCard({
 
 export function MessagesPage() {
   const user = useAuth((s) => s.user)
+  const [params] = useSearchParams()
+  // Owners answer requirements; see the note on `Tab` above.
+  const answersRequirements = Boolean(user?.permissions.includes('request.respond'))
+  const tab: Tab =
+    answersRequirements && params.get('tab') === 'requirements' ? 'requirements' : 'conversations'
+
+  /*
+   * How many requirements are waiting on the owner, for the tab's label.
+   * One page of 100 is the same bound the home tile used when it carried this
+   * count; an owner with more than a hundred open requirements has a problem
+   * a badge was never going to describe. Re-asked when a response is sent.
+   */
+  const { data: openRequests, reload: recount } = useAsync(
+    () => (answersRequirements ? requests.list({ per_page: 100 }) : Promise.resolve([])),
+    [answersRequirements],
+  )
+  const waiting = (openRequests ?? []).filter((r) => r.awaits_applicant).length
+  const tabs = answersRequirements ? <MessagesTabs tab={tab} waiting={waiting} /> : null
+
+  if (tab === 'requirements') {
+    return (
+      <RequestsPage
+        embedded={{
+          title: 'Messages',
+          above: tabs,
+          backLabel: 'All requirements',
+          onChanged: recount,
+        }}
+      />
+    )
+  }
+  return <Conversations tabs={tabs} />
+}
+
+/** The inbox: conversation list on the left, the open thread on the right. */
+function Conversations({ tabs }: { tabs: ReactNode }) {
+  const user = useAuth((s) => s.user)
   const readerIsOfficer = Boolean(user?.permissions.includes('application.view_all'))
   // Their own office, so the cards can stop telling an office its own name.
   const readerOffice = user?.department?.name ?? null
@@ -437,6 +538,8 @@ export function MessagesPage() {
       >
         Messages
       </PageTitle>
+
+      {tabs}
 
       <label className="relative mb-5 block">
         <span className="sr-only">Search messages</span>

@@ -21,6 +21,7 @@ function ownerApplicationId(): int
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Thread Test Bakery',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-49001',
         'tin' => '123-456-789-000',
@@ -52,6 +53,7 @@ function requirementFilingForInbox(): int
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => "Inbox Filter Store {$n}",
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => "DTI-4930{$n}",
         'tin' => '123-456-789-000',

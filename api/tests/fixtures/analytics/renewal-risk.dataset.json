@@ -84,7 +84,7 @@
             "rule": "progress",
             "label": "Renewal progress",
             "max": 25,
-            "description": "All 25 points if the permit expires within 30 days and no renewal has been filed \u2014 or if one was filed and rejected, so it still has to be done again. Nothing if the renewal is not due yet, and nothing once it has been approved."
+            "description": "All 25 points if the permit expires within 30 days and no renewal has been filed \u2014 or if one was filed and disapproved, so it still has to be done again. Nothing if the renewal is not due yet, and nothing once it has been approved."
         },
         {
             "rule": "punctuality",

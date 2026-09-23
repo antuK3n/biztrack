@@ -145,7 +145,7 @@ final class RenewalRiskScoring
                 'max' => self::WEIGHTS['progress'],
                 'description' => 'All '.self::WEIGHTS['progress'].' points if the permit expires within '
                     .self::RENEWAL_DUE_WITHIN_DAYS.' days and no renewal has been filed — or if one was filed '
-                    .'and rejected, so it still has to be done again. Nothing if the renewal is not due yet, '
+                    .'and disapproved, so it still has to be done again. Nothing if the renewal is not due yet, '
                     .'and nothing once it has been approved.',
             ],
             [
@@ -205,7 +205,7 @@ final class RenewalRiskScoring
             'in_progress' => 'Renewal filed and in the queue',
             'draft' => 'Renewal started but never submitted',
             'returned' => 'Renewal returned to the applicant',
-            'rejected' => 'Renewal rejected — must be refiled',
+            'rejected' => 'Renewal disapproved — must be refiled',
             default => 'No renewal filed yet',
         });
     }

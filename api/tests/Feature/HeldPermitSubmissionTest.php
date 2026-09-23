@@ -28,6 +28,7 @@ function heldPermitDraft(string $name = 'Held Permit Store'): int
 
     $businessId = test()->postJson('/api/v1/businesses', [
         'name' => $name,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-59001',
         'tin' => '123-456-789-000',

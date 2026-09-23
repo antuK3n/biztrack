@@ -776,12 +776,12 @@ test('the Edit-mode banner names the category as one of the fields it turns on',
   ).toContainText('the RA 11032 category')
 })
 
-test('every outstanding visit carries its own named Approve and Reject', async ({ page }) => {
+test('every outstanding visit carries its own named Approve and Disapprove', async ({ page }) => {
   const assignmentId = await openForInspectionFiling(page)
   test.skip(assignmentId === null, 'no filing on this office\'s queue carries a scheduled visit')
 
   const approve = page.getByRole('button', { name: /^Approve the .+ inspection$/ })
-  const reject = page.getByRole('button', { name: /^Reject the .+ inspection with remarks$/ })
+  const reject = page.getByRole('button', { name: /^Disapprove the .+ inspection with remarks$/ })
 
   const approveCount = await approve.count()
   test.skip(approveCount === 0, 'every visit on this filing has already been conducted')
@@ -841,11 +841,11 @@ test('rejecting a visit asks for remarks and will not proceed without them', asy
   const assignmentId = await openForInspectionFiling(page)
   test.skip(assignmentId === null, 'no filing on this office\'s queue carries a scheduled visit')
 
-  const reject = page.getByRole('button', { name: /^Reject the .+ inspection with remarks$/ })
+  const reject = page.getByRole('button', { name: /^Disapprove the .+ inspection with remarks$/ })
   test.skip((await reject.count()) === 0, 'every visit on this filing has already been conducted')
 
   await reject.first().click()
-  await expect(page.getByText('REMARKS FOR REJECTION')).toBeVisible()
+  await expect(page.getByText('REMARKS FOR DISAPPROVAL')).toBeVisible()
 
   /*
    * A rejection with no finding leaves the owner a failed visit and no
@@ -859,13 +859,13 @@ test('rejecting a visit asks for remarks and will not proceed without them', asy
 
   await proceed.click()
   await expect(
-    page.getByText('REMARKS FOR REJECTION'),
+    page.getByText('REMARKS FOR DISAPPROVAL'),
     'an empty rejection is refused rather than sent',
   ).toBeVisible()
 
   // And it is dismissable without touching the record.
   await page.getByRole('button', { name: 'Cancel' }).click()
-  await expect(page.getByText('REMARKS FOR REJECTION')).toHaveCount(0)
+  await expect(page.getByText('REMARKS FOR DISAPPROVAL')).toHaveCount(0)
 })
 
 test('an outstanding visit can still be moved to another date', async ({ page }) => {
@@ -1571,4 +1571,72 @@ test('the Tax Order of Payment is a second bar under the application, opening on
 
   // And the assessment really is behind it, not just a state flip.
   await expect(page.getByText('Tax Order of Payment', { exact: true })).toBeVisible()
+})
+
+/*
+ * The clear-copy preset (client, 23 September 2026): when a return is about an
+ * uploaded document, the composer offers "Reupload a clear copy of <name>."
+ * for a blurry or unreadable file. It FILLS the reason box and leaves it
+ * editable — nothing is sent until the officer confirms, and this test never
+ * does, so it leaves the register as it found it.
+ *
+ * The checklist row is injected into the real assignment payload rather than
+ * hunted for in the seed. Whether a zoning sheet on this register carries an
+ * upload row today is a fact about the data; what is under test is what the
+ * composer does once one exists.
+ */
+test('a return about an uploaded document offers the clear-copy reason, and it stays editable', async ({
+  page,
+}) => {
+  const DOC = 'Vicinity Map or Sketch'
+  await page.route(/\/api\/v1\/assignments\/\d+(\?.*)?$/, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    const body = await response.json()
+    const dept: string | undefined = body?.data?.department?.code
+    const forms: { department_code?: string; requirements?: unknown[] | null }[] =
+      body?.data?.application?.office_forms ?? []
+    const own = forms.find((f) => f.department_code === dept)
+    if (own) {
+      own.requirements = [
+        ...(own.requirements ?? []),
+        {
+          key: 'E2E_SKETCH',
+          code: 'E2E_SKETCH',
+          label: DOC,
+          note: '',
+          source: 'upload',
+          satisfied: true,
+          document: { id: 0, filename: 'sketch.jpg', size_bytes: null, uploaded_at: null },
+        },
+      ]
+    }
+    await route.fulfill({ response, json: body })
+  })
+
+  const assignmentId = await openOwedReviewFiling(page)
+  test.skip(assignmentId === null, 'no filing on this office’s queue still owes it a review')
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.getByRole('button', { name: /^Return/ }).first().click()
+
+  const reason = page.getByRole('textbox', { name: /What the applicant must fix/ })
+  await expect(reason).toBeVisible()
+
+  // Not offered until the return is about a document.
+  const preset = page.getByRole('button', { name: `Use “Reupload a clear copy of ${DOC}.”` })
+  await expect(preset).toHaveCount(0)
+
+  const about = page.getByRole('combobox', { name: /What is this about/ })
+  test.skip(
+    (await about.count()) === 0,
+    'this office’s sheet is not on the filing, so the return has nothing to point at',
+  )
+  await about.selectOption({ label: DOC })
+  await preset.click()
+  await expect(reason).toHaveValue(new RegExp(`Reupload a clear copy of ${DOC}\\.$`))
+
+  // Still the officer's words to change.
+  await reason.fill(`Reupload a clear copy of ${DOC}. The north arrow is cut off.`)
+  await expect(reason).toHaveValue(`Reupload a clear copy of ${DOC}. The north arrow is cut off.`)
 })

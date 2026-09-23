@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { toApiError } from '../../lib/api'
-import { formatDateTime } from '../../lib/format'
 import { admin, assignments } from '../../lib/resources'
 import type { OicAssignment, OicCandidate } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -15,6 +14,37 @@ import {
   inputCls,
 } from '../../components/ui/Proto'
 import { UsersIcon } from '../../components/icons'
+import { DENSE_PAGE, dBtnPrimary, dFoot, dInput, dPager, dTable, dTd, dTh, dTheadRow } from './dense'
+
+/**
+ * Rows per request. 20, down from 50, when the register went compact
+ * (dense.ts, client 2026-09: "make it so every detail fits without
+ * scrolling"). Every row carries a 24px Reassign button, so a row is 33px at
+ * the least: fifty are 1,650px, which no desktop shows, and twenty-five
+ * overran a 1440×900 screen by 74px. Twenty fit with the title and pager.
+ * Paging is server-side, so the smaller page costs a click, not data.
+ */
+const PAGE_SIZE = 20
+
+/**
+ * "Sep 19, 2023, 5:26 AM" — the assignment date in one line.
+ *
+ * `formatDateTime` spells the month out, which wrapped every Assigned cell onto
+ * two lines and doubled the row. The short month says the same thing.
+ */
+const shortDateTime = new Intl.DateTimeFormat('en-PH', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+})
+
+function shortWhen(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? '—' : shortDateTime.format(d)
+}
 
 /*
  * Officer in Charge — the super admin's register of who holds what.
@@ -198,7 +228,7 @@ export function OicPage() {
     () =>
       admin.oicAssignments({
         page,
-        per_page: 50,
+        per_page: PAGE_SIZE,
         ...(office ? { department_id: Number(office) } : {}),
         ...(holder ? { holder: holder as 'assigned' | 'unassigned' } : {}),
         ...(asked ? { q: asked } : {}),
@@ -228,8 +258,9 @@ export function OicPage() {
   }
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex flex-wrap items-center gap-3">
             <input
@@ -238,7 +269,7 @@ export function OicPage() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Business or tracking ID"
-              className="w-64 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-64`}
             />
             <SortFilter
               sort={{
@@ -261,10 +292,6 @@ export function OicPage() {
         Officer in Charge
       </PageTitle>
 
-      <p role="status" className="mb-4 text-sm text-ink-muted">
-        {meta ? `Showing ${rows.length} of ${meta.total} assignments` : ' '}
-      </p>
-
       {loading && rows.length === 0 ? (
         <SkeletonList rows={5} />
       ) : error ? (
@@ -280,31 +307,40 @@ export function OicPage() {
           }
         />
       ) : (
-        <ProtoCard>
+        <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[62rem] text-left text-sm">
+            {/*
+              One line per row (compact, 2026-09). Long cells truncate with the
+              full text in `title`; the office keeps its full name in the DOM,
+              the spec reads it and a screen reader should hear it.
+            */}
+            <table className={`${dTable} min-w-[62rem]`}>
               <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  <th className="px-5 py-3">Business</th>
-                  <th className="px-5 py-3">Business No.</th>
-                  <th className="px-5 py-3">Office</th>
-                  <th className="px-5 py-3">Officer in charge</th>
-                  <th className="px-5 py-3">Assigned</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Action</th>
+                <tr className={dTheadRow}>
+                  <th className={dTh}>Business</th>
+                  <th className={dTh}>Business No.</th>
+                  <th className={dTh}>Office</th>
+                  <th className={dTh}>Officer in charge</th>
+                  <th className={dTh}>Assigned</th>
+                  <th className={dTh}>Status</th>
+                  <th className={dTh}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} className="border-t border-line align-top">
-                    <td className="px-5 py-3.5 font-semibold text-ink">{nameOf(row)}</td>
-                    <td className="tnum px-5 py-3.5 text-ink-secondary">{row.tracking_id ?? '—'}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{row.office?.name ?? '—'}</td>
-                    <td className="px-5 py-3.5">
+                  <tr key={row.id} className="border-t border-line">
+                    <td className={`${dTd} max-w-[16rem] truncate font-semibold text-ink`} title={nameOf(row)}>
+                      {nameOf(row)}
+                    </td>
+                    <td className={`${dTd} tnum whitespace-nowrap text-ink-secondary`}>{row.tracking_id ?? '—'}</td>
+                    <td className={`${dTd} max-w-[15rem] truncate text-ink-secondary`} title={row.office?.name}>
+                      {row.office?.name ?? '—'}
+                    </td>
+                    <td className={`${dTd} max-w-[18rem] truncate`} title={row.officer?.email}>
                       {row.officer ? (
                         <>
                           <span className="font-semibold text-ink">{row.officer.name}</span>
-                          <span className="block text-xs text-ink-muted">{row.officer.email}</span>
+                          <span className="ml-2 text-xs text-ink-muted">{row.officer.email}</span>
                         </>
                       ) : (
                         /*
@@ -317,19 +353,19 @@ export function OicPage() {
                         <span className="font-semibold text-s-orange-ink">Not yet taken</span>
                       )}
                     </td>
-                    <td className="px-5 py-3.5 text-ink-secondary">
-                      {row.assigned_at ? formatDateTime(row.assigned_at) : '—'}
+                    <td className={`${dTd} tnum whitespace-nowrap text-ink-secondary`}>
+                      {shortWhen(row.assigned_at)}
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className={`${dTd} whitespace-nowrap`}>
                       <StatusChip tone={row.completed_at ? 'tint-green' : 'tint-yellow'}>
                         {row.status_label ?? '—'}
                       </StatusChip>
                     </td>
-                    <td className="px-5 py-3.5">
+                    <td className={dTd}>
                       <button
                         type="button"
                         onClick={() => setReassigning(row)}
-                        className="rounded-full border border-transparent bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover"
+                        className={dBtnPrimary}
                       >
                         Reassign
                       </button>
@@ -339,33 +375,42 @@ export function OicPage() {
               </tbody>
             </table>
           </div>
+          {/*
+            Count and pager share one strip under the table, as on Officer
+            Assignment. They used to be a line above the table and a centred row
+            below it — 80px between them for two facts.
+          */}
+          <div className={dFoot}>
+            <p role="status" className="text-[13px] text-ink-muted">
+              {meta ? `Showing ${rows.length} of ${meta.total} assignments` : ' '}
+            </p>
+            {meta && meta.last_page > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  aria-disabled={page <= 1 || undefined}
+                  aria-label="Previous page"
+                  className={dPager}
+                >
+                  ‹
+                </button>
+                <span className="tnum text-xs text-ink-muted">
+                  Page {meta.current_page} of {meta.last_page}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
+                  aria-disabled={page >= meta.last_page || undefined}
+                  aria-label="Next page"
+                  className={dPager}
+                >
+                  ›
+                </button>
+              </div>
+            )}
+          </div>
         </ProtoCard>
-      )}
-
-      {meta && meta.last_page > 1 && (
-        <div className="mt-5 flex items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            aria-disabled={page <= 1 || undefined}
-            aria-label="Previous page"
-            className="rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-          >
-            Previous
-          </button>
-          <span className="tnum text-sm text-ink-muted">
-            Page {meta.current_page} of {meta.last_page}
-          </span>
-          <button
-            type="button"
-            onClick={() => setPage((p) => Math.min(meta.last_page, p + 1))}
-            aria-disabled={page >= meta.last_page || undefined}
-            aria-label="Next page"
-            className="rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
-          >
-            Next
-          </button>
-        </div>
       )}
 
       {reassigning && (

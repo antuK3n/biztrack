@@ -27,6 +27,7 @@ import {
   useDialogKeyboard,
 } from '../../components/ui/Proto'
 import { UsersIcon } from '../../components/icons'
+import { DENSE_PAGE, dBtn, dFoot, dInput, dPager, dTable, dTd, dTh, dTheadRow, dToolbarBtn, dToolbarBtnPrimary } from './dense'
 
 /*
  * Officer Assignment (PDF p93–98) — the super admin's Manage Officer-in-Charge
@@ -57,8 +58,14 @@ import { UsersIcon } from '../../components/icons'
  *     role — the thing the screen is named after — was not shown at all.
  */
 
-/** Rows per request. Server-side now; the browser used to hold the directory. */
-const PAGE_SIZE = 10
+/**
+ * Rows per request. Server-side now; the browser used to hold the directory.
+ *
+ * 20, up from 10, once the table went compact (dense.ts): at 33px a row, twenty
+ * fit a 1440×900 screen with the header and pager, and the whole staff roster
+ * (19 at the time) then reads as one page instead of two.
+ */
+const PAGE_SIZE = 20
 
 function fullName(u: AdminUser): string {
   return [u.first_name, u.last_name].filter(Boolean).join(' ') + (u.suffix ? ` ${u.suffix}` : '')
@@ -1317,24 +1324,99 @@ export function UsersPage() {
   const filtersApplied = Boolean(query || role || office || active !== 'all')
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            {/*
+              The three filters moved up into the title row (client, 2026-09:
+              "every detail fits without scrolling"). They were a row of their
+              own with captions above, which cost 70px of height a compact
+              table can spend on two more officers. DOM order is unchanged —
+              office, role, status — which the filter spec relies on.
+            */}
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-ink-muted">Office</span>
+              <select
+                className={`${dInput} w-44`}
+                value={office}
+                onChange={(e) => {
+                  setOffice(e.target.value)
+                  setPage(1)
+                }}
+              >
+                <option value="">All offices</option>
+                {(departments ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} — {d.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-ink-muted">Role</span>
+              <select
+                className={`${dInput} w-44`}
+                value={role}
+                onChange={(e) => {
+                  setRole(e.target.value)
+                  setPage(1)
+                }}
+              >
+                <option value="">All roles</option>
+                {roleList.map((r) => (
+                  <option key={r.name} value={r.name}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold text-ink-muted">Status</span>
+              <select
+                className={`${dInput} w-44`}
+                value={active}
+                onChange={(e) => {
+                  setActive(e.target.value as ActiveFilter)
+                  setPage(1)
+                }}
+              >
+                <option value="all">Active and inactive</option>
+                <option value="active">Active only</option>
+                <option value="inactive">Inactive only</option>
+              </select>
+            </label>
+            {filtersApplied && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('')
+                  setQuery('')
+                  setOffice('')
+                  setRole('')
+                  setActive('all')
+                  setPage(1)
+                }}
+                className={dToolbarBtn}
+              >
+                Clear filters
+              </button>
+            )}
             <input
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name or email…"
               aria-label="Search officers"
-              className="w-52 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-48`}
             />
             <button
               type="button"
               onClick={() => setModal({ kind: 'create' })}
-              // Transparent border so it stands exactly as tall as the bordered
-              // search field it shares this header row with.
-              className="rounded-full border border-transparent bg-royal px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+              // dToolbarBtnPrimary is h-8 with a transparent border, so it stands
+              // exactly as tall as the bordered search field it shares the row with.
+              className={dToolbarBtnPrimary}
             >
               Add officer
             </button>
@@ -1347,81 +1429,12 @@ export function UsersPage() {
       {/*
         Filters as real controls rather than the decorative Sort/Filter pair
         that used to sit here: 81 staff across seven offices is not a list you
-        scroll to find the Fire inspector in.
+        scroll to find the Fire inspector in. They sit in the title row above.
       */}
-      <div className="mb-5 flex flex-wrap items-end gap-3">
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Office</span>
-          <select
-            className={`${inputCls} w-52`}
-            value={office}
-            onChange={(e) => {
-              setOffice(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="">All offices</option>
-            {(departments ?? []).map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.code} — {d.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Role</span>
-          <select
-            className={`${inputCls} w-52`}
-            value={role}
-            onChange={(e) => {
-              setRole(e.target.value)
-              setPage(1)
-            }}
-          >
-            <option value="">All roles</option>
-            {roleList.map((r) => (
-              <option key={r.name} value={r.name}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Status</span>
-          <select
-            className={`${inputCls} w-40`}
-            value={active}
-            onChange={(e) => {
-              setActive(e.target.value as ActiveFilter)
-              setPage(1)
-            }}
-          >
-            <option value="all">Active and inactive</option>
-            <option value="active">Active only</option>
-            <option value="inactive">Inactive only</option>
-          </select>
-        </label>
-        {filtersApplied && (
-          <button
-            type="button"
-            onClick={() => {
-              setSearch('')
-              setQuery('')
-              setOffice('')
-              setRole('')
-              setActive('all')
-              setPage(1)
-            }}
-            className="rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold text-ink-secondary hover:bg-canvas"
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
 
       {banner && (
         <p
-          className={`mb-4 rounded-lg px-4 py-3 text-sm font-medium ${
+          className={`mb-2 rounded-lg px-3 py-1.5 text-[13px] font-medium ${
             banner.tone === 'ok' ? 'bg-s-green-tint text-s-green' : 'bg-s-red-tint text-s-red'
           }`}
           role="status"
@@ -1447,42 +1460,45 @@ export function UsersPage() {
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[52rem] text-left text-sm">
+            <table className={`${dTable} min-w-[52rem]`}>
               <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  <th className="px-5 py-3">Officer</th>
-                  <th className="px-5 py-3">Role</th>
-                  <th className="px-5 py-3">Office</th>
-                  <th className="px-5 py-3">Status</th>
-                  <th className="px-5 py-3">Actions</th>
+                <tr className={dTheadRow}>
+                  <th className={dTh}>Officer</th>
+                  <th className={dTh}>Role</th>
+                  <th className={dTh}>Office</th>
+                  <th className={dTh}>Status</th>
+                  <th className={dTh}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((user) => (
                   <tr key={user.id} className="border-t border-line">
-                    <td className="px-5 py-3.5">
+                    <td className={dTd}>
+                      {/*
+                        Name and email on one line, and no initials avatar: the
+                        avatar repeated the name in two letters and the stacked
+                        email doubled every row's height (compact, 2026-09). The
+                        avatar still heads the details and edit dialogs.
+                      */}
                       <button
                         type="button"
                         onClick={() => setModal({ kind: 'details', user })}
-                        className="flex items-center gap-3 text-left hover:underline"
+                        className="min-h-6 text-left hover:underline"
                       >
-                        <Avatar user={user} />
-                        <span className="min-w-0">
-                          <span className="block font-bold text-ink">{fullName(user)}</span>
-                          <span className="block truncate text-xs text-ink-muted">{user.email}</span>
-                        </span>
+                        <span className="font-bold text-ink">{fullName(user)}</span>
+                        <span className="ml-2 text-xs text-ink-muted">{user.email}</span>
                       </button>
                     </td>
                     {/* The thing this screen is named after, and it was not shown. */}
-                    <td className="px-5 py-3.5 text-ink-secondary">{roleLabel(user, roleList)}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{user.department?.code ?? '—'}</td>
-                    <td className="px-5 py-3.5">
+                    <td className={`${dTd} text-ink-secondary`}>{roleLabel(user, roleList)}</td>
+                    <td className={`${dTd} text-ink-secondary`}>{user.department?.code ?? '—'}</td>
+                    <td className={dTd}>
                       <StatusChip tone={user.is_active ? 'tint-green' : 'tint-gray'}>
                         {user.is_active ? 'Active' : 'Inactive'}
                       </StatusChip>
                     </td>
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
+                    <td className={dTd}>
+                      <div className="flex items-center gap-1.5">
                         {/*
                           * Not on an account with NO OFFICE.
                           *
@@ -1507,7 +1523,7 @@ export function UsersPage() {
                             // Transparent border, not no border: the outlined
                             // buttons beside it carry a 1px one, so without this
                             // the filled button stands 2px shorter than its row.
-                            className="rounded-full border border-transparent bg-royal-deep px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
+                            className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded-full border border-transparent bg-royal-deep px-2.5 text-xs font-semibold text-white hover:brightness-110"
                           >
                             Reassign
                           </button>
@@ -1515,7 +1531,7 @@ export function UsersPage() {
                         <button
                           type="button"
                           onClick={() => setModal({ kind: 'edit', user })}
-                          className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas"
+                          className={dBtn}
                         >
                           Edit
                         </button>
@@ -1536,7 +1552,7 @@ export function UsersPage() {
                               ? 'The only super admin cannot be deactivated — no other account can manage accounts.'
                               : undefined
                           }
-                          className="rounded-full border border-line bg-white px-4 py-1.5 text-xs font-semibold text-ink-secondary hover:bg-canvas disabled:opacity-60"
+                          className={`${dBtn} disabled:opacity-60`}
                         >
                           {user.is_active ? 'Deactivate' : 'Activate'}
                         </button>
@@ -1548,8 +1564,8 @@ export function UsersPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
-            <p className="text-sm text-ink-muted">
+          <div className={dFoot}>
+            <p className="text-[13px] text-ink-muted">
               Showing {rows.length.toLocaleString()} of {total.toLocaleString()} accounts
               {filtersApplied && ' matching these filters'}
             </p>
@@ -1566,7 +1582,7 @@ export function UsersPage() {
                  */
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-disabled={page <= 1 || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ‹
               </button>
@@ -1578,7 +1594,7 @@ export function UsersPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
                 aria-disabled={page >= lastPage || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ›
               </button>

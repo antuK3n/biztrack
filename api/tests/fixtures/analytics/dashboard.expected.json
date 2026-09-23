@@ -47,7 +47,7 @@
       },
       {
         "outcome": "rejected",
-        "label": "Rejected",
+        "label": "Disapproved",
         "count": 2,
         "decisioned": true
       },

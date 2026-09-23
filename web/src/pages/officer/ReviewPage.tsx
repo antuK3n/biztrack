@@ -410,13 +410,41 @@ function RemarkBubble({ author, remark }: { author: string; remark: string }) {
   )
 }
 
+/**
+ * One thing a return can be about: a checklist upload, a clearance certificate,
+ * or one of the office's own answers. `document` marks the first two, which are
+ * files — the only targets the clear-copy preset below makes sense for.
+ */
+type ReturnTarget = { value: string; label: string; document?: boolean }
+
+/**
+ * The preset reason for an unreadable upload, on the client's instruction of
+ * 23 September 2026: officers were typing the same sentence for every blurry
+ * scan. It fills the box rather than sending, so the officer can still change
+ * it — a preset that went out untouched would be the system's words, not theirs.
+ */
+function clearCopyPreset(documentName: string): string {
+  return `Reupload a clear copy of ${documentName}.`
+}
+
+/**
+ * Adds the preset to what is already in the box instead of replacing it. The
+ * box can open seeded with Evaluator Remarks (SEP-6), and a preset that wiped
+ * those would throw away words the officer wrote.
+ */
+function withPreset(text: string, preset: string): string {
+  const current = text.trim()
+  if (current.includes(preset)) return text
+  return current ? `${current}\n${preset}` : preset
+}
+
 /** What each decision does, said where it is being made rather than after. */
 const REMARK_COPY = {
   reject: {
-    heading: 'Reject this application',
-    label: 'Reason for rejection',
+    heading: 'Disapprove this application',
+    label: 'Reason for disapproval',
     help: 'This ends the application for every office. The applicant sees this reason on their Track page, so say what was wrong.',
-    confirm: 'Reject application',
+    confirm: 'Disapprove application',
     confirmCls: 'bg-s-red hover:brightness-110',
   },
   return: {
@@ -481,7 +509,7 @@ function RemarkPopup({
    * Empty on the reject composer and on sheets with nothing to point at, in
    * which case the control is not rendered at all.
    */
-  targets: { value: string; label: string }[]
+  targets: ReturnTarget[]
   submitting: boolean
   error: string | null
   onCancel: () => void
@@ -491,6 +519,8 @@ function RemarkPopup({
   const [target, setTarget] = useState('')
   const copy = REMARK_COPY[action]
   const empty = !text.trim()
+  const picked = targets.find((t) => t.value === target)
+  const preset = picked?.document ? clearCopyPreset(picked.label) : null
   return (
     <div className="rounded-xl bg-white p-4 shadow-overlay">
       <div className="flex items-center gap-2.5">
@@ -532,6 +562,20 @@ function RemarkPopup({
             does not stop them resubmitting.
           </span>
         </label>
+      )}
+      {preset && (
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setText((t) => withPreset(t, preset))}
+            className="rounded-md border border-royal px-3 py-1.5 text-left text-xs font-semibold text-royal hover:bg-royal-tint"
+          >
+            Use “{preset}”
+          </button>
+          <span className="mt-1 block text-xs text-ink-secondary">
+            For a blurry or unreadable file. You can edit it after.
+          </span>
+        </div>
       )}
       <label className="mt-3 block">
         <span className="text-xs font-bold text-ink">
@@ -1361,7 +1405,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     ...ownOfficeForms.flatMap((form) => [
       ...(form.requirements ?? [])
         .filter((row) => row.source === 'upload' && row.code !== null)
-        .map((row) => ({ value: row.code as string, label: row.label })),
+        .map((row) => ({ value: row.code as string, label: row.label, document: true })),
       ...Object.keys(form.form_data ?? {}).map((key) => ({
         value: key,
         label: humanizeKey(key),
@@ -1391,7 +1435,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     ...(bploFinalApproval && app.application_type === 'renewal'
       ? restsOn
           .filter(({ permit }) => permit.mode === 'upload')
-          .map(({ permit }) => ({ value: permit.code, label: permit.name }))
+          .map(({ permit }) => ({ value: permit.code, label: permit.name, document: true }))
       : []),
   ]
 
@@ -2411,7 +2455,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * rather than by hunting for a button that was never drawn for them.
    */
   const decisionNote = canReject
-    ? 'Rejecting ends the application for every office; returning sends it back to the applicant for revision.'
+    ? 'Disapproving ends the application for every office; returning sends it back to the applicant for revision.'
     : 'Returning is how your office refuses this filing — ending the application outright is the BPLO’s decision.'
 
   /*
@@ -2510,7 +2554,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           <span
             className={`text-2xl font-bold underline underline-offset-4 ${rejected ? 'text-s-red' : 'text-s-green'}`}
           >
-            {rejected ? 'Rejected' : 'Approved'}
+            {rejected ? 'Disapproved' : 'Approved'}
           </span>
         ) : heldByAnother ? (
           /*
@@ -2555,7 +2599,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     disabled={busy}
                     className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
                   >
-                    Reject
+                    Disapprove
                   </button>
                 )}
                 {/*
@@ -2715,7 +2759,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             For Office Use Only
           </a>{' '}
           and save it — that is what sets the RA 11032 deadline this filing is measured against.
-          Return with remarks and Reject do not need one.
+          Return with remarks and Disapprove do not need one.
         </p>
       )}
 
@@ -4166,7 +4210,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                    * they typed is thrown away.
                    */}
                   <span className="mt-1.5 block text-xs text-ink-secondary">
-                    Sent with the application when you approve. On Return or Reject it fills in the
+                    Sent with the application when you approve. On Return or Disapprove it fills in the
                     reason box for you to check before it goes.
                   </span>
                 </label>

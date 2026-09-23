@@ -45,6 +45,7 @@ function requirementFiling(string $businessName, string $registrationNumber, arr
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => $businessName,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',

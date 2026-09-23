@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { sessionFor } from './helpers'
+import { makeCompleteDraft, sessionFor, uploadRequiredDocuments } from './helpers'
 
 /*
  * The apply wizard, from a business owner's side.
@@ -140,17 +140,19 @@ test('the wizard is the business permit alone, with no clearance step', async ({
   const joined = map.join(' | ').toLowerCase()
 
   /*
-   * Seven sections, fixed. Not "seven or more": the count is the whole point.
+   * Six sections, fixed. Not "six or more": the count is the whole point.
    * Under the previous arrangement the map GREW as office sheets joined it, so
    * an exact count is what distinguishes a wizard with no clearance machinery
    * from one whose machinery merely has not fired yet.
    *
-   * It was six until Business Information was split and Business Operation
-   * added. The number is incidental — what it guards is that nothing can be
-   * appended by applying for something — so it moves when a phase is
-   * deliberately added, and the assertions below are the ones with teeth.
+   * It was six, then seven when Business Information was split and Business
+   * Operation added, and six again when the tax step was removed (16 September
+   * 2026, commit 7e92dac — see below). The number is incidental — what it
+   * guards is that nothing can be appended by applying for something — so it
+   * moves when a phase is deliberately added or removed, and the assertions
+   * below are the ones with teeth.
    */
-  expect(map, `the section map is not the seven phases: ${joined}`).toHaveLength(7)
+  expect(map, `the section map is not the six phases: ${joined}`).toHaveLength(6)
 
   // The step itself, gone. This is the rule the client reversed.
   expect(joined, 'the LGU Clearances step is back in the wizard').not.toContain('clearance')
@@ -243,7 +245,7 @@ test('line of business is asked once, and the one ask is the searchable picker',
    * Selected panel pushed the map off the screen on the step whose job is
    * picking a location.
    */
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   await expect(results).toBeHidden()
   await search.click()
   await expect(results).toBeVisible()
@@ -288,7 +290,7 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   // screen from the moment before.
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
 
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   // Matched on the element, not on a role: the rows carry `role="radio"` now
   // that a filing declares one trade, so `getByRole('button')` finds nothing.
   const row = results.locator('button').first()
@@ -381,7 +383,7 @@ test('the line of business step reads as one choice, and changing it is not an e
    * of independent checkboxes, and they are easy to lose in a copy rewrite —
    * which is what this test is guarding against.
    */
-  const group = page.locator('#psic-results')
+  const group = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   await expect(group).toHaveAttribute('role', 'radiogroup')
   await expect(group).toHaveAttribute('aria-label', /line of business/i)
   const rows = group.getByRole('radio')
@@ -419,7 +421,7 @@ test('the line of business step reads as one choice, and changing it is not an e
   // Change puts the applicant back in the picker rather than emptying the
   // answer, and Clear is still there for somebody who wants the box empty.
   await change.click()
-  await expect(page.locator('#psic-results')).toBeVisible()
+  await expect(page.getByRole('radiogroup', { name: 'Line of business', exact: true })).toBeVisible()
   await expect(search).toBeFocused()
   await page.keyboard.press('Escape')
   await clear.click()
@@ -674,7 +676,8 @@ test('a peso amount gains its centavos when committed, and still posts as a numb
   // 5. And the validator reads the padded string as an amount, while a blank
   // one is still reported missing rather than passing as zero.
   expect(found.acceptedPadded).toEqual([])
-  expect(found.blankStillMissing).toEqual(['Capital Investment'])
+  // Under its paper item number (Section B item 6), as the step prints it.
+  expect(found.blankStillMissing).toEqual(['6. Capital Investment'])
 })
 
 test('every line of business is reachable, and the count is stated', async ({ page }) => {
@@ -711,7 +714,7 @@ test('every line of business is reachable, and the count is stated', async ({ pa
 
   const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
 
   // Browsing reaches everything. The shortlist is a head start, and it says so.
   // Matched on the element, not on a role: the rows carry `role="radio"` now
@@ -860,7 +863,7 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
   await search.click()
   await search.fill('sari-sari')
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
-  await page.locator('#psic-results button').first().click()
+  await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
 
   /*
@@ -970,7 +973,7 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
    * reason is on screen" rather than by clicking it — with every other field
    * answered, the missing pin is the only thing holding the step.
    */
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   const next = page.getByRole('button', { name: /^next$/i })
@@ -988,7 +991,6 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await expect(page.getByText(/pinned at/i)).toBeVisible()
   await expect(next).toBeEnabled()
   await next.click()
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 })
 
@@ -1028,7 +1030,7 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
   // Nothing is pinned until the address says something worth looking up.
   await expect(page.getByText(/pinned at/i)).toBeHidden()
 
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
 
   // The debounce is 800ms; the assertion's own timeout covers it rather than a
   // hard wait, so a slower machine does not make this flake.
@@ -1285,7 +1287,7 @@ async function goToZoningStep(page: Page) {
     await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
     // Matched on the element, not on a role: the rows carry `role="radio"` now
     // that a filing declares one trade, so `getByRole('button')` finds nothing.
-    await page.locator('#psic-results button').first().click()
+    await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   }
 
   /*
@@ -1379,18 +1381,12 @@ async function goToBusinessStep(page: Page) {
    */
   await pinAtMapCentre(page)
 
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 
+  // Straight to part 3 — the zoning answer is inline on the step, not a dialog.
   await page.getByRole('button', { name: /^next$/i }).click()
-  /*
-   * Leaving the zoning step opens the conformity modal on the way out. The
-   * modal is now the conformity message and nothing else — Business Location
-   * Insights used to render inside it and does not any more. See the tests
-   * below for why that matters.
-   */
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
 
@@ -1430,19 +1426,19 @@ function insightsPanel(page: Page) {
   return page.getByRole('region', { name: /business location insights/i })
 }
 
-test('Business Location Insights answers the pin, not the confirmation modal', async ({ page }) => {
+test('Business Location Insights is two rows on the step, and Next opens no dialog', async ({
+  page,
+}) => {
   /*
-   * The client's item, and it is a sequencing point rather than a layout one.
+   * Two rules from the client's feedback of 23 September 2026.
    *
-   * These four figures are decision support for choosing a location. They used
-   * to render inside the zoning-result modal, which opens on the way OUT of the
-   * step — so they reached the applicant only after the location was chosen,
-   * with a Proceed button under them. Useless there, and quietly misleading:
-   * numbers inside a dialog headed CONGRATULATIONS read as part of the
-   * conformity finding.
+   * "Less is more": the panel is two rows — similar businesses and business
+   * concentration — with the radius said once above them. The other two rows
+   * (most common line of business, average distance) are gone from the screen;
+   * their payload keys stay, pinned by LocationInsightsApiTest.
    *
-   * So this asserts both halves. On the step, with the pin, while it can still
-   * be moved — and NOT in the modal.
+   * "Zoning must not be a popup": the CONGRATULATIONS dialog that opened on
+   * Next is gone. Next moves straight to part 3.
    */
   await goToZoningStep(page)
 
@@ -1451,17 +1447,9 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
 
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
-
-  /*
-   * Read the radius off the wire rather than hard-coding 500. The whole point of
-   * `radius_m` being in the payload is that the server owns the number; a test
-   * that asserts 500 would keep passing on the day the API changed it and the
-   * screen went on saying 500.
-   */
-  // Item 8 — the map takes no pin before a barangay is named. Longos, because
-  // that is where the centre this test clicks actually falls.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
 
+  // Read the radius and thresholds off the wire: the server owns them.
   const answered = page.waitForResponse(
     (r) => r.url().includes('location-insights') && r.status() === 200,
   )
@@ -1472,112 +1460,75 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
   const highFrom = payload.concentration.thresholds.high_from as number
   expect(radiusM).toBeGreaterThan(0)
 
-  // The card is on the step, headed the way the client names it.
   const panel = insightsPanel(page)
-  await expect(panel).toBeVisible()
   await expect(panel.getByRole('heading', { name: /business location insights/i })).toBeVisible()
+  await expect(panel.getByText(new RegExp(`within ${radiusM} m of your pin`, 'i'))).toBeVisible()
 
-  /*
-   * And it has actually reported something — the skeleton is not the answer.
-   * "Registered businesses in total" is the one row that always resolves: it
-   * needs no line of business and it has no unavailable state, so it is the
-   * honest proof that a real payload rendered.
-   */
-  await expect(panel.getByText(/registered businesses in total/i)).toBeVisible()
-  await expect(panel.getByText(new RegExp(`within ${radiusM} m`, 'i')).first()).toBeVisible()
-
-  /*
-   * Four rows, each a Title over a Description, named exactly as the client
-   * specified them. The titles are load-bearing and not decoration: "Nearby
-   * Similar Businesses" counts the applicant's 3-digit PSIC trade GROUP while
-   * "Most Common Line of Business" takes the mode of the 2-digit DIVISION, and
-   * since the client removed the third figure that used to reconcile the two,
-   * these words are now the only thing on screen carrying that difference.
-   */
-  for (const title of [
-    'Nearby Similar Businesses',
-    'Business Concentration',
-    'Most Common Line of Business',
-    'Average Distance to Similar Businesses',
+  // Exactly the two rows, and the retired ones stay retired.
+  await expect(panel.getByRole('row')).toHaveCount(2)
+  await expect(panel.getByText('Similar Businesses', { exact: true })).toBeVisible()
+  await expect(panel.getByText('Business Concentration', { exact: true })).toBeVisible()
+  for (const gone of [
+    /most common line of business/i,
+    /average distance/i,
+    /businesses in your own category/i,
   ]) {
-    await expect(panel.getByText(title, { exact: true })).toBeVisible()
+    await expect(panel.getByText(gone)).toBeHidden()
   }
 
-  /*
-   * And the row that used to sit between them is gone and stays gone. It
-   * reconciled the two widths above with a third count, and the client decided
-   * against it in favour of the titles doing that work — so a reader meeting the
-   * old bug report must not "restore" it. See the panel's module docblock.
-   */
-  await expect(panel.getByText(/businesses in your own category/i)).toBeHidden()
+  // The band is a word with its count named, never a tint alone.
+  await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+ registered\)$/)).toBeVisible()
 
-  /*
-   * The band is a word, not just a tint. DESIGN.md's Never Color Alone rule —
-   * an ordinal scale carried in colour alone is no scale at all for a reader who
-   * cannot separate the tints, and it must never be the error red either,
-   * because a busy block is not a fault.
-   *
-   * Anchored to the count in brackets so this matches the BADGE specifically.
-   */
-  await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+\)$/)).toBeVisible()
-
-  /*
-   * ── The band scale, behind an info affordance ────────────────────────────
-   *
-   * "Low 0–5 · Medium 6–10 · High 11+" used to be printed inline under this
-   * row. The client moved it into an affordance, which is the right call for
-   * reference material read once — but only if the affordance is a real one.
-   *
-   * A `title=` tooltip would satisfy the request and fail the applicant: there
-   * is no hover on touch, and hover is not reachable by keyboard. So this
-   * asserts the WCAG 2.1 AA SC 1.4.13 behaviour rather than the presence of an
-   * icon — it opens from the KEYBOARD, and Escape dismisses it.
-   *
-   * The scale itself is built from the payload's own thresholds, so a test that
-   * hard-coded 5, 6 and 11 could not catch the legend drifting from the banding.
-   */
+  // The band scale opens from the keyboard and Escape closes it (WCAG 1.4.13).
   const bandScale = `Low 0–${mediumFrom - 1} · Medium ${mediumFrom}–${highFrom - 1} · High ${highFrom}+`
   await expect(panel.getByText(bandScale)).toBeHidden()
-
   const bandInfo = panel.getByRole('button', { name: /business concentration bands/i })
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
-
   await bandInfo.focus()
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'true')
   await expect(panel.getByText(bandScale)).toBeVisible()
-
   await page.keyboard.press('Escape')
   await expect(panel.getByText(bandScale)).toBeHidden()
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
 
-  /* ── and the modal it used to live in no longer carries it ─────────────── */
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  /*
-   * Longos, and not Acacia as this said until the pin gained a barangay.
-   *
-   * These helpers pin the centre of the map, which is Malabon City Hall, which
-   * is in Longos. Naming Acacia there was the exact mismatch the step now
-   * refuses — a pin in one barangay filed under another — so the old value was
-   * not arbitrary test data, it was the bug. Keep this in step with
-   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
-   */
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  /* ── and Next goes on without a dialog ─────────────────────────────────── */
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
 
-  const modal = page.getByRole('dialog', { name: /congratulations/i })
-  await expect(modal).toBeVisible()
-  await expect(modal.getByRole('region', { name: /business location insights/i })).toBeHidden()
-  await expect(modal.getByText(/registered businesses in total/i)).toBeHidden()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
 
+test('the zoning step warns that the pin must be accurate, and asks block, lot and lot area', async ({
+  page,
+}) => {
   /*
-   * What the modal must keep. This CPDO line is the standing condition under
-   * which the panel's removed "not part of the zoning decision" disclaimer would
-   * have to come back — without it, CONGRATULATIONS is the only verdict on
-   * screen and nothing says who actually issues the clearance.
+   * Client, 23 September 2026. The warning is prominent and near the map, in
+   * the attention colour rather than the error red (DESIGN.md: nothing is
+   * wrong yet). Block, Lot and Lot Area are optional — a market stall has none.
    */
-  await expect(modal.getByText(/zoning office \(cpdo\) makes the final determination/i)).toBeVisible()
+  await goToZoningStep(page)
+
+  const warning = page.locator('#pin-accuracy-note')
+  await expect(warning).toBeVisible()
+  await expect(warning).toContainText(/place the pin exactly/i)
+  await expect(warning).toContainText(/disapproved/i)
+  await expect(warning).toContainText(/forfeited/i)
+  const colour = await warning.evaluate((el) => getComputedStyle(el).color)
+  expect(colour, 'the warning must not borrow the error red').not.toBe('rgb(189, 0, 0)')
+
+  // The clutter the client named is gone from this step.
+  await expect(page.getByText(/the other permits come later/i)).toBeHidden()
+  await expect(page.getByText(/once bplo approves your application/i)).toBeHidden()
+
+  for (const label of [/^block$/i, /^lot$/i, /^lot area \(sq\. m\.\)$/i]) {
+    await expect(page.getByLabel(label)).toBeEditable()
+  }
+  // Optional: none is listed as still needed while blank...
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).not.toContainText(/block|lot/i)
+  // ...but a lot area that is not an area is.
+  await page.getByLabel(/^lot area/i).fill('about half')
+  await expect(still).toContainText(/a valid lot area/i)
 })
 
 test('the pin is ringed at the radius the figures were measured over', async ({ page }) => {
@@ -1616,7 +1567,7 @@ test('the pin is ringed at the radius the figures were measured over', async ({ 
    * and to a screen reader, which cannot see an SVG path at all — and stated as
    * the API's own number, so caption and circle can never disagree.
    */
-  await expect(page.getByText(new RegExp(`circle around it covers ${radiusM} m`, 'i'))).toBeVisible()
+  await expect(page.getByText(new RegExp(`circle is the ${radiusM} m the figures below count`, 'i'))).toBeVisible()
 
   /*
    * The ring is scenery, and this is checked BEFORE zooming so the offset below
@@ -1720,7 +1671,7 @@ test('moving the pin does not stampede the lookup, and never shows the old point
   }
 
   // The figures for the LAST pin arrive and the panel settles.
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeVisible({
     timeout: 15_000,
   })
   /*
@@ -1738,10 +1689,10 @@ test('moving the pin does not stampede the lookup, and never shows the old point
    */
   await map.click({ position: { x: box.width / 2 - 30, y: box.height / 2 - 30 } })
   await expect(insightsPanel(page).getByRole('status', { name: /loading location insights/i })).toBeVisible()
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeHidden()
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeHidden()
 
   // ...and it comes back on its own.
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeVisible({
     timeout: 15_000,
   })
 })
@@ -1774,8 +1725,8 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   // claim about a distance nothing measured.
   await expect(page.locator('path.biztrack-radius-ring')).toBeHidden()
 
-  // And the step still goes on, all the way through the conformity modal.
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  // And the step still goes on.
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   /*
    * Longos, and not Acacia as this said until the pin gained a barangay.
    *
@@ -1789,7 +1740,6 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 })
 
@@ -2255,6 +2205,119 @@ test('the four TIN boxes are one named question, not four nameless ones', async 
   expect(perBox, 'the error is described on each box, so it is read four times').toBe(0)
 })
 
+/* ── Client feedback, 23 September 2026: what Business Information asks ── */
+
+test('the TIN is optional on a new filing, and Trade Name is required', async ({ page }) => {
+  await goToBusinessStep(page)
+
+  // No asterisk and no "(required)" on the TIN's question for a new business,
+  // which may not have registered with BIR yet.
+  const tin = page.getByRole('group', { name: /tax identification number/i })
+  // Item 2's number is part of the name (checklist item 23); "(required)" is not.
+  await expect(tin).toHaveAccessibleName(/^2\. Tax Identification Number \(TIN\)$/)
+
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).not.toContainText(/tax identification number/i)
+  await expect(still).toContainText(/trade name \/ franchise/i)
+
+  const trade = page.getByLabel(/trade name \/ franchise/i)
+  await expect(trade).toHaveAccessibleName(/\(required\)/i)
+  await trade.fill('Aling Nena’s')
+  await expect(still).not.toContainText(/trade name/i)
+
+  // A TIN that is typed must still be whole.
+  const boxes = tinBoxes(page)
+  await boxes[0].click()
+  await page.keyboard.type('12')
+  await expect(still).toContainText(/a valid tin/i)
+})
+
+test('the owner’s name is asked of a sole proprietorship only', async ({ page }) => {
+  /*
+   * "Name on the Registration" follows Type of Registration: a corporation,
+   * partnership or cooperative is named by its President / OIC (13-15), and
+   * is not asked an owner's surname, given name or sex.
+   */
+  await goToBusinessStep(page)
+  const structure = page.getByRole('radiogroup', { name: /type of registration/i })
+
+  await structure.getByRole('radio', { name: 'Corporation' }).click()
+  await expect(page.getByLabel(/^surname/i)).toHaveCount(0)
+  await expect(page.getByRole('radiogroup', { name: /^gender$/i })).toHaveCount(0)
+  await expect(page.getByLabel(/name of president \/ officer in charge/i)).toBeVisible()
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).not.toContainText(/owner’s/i)
+
+  await structure.getByRole('radio', { name: 'Sole Proprietorship' }).click()
+  await expect(page.getByText('11. Sole Proprietor', { exact: true })).toBeVisible()
+  await expect(page.getByLabel(/^surname/i)).toBeEditable()
+  await expect(page.getByRole('radiogroup', { name: /^gender$/i })).toBeVisible()
+})
+
+test('employees are asked male and female first, and the total is their sum', async ({ page }) => {
+  /*
+   * Client, 23 September 2026. The total is computed and read-only — `readOnly`,
+   * not `disabled`, so a screen reader still reaches it and hears the sum.
+   */
+  await goToBusinessStep(page)
+
+  // The minimum Business Information needs, as a sole proprietor.
+  await page
+    .getByRole('radiogroup', { name: /type of registration/i })
+    .getByRole('radio', { name: 'Sole Proprietorship' })
+    .click()
+  await page.getByRole('textbox', { name: /DTI Business Name Registration Number/i }).fill(
+    `DTI-${Date.now() % 1_000_000}`,
+  )
+  await page.getByLabel(/^\d+\. business name/i).fill('Employee Count Store')
+  await page.getByLabel(/trade name \/ franchise/i).fill('Employee Count Store')
+  const mobile = page.getByLabel(/mobile number after \+63, first three digits/i)
+  if ((await mobile.inputValue()) === '') {
+    await mobile.fill('917')
+    await page.getByLabel(/mobile number after \+63, second three digits/i).fill('123')
+    await page.getByLabel(/mobile number after \+63, last four digits/i).fill('4567')
+  }
+  const email = page.getByLabel(/e-mail address/i)
+  if ((await email.inputValue()) === '') await email.fill('owner@example.com')
+  const surname = page.getByLabel(/^surname/i)
+  if ((await surname.inputValue()) === '') await surname.fill('Dela Cruz')
+  const given = page.getByLabel(/^given name/i)
+  if ((await given.inputValue()) === '') await given.fill('Juan')
+  // Pressing the chosen radio again un-chooses it, so answer only if unanswered.
+  const gender = page.getByRole('radiogroup', { name: /^gender$/i })
+  if ((await gender.locator('[aria-checked="true"]').count()) === 0) {
+    await gender.getByRole('radio', { name: 'Male', exact: true }).click()
+  }
+  const president = page.getByLabel(/name of president \/ officer in charge/i)
+  if ((await president.inputValue()) === '') await president.fill('Juan Dela Cruz')
+  await page.getByLabel(/citizenship \(of president\/oic\)/i).fill('Filipino')
+  await page.getByLabel(/capital participation/i).fill('100')
+
+  const next = page.getByRole('button', { name: /^next$/i })
+  await expect(next, await page.getByText(/still needed on this part/i).textContent().catch(() => '') ?? '').toBeEnabled()
+  await next.click()
+  await expect(page.getByText(/part 4 of/i).first()).toBeVisible({ timeout: 20_000 })
+
+  const group = page.getByRole('group', { name: /total number of employees/i })
+  const boxes = await group
+    .getByRole('textbox')
+    .evaluateAll((els) => els.map((el) => (el.closest('label')?.textContent ?? '').trim()))
+  expect(boxes.map((t) => t.replace(/\s*\*.*$/, '').replace(/\(required\)/, '').trim())).toEqual([
+    'Male',
+    'Female',
+    'Total',
+  ])
+
+  const total = group.getByLabel(/^total$/i)
+  await expect(total).toHaveAttribute('readonly', '')
+  await expect(total).not.toHaveAttribute('disabled', /.*/)
+
+  await group.getByLabel(/^male/i).fill('3')
+  await expect(total).toHaveValue('')
+  await group.getByLabel(/^female/i).fill('4')
+  await expect(total).toHaveValue('7')
+})
+
 test('an unusual registration number is questioned, never refused', async ({ page }) => {
   /*
    * Checklist items 21 and 26 — the client asked twice for validation rules on
@@ -2363,6 +2426,27 @@ test('the numbers on a step run in the order the fields are read', async ({ page
   )
 })
 
+/**
+ * Review & Submit, on a draft complete enough to reach it.
+ *
+ * These tests walked a BLANK form with Next, and Next is shut on Location &
+ * Zoning until a line of business, a street, a pin and an emergency contact are
+ * given — so the walk stopped at part 2 and never saw the step it was testing.
+ * The same fixture clearances.spec.ts walks the wizard with is used instead:
+ * reaching Review by filling six sections would be a test of the form, not of
+ * the step.
+ */
+async function openReviewOfCompleteDraft(page: Page) {
+  const appId = await makeCompleteDraft(page)
+  await uploadRequiredDocuments(page, appId)
+  await page.goto(`/apply?draft=${appId}`)
+  const map = page.locator('ol[aria-label="Application sections"]')
+  await expect(map).toBeVisible({ timeout: 30_000 })
+  await map.getByRole('button', { name: /data privacy consent/i }).click()
+  await page.getByRole('checkbox').first().check()
+  await map.getByRole('button', { name: /review & submit/i }).click()
+}
+
 /*
  * ── Review shows the whole form, editable ─────────────────────────────────
  *
@@ -2378,18 +2462,7 @@ test('the numbers on a step run in the order the fields are read', async ({ page
  * all — a gate edited, a block moved — and that is what this catches.
  */
 test('the review step shows every section, in the wizard’s own order', async ({ page }) => {
-  await page.getByRole('checkbox').first().check()
-
-  // Walk to the last part. Next is disabled while a part is incomplete, so a
-  // blocked press means the step map changed rather than that the walk failed.
-  for (let i = 0; i < 8; i++) {
-    const submit = page.getByRole('button', { name: /^submit$/i })
-    if (await submit.isVisible().catch(() => false)) break
-    const next = page.getByRole('button', { name: /next/i })
-    if (!(await next.isEnabled().catch(() => false))) break
-    await next.click()
-    await page.waitForTimeout(250)
-  }
+  await openReviewOfCompleteDraft(page)
 
   await expect(page.getByRole('heading', { name: /review & submit/i }).first()).toBeVisible({
     timeout: 20_000,
@@ -2419,8 +2492,14 @@ test('the review step shows every section, in the wizard’s own order', async (
    * is for reading, so each answer is one row — label, answer, Change — and
    * the real inputs stay behind it until asked for.
    */
-  await expect(page.getByText(/^business name$/i).first()).toBeVisible()
-  await expect(page.getByLabel(/^business name/i).first()).toBeHidden()
+  /*
+   * The labels carry the paper's item number, as the fields do (checklist item
+   * 23), so the patterns allow for it. The field pattern REQUIRES it: without
+   * the number, `^business name` matched no label at all, and "hidden" was
+   * being asserted of nothing.
+   */
+  await expect(page.getByText(/^(\d+\. )?business name$/i).first()).toBeVisible()
+  await expect(page.getByLabel(/^\d+\. business name/i).first()).toBeHidden()
 
   /*
    * Editable in place, which is the half that matters: Change opens that
@@ -2430,10 +2509,10 @@ test('the review step shows every section, in the wizard’s own order', async (
    * below guards that.
    */
   await page
-    .getByRole('button', { name: /change business name/i })
+    .getByRole('button', { name: /change (\d+\. )?business name/i })
     .first()
     .click()
-  await expect(page.getByLabel(/^business name/i).first()).toBeEditable()
+  await expect(page.getByLabel(/^\d+\. business name/i).first()).toBeEditable()
 
   /*
    * Foldable. Submit sits at the bottom of a long page with no sticky footer,
@@ -2443,7 +2522,7 @@ test('the review step shows every section, in the wizard’s own order', async (
   const foldAll = page.getByRole('button', { name: /collapse all/i })
   await expect(foldAll).toBeVisible()
   await foldAll.click()
-  await expect(page.getByText(/^business name$/i).first()).toBeHidden()
+  await expect(page.getByText(/^(\d+\. )?business name$/i).first()).toBeHidden()
   await expect(page.getByRole('button', { name: /expand all/i })).toBeVisible()
 })
 
@@ -2466,16 +2545,7 @@ test('the review step shows every section, in the wizard’s own order', async (
  * gains a question nobody added a row for.
  */
 test('the review summary covers every field a section asks', async ({ page }) => {
-  await page.getByRole('checkbox').first().check()
-
-  for (let i = 0; i < 8; i++) {
-    const submit = page.getByRole('button', { name: /^submit$/i })
-    if (await submit.isVisible().catch(() => false)) break
-    const next = page.getByRole('button', { name: /next/i })
-    if (!(await next.isEnabled().catch(() => false))) break
-    await next.click()
-    await page.waitForTimeout(250)
-  }
+  await openReviewOfCompleteDraft(page)
   await expect(page.getByRole('heading', { name: /review & submit/i }).first()).toBeVisible({
     timeout: 20_000,
   })
@@ -2488,9 +2558,16 @@ test('the review summary covers every field a section asks', async ({ page }) =>
     expect(rows, `${name} contributes no summary rows`).toBeGreaterThan(0)
 
     // Open the real form and count what it asks for.
+    /*
+     * This section's own Edit, found through the section that holds the body.
+     * It was `.nth(index)` over every "Edit this section" on the page, which
+     * shifts as soon as one is pressed — that one reads "Done editing" after —
+     * so the second pass opened the THIRD section and the third timed out.
+     */
     await page
+      .getByRole('region')
+      .filter({ has: body })
       .getByRole('button', { name: /edit this section/i })
-      .nth(['address', 'business', 'operation'].indexOf(name))
       .click()
     const inputs = await body
       .locator('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), select, textarea')
@@ -2508,24 +2585,18 @@ test('the review summary covers every field a section asks', async ({ page }) =>
 })
 
 /*
- * The confirmation modal says what the press costs.
+ * The confirmation modal asks about the reviewing, and says what the press costs.
  *
- * Client requirement the same day. It confirmed an action without saying the
- * action is one-way, and "irrevocable" is not a word to put in front of a
- * shopkeeper — so the wording is plain, and it names the way out (Cancel) as
- * well as the door that closes.
+ * Two client requirements. Checklist item 14: "a modal stating if the
+ * applicant is already done reviewing his/her information" — a question about
+ * the step just finished, not "Submit this application?", which the Submit
+ * button has already asked. And 16 September 2026: it confirmed an action
+ * without saying the action is one-way. "Irrevocable" is not a word to put in
+ * front of a shopkeeper, so the wording is plain, and it names the way back
+ * ("Keep reviewing") as well as the door that closes.
  */
 test('the submit confirmation warns that answers cannot be changed afterwards', async ({ page }) => {
-  await page.getByRole('checkbox').first().check()
-
-  for (let i = 0; i < 8; i++) {
-    const submit = page.getByRole('button', { name: /^submit$/i })
-    if (await submit.isVisible().catch(() => false)) break
-    const next = page.getByRole('button', { name: /next/i })
-    if (!(await next.isEnabled().catch(() => false))) break
-    await next.click()
-    await page.waitForTimeout(250)
-  }
+  await openReviewOfCompleteDraft(page)
 
   const submit = page.getByRole('button', { name: /^submit$/i })
   await expect(submit).toBeVisible({ timeout: 20_000 })
@@ -2537,9 +2608,13 @@ test('the submit confirmation warns that answers cannot be changed afterwards', 
   await submit.click()
 
   const modal = page.getByRole('dialog')
-  await expect(modal).toContainText(/check your answers first/i)
-  await expect(modal).toContainText(/will not be able to change your answers yourself/i)
+  await expect(modal).toContainText(/have you finished reviewing your information\?/i)
+  await expect(modal).toContainText(/you cannot change it yourself/i)
   // Honest about what does NOT end: BPLO can still send it back, with remarks.
   await expect(modal).toContainText(/return the application to you/i)
-  await expect(modal).toContainText(/cancel/i)
+  // Both answers name what they do to the filing, and the way back works.
+  await expect(modal.getByRole('button', { name: /^yes, submit$/i })).toBeVisible()
+  await modal.getByRole('button', { name: /^keep reviewing$/i }).click()
+  await expect(modal).toBeHidden()
+  await expect(submit).toBeVisible()
 })

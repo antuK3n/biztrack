@@ -167,7 +167,7 @@ export function ComputedAt({ meta, onRefreshed }: { meta: AnalyticsProvenance; o
     return (
       <div
         role="status"
-        className="mb-5 rounded-lg border border-s-orange bg-s-orange-tint px-4 py-3 text-sm text-ink"
+        className="mb-3 rounded-lg border border-s-orange bg-s-orange-tint px-3 py-2 text-[13px] text-ink"
       >
         <span className="font-semibold">These figures have not been recomputed yet.</span>{' '}
         <span className="text-ink-secondary">
@@ -184,7 +184,7 @@ export function ComputedAt({ meta, onRefreshed }: { meta: AnalyticsProvenance; o
   }
 
   return (
-    <p role="status" className="mb-5 text-sm text-ink-muted">
+    <p role="status" className="mb-3 text-[13px] text-ink-muted">
       {/*
        * The timestamp and the engine that produced it, which is now always this
        * product. `by R 4.2.1` once stood here and was cut, on the grounds that a

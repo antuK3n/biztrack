@@ -45,6 +45,7 @@ function paidReceiptPayment(): Payment
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Receipt Test Store',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-88201',
         'tin' => '123-456-789-000',

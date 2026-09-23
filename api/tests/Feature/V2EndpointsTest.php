@@ -122,6 +122,7 @@ it('upserts and reads a per-office application form', function () {
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'FormCo', 'registration_type' => 'DTI',
+        'trade_name' => 'Test Trade Name',
         'registration_number' => 'DTI-99002', 'tin' => '123-456-789-000',
         'address' => ['line1' => 'x', 'barangay_id' => $barangayId],
         'lines' => [['psic_code_id' => $psicId]],

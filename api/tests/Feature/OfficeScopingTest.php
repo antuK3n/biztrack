@@ -60,6 +60,7 @@ function fileRoutedApplication(string $businessName, array $permitCodes): array
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => $businessName,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-'.random_int(10000, 99999),
         'tin' => '123-456-789-000',
@@ -386,6 +387,7 @@ it('does not turn a business the officer may not see into a 500', function () {
         $orphanBusiness = Business::find(
             test()->withHeaders($owner)->postJson('/api/v1/businesses', [
                 'name' => 'Scoping Orphan Store',
+                'trade_name' => 'Test Trade Name',
                 'registration_type' => 'DTI',
                 'registration_number' => 'DTI-70001',
                 'tin' => '123-456-789-000',

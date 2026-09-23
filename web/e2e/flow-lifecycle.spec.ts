@@ -411,7 +411,7 @@ async function approveOwnReview(page: Page) {
  * can drift.
  */
 async function bookOwnVisit(page: Page, narrative: Narrative) {
-  await openFromQueue(page, 'For Inspection', narrative)
+  await openFromQueue(page, 'inspection', narrative)
 
   const dateField = page.getByLabel(/^Date and time of the .+ inspection$/)
   const book = page.getByRole('button', { name: /^Book the .+ visit$/ })
@@ -500,7 +500,17 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
           name,
           registration_type: 'DTI',
           registration_number: 'DTI-E2E-LIFE',
+          // Required at submission since 23 September (client: Trade Name is mandatory).
+          trade_name: 'E2E Lifecycle Trade Name',
           tin: '123-456-789-000',
+          // Business Information's remaining required answers under the paper
+          // form (items 11 and 13-15) — the same set helpers.makeCompleteDraft
+          // sends. Without them the section never reads "complete" and the
+          // narrative cannot reach Review & Submit.
+          owner: { surname: 'Dela Cruz', given_name: 'Ana', gender: 'F' },
+          president_officer_name: 'Ana Dela Cruz',
+          citizenship: 'Filipino',
+          capital_participation_filipino: 100,
           address: {
             line1: '3 Playwright St.',
             /*
@@ -597,9 +607,17 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
      */
     const pdf = '%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n'
     for (const dt of businessType.document_types) {
-      const context: string | undefined = dt.context
+      // Comma-separated context tokens, as the wizard's `requiredDocs` reads
+      // them: a new, owner-occupied filing owes the `all`, `new` and `owned`
+      // requirements. Matching the whole string missed "new,owned"-style
+      // contexts, left Documentary Requirements unfinished, and shut Review.
+      const tokens = (dt.context ?? '')
+        .split(',')
+        .map((t: string) => t.trim())
+        .filter(Boolean)
       const appliesNow =
-        !context || context === 'all' || context === 'new' || context.toUpperCase() === 'BUSINESS'
+        tokens.length === 0 ||
+        tokens.some((t: string) => ['all', 'new', 'owned'].includes(t) || t.toUpperCase() === 'BUSINESS')
       if (dt.is_required === false || !appliesNow) continue
       const body = new FormData()
       body.append('document_type_id', String(dt.id))
@@ -676,32 +694,28 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
   await page.getByRole('checkbox').first().check()
 
   /*
-   * SEVEN sections, fixed — and seven is the right number, not a regression to
-   * undo. `BASE_PHASES` in ApplyWizard.tsx is: Data Privacy Consent, Location &
-   * Zoning, Business Information & Registration, BUSINESS OPERATION,
-   * Documentary Requirements, Fees & Tax Computation, Review & Submit.
+   * SIX sections: Data Privacy Consent, Location & Zoning, Business Information
+   * & Registration, Business Operation, Documentary Requirements, Review &
+   * Submit.
    *
-   * This said six until 242bc1d reconciled the wizard with MCG-BPLO-FO-001
-   * v2.0, which splits Section A (Business Information & Registration) from
-   * Section B (Business Operation) and prints them as two sections. The client
-   * asked the wizard to say so — "Section 3 to be Business Information &
-   * Registration, Section 4 to be Business Operation" — so `operation` became a
-   * STEP of its own rather than a heading part-way down the business step. The
-   * section map is the one place an applicant looks to find what is left, and a
-   * heading inside another step does not appear there at all.
+   * It was seven until 7e92dac (21 September) took Fees & Tax Computation out
+   * of the wizard. What this assertion always guarded is still true and is now
+   * asserted by NAME rather than inferred from the count: Section A (Business
+   * Information & Registration) and Section B (Business Operation) are two
+   * steps, as MCG-BPLO-FO-001 v2.0 prints them and as the client asked
+   * (242bc1d). A count alone would let B be folded back into A and a new step
+   * added elsewhere without this test noticing.
    *
-   * So: do NOT put this back to 6. Six would mean Section B has been folded
-   * back into Section A and the paper's shape has been lost again. Renewals and
-   * new filings both run BASE_PHASES; only `application_type === 'amendment'`
-   * runs eight (AMENDMENT_PHASES prepends "Changes Since Last Permit"), and
-   * this narrative files a NEW application.
+   * Renewals and new filings both run BASE_PHASES; amendments prepend "Changes
+   * Since Last Permit". This narrative files a NEW application.
    *
-   * Still asserted, because the jump below is what proves the filing is
-   * complete: the map refuses a forward jump over an unfinished section, so
-   * reaching Review & Submit in one click IS the statement that nothing is
-   * outstanding.
+   * The jump below is still what proves the filing complete: the map refuses a
+   * forward jump over an unfinished section, so reaching Review & Submit in one
+   * click IS the statement that nothing is outstanding.
    */
-  await expect(map.locator('li')).toHaveCount(7)
+  await expect(map.locator('li')).toHaveCount(6)
+  await expect(map.getByRole('button', { name: /^3 business information & registration/i })).toBeVisible()
+  await expect(map.getByRole('button', { name: /^4 business operation/i })).toBeVisible()
 
   /*
    * Walked to Review & Submit, then submitted through the API rather than by
@@ -801,7 +815,7 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
   const { trackingId, businessName } = narrative
 
   await page.goto('/applications')
-  await expect(page.getByRole('heading', { name: 'Permit Tracking', level: 1 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Business Application Status', level: 1 })).toBeVisible({
     timeout: 30_000,
   })
   await page.getByLabel(/Search your applications/).fill(trackingId)
@@ -2144,7 +2158,7 @@ test('the owner is shown the approval and every permit it produced', async ({ pa
    * where it went.
    */
   await page.goto('/applications')
-  await expect(page.getByRole('heading', { name: 'Permit Tracking', level: 1 })).toBeVisible({
+  await expect(page.getByRole('heading', { name: 'Business Application Status', level: 1 })).toBeVisible({
     timeout: 30_000,
   })
   await page.getByLabel(/Search your applications/).fill(trackingId)

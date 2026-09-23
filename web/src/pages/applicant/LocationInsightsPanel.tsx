@@ -37,40 +37,30 @@ import { useAsync } from '../../lib/useAsync'
  * same `radius_m` is what MapPicker draws the ring from, for the same reason:
  * one number, stated once by the side that measured it.
  *
- * ## On the wording (checklist item 68: "remove descriptions that sound AI")
+ * ## Two rows, and why not four (client, 23 September 2026: "less is more")
  *
- * Each row is a Title with a Description under it, both dictated by the client
- * down to the capitalisation. Titles are Title Case noun phrases and carry no
- * full stop, because they are the left-hand column of a table and not sentences;
- * descriptions say what the figure beside them actually counted, because a
- * figure whose subject is unstated is not information.
+ * The panel had four titled rows, each with a sentence under it: nearby similar
+ * businesses, business concentration, the most common line of business, and the
+ * average distance to similar businesses. The client asked for less. What an
+ * applicant choosing a spot actually weighs is how many shops like theirs are
+ * already there and how busy the area is, so those two stay and the rest went:
  *
- * The trailing qualifiers went long ago: "in the area", "operating nearby" and
- * "of nearby similar businesses" all restated the radius the row above already
- * gives, and stacked restatement is exactly what reads as machine-written
- * padding.
+ *   - "Most Common Line of Business" counted a different width of PSIC (the
+ *     2-digit division) from the similar count (the 3-digit group), and the two
+ *     side by side invited arithmetic that does not hold — a dairy applicant
+ *     once filed a bug against a count that was right. Gone, that confusion
+ *     goes with it.
+ *   - "Average Distance" restated the similar count as a distance, with a
+ *     caveat (straight-line, not walking) that needed its own sentence.
  *
- * ## The row that is deliberately absent — do not re-add it
+ * The radius is said once, in the caption, instead of in each row. The payload
+ * is unchanged — `common_type` and `average_distance_m` are still sent and
+ * pinned by LocationInsightsApiTest — so either row can come back without an
+ * API change if the client asks for it.
  *
- * There was briefly a fifth row, "Businesses in your own category", fed by a
- * `your_line` key on the payload. It existed because the first and third rows
- * count on DIFFERENT widths of PSIC and did not say so: "Nearby Similar
- * Businesses" matches the applicant's 3-digit trade GROUP, while "Most Common
- * Line of Business" takes the mode of the 2-digit DIVISION. Both are correct —
- * widening "similar" to the division would make a coffee shop similar to a
- * canteen — but as adjacent rows of one table they invited arithmetic that does
- * not hold. A dairy applicant met "Similar: 0" above "Most common:
- * Manufacturing, 6 of 33" and filed a bug against a count that was right.
- *
- * The client has since decided against that third figure and asked for it
- * removed. The distinction is now carried by the two titles themselves —
- * "Nearby Similar" versus "Most Common Line of Business" — which is a
- * legitimate way to draw it and their call to make.
- *
- * So this is a decision, not an omission. If the confusion is reported again the
- * answer is wording on those two rows, not a third count; re-adding it would be
- * re-opening something the client has already ruled on. Same note sits on
- * LocationInsights.php, where the payload key was removed.
+ * The fifth row once briefly here, "Businesses in your own category" (a
+ * `your_line` key), was removed earlier on the client's instruction and is not
+ * to be re-added; the note on LocationInsights.php says why.
  */
 
 interface LocationInsightsData {
@@ -95,10 +85,8 @@ interface LocationInsightsData {
     /**
      * The applicant's own 5-digit sub-class title, still sent by the controller.
      *
-     * Nothing renders it now. The first row's description is fixed copy the
-     * client specified — "Similar businesses within {radius}" — where it used to
-     * name this title and then admit the count reached past it to the whole
-     * 3-digit group. Kept on the type because it is genuinely on the wire and a
+     * Nothing renders it now; the row is titled "Similar Businesses" and the
+     * count covers the whole 3-digit group, not just this sub-class. Kept on the type because it is genuinely on the wire and a
      * type that omits a field it receives is a type that lies; removing it for
      * real means editing LocationInsightsController, which is a separate change.
      */
@@ -189,21 +177,17 @@ const BAND_CLASS: Record<'low' | 'medium' | 'high', string> = {
 }
 
 /**
- * One row: a Title, the Description that says what the figure beside it
- * measured, and optionally an info affordance sitting on the title.
- *
- * The structure is the client's — every row is a titled thing with a sentence
- * under it, rather than the single run-on label this used to be. The title is
- * the name of the figure; the description is the definition of it.
+ * One row: a title, the figure, and optionally an info affordance on the
+ * title. Rows had a description sentence under the title until the panel was
+ * cut to two rows (client, 23 September 2026); the caption above the table
+ * now says once what both count.
  */
 function InsightRow({
   title,
-  description,
   info,
   children,
 }: {
   title: string
-  description?: string
   /** Rendered inline after the title. See `InfoNote`. */
   info?: ReactNode
   children: ReactNode
@@ -216,9 +200,6 @@ function InsightRow({
           <span>
             <span className="font-medium">{title}</span>
             {info}
-            {description && (
-              <span className="mt-0.5 block text-xs font-normal text-ink-muted">{description}</span>
-            )}
           </span>
         </span>
       </th>
@@ -326,7 +307,7 @@ function InfoNote({ label, children }: { label: string; children: ReactNode }) {
            * `span`, not `div`: this lives inside a `<th>`, where a block element
            * is invalid HTML and browsers reflow it out of position.
            */
-          className="absolute left-0 top-6 z-20 block w-64 max-w-[min(16rem,calc(100vw-2rem))] cursor-default rounded-lg border border-line bg-white p-3 text-left text-xs font-normal leading-relaxed text-ink-secondary shadow-lg"
+          className="absolute left-0 top-6 z-20 block w-64 max-w-[min(16rem,calc(100vw-2rem))] cursor-default rounded-lg border border-line bg-white p-3 text-left text-sm font-normal leading-relaxed text-ink-secondary shadow-lg"
         >
           {children}
         </span>
@@ -340,7 +321,7 @@ function Unavailable({ children }: { children: string }) {
   return (
     <span className="font-normal text-ink-muted">
       <span aria-hidden="true">— </span>
-      <span className="text-xs">{children}</span>
+      <span className="text-sm">{children}</span>
     </span>
   )
 }
@@ -434,32 +415,19 @@ export function LocationInsightsPanel({
 
       {!loading && error === null && insights !== null && (
         <>
+          {/*
+           * The radius, said once for both rows. It is interpolated from the
+           * response, never typed: MapPicker draws its ring from the same
+           * `radius_m`, and a hard-coded 500 here could disagree with the
+           * circle drawn over the applicant's own street.
+           */}
+          <p className="mt-1 text-sm text-ink-secondary">Within {radius} of your pin</p>
           <table className="mt-1 w-full border-collapse text-sm">
             <caption className="sr-only">
               Registered businesses near the location you pinned, within {radius}
             </caption>
             <tbody className="divide-y divide-line/70">
-              <InsightRow
-                title="Nearby Similar Businesses"
-                /*
-                 * The radius is interpolated, never typed. `radius_m` comes off
-                 * the response and MapPicker draws its ring from the same
-                 * number, so a hard-coded 500 here would be a second copy that
-                 * can disagree with the circle drawn over the applicant's own
-                 * street — worse than saying nothing.
-                 *
-                 * The description is fixed copy the client specified. It
-                 * previously named the applicant's own 5-digit sub-class
-                 * (`psic_title`) and then admitted the count reached past it to
-                 * the whole 3-digit group, because those really are different
-                 * sets: an applicant filing 56101 "Restaurants and carinderia"
-                 * also matches a fast-food outlet in group 561, and 21 of the
-                 * 135 reference codes sit in a group with siblings. The title
-                 * now carries that width instead — "Similar", against "Line of
-                 * Business" three rows down.
-                 */
-                description={`Similar businesses within ${radius}`}
-              >
+              <InsightRow title="Similar Businesses">
                 {insights.similar.available && insights.similar.count !== null ? (
                   <span className="tnum">{insights.similar.count}</span>
                 ) : (
@@ -469,19 +437,11 @@ export function LocationInsightsPanel({
 
               <InsightRow
                 title="Business Concentration"
-                description="Registered businesses in total"
                 /*
-                 * The band scale used to sit inline, stapled onto the end of
-                 * this row's note: "Within 500 m · Low 0–5 · Medium 6–10 · High
-                 * 11+". It is reference material — read once, then never again —
-                 * and inline it competed for attention with the description
-                 * every time the panel rendered. Behind the affordance it is
-                 * still one keystroke or one tap away.
-                 *
-                 * Both boundaries are read off `thresholds` rather than typed.
-                 * The scale is the server's; a legend that disagreed with the
-                 * banding would send an applicant looking for a bug in the
-                 * count.
+                 * The band scale sits behind the affordance rather than inline:
+                 * it is reference material, read once. Both boundaries are read
+                 * off `thresholds` — the scale is the server's, and a legend
+                 * that disagreed with the banding would look like a bug.
                  */
                 info={
                   <InfoNote label="What the Business Concentration bands mean">
@@ -494,89 +454,16 @@ export function LocationInsightsPanel({
                 }
               >
                 <span
-                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-xs font-semibold ${
+                  className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-0.5 text-sm font-semibold ${
                     BAND_CLASS[insights.concentration.band]
                   }`}
                 >
                   {BAND_LABEL[insights.concentration.band]}
-                  <span className="tnum font-normal">({insights.concentration.count})</span>
+                  {/* Named, not bare: "(12)" alone does not say twelve of what. */}
+                  <span className="tnum font-normal">
+                    ({insights.concentration.count} registered)
+                  </span>
                 </span>
-              </InsightRow>
-
-              <InsightRow
-                title="Most Common Line of Business"
-                /*
-                 * "15 of 48" on its own said nothing — fifteen of forty-eight
-                 * what? Both numbers need naming: how many nearby businesses
-                 * are in this trade, out of how many are nearby at all.
-                 *
-                 * Withheld entirely when there is nothing nearby, rather than
-                 * rendered as "0 of the 0 businesses near this pin". The figure
-                 * beside it already says none are registered in range, and a
-                 * description of a count that does not exist is noise.
-                 */
-                description={
-                  insights.common_type.available
-                    ? `${insights.common_type.count} of the ${insights.common_type.of_total} businesses near this pin`
-                    : undefined
-                }
-              >
-                {insights.common_type.available ? (
-                  insights.common_type.category
-                ) : (
-                  <Unavailable>{`none registered within ${radius}`}</Unavailable>
-                )}
-              </InsightRow>
-
-              {/*
-               * A fifth row, "Businesses in your own category", sat here and was
-               * removed on the client's instruction. It is not missing by
-               * accident — see the module docblock before re-adding it.
-               */}
-
-              <InsightRow
-                title="Average Distance to Similar Businesses"
-                /*
-                 * This description says what the figure IS. It used to say what
-                 * it is not — "Straight line, not walking distance" — which the
-                 * client rejected as vague, and they were right: a caveat is
-                 * only meaningful to a reader who already knows what was
-                 * measured, and it named neither the set averaged over nor the
-                 * fact that it is an average at all.
-                 *
-                 * Both facts it does carry are load-bearing and neither may be
-                 * dropped for brevity:
-                 *
-                 *   "Average"       — one number standing for several distances,
-                 *                     not the distance to the nearest one.
-                 *   "straight-line" — this is a haversine over the direct
-                 *                     point-to-point distance, not a route. An
-                 *                     applicant who reads "320 m" and walks it
-                 *                     will find it further, and around a river
-                 *                     or a closed block considerably further.
-                 *                     That is the whole reason the old note
-                 *                     existed and it survives the rewrite.
-                 *
-                 * "each similar business" names the set explicitly, which is the
-                 * same set the first row counts — so the two rows are visibly
-                 * about one thing and the reader does not have to guess whether
-                 * this averages over every neighbour.
-                 */
-                description={
-                  insights.similar.average_distance_m !== null
-                    ? 'Average straight-line distance from your pin to each similar business'
-                    : undefined
-                }
-              >
-                {insights.similar.average_distance_m !== null ? (
-                  <span className="tnum">{insights.similar.average_distance_m} m</span>
-                ) : (
-                  <Unavailable>
-                    {insights.similar.available
-                      ? 'none in range'
-                      : similarUnavailableReason(insights.similar.reason)}
-                  </Unavailable>
-                )}
               </InsightRow>
             </tbody>
           </table>
@@ -584,32 +471,20 @@ export function LocationInsightsPanel({
           {/*
            * "These figures are not part of the zoning decision." stood here and
            * was removed on the client's instruction (checklist item 112). It
-           * STAYS removed after the move out of the zoning modal, and the
-           * reasoning is worth writing down because the old note left a trigger
-           * condition that a reader could easily think has just fired.
+           * guarded one confusion: figures inside a dialog headed
+           * CONGRATULATIONS, where anything on screen reads as the verdict.
            *
-           * The sentence guarded one specific confusion: four confident numbers
-           * sitting inside a dialog headed CONGRATULATIONS, where anything on
-           * screen reads as part of the conformity finding. The old note said it
-           * had to come back "if the CPDO line ever leaves that modal".
+           * That dialog is gone (23 September 2026). The zoning answer is now
+           * ZoningConformanceNote beside this panel, which words itself as a
+           * lookup and names CPDO as the decider, and BarangayZoningMap says
+           * "CPDO confirms what applies to your exact location". So the step
+           * still names who decides, twice, and the sentence stays out.
            *
-           * That condition has not fired, in either direction. The CPDO line is
-           * still in the modal, untouched. What left the modal is this panel —
-           * and it left TOWARDS safety, not away from it. There is no verdict on
-           * the map step at all: the step is location capture, its own intro says
-           * CPDO evaluates the zoning clearance during processing, and the
-           * caption under the map says CPDO checks the actual site. The panel is
-           * now further from a conformity claim than the disclaimer ever put it,
-           * and next to two sentences that already name who decides.
-           *
-           * So the trigger condition is restated for where the panel actually
-           * lives now. This sentence has to come back if EITHER:
-           *   - this panel is ever rendered inside the zoning-result modal, or
-           *     any other surface that announces a conformity outcome; or
-           *   - the Location & Zoning step stops naming CPDO as the office that
-           *     determines the clearance.
-           * Either would leave four authoritative-looking figures beside an
-           * apparent verdict with nothing saying they are not it.
+           * It has to come back if EITHER:
+           *   - this panel is rendered on any surface that announces a
+           *     conformity outcome without saying CPDO decides; or
+           *   - the step stops naming CPDO as the office that determines the
+           *     clearance (both lines above removed).
            */}
         </>
       )}
@@ -690,19 +565,20 @@ export function ZoningConformanceNote({
          * for anyone who wants to read the provisos, and the clause is still
          * verbatim up to the cut, so it cannot mislead by paraphrase.
          */
-        <p className="mt-1.5 text-xs text-ink-secondary" title={matched.matched_use}>
+        <p className="mt-1.5 text-sm text-ink-secondary" title={matched.matched_use}>
           <span className="font-semibold">{matched.name}</span> — “{firstClause(matched.matched_use)}”
         </p>
       )}
 
       {!listed && zoning.zones.length > 0 && (
-        <p className="mt-1.5 text-xs text-ink-secondary">
-          {where} is zoned {zoning.zones.map((z) => z.name).join(', ')}. The ordinance’s list is
-          open — a use it does not name is referred to other laws, not refused.
+        <p className="mt-1.5 text-sm text-ink-secondary">
+          {where} is zoned {zoning.zones.map((z) => z.name).join(', ')}. A use not on the list is
+          not automatically refused.
         </p>
       )}
 
-      <p className="mt-2 text-xs text-ink-muted">
+      {/* The one line that keeps a lookup from reading as a clearance. Do not trim it. */}
+      <p className="mt-2 text-sm text-ink-muted">
         The Zoning Office (CPDO) makes the final determination on your locational clearance.
       </p>
     </section>

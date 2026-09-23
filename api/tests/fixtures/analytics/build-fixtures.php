@@ -231,7 +231,7 @@ $dashboard = [
     'decisions' => [
         ['outcome' => 'approved', 'label' => 'Approved', 'count' => 8, 'decisioned' => true],
         ['outcome' => 'returned', 'label' => 'Returned for revision', 'count' => 2, 'decisioned' => true],
-        ['outcome' => 'rejected', 'label' => 'Rejected', 'count' => 2, 'decisioned' => true],
+        ['outcome' => 'rejected', 'label' => 'Disapproved', 'count' => 2, 'decisioned' => true],
         ['outcome' => 'pending', 'label' => 'Pending', 'count' => 4, 'decisioned' => false],
         ['outcome' => 'cancelled', 'label' => 'Cancelled', 'count' => 0, 'decisioned' => false],
     ],

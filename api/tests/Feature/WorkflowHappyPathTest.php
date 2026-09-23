@@ -44,6 +44,7 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
     $psicId = PsicCode::first()->id;
     $bizRes = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Test Diner',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-77001',
         'tin' => '123-456-789-000',
@@ -261,6 +262,7 @@ it('routes one queue item per office, and only as that office’s permit is file
     $psicId = PsicCode::first()->id;
     $businessId = $this->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Every Office Mart',
+        'trade_name' => 'Test Trade Name',
         // Item 94: `registration_type` is the organisation structure, not the
         // agency. "SEC" is refused on purpose — it registers both partnerships
         // and corporations, so it does not say which this shop is.

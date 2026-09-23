@@ -2,7 +2,13 @@ import { expect, test } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
- * The receipt on Payment History, read rather than downloaded.
+ * The receipt, read rather than downloaded — and where it lives now.
+ *
+ * Payment History was an owner rail entry at /payments until the client asked
+ * for payment information on the status screen instead. The receipts moved to
+ * two places: a Payments section at the foot of Business Application Status
+ * (every filing), and a Payments section on each filing's own page (that
+ * filing). /payments redirects to the first, so old links still land on them.
  *
  * Checklist: "view payment history ... having the receipt viewable". Most of
  * this screen already existed — the list, the filters, the receipt PDF itself —
@@ -24,8 +30,49 @@ import { sessionFor } from './helpers'
 test.describe('payment receipts', () => {
   test.use({ storageState: sessionFor('owner') })
 
-  test('a receipt opens for reading, and can still be saved', async ({ page, context }) => {
+  test('the old Payment History address lands on the Payments section of the status screen', async ({
+    page,
+  }) => {
     await page.goto('/payments')
+    await expect(page).toHaveURL(/\/applications#payments$/)
+    await expect(
+      page.getByRole('heading', { name: 'Business Application Status', level: 1 }),
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('heading', { name: 'Payments', level: 2 })).toBeVisible()
+    // Not on the rail any more.
+    await expect(
+      page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /payment/i }),
+    ).toHaveCount(0)
+  })
+
+  test('a filing’s own page lists what it paid, with the receipt', async ({ page, context }) => {
+    // The owner's payment history names each payment's filing; take the first.
+    const history = page.waitForResponse(
+      (r) => /\/api\/v1\/payments(\?|$)/.test(r.url()) && r.request().method() === 'GET',
+    )
+    await page.goto('/applications')
+    const body = (await (await history).json()) as {
+      data: { reference_number: string; application?: { id: number } }[]
+    }
+    const paid = body.data.find((p) => p.application)
+    expect(paid, 'the owner has no paid filing on this stack').toBeTruthy()
+
+    await page.goto(`/applications/${paid!.application!.id}`)
+    const section = page.getByRole('region', { name: 'Payments' })
+    await expect(section).toBeVisible({ timeout: 30_000 })
+    const view = section.getByRole('button', { name: `View receipt ${paid!.reference_number}` })
+    await expect(view).toBeVisible()
+
+    const popup = context.waitForEvent('page')
+    await view.click()
+    const tab = await popup
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    expect(tab.isClosed(), 'a failed fetch closes the tab it opened').toBe(false)
+    await tab.close()
+  })
+
+  test('a receipt opens for reading, and can still be saved', async ({ page, context }) => {
+    await page.goto('/applications#payments')
 
     /*
      * A row has to exist before anything here means something. Asserted rather

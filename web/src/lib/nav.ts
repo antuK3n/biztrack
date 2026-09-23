@@ -6,7 +6,6 @@ import {
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
-  HistoryIcon,
   HomeIcon,
   InboxIcon,
   MailIcon,
@@ -62,11 +61,20 @@ export interface NavItem {
   toByPermission?: Record<string, string>
   /** Include in the mobile bottom tab bar (max 5 survive the filter). */
   mobile?: boolean
+  /**
+   * A shorter label for the mobile tab bar, where a tab is a quarter of a
+   * phone's width. Must be a PART of `label`, word for word, so the name a
+   * screen reader announces still contains what a sighted reader sees there
+   * (WCAG 2.5.3, label in name). Absent = `label` fits.
+   */
+  mobileLabel?: string
 }
 
 /*
  * Prototype rail registry (docs/rehaul-spec.md §2).
- * Owner rail (PDF p5): Home · Track · Drafts · Payment History.
+ * Owner rail: Home · Business Application Status · Messages · Drafts. The PDF
+ * (p5) drew Home · Track · Drafts · Payment History; the client then renamed
+ * the owner's Track and took Payment History off the rail — see the entries.
  * Staff rail (p61): Home · Track (verification) · Other Requirements. The PDF
  * draws an Inspections entry beside Track; it is gone on purpose — the client
  * had the two screens merged into Track's For Inspection tab. See below.
@@ -78,10 +86,38 @@ export interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'Home', icon: HomeIcon, to: '/dashboard', mobile: true },
   // Business owner
-  { label: 'Track', icon: TrackIcon, to: '/applications', permission: 'application.view_own', mobile: true },
+  /*
+   * "Business Application Status", not "Track" — the client's word for it. The
+   * officer's entry below keeps "Track": that one IS a queue they work through,
+   * and the owner's is where they read how their own filings stand.
+   *
+   * The tab bar says "Application Status": four tabs share a phone's width and
+   * the full name wrapped to three lines there, taller than the bar.
+   */
+  {
+    label: 'Business Application Status',
+    mobileLabel: 'Application Status',
+    icon: TrackIcon,
+    to: '/applications',
+    permission: 'application.view_own',
+    mobile: true,
+  },
+  /*
+   * Messages carries the owner's Other Requirements as well as their
+   * conversations: an office asking for a document is an office writing to
+   * them, and the client asked for the two in one place. The requirements are
+   * a tab inside Messages (?tab=requirements), and the rail badge on this entry
+   * counts both — see AppShell.
+   */
   { label: 'Messages', icon: MailIcon, to: '/messages', permission: 'message.participate', mobile: true },
   { label: 'Drafts', icon: DraftsIcon, to: '/drafts', permission: 'application.create', mobile: true },
-  { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
+  /*
+   * No Payment History entry. The client moved payment information onto the
+   * status screen: each filing's page lists what it paid with the receipts,
+   * and Business Application Status ends with every payment across filings.
+   * /payments redirects there (App.tsx). To bring the entry back, point it at
+   * '/applications#payments' under `payment.make`.
+   */
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
   { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
@@ -99,6 +135,11 @@ const NAV_ITEMS: NavItem[] = [
    * every one of them also holds `application.review`, so removing this entry
    * takes nothing off their rail that Track above does not already reach. BPLO
    * and the super admin never had it.
+   */
+  /*
+   * Officers only, by `request.create`: they raise requirements, and this is
+   * their register of them. Owners answer requirements from Messages instead
+   * (see the Messages entry above), which is why no owner-side entry exists.
    */
   { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
   // Admin

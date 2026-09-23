@@ -62,6 +62,7 @@ function filingRoutedTo(array $codes, string $registrationNumber): int
 
     $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
         'name' => 'Multi Office Cafe',
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => $registrationNumber,
         'tin' => '123-456-789-000',

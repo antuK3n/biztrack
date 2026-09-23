@@ -8,6 +8,14 @@ import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primit
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
+import { DENSE_PAGE, dFoot, dInput, dPager, dTable, dTh, dTheadRow, dToolbarBtn } from './dense'
+
+/*
+ * 2px of cell padding, not dense.ts's 4px: each row carries a status chip and
+ * a 24px View button, which set the row height rather than the text. At 2px a
+ * row is 29px and a page of 25 permits fits a 1440×900 screen with the pager.
+ */
+const cell = 'px-3 py-0.5'
 
 /*
  * Permits — every certificate the City has issued, as one table.
@@ -297,10 +305,17 @@ export function PermitsPage() {
   const filterLabel = STATUS_FILTERS.find((f) => f.value === status)?.label ?? 'All'
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            {/*
+              The status pills sit in the title row (client, 2026-09: "every
+              detail fits without scrolling"); a row of their own cost two
+              permits' worth of height.
+            */}
+            <FilterPills options={STATUS_FILTERS} value={status} onChange={selectStatus} />
             {/*
               A placeholder is not an accessible name — it disappears on the
               first keystroke — so the field carries a real label, hidden only
@@ -317,7 +332,7 @@ export function PermitsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Permit no., business or tracking ID…"
-              className="w-64 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-64`}
             />
             <button
               type="button"
@@ -328,7 +343,7 @@ export function PermitsPage() {
               // handler needs no guard — `reload` bumps a nonce and useAsync
               // cancels the in-flight request.
               aria-disabled={loading || undefined}
-              className="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              className={`${dToolbarBtn} aria-disabled:cursor-not-allowed aria-disabled:opacity-40`}
             >
               Refresh
             </button>
@@ -338,10 +353,6 @@ export function PermitsPage() {
         Permits
       </PageTitle>
 
-      <div className="mb-5">
-        <FilterPills options={STATUS_FILTERS} value={status} onChange={selectStatus} />
-      </div>
-
       {/*
         The failure of one row's View, said once above the table rather than
         inside the row. A 403 here is almost always the office boundary
@@ -350,7 +361,7 @@ export function PermitsPage() {
         which it cannot be in a table cell.
       */}
       {viewError && (
-        <p role="alert" className="mb-4 rounded-lg border border-s-red/30 bg-s-red-tint px-4 py-3 text-sm text-s-red">
+        <p role="alert" className="mb-2 rounded-lg border border-s-red/30 bg-s-red-tint px-3 py-1.5 text-[13px] text-s-red">
           {viewError}
         </p>
       )}
@@ -372,9 +383,9 @@ export function PermitsPage() {
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[52rem] text-left text-sm">
+            <table className={`${dTable} min-w-[52rem]`}>
               <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                <tr className={dTheadRow}>
                   {COLUMNS.map((column) => {
                     const active = sort?.key === column.key
                     return (
@@ -384,12 +395,12 @@ export function PermitsPage() {
                         // The sort state belongs on the column: a screen reader
                         // announces `aria-sort` and cannot read a glyph.
                         aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className="px-5 py-3"
+                        className={dTh}
                       >
                         <button
                           type="button"
                           onClick={() => toggleSort(column.key)}
-                          className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                          className="inline-flex min-h-6 items-center gap-1 rounded uppercase tracking-wide hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
                         >
                           {column.label}
                           <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
@@ -405,7 +416,7 @@ export function PermitsPage() {
                     accessible name is announced as blank. The word is there and
                     hidden.
                   */}
-                  <th scope="col" className="px-5 py-3 text-right">
+                  <th scope="col" className={`${dTh} text-right`}>
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -413,11 +424,11 @@ export function PermitsPage() {
               <tbody>
                 {rows.map((permit) => (
                   <tr key={permit.id} className="border-t border-line">
-                    <td className="px-5 py-3.5 font-bold text-ink">{permit.permit_number}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{businessName(permit.business)}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{permit.permit_type?.name ?? '—'}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{formatDate(permit.valid_until)}</td>
-                    <td className="px-5 py-3.5">
+                    <td className={`${cell} font-bold text-ink`}>{permit.permit_number}</td>
+                    <td className={`${cell} text-ink-secondary`}>{businessName(permit.business)}</td>
+                    <td className={`${cell} text-ink-secondary`}>{permit.permit_type?.name ?? '—'}</td>
+                    <td className={`${cell} text-ink-secondary`}>{formatDate(permit.valid_until)}</td>
+                    <td className={cell}>
                       {/*
                         The chip is tinted AND worded — "Never Color Alone"
                         (DESIGN.md). The label comes from the server so the
@@ -429,7 +440,7 @@ export function PermitsPage() {
                         {permit.status_label}
                       </StatusChip>
                     </td>
-                    <td className="px-5 py-3.5 text-right">
+                    <td className={`${cell} text-right`}>
                       <button
                         type="button"
                         onClick={() => view(permit)}
@@ -441,7 +452,7 @@ export function PermitsPage() {
                          */
                         aria-label={`View certificate ${permit.permit_number}`}
                         aria-disabled={viewing === permit.id || undefined}
-                        className="rounded-full border border-royal px-4 py-1.5 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
+                        className="inline-flex h-6 items-center rounded-full border border-royal px-3 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
                       >
                         {viewing === permit.id ? 'Opening…' : 'View'}
                       </button>
@@ -452,20 +463,20 @@ export function PermitsPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
-            <div>
+          <div className={dFoot}>
+            <div className="flex flex-wrap items-baseline gap-x-3">
               {/*
                 Both numbers named (AGENTS.md §6.4). "Showing 25" says nothing;
                 "25 of 2,182 active permits" says what the pager is moving
                 through.
               */}
-              <p role="status" aria-live="polite" className="text-sm text-ink-muted">
+              <p role="status" aria-live="polite" className="text-[13px] text-ink-muted">
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
                 {query && ' matching your search'}
               </p>
               {sortedColumn && (
-                <p className="mt-1 text-xs text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   Sorted by {sortedColumn} within this page. The register itself is ordered by issue
                   date, newest first.
                 </p>
@@ -481,7 +492,7 @@ export function PermitsPage() {
                 // losing the control.
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-disabled={page <= 1 || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ‹
               </button>
@@ -493,7 +504,7 @@ export function PermitsPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
                 aria-disabled={page >= lastPage || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ›
               </button>

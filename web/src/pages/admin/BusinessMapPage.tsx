@@ -10,6 +10,7 @@ import { BARANGAY_POLYGONS, MALABON_OUTLINE } from '../../lib/malabonGeo.data'
 import { BARANGAY_TOLERANCE_M, metresFromBarangay, withinMalabon } from '../../lib/malabonGeo'
 import { ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard } from '../../components/ui/Proto'
+import { DENSE_PAGE, dInput, dTable, dTh, dTheadRow } from './dense'
 
 /*
  * THE BUSINESS MAP — issue #104, "GIS mapping showing all businesses and
@@ -381,8 +382,47 @@ export function BusinessMapPage() {
   ]
 
   return (
-    <div>
-      <PageTitle>Business Map</PageTitle>
+    <div {...DENSE_PAGE}>
+      {/*
+        * Compact layout (client, 2026-09: "every detail fits without
+        * scrolling"). The filters sit in the title row, and at desktop width
+        * the legend table and the pin note sit in a column beside the map
+        * instead of below it, with the map taking the rest of the viewport's
+        * height. Below lg the column stacks under the map as before.
+        */}
+      <PageTitle
+        compact
+        right={
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            <FilterPills value={state} onChange={setState} options={statePills} />
+
+            {/*
+              * A select rather than a second row of pills. The permit state is the
+              * question this screen answers and owns the pills; the pin check is a
+              * data-quality lens over it, and giving them the same control would
+              * say they matter equally.
+              */}
+            <label className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted">
+              <span>Pin check</span>
+              <select
+                value={pinCheck}
+                onChange={(e) => setPinCheck(e.target.value as PinCheck)}
+                className={`${dInput} w-52`}
+              >
+                {PIN_CHECKS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.value === 'all'
+                      ? `${option.label} ${meta.plotted}`
+                      : `${option.label} ${pinCounts[option.value]}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </span>
+        }
+      >
+        Business Map
+      </PageTitle>
 
       {/*
         * One line, and it names both numbers (AGENTS.md §6.4). "742 businesses"
@@ -391,7 +431,7 @@ export function BusinessMapPage() {
         * caveat, and it is stated even at 2 rows: the day a wizard change stops
         * writing coordinates, this line is where it shows up.
         */}
-      <p className="mt-1 max-w-3xl text-sm text-ink-secondary">
+      <p className="mb-2 text-[13px] text-ink-secondary">
         {meta.plotted} of the {meta.businesses_total} businesses on file carry a map pin, shown here
         by the state of their Mayor&rsquo;s Permit on {formatDate(meta.as_of)}.
         {meta.unmapped > 0 && (
@@ -403,225 +443,208 @@ export function BusinessMapPage() {
         )}
       </p>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <FilterPills value={state} onChange={setState} options={statePills} />
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_26rem]">
+        {/*
+          * 8.5rem is the shell's top and bottom margin plus the title row and
+          * the one-line summary above; what is left of a 900px screen goes to
+          * the map. The floor keeps it usable on a short laptop screen, where
+          * the page then scrolls rather than the map shrinking to a strip.
+          */}
+        <ProtoCard className="overflow-hidden rounded-xl p-0">
+          <div className="h-[480px] overflow-hidden lg:h-[max(28rem,calc(100dvh-8.5rem))]">
+            <MapContainer
+              bounds={CITY_BOUNDS}
+              boundsOptions={{ padding: [16, 16] }}
+              /*
+               * Scroll wheel off, same as the wizard's picker. Below lg this
+               * screen stacks and scrolls, and a map that swallows the wheel
+               * traps a reader who was trying to reach the table under it. The
+               * zoom control and pinch both still work.
+               */
+              scrollWheelZoom={false}
+              style={{ height: '100%', width: '100%' }}
+            >
+              <ContainerName
+                label={`Map of Malabon showing ${visible.length} businesses: ${STATE_ORDER.map(
+                  (s) => `${meta.counts[s]} ${STATES[s].label.toLowerCase()}`,
+                ).join(', ')}. The same figures are in the table beside the map.`}
+              />
+              {/*
+                * Street and satellite, exactly as the wizard's picker offers
+                * them. Streets name things and are the lighter download, so they
+                * stay the default; the imagery is what lets someone recognise a
+                * block of unnamed alleys, which is most of interior Malabon.
+                */}
+              <LayersControl position="topright">
+                <LayersControl.BaseLayer checked name="Street map">
+                  <TileLayer
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  />
+                </LayersControl.BaseLayer>
+                <LayersControl.BaseLayer name="Satellite">
+                  {/*
+                    * Esri World Imagery. Note {z}/{y}/{x} — Esri puts row before
+                    * column, the opposite of the OSM line above, and swapping
+                    * them yields a map of the wrong hemisphere rather than an
+                    * error. Attribution is a licence condition.
+                    */}
+                  <TileLayer
+                    attribution="Imagery &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+                    url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    maxZoom={19}
+                  />
+                </LayersControl.BaseLayer>
+              </LayersControl>
+
+              <Polygon positions={toLatLngs(MALABON_OUTLINE)} interactive={false} pathOptions={CITY_BORDER} />
+              {BARANGAY_POLYGONS.map((b) => (
+                <Polygon
+                  key={b.psgc}
+                  positions={b.rings.map(toLatLngs)}
+                  interactive={false}
+                  pathOptions={BARANGAY_LINE}
+                />
+              ))}
+
+              {visible.map((row) => (
+                <Marker
+                  key={row.id}
+                  position={[row.latitude, row.longitude]}
+                  icon={MARKER_ICONS[row.state]}
+                  /*
+                   * NOT keyboard-focusable, and that is a considered trade rather
+                   * than an oversight.
+                   *
+                   * Leaflet's default puts every marker in the tab order. At 742
+                   * markers that is 742 stops between the filter and the table
+                   * below — a keyboard user would have to hold Tab for a minute
+                   * to get past the map, and each stop would announce a business
+                   * name with no way to tell where it is. The region label and
+                   * the table carry the content instead.
+                   *
+                   * The gap this leaves is real and worth naming: there is no
+                   * keyboard route to an individual business from this screen.
+                   * The answer when one is wanted is a searchable list beside the
+                   * map that drives the same selection, not switching this flag
+                   * back on.
+                   */
+                  keyboard={false}
+                  title={`${row.name} — ${STATES[row.state].label}`}
+                >
+                  <Popup>
+                    <span className="block text-sm font-semibold text-ink">{row.name}</span>
+                    {/*
+                      * The state in words, next to the same glyph the marker
+                      * uses. The popup is where a reader confirms what the shape
+                      * they just clicked actually meant, so repeating the glyph
+                      * here is what teaches the legend.
+                      */}
+                    <span className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
+                      <span
+                        className="inline-flex"
+                        aria-hidden="true"
+                        dangerouslySetInnerHTML={{ __html: glyphHtml(row.state, 14) }}
+                      />
+                      {STATES[row.state].label}
+                    </span>
+                    {/*
+                      * A dash, never a zero or an invented date, where a figure
+                      * genuinely has no value (AGENTS.md §6.4). A business that
+                      * never held a permit has no permit number and no expiry,
+                      * and printing "—" says so where "n/a" would read as a
+                      * lookup that failed.
+                      */}
+                    <span className="mt-1 block text-sm text-ink-secondary tnum">
+                      {row.permit_number ?? '—'}
+                      {row.valid_until !== null && (
+                        <>
+                          {' · '}
+                          {row.state === 'active' ? 'valid to' : 'lapsed'} {formatDate(row.valid_until)}
+                        </>
+                      )}
+                    </span>
+                    <span className="mt-1 block text-sm text-ink-muted">
+                      Barangay {row.barangay ?? '—'}
+                      {verdicts.get(row.id) === 'off-city' && ' · pin is outside Malabon'}
+                      {verdicts.get(row.id) === 'disagrees' && ' · pin is in a different barangay'}
+                    </span>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </div>
+        </ProtoCard>
 
         {/*
-          * A select rather than a second row of pills. The permit state is the
-          * question this screen answers and owns the pills; the pin check is a
-          * data-quality lens over it, and giving them the same control would
-          * say they matter equally.
+          * The map's numbers as a real table.
+          *
+          * Same rule the charts follow (AGENTS.md §6.2, components/charts/
+          * ChartFrame.tsx): an SVG or a map is nothing to a screen reader, so
+          * whatever it shows is also rendered as markup that can be read. It is
+          * not a duplicate for its own sake — it is the only form of this screen
+          * that exists for a non-sighted reader, and it doubles as the legend for
+          * everyone else, which is why the glyphs sit in it rather than floating
+          * over a corner of the map.
           */}
-        <label className="flex items-center gap-2 text-sm text-ink-secondary">
-          <span>Pin check</span>
-          <select
-            value={pinCheck}
-            onChange={(e) => setPinCheck(e.target.value as PinCheck)}
-            className="rounded-md border border-line-strong bg-white px-2.5 py-1.5 text-sm text-ink"
-          >
-            {PIN_CHECKS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.value === 'all'
-                  ? `${option.label} ${meta.plotted}`
-                  : `${option.label} ${pinCounts[option.value]}`}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+        <div className="flex flex-col gap-3">
+          <ProtoCard className="overflow-hidden rounded-xl">
+            <table className={dTable}>
+              <caption className="px-3 pt-2 pb-1 text-left text-[13px] font-semibold text-ink">
+                What the markers mean
+              </caption>
+              <thead>
+                <tr className={dTheadRow}>
+                  <th scope="col" className={dTh}>
+                    Marker
+                  </th>
+                  <th scope="col" className={dTh}>
+                    Meaning
+                  </th>
+                  <th scope="col" className={`${dTh} text-right`}>
+                    Businesses
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {STATE_ORDER.map((s) => (
+                  <tr key={s} className="border-t border-line align-top">
+                    <th scope="row" className="whitespace-nowrap py-1.5 pl-3 pr-2 font-medium text-ink">
+                      <span className="flex items-center gap-2">
+                        <span
+                          className="inline-flex"
+                          aria-hidden="true"
+                          dangerouslySetInnerHTML={{ __html: glyphHtml(s, 18) }}
+                        />
+                        {STATES[s].label}
+                      </span>
+                    </th>
+                    <td className="px-2 py-1.5 text-ink-secondary">{STATES[s].description}</td>
+                    <td className="px-3 py-1.5 text-right text-ink tnum">{meta.counts[s]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ProtoCard>
 
-      <ProtoCard className="mt-4 overflow-hidden rounded-xl p-0">
-        <div className="overflow-hidden">
-          <MapContainer
-            bounds={CITY_BOUNDS}
-            boundsOptions={{ padding: [16, 16] }}
-            /*
-             * Scroll wheel off, same as the wizard's picker. This screen sits
-             * in a page that scrolls, and a map that swallows the wheel traps
-             * a reader who was trying to reach the table underneath it. The
-             * zoom control and pinch both still work.
-             */
-            scrollWheelZoom={false}
-            style={{ height: 560, width: '100%' }}
-          >
-            <ContainerName
-              label={`Map of Malabon showing ${visible.length} businesses: ${STATE_ORDER.map(
-                (s) => `${meta.counts[s]} ${STATES[s].label.toLowerCase()}`,
-              ).join(', ')}. The same figures are in the table below the map.`}
-            />
-            {/*
-              * Street and satellite, exactly as the wizard's picker offers
-              * them. Streets name things and are the lighter download, so they
-              * stay the default; the imagery is what lets someone recognise a
-              * block of unnamed alleys, which is most of interior Malabon.
-              */}
-            <LayersControl position="topright">
-              <LayersControl.BaseLayer checked name="Street map">
-                <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                />
-              </LayersControl.BaseLayer>
-              <LayersControl.BaseLayer name="Satellite">
-                {/*
-                  * Esri World Imagery. Note {z}/{y}/{x} — Esri puts row before
-                  * column, the opposite of the OSM line above, and swapping
-                  * them yields a map of the wrong hemisphere rather than an
-                  * error. Attribution is a licence condition.
-                  */}
-                <TileLayer
-                  attribution="Imagery &copy; Esri, Maxar, Earthstar Geographics, and the GIS User Community"
-                  url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                  maxZoom={19}
-                />
-              </LayersControl.BaseLayer>
-            </LayersControl>
-
-            <Polygon positions={toLatLngs(MALABON_OUTLINE)} interactive={false} pathOptions={CITY_BORDER} />
-            {BARANGAY_POLYGONS.map((b) => (
-              <Polygon
-                key={b.psgc}
-                positions={b.rings.map(toLatLngs)}
-                interactive={false}
-                pathOptions={BARANGAY_LINE}
-              />
-            ))}
-
-            {visible.map((row) => (
-              <Marker
-                key={row.id}
-                position={[row.latitude, row.longitude]}
-                icon={MARKER_ICONS[row.state]}
-                /*
-                 * NOT keyboard-focusable, and that is a considered trade rather
-                 * than an oversight.
-                 *
-                 * Leaflet's default puts every marker in the tab order. At 742
-                 * markers that is 742 stops between the filter and the table
-                 * below — a keyboard user would have to hold Tab for a minute
-                 * to get past the map, and each stop would announce a business
-                 * name with no way to tell where it is. The region label and
-                 * the table carry the content instead.
-                 *
-                 * The gap this leaves is real and worth naming: there is no
-                 * keyboard route to an individual business from this screen.
-                 * The answer when one is wanted is a searchable list beside the
-                 * map that drives the same selection, not switching this flag
-                 * back on.
-                 */
-                keyboard={false}
-                title={`${row.name} — ${STATES[row.state].label}`}
-              >
-                <Popup>
-                  <span className="block text-sm font-semibold text-ink">{row.name}</span>
-                  {/*
-                    * The state in words, next to the same glyph the marker
-                    * uses. The popup is where a reader confirms what the shape
-                    * they just clicked actually meant, so repeating the glyph
-                    * here is what teaches the legend.
-                    */}
-                  <span className="mt-1 flex items-center gap-1.5 text-sm text-ink-secondary">
-                    <span
-                      className="inline-flex"
-                      aria-hidden="true"
-                      dangerouslySetInnerHTML={{ __html: glyphHtml(row.state, 14) }}
-                    />
-                    {STATES[row.state].label}
-                  </span>
-                  {/*
-                    * A dash, never a zero or an invented date, where a figure
-                    * genuinely has no value (AGENTS.md §6.4). A business that
-                    * never held a permit has no permit number and no expiry,
-                    * and printing "—" says so where "n/a" would read as a
-                    * lookup that failed.
-                    */}
-                  <span className="mt-1 block text-sm text-ink-secondary tnum">
-                    {row.permit_number ?? '—'}
-                    {row.valid_until !== null && (
-                      <>
-                        {' · '}
-                        {row.state === 'active' ? 'valid to' : 'lapsed'} {formatDate(row.valid_until)}
-                      </>
-                    )}
-                  </span>
-                  <span className="mt-1 block text-sm text-ink-muted">
-                    Barangay {row.barangay ?? '—'}
-                    {verdicts.get(row.id) === 'off-city' && ' · pin is outside Malabon'}
-                    {verdicts.get(row.id) === 'disagrees' && ' · pin is in a different barangay'}
-                  </span>
-                </Popup>
-              </Marker>
-            ))}
-          </MapContainer>
+          {/*
+            * The pin/barangay shortfall, stated once, in plain words, with both
+            * numbers. See the long note at the top of this file for why it is a
+            * sentence here rather than a warning painted on 672 markers.
+            *
+            * Deliberately not styled as an alert: no red, no icon, no tinted panel.
+            * It is a fact about historical data, not something that just went
+            * wrong, and dressing it as an error would put a permanent alarm on a
+            * screen somebody has to look at every day.
+            */}
+          <p className="text-[13px] text-ink-secondary">
+            {pinCounts.agrees} of the {meta.plotted} pins sit in the barangay their owner declared, and{' '}
+            {pinCounts['off-city']} fall outside Malabon altogether. Filings made before the apply
+            wizard began checking the pin against the barangay were never held to it, so those markers
+            are drawn where the register says they are. Use Pin check above to work through them.
+          </p>
         </div>
-      </ProtoCard>
-
-      {/*
-        * The map's numbers as a real table.
-        *
-        * Same rule the charts follow (AGENTS.md §6.2, components/charts/
-        * ChartFrame.tsx): an SVG or a map is nothing to a screen reader, so
-        * whatever it shows is also rendered as markup that can be read. It is
-        * not a duplicate for its own sake — it is the only form of this screen
-        * that exists for a non-sighted reader, and it doubles as the legend for
-        * everyone else, which is why the glyphs sit in it rather than floating
-        * over a corner of the map.
-        */}
-      <ProtoCard className="mt-4 overflow-hidden rounded-xl">
-        <table className="w-full text-left text-sm">
-          <caption className="px-5 pt-4 text-left text-sm font-semibold text-ink">
-            What the markers mean
-          </caption>
-          <thead>
-            <tr className="text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-              <th scope="col" className="px-5 py-3">
-                Marker
-              </th>
-              <th scope="col" className="px-5 py-3">
-                Meaning
-              </th>
-              <th scope="col" className="px-5 py-3 text-right">
-                Businesses
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {STATE_ORDER.map((s) => (
-              <tr key={s} className="border-t border-line align-top">
-                <th scope="row" className="whitespace-nowrap px-5 py-3.5 font-medium text-ink">
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="inline-flex"
-                      aria-hidden="true"
-                      dangerouslySetInnerHTML={{ __html: glyphHtml(s, 18) }}
-                    />
-                    {STATES[s].label}
-                  </span>
-                </th>
-                <td className="px-5 py-3.5 text-ink-secondary">{STATES[s].description}</td>
-                <td className="px-5 py-3.5 text-right text-ink tnum">{meta.counts[s]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </ProtoCard>
-
-      {/*
-        * The pin/barangay shortfall, stated once, in plain words, with both
-        * numbers. See the long note at the top of this file for why it is a
-        * sentence here rather than a warning painted on 672 markers.
-        *
-        * Deliberately not styled as an alert: no red, no icon, no tinted panel.
-        * It is a fact about historical data, not something that just went
-        * wrong, and dressing it as an error would put a permanent alarm on a
-        * screen somebody has to look at every day.
-        */}
-      <p className="mt-4 max-w-3xl text-sm text-ink-secondary">
-        {pinCounts.agrees} of the {meta.plotted} pins sit in the barangay their owner declared, and{' '}
-        {pinCounts['off-city']} fall outside Malabon altogether. Filings made before the apply
-        wizard began checking the pin against the barangay were never held to it, so those markers
-        are drawn where the register says they are. Use Pin check above to work through them.
-      </p>
+      </div>
     </div>
   )
 }

@@ -14,6 +14,15 @@ import type {
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
 import { StatusBadge } from '../../components/ui/StatusBadge'
+import { DENSE_PAGE, dFoot, dInput, dPager, dTable, dTh, dTheadRow, dToolbarBtn } from './dense'
+
+/*
+ * 2px of cell padding, not dense.ts's 4px: every row here carries a status
+ * badge about 22px tall, so the badge — not the text — sets the row height, and
+ * at 4px a page of 25 came to ~31px a row and pushed the pager just past a
+ * 900px screen. At 2px it is 27px and the whole page fits.
+ */
+const cell = 'px-3 py-0.5'
 import { BuildingIcon, ClipboardIcon, UsersIcon } from '../../components/icons'
 
 /*
@@ -420,10 +429,17 @@ export function RecordsPage() {
   const sortedColumn = sort ? config.columns[SORT_KEYS.indexOf(sort.key)] : null
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-2">
+            {/*
+              The three tabs sit in the title row (client, 2026-09: "every
+              detail fits without scrolling"). A row of their own cost ~55px,
+              which is two register rows at the compact height.
+            */}
+            <FilterPills options={tabs} value={config.value} onChange={selectTab} />
             {/*
               A placeholder is not an accessible name — it disappears on the
               first keystroke — so the field carries a real label, hidden only
@@ -439,7 +455,7 @@ export function RecordsPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={config.searchPlaceholder}
-              className="w-60 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              className={`${dInput} w-60`}
             />
             <button
               type="button"
@@ -452,7 +468,7 @@ export function RecordsPage() {
                * useAsync cancels the in-flight request.
                */
               aria-disabled={loading || undefined}
-              className="rounded-full border border-line bg-white px-4 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+              className={`${dToolbarBtn} aria-disabled:cursor-not-allowed aria-disabled:opacity-40`}
             >
               Refresh
             </button>
@@ -461,10 +477,6 @@ export function RecordsPage() {
       >
         Records
       </PageTitle>
-
-      <div className="mb-5">
-        <FilterPills options={tabs} value={config.value} onChange={selectTab} />
-      </div>
 
       {loading ? (
         <SkeletonList rows={8} />
@@ -479,9 +491,9 @@ export function RecordsPage() {
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[44rem] text-left text-sm">
+            <table className={`${dTable} min-w-[44rem]`}>
               <thead>
-                <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                <tr className={dTheadRow}>
                   {config.columns.map((label, i) => {
                     const key = SORT_KEYS[i]
                     const active = sort?.key === key
@@ -493,12 +505,12 @@ export function RecordsPage() {
                         // arrow: a screen reader announces `aria-sort` and cannot
                         // read a glyph.
                         aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className="px-5 py-3"
+                        className={dTh}
                       >
                         <button
                           type="button"
                           onClick={() => toggleSort(key)}
-                          className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                          className="inline-flex min-h-6 items-center gap-1 rounded uppercase tracking-wide hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
                         >
                           {label}
                           <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
@@ -519,19 +531,19 @@ export function RecordsPage() {
                 */}
                 {rows.map((row) => (
                   <tr key={row.key} className="border-t border-line">
-                    <td className="px-5 py-3.5 font-bold text-ink">{row.primary}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{row.secondary}</td>
-                    <td className="px-5 py-3.5">{row.status}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{formatDate(row.date)}</td>
+                    <td className={`${cell} font-bold text-ink`}>{row.primary}</td>
+                    <td className={`${cell} text-ink-secondary`}>{row.secondary}</td>
+                    <td className={cell}>{row.status}</td>
+                    <td className={`${cell} text-ink-secondary`}>{formatDate(row.date)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
-            <div>
-              <p role="status" aria-live="polite" className="text-sm text-ink-muted">
+          <div className={dFoot}>
+            <div className="flex flex-wrap items-baseline gap-x-3">
+              <p role="status" aria-live="polite" className="text-[13px] text-ink-muted">
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()} {config.noun}
                 {query && ' matching your search'}
               </p>
@@ -542,7 +554,7 @@ export function RecordsPage() {
                 told that the top row is not the whole register's first.
               */}
               {sortedColumn && (
-                <p className="mt-1 text-xs text-ink-muted">
+                <p className="text-xs text-ink-muted">
                   Sorted by {sortedColumn} within this page. The register itself is ordered{' '}
                   {config.serverOrder}.
                 </p>
@@ -561,7 +573,7 @@ export function RecordsPage() {
                  */
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-disabled={page <= 1 || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ‹
               </button>
@@ -573,7 +585,7 @@ export function RecordsPage() {
                 aria-label="Next page"
                 onClick={() => setPage((p) => Math.min(lastPage, p + 1))}
                 aria-disabled={page >= lastPage || loading || undefined}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-line text-sm text-ink-secondary hover:bg-canvas aria-disabled:cursor-not-allowed aria-disabled:opacity-40"
+                className={dPager}
               >
                 ›
               </button>

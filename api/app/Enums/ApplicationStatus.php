@@ -71,7 +71,7 @@ enum ApplicationStatus: string
             self::AwaitingOtherPermits => 'Awaiting Other Permits',
             self::ForFinalApproval => 'For Final Approval',
             self::Approved => 'Approved',
-            self::Rejected => 'Rejected',
+            self::Rejected => 'Disapproved',
             self::Returned => 'Returned',
             self::Cancelled => 'Cancelled',
         };

@@ -50,6 +50,7 @@ function heldCopyFiling(string $name = 'Held Copy Cafe'): Application
 
     $businessId = test()->postJson('/api/v1/businesses', [
         'name' => $name,
+        'trade_name' => 'Test Trade Name',
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-HELD-001',
         'tin' => '123-456-789-000',

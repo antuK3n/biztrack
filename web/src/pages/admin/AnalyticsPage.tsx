@@ -32,6 +32,7 @@ import type {
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { GenerateReportButton } from './GenerateReportButton'
+import { DENSE_PAGE } from './dense'
 
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
@@ -226,10 +227,10 @@ function SectionHeading({ children, note, metric }: { children: ReactNode; note?
        * anyone navigating by heading hears the button on every section.
        */}
       <div className="flex items-center">
-        <h2 className="text-[17px] font-semibold text-ink">{children}</h2>
+        <h2 className="text-base font-semibold text-ink">{children}</h2>
         {metric && <Info metric={metric} />}
       </div>
-      {note && <p className="text-[11px] text-ink-muted">{note}</p>}
+      {note && <p className="text-xs text-ink-muted">{note}</p>}
     </div>
   )
 }
@@ -1250,8 +1251,9 @@ export function AnalyticsPage() {
   const asOf = data ? `As of ${dateLabel(data.today)}` : ''
 
   return (
-    <div>
+    <div {...DENSE_PAGE}>
       <PageTitle
+        compact
         right={
           <span className="flex items-center gap-3 pb-1">
             <FilterMenu

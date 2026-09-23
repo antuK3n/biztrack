@@ -21,6 +21,7 @@ import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
 import { OfficeFormSheet, OFFICE_FORM_META, hasOfficeForm } from './OfficeFormStep'
 import { carriedOverBusiness } from './carriedOver'
+import { PaymentRows } from './PaymentsPage'
 import type { OfficeForm } from '../../lib/types'
 
 /*
@@ -461,7 +462,7 @@ export function ApplicationDetailPage() {
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
   const remarks: { who: string; text: string }[] = [
     ...(app.rejection_reason
-      ? [{ who: 'Reason for rejection', text: app.rejection_reason }]
+      ? [{ who: 'Reason for disapproval', text: app.rejection_reason }]
       : []),
     ...app.assignments
       .filter((a) => a.remarks)
@@ -717,7 +718,7 @@ export function ApplicationDetailPage() {
             <div className="flex items-center gap-5 py-2 text-ink">
               <XCircleIcon size={44} strokeWidth={1.6} />
               <span className="text-4xl font-medium">
-                {status === 'cancelled' ? 'Cancelled' : 'Rejected'}
+                {status === 'cancelled' ? 'Cancelled' : 'Disapproved'}
               </span>
             </div>
           </StatusCard>
@@ -823,6 +824,30 @@ export function ApplicationDetailPage() {
           * outcome of a failed visit on screen while a re-inspection is booked.
           */}
         {status !== 'draft' && <OfficeVisits app={app} />}
+
+        {/* ── What was paid on this filing, and the receipts ──────────────
+          *
+          * Payment History used to be its own rail entry, a list of every
+          * payment across every filing. The client moved it onto the status
+          * screens, and this is the per-filing half: the payments this one
+          * application settled, each with its receipt. The cross-filing list
+          * is at the foot of Business Application Status.
+          *
+          * `fee` is the filing's own Tax Order, already on this payload, so
+          * opening a row does not fetch the application a second time.
+          * Nothing is drawn before the first payment: an empty "Payments"
+          * heading on a filing BPLO has not billed yet reads as a missing one.
+          */}
+        {app.payments.length > 0 && (
+          <section aria-labelledby="payments-heading" className="mt-8">
+            <div className="mb-4 border-b border-ink/50 pb-2">
+              <h2 id="payments-heading" className="text-2xl font-bold text-ink">
+                Payments
+              </h2>
+            </div>
+            <PaymentRows payments={app.payments} fee={app.fee_assessment} />
+          </section>
+        )}
 
         {/* ── LGU Clearances · the stage after this filing is paid for ───
           *
