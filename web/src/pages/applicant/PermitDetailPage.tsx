@@ -128,6 +128,17 @@ export function PermitDetailPage() {
   if (error || !permit) return <ErrorState error={error ?? new Error('Not found')} onRetry={reload} />
 
   const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
+  /*
+   * ── Sanction, as distinct from a date passing ────────────────────────
+   *
+   * `expired` above is a date going by and nothing anybody decided. These
+   * two are decisions, and they are the ones the PDF already stamps across
+   * its face — see `resources/views/pdf/permit.blade.php`, which prints any
+   * status but Active in red. This screen printed nothing for either, so a
+   * suspended certificate looked fine here and suspended in the download.
+   */
+  const suspended = permit.status === 'suspended'
+  const revoked = permit.status === 'revoked'
   const cert = permit.certificate
   /*
    * The owner's name comes off the permit, not off the session.
@@ -224,6 +235,53 @@ export function PermitDetailPage() {
             {expired && (
               <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
                 Expired
+              </p>
+            )}
+            {/*
+              ── A suspension says what to DO about it ─────────────────────
+
+              Not just the word. An owner arriving here has been told their
+              Mayor's Permit is suspended and the only question they have is
+              how to get it back — so the route is on the screen rather than
+              in the notification they have already scrolled past.
+
+              The cause is deliberately NOT named here. A suspension can
+              follow a refused clearance, which the clearance page explains
+              per permit with the office's own words, and it may in future
+              follow an enforcement decision, which has no page yet. Naming
+              one cause on a screen that cannot know which it was would be
+              wrong half the time; pointing at the page that CAN say is right
+              either way.
+
+              Revoked gets the word and no route, because there is no route:
+              `PermitStatus::Revoked` has no writer and no way back, and
+              offering a button that fixes nothing is worse than silence.
+            */}
+            {suspended && (
+              <div className="mx-auto mt-3 max-w-xl rounded-md border border-s-red bg-s-red-tint px-4 py-3 print:hidden">
+                <p className="text-center text-sm font-bold uppercase tracking-wide text-s-red">
+                  Suspended
+                </p>
+                <p className="mt-1.5 text-center text-xs leading-relaxed text-ink-secondary">
+                  This permit does not verify while it is suspended — anyone scanning the QR
+                  code is told so. If one of your other permits was rejected, apply for it
+                  again and this permit is restored as soon as that office approves it.
+                </p>
+                {permit.application !== null && (
+                  <p className="mt-2 text-center">
+                    <Link
+                      to={`/applications/${permit.application.id}/clearances`}
+                      className="text-xs font-semibold text-royal underline underline-offset-2 hover:no-underline"
+                    >
+                      See your other permits on {permit.application.tracking_id}
+                    </Link>
+                  </p>
+                )}
+              </div>
+            )}
+            {revoked && (
+              <p className="mt-1 text-center text-sm font-bold uppercase tracking-wide text-s-red">
+                Revoked
               </p>
             )}
 

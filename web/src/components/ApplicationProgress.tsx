@@ -33,9 +33,16 @@ type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
  * Two halves, because they answer different questions and one cannot stand in
  * for the other:
  *
- *  - The RAIL is the fixed sequence the LGU describes: For Approval → Pending
- *    Payment → Awaiting Other Permits → For Final Approval → Approved. It says
- *    where the filing sits and what is still ahead of it.
+ *  - The RAIL is the fixed sequence the LGU describes: For Approval →
+ *    Pending Payment → Permit Released → Approved. It says where the filing
+ *    sits and what is still ahead of it.
+ *
+ *    The THIRD node is where the Mayor's Permit is minted, since
+ *    24 September 2026. It used to be the last one, and the rail did not
+ *    have to change shape for the move — which is the point of drawing it
+ *    from `statusFlowFor` and labelling it from `applicationStatusMeta`
+ *    rather than writing the steps out here. What changed is one label and
+ *    one tone, in status.ts, and this rail followed.
  *  - The LOG is what actually happened to this filing — every transition, when,
  *    by whom, and the note the officer left. The rail alone would flatten a
  *    filing that was returned twice into one that sailed through.
@@ -65,10 +72,16 @@ type IconType = ComponentType<SVGProps<SVGSVGElement> & { size?: number }>
  * handled here rather than papered over:
  *
  *  1. THE OTHER PERMITS ARE THE LONG STAGE. `WorkflowService::refreshReadiness`
- *     holds the filing at Awaiting Other Permits until every REQUIRED permit
- *     reads Approved, and walks it back if one stops being approved. So the
- *     node carries the count and names what is outstanding — the one thing that
+ *     holds the filing at Permit Released until every REQUIRED permit reads
+ *     Approved, and walks it back if one stops being approved. So the node
+ *     carries the count and names what is outstanding — the one thing that
  *     turns "it is stuck" into someone to ring.
+ *
+ *     It is no longer the stage that gates the permit, and the count means
+ *     something different because of it: what is outstanding is a condition
+ *     on a certificate the applicant already holds, and a REJECTED one
+ *     suspends it. The node reports the tally either way; the clearance
+ *     cards are where the consequence is spelled out.
  *  2. RETURNED IS A LOOP, NOT A STAGE. It goes back to the applicant from For
  *     Approval and comes back into For Approval. As a sixth box in the line it
  *     would read as progress, which is the opposite of what it is, so it is an
@@ -291,8 +304,8 @@ function buildSteps(app: Application): { steps: RailStep[]; terminal: Applicatio
 /**
  * ── The rail a CLEARANCE OFFICE gets, about its own permit ────────────────
  *
- * The filing rail above is BPLO's process: For Initial Approval → Pending
- * Payment → Awaiting Other Permits → For Final Approval → Approved. Four of
+ * The filing rail above is BPLO's process: For Approval → Pending
+ * Payment → Permit Released → For Final Approval → Approved. Four of
  * those five nodes are BPLO's own acts, and the fifth told a sanitary officer
  * they were "waiting on SANITARY, FSIC, OCCUPANCY, CEC, ZONING" — which
  * includes themselves. The client, from the sanitary seat, 17 September 2026:

@@ -47,6 +47,13 @@ class AssignmentResource extends JsonResource
             'status' => $this->status?->value,
             'status_label' => $this->status?->label(),
             'remarks' => $readsWords ? $this->remarks : null,
+            /*
+             * Behind the same gate as the prose it points at. A pointer without
+             * its remarks names a field and gives no reason, which is worse
+             * than silence — and it is the same sentence, so it answers to the
+             * same reader.
+             */
+            'remarks_target' => $readsWords ? $this->remarks_target : null,
             'department' => $this->relationLoaded('department') && $this->department ? [
                 'code' => $this->department->code,
                 'name' => $this->department->name,
@@ -188,6 +195,27 @@ class AssignmentResource extends JsonResource
              * nothing about what anyone wrote.
              */
             'returned_at' => optional($type->pivot?->returned_at)->toISOString(),
+            /*
+             * ── Has this office refused this permit before? ──────────────
+             *
+             * The re-read is the whole reason these exist. When an applicant
+             * re-applies after a refusal, `submitClearanceForm` clears the
+             * remarks — the instruction has been answered — and the row comes
+             * back to this office as a clean `for_approval`. Without this the
+             * officer cannot tell it is the second time, and can approve in
+             * good faith exactly what their office turned down last week.
+             *
+             * It matters more than it would have a week ago: the sheet
+             * reopens with every answer still in it, so an applicant can
+             * resubmit unchanged and the office receives an identical form.
+             *
+             * Progress, not prose, on the same reasoning as `returned_at`
+             * above: this is the office's own decision being read back to the
+             * office that made it, not another office's paperwork.
+             */
+            'rejected_at' => optional($type->pivot?->rejected_at)->toISOString(),
+            'rejection_note' => $type->pivot?->rejection_note,
+            'rejection_remedy' => $type->pivot?->rejection_remedy,
         ];
     }
 

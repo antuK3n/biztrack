@@ -224,6 +224,16 @@ export function PermitsPage() {
    */
   const [viewing, setViewing] = useState<number | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
+  /*
+   * The permit whose suspension is being lifted, or null. The whole permit
+   * rather than its id, because the dialog names the certificate and the
+   * business — an admin confirming a lift should not have to trust that they
+   * clicked the row they meant.
+   */
+  const [lifting, setLifting] = useState<Permit | null>(null)
+  const [liftReason, setLiftReason] = useState('')
+  const [liftBusy, setLiftBusy] = useState(false)
+  const [liftError, setLiftError] = useState<string | null>(null)
 
   const { data, loading, error, reload } = useAsync(
     () => permits.page({ q: query || undefined, status: status || undefined, page, per_page: PAGE_SIZE }),
@@ -445,12 +455,124 @@ export function PermitsPage() {
                       >
                         {viewing === permit.id ? 'Opening…' : 'View'}
                       </button>
+                      {/*
+                        ── Lift, on suspended rows only ──────────────────────
+
+                        A suspension is automatic: a clearance office refusing
+                        one of the other permits suspends the business permit
+                        in the same transaction, so nothing waits on a queue
+                        being opened. This is the other half the LGU asked for
+                        — *"CAN be suspended"* — a person able to overrule it.
+
+                        Drawn only where it applies rather than disabled
+                        everywhere: on an active permit it is not a control in
+                        a wrong state, it is a control about nothing.
+
+                        The permit number is in the accessible name for the
+                        reason the View button beside it gives.
+                      */}
+                      {permit.status === 'suspended' && (
+                        <button
+                          type="button"
+                          onClick={() => setLifting(permit)}
+                          aria-label={`Lift the suspension on ${permit.permit_number}`}
+                          className="ml-2 rounded-full border border-s-red px-4 py-1.5 text-xs font-semibold text-s-red hover:bg-s-red hover:text-white"
+                        >
+                          Lift
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {lifting !== null && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="lift-heading"
+                className="w-full max-w-md rounded-xl bg-white p-6 shadow-raised"
+              >
+                <h2 id="lift-heading" className="text-base font-bold text-ink">
+                  Lift the suspension on {lifting.permit_number}?
+                </h2>
+                {/*
+                  What the act does and what it deliberately does NOT do. An
+                  admin who believes this also grants the refused clearance
+                  would be lifting it for a reason that is not true.
+                */}
+                <p className="mt-2 text-sm leading-relaxed text-ink-secondary">
+                  {businessName(lifting.business)} may trade on this permit again. The permit
+                  that was rejected stays rejected — that is the issuing office’s decision,
+                  not yours — so this says the business may operate while it is unsettled.
+                </p>
+                <label className="mt-4 block">
+                  <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">
+                    Why are you lifting it?
+                  </span>
+                  <textarea
+                    value={liftReason}
+                    onChange={(e) => setLiftReason(e.target.value)}
+                    rows={3}
+                    className="mt-1 w-full rounded-lg border border-line px-3 py-2 text-sm text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                    placeholder="e.g. CHO confirmed the refusal was filed against the wrong business."
+                  />
+                </label>
+                {/* This is audited and read back later; say so where it is typed. */}
+                <p className="mt-1 text-xs text-ink-muted">
+                  Recorded in the audit log against your account.
+                </p>
+                {liftError !== null && (
+                  <p role="alert" className="mt-2 text-xs font-medium text-s-red">
+                    {liftError}
+                  </p>
+                )}
+                <div className="mt-5 flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLifting(null)
+                      setLiftReason('')
+                      setLiftError(null)
+                    }}
+                    className="rounded-full border border-line px-5 py-2 text-sm font-semibold text-ink hover:bg-shell-deep"
+                  >
+                    Cancel
+                  </button>
+                  {/*
+                    `aria-disabled`, never `disabled` (AGENTS.md §6.2): a screen
+                    reader skips a disabled control and takes the sentence
+                    explaining it along too.
+                  */}
+                  <button
+                    type="button"
+                    aria-disabled={liftBusy || liftReason.trim() === '' || undefined}
+                    onClick={async () => {
+                      if (liftBusy || liftReason.trim() === '') return
+                      setLiftBusy(true)
+                      setLiftError(null)
+                      try {
+                        await permits.liftSuspension(lifting.id, liftReason.trim())
+                        setLifting(null)
+                        setLiftReason('')
+                        reload()
+                      } catch (err) {
+                        setLiftError(toApiError(err).message)
+                      } finally {
+                        setLiftBusy(false)
+                      }
+                    }}
+                    className="rounded-full bg-s-red px-5 py-2 text-sm font-semibold text-white hover:brightness-110 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+                  >
+                    {liftBusy ? 'Lifting…' : 'Lift suspension'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-4 border-t border-line px-5 py-3.5">
             <div>

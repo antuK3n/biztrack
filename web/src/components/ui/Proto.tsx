@@ -517,15 +517,47 @@ export function SortFilter({
     (filter && filter.value !== filter.options[0]?.value) ||
     Boolean(dateRange && (dateRange.from || dateRange.to))
 
+  /*
+   * ── The button says what it is set to ──────────────────────────────────
+   *
+   * Both read a bare "Sort" and "Filter" until 24 September 2026, so the
+   * order a list was in could only be discovered by opening the menu and
+   * finding the tick. On a page of twenty drafts that is a click to answer
+   * a question the heading should have answered.
+   *
+   * The chosen option's own label, looked up rather than stored: the menus
+   * already hold {value, label} pairs and the caller has named each one for
+   * the panel, so there is nothing new to keep in step — a label edited
+   * there changes here for free.
+   *
+   * FILTER falls back to the word alone when nothing is narrowed. Its first
+   * option is the "All" entry by convention (`filterActive` above relies on
+   * exactly that), and a button reading "Filter: All statuses" spends width
+   * to say that no filter is on — which the plain word already says.
+   *
+   * SORT always shows its value, because a list is always in SOME order and
+   * there is no neutral state to fall back to.
+   */
+  const sortLabel = sort?.options.find((o) => o.value === sort.value)?.label
+  const filterLabel = filterActive
+    ? filter?.options.find((o) => o.value === filter.value)?.label
+    : undefined
+
   const sortInner = (
     <>
-      Sort <ChevronDownIcon size={14} className="rotate-180" />
+      {/*
+        "Sort: Newest first". The colon carries the relationship for a screen
+        reader too, which reads the button's whole text as its name — no
+        `aria-label` to write, and none to let drift.
+      */}
+      Sort{sortLabel ? `: ${sortLabel}` : ''}{' '}
+      <ChevronDownIcon size={14} className="rotate-180" />
       <ChevronDownIcon size={14} className="-ml-2.5" />
     </>
   )
   const filterInner = (
     <>
-      Filter
+      Filter{filterLabel ? `: ${filterLabel}` : ''}
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
         <path d="M4 5h16l-6.5 8v5L10 20v-7L4 5Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       </svg>
@@ -673,8 +705,200 @@ export function StatusCard({
 }
 
 /** Filled light-blue input classes — apply to input/select/textarea. */
+/*
+ * ── One step tighter, 24 September 2026 ──────────────────────────────────
+ *
+ * `py-2.5 px-3.5` became `py-2 px-3` on the client's instruction to take the
+ * forms in: *"they took so much space... MAXIMIZE THE SPACING."* Four pixels
+ * a box does not sound like much and there are sixty boxes across the
+ * application.
+ *
+ * It stops there rather than going smaller. At `text-sm` this leaves the
+ * control about 38px tall, which is still a comfortable pointer and touch
+ * target; another step would buy a few more pixels and start costing people
+ * on phones, and WCAG 2.1 AA operability is not negotiable against density.
+ */
 export const inputCls =
-  'w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal'
+  'w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal'
+
+/**
+ * The same box, capped for answers that are short by nature.
+ *
+ * ── Why a cap and not a width ────────────────────────────────────────────
+ *
+ * `inputCls` is `w-full`, so a box holding "Jr." is as wide as one holding a
+ * business name — which is the other half of what the client called *"field
+ * boxes being too long or big"*. A long box also lies about the answer: it
+ * invites a sentence where the form wants three characters.
+ *
+ * `w-full max-w-*` keeps the shrink. A fixed `w-40` would overflow its
+ * column on a narrow phone, and the grid this sits in is one column there.
+ *
+ * For suffixes, extensions, percentages and counts — never for a name, an
+ * address or anything an applicant might reasonably write a lot into.
+ */
+export const inputClsShort = `${inputCls} max-w-[10rem]`
+
+/**
+ * The message a field makes about itself, floated over its label.
+ *
+ * Client, 24 September 2026: *"Can you make the warning messages like pop-ups
+ * near the title instead of text appearing below the field."*
+ *
+ * ── Why the paragraph had to go ──────────────────────────────────────────────
+ *
+ * It was `<p className="mt-1 text-xs ...">` in the flow, directly under the
+ * box, and on a form packed into one wrapping row that is expensive twice
+ * over. It ADDS HEIGHT to its own cell, so the whole row grows and every other
+ * field on it gains a band of empty space beside its box — the exact white
+ * space this form has spent the week having squeezed out of it. And on a
+ * narrow cell a sentence like "Enter your SEC Registration Number as it is
+ * printed on your certificate — letters, numbers, spaces and dashes, and at
+ * least one digit" wraps to four lines, so a single mistyped field could push
+ * the three beside it down by fifty pixels.
+ *
+ * Absolute positioning costs nothing: the bubble is out of flow, the row keeps
+ * its height, and the fields around it do not move when a message appears or
+ * goes. That last part matters more than the space — a layout that reflows
+ * while somebody is tabbing through it moves the box they were aiming at.
+ *
+ * ── It is not a tooltip ──────────────────────────────────────────────────────
+ *
+ * There is no hover or focus trigger and nothing to dismiss. It is shown for
+ * exactly as long as the field is wrong, which is what separates this from the
+ * pattern it resembles: an error somebody has to go looking for is an error
+ * they will submit the form without reading, and hover does not exist on the
+ * phones a good share of these filings come from.
+ *
+ * ── What it keeps from the paragraph ─────────────────────────────────────────
+ *
+ * `id`, so `aria-describedby` on the input still reaches it and the message is
+ * read out as part of the field rather than found later by hunting.
+ * `role="alert"`, so it is announced when it appears. A screen reader is
+ * unaffected by any of the positioning above — this is a visual change, and
+ * the accessible behaviour is the thing that must NOT change with it.
+ *
+ * Anchored bottom-right of the cell's top edge, with a tail pointing down at
+ * the label. It needs `relative` on that cell; without it the bubble escapes to
+ * the nearest positioned ancestor and lands somewhere unrelated, which is the
+ * one way to get this wrong.
+ */
+export function FieldError({
+  id,
+  children,
+  /**
+   * Which edge of the cell the bubble and its tail line up with.
+   *
+   * `left` by default, and for the reason the client asked for the bubble at
+   * all: the tail then sits four pixels in from the cell's left edge, which
+   * is directly over the start of the label — *"near the title"*. Aligned
+   * right, the tail points down at the far end of the field instead, and on
+   * a wide cell that is a long way from the question it is about.
+   *
+   * A bubble wider than its cell overhangs, which is the point of floating
+   * it; `right` is there for a cell far enough right that the overhang would
+   * leave the card.
+   */
+  align = 'left',
+  tone = 'error',
+}: {
+  id?: string
+  children: ReactNode
+  align?: 'left' | 'right'
+  /**
+   * `note` for a message that is not a complaint.
+   *
+   * The TIN's "leave it blank and an officer will ask for it" is the case
+   * this exists for: it has the same layout problem as an error — text under
+   * a box, growing the row — and none of its meaning. Red would tell an
+   * applicant they had done something wrong by exercising a choice the form
+   * offers them.
+   *
+   * It also drops `role="alert"`. An alert interrupts whatever a screen
+   * reader is saying; a note about an optional field has not earned that.
+   */
+  tone?: 'error' | 'note'
+}) {
+  return (
+    <span
+      id={id}
+      role={tone === 'error' ? 'alert' : undefined}
+      className={`pointer-events-none absolute bottom-full z-30 mb-1 w-max max-w-[17rem] rounded-lg px-2.5 py-1.5 text-left text-xs font-medium leading-snug text-white shadow-lg ${
+        tone === 'error' ? 'bg-s-red' : 'bg-ink'
+      } ${align === 'left' ? 'left-0' : 'right-0'}`}
+    >
+      {children}
+      {/*
+        The tail. A rotated square rather than a border triangle, because the
+        bubble has a shadow and a CSS triangle cannot carry one — the join
+        would show as a hard edge under the corner. Half of it sits inside the
+        bubble, so the rotation seam is hidden behind the fill.
+      */}
+      <span
+        aria-hidden="true"
+        className={`absolute top-full -mt-1 h-2 w-2 rotate-45 ${
+          tone === 'error' ? 'bg-s-red' : 'bg-ink'
+        } ${align === 'left' ? 'left-4' : 'right-4'}`}
+      />
+    </span>
+  )
+}
+/**
+ * "All uploaded documents will be verified against the originals."
+ *
+ * Client, 24 September 2026: *"In every Documentary Requirements section,
+ * please add a message like 'Documents uploaded will be verified against
+ * original' ... and make it very apparent."*
+ *
+ * ── Why it is a component and not a sentence typed twice ─────────────────────
+ *
+ * An applicant meets two separate lists of documents — the wizard's
+ * Documentary Requirements and each office sheet's own checklist — and this is
+ * a standing rule about all of them. Two copies of one rule drift, and a rule
+ * that is worded one way on BPLO's list and another way on CENRO's reads as two
+ * different rules to the person deciding what to bring to City Hall.
+ *
+ * ── It states a fact and asks for nothing ────────────────────────────────────
+ *
+ * The first version of this read "Bring your original documents. Everything you
+ * upload will be checked against them", and the client corrected it the same
+ * day: *"The user won't have to bring that."* Right on both counts — BizTrack
+ * exists so a permit can be filed without a trip to City Hall, and nothing in
+ * the flow or on either paper form asks an applicant to present originals at a
+ * counter. The sentence was describing a procedure that does not exist.
+ *
+ * ── Why it is loud ───────────────────────────────────────────────────────────
+ *
+ * *"Make it very apparent."* It is the one thing on these screens about what
+ * happens AFTER the upload, and it is worth reading before somebody attaches a
+ * scan they have tidied up. So it gets the amber treatment the rest of the
+ * product uses — border, tint and weight — rather than the grey small print the
+ * help text around it is set in.
+ *
+ * Amber and not red, on this codebase's standing rule: nothing has failed.
+ */
+export function OriginalsNotice() {
+  return (
+    <p className="mt-3 flex items-start gap-2.5 rounded-lg border-l-4 border-s-orange bg-s-orange-tint px-4 py-3 text-sm font-semibold text-ink">
+      {/*
+        Decorative. The sentence carries the whole message, and a screen reader
+        announcing "warning triangle" before it adds a word the applicant
+        cannot act on.
+      */}
+      <svg
+        width="18"
+        height="18"
+        viewBox="0 0 24 24"
+        fill="currentColor"
+        aria-hidden="true"
+        className="mt-0.5 shrink-0 text-s-orange"
+      >
+        <path d="M12 2 1 21h22L12 2Zm0 6a1 1 0 0 1 1 1v5a1 1 0 1 1-2 0V9a1 1 0 0 1 1-1Zm0 9.5a1.25 1.25 0 1 1 0 2.5 1.25 1.25 0 0 1 0-2.5Z" />
+      </svg>
+      All uploaded documents will be verified against the originals.
+    </p>
+  )
+}
 
 /**
  * Field label above an input.
@@ -700,7 +924,7 @@ export function FieldLabel({
    *
    * The "still needed" list at the foot of each wizard step names the fields
    * the applicant has not answered, and naming was all it did: on a step with
-   * seventeen questions, "Type of Registration, Your registration number, Tax
+   * seventeen questions, "Form of Organization, Your registration number, Tax
    * Identification Number (TIN)" sent them hunting. Numbering both ends of that
    * sentence is the client's ask, and the numbers come from one ordered list
    * per step so the two cannot disagree.

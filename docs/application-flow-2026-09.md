@@ -94,6 +94,13 @@ The client then asked what BPLO was reading when it got there:
 > What is the purpose of the BPLO checking if all other permits are legit, when
 > those permits are APPLIED DIRECTLY in BizTrack itself?
 
+> **Superseded 24 September 2026.** The passage below describes where the
+> Mayor's Permit was issued between 18 and 24 September. The LGU has since
+> moved the release to PAYMENT — see *The permit is released at payment* at
+> the foot of this file. The reasoning here still stands for why BPLO's
+> final approval is not on the new-application path; only the moment of
+> issuance moved.
+
 Nothing, on this path. Every clearance is applied for in BizTrack, approved by
 its own office in BizTrack, and inspected against a pivot row in BizTrack. BPLO
 re-reading them was the system checking its own records against itself — and
@@ -225,3 +232,85 @@ neither doc records.
 That is three sources disagreeing about the one thing a reader most needs. Both
 old docs are now headed SUPERSEDED and point here, and this file is the only one
 describing the flow.
+
+
+## The permit is released at payment — 24 September 2026
+
+The client, having clarified the new-application flow with the LGU:
+
+> After payment, business permit is already released, but can be suspended if
+> the other permits applied to were rejected.
+
+This inverts the dependency the rest of this file was written around. The
+business permit used to be the LAST thing to happen — withheld until all five
+clearances were approved, first by BPLO's press and then, from 18 September, by
+`refreshReadiness()` in the same transaction as the fifth approval. It is now
+the FIRST thing that happens after the money lands, and the clearances are
+conditions attached to a certificate the applicant is already holding.
+
+**What moved:** `WorkflowService::releaseOutcomePermit()`, called from
+`onPaymentCompleted()` on the same `$backToBplo` test that routes the filing —
+so a NEW filing releases and a renewal or amendment does not, both of which have
+a real BPLO act left. `approveOverall()` still mints the permit if it is somehow
+absent, and its existing `status !== Approved` guard means it now does nothing
+on the ordinary path.
+
+**What the sanction became.** Withholding is no longer available, because there
+is nothing left to withhold. So `ClearanceStatus::Rejected` is back — deleted on
+17 September on the reasoning that Return was enough, which was correct while a
+refusal cost the applicant only time. A refusal now costs them their business
+permit, and `Returned` cannot carry that: a return is fixable and repeats, and
+suspending a permit every time an office asked for a clearer scan would be
+absurd.
+
+**The three states, and who sets them:**
+
+| act | who | effect on the business permit |
+| --- | --- | --- |
+| Return | any office | none — fixable, repeats |
+| Reject | the five clearance offices | **Suspended**, automatically |
+| Reject application | BPLO | the filing ends; this is unchanged |
+
+BPLO cannot reach the office Reject (`rejectAssignment` refuses it). The row it
+holds is the BUSINESS one — the row that issued the certificate — so refusing it
+would suspend the permit for the absence of itself.
+
+**Suspension is automatic and the lift is human.** The client chose this over a
+BPLO decision queue: a business whose fire clearance has been refused should not
+keep trading because nobody opened a queue that morning. BPLO lifts it through
+`POST /permits/{permit}/lift-suspension`, behind `permit.issue`, with a recorded
+reason. A lift does NOT clear the refusal — the permit that was refused is still
+the issuing office's decision.
+
+**Reinstatement is automatic and mirrors the suspension.**
+`reconsiderSuspension()` asks "is anything on this filing still refused" rather
+than "was this the one that caused it", so two offices refusing produces one
+suspension that survives until both are settled.
+
+**The way back needed three guards opened**, all of which were written for a
+world with no clearance-level refusal and all of which silently blocked the
+route the client chose:
+
+- `ClearanceService::isAppliedFor` counted a refused permit as applied-for, so
+  `apply` answered *"You have already applied for the …"*;
+- `OfficeFormController::ownerMayEdit` kept the sheet locked, so applying again
+  would have opened a form nobody could type in;
+- `WorkflowService::submitClearanceForm` returned silently for any status but
+  NotStarted and Returned, so pressing Submit moved nothing and the office's
+  Approve then failed with *"A Rejected permit cannot become For Inspection."*
+
+Only the third was reachable in a test that stopped at the first, which is why
+`PermitReleasedAtPaymentTest` walks the whole loop — apply, fill, submit,
+approve, inspect — rather than asserting on the pivot.
+
+**What did not change, and was checked:** the certificate PDF already stamps its
+status across the face for anything but Active, and `/verify/{number}` already
+answers invalid for a non-Active permit. Both were built for `Revoked` and cover
+`Suspended` without alteration.
+
+**The stage was renamed.** `awaiting_other_permits` keeps its value and is now
+labelled **Permit Released** — the filing is still waiting on five offices, but
+the person reading the tracker is not waiting for anything, and "Awaiting" over
+a certificate they have already downloaded is the tracker contradicting the
+vault. BPLO's queue tab keeps the old words, because from that seat the filing
+genuinely is out with the other offices.

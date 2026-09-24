@@ -252,6 +252,27 @@ class ClearanceService
              * and Malabon has given us no response window (open question A10).
              */
             'returned_at' => optional($this->pivotRow($application, $type)?->returned_at)->toISOString(),
+            /*
+             * ── The refusal, which OUTLIVES the answer to it ─────────────
+             *
+             * `return_note` above is the current instruction and goes null
+             * the moment the applicant hands the sheet back in. These three
+             * do not, and that is deliberate on both sides of the screen:
+             * the office needs to know it refused this once, and the
+             * applicant needs the remedy in front of them while they are
+             * filling the form in again.
+             *
+             * `rejection_remedy` is the one that changes behaviour. The form
+             * reopens with every answer still in it — one row per permit per
+             * filing, never one per attempt — which is right, and carries a
+             * risk with it: an applicant can press Submit unchanged and the
+             * office receives the identical sheet it refused. Putting what
+             * would settle it ON the sheet is the cheap half of preventing
+             * that; the officer's own banner is the other half.
+             */
+            'rejected_at' => optional($this->pivotRow($application, $type)?->rejected_at)->toISOString(),
+            'rejection_note' => $this->pivotRow($application, $type)?->rejection_note,
+            'rejection_remedy' => $this->pivotRow($application, $type)?->rejection_remedy,
             'fee_preview' => $this->feePreview($application, $type, $baseline),
         ];
     }
@@ -332,9 +353,20 @@ class ClearanceService
          * to `apply` instead would create a second start on a permit an office
          * has already read, and lose the remarks explaining what to fix.
          *
-         * This said "A REJECTED or RETURNED permit" and named `refileClearance()`
-         * as the route. Clearance-level rejection was removed on 17 September
-         * 2026 — Return is enough — and that method went with it.
+         * A REJECTED permit is the opposite case and answers FALSE, which is
+         * what lets the applicant apply for it again. The office has finished
+         * with it — there is no open application to duplicate and no remarks
+         * to lose — and re-applying is the route the client chose out of a
+         * suspended business permit on 24 September 2026. The enum agrees:
+         * `Rejected → ForApproval` is legal in `allowedNext`, and
+         * `submitClearanceForm` is what walks it.
+         *
+         * This note said "A REJECTED or RETURNED permit" and named
+         * `refileClearance()` as the route, back when both existed.
+         * Clearance-level rejection was removed on 17 September 2026 — Return
+         * is enough — and that method went with it. Rejection is back and the
+         * method is not: `apply` IS the re-file, which is one mechanism rather
+         * than two that can disagree.
          *
          * ── And `not_started` stopped being the whole answer again ────────────
          *
@@ -355,6 +387,10 @@ class ClearanceService
          * permit goes back to answering false without a second rule saying so.
          */
         $row = $this->pivotRow($application, $type);
+
+        if ($row?->status === ClearanceStatus::Rejected) {
+            return false;
+        }
 
         return $row !== null
             && ($row->status !== ClearanceStatus::NotStarted || $row->mode !== null);
