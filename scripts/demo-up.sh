@@ -28,6 +28,15 @@ echo "Building the bundle testers will see…"
 # broken deploy and is a missing address family.
 ( cd "$DEMO/web" && VITE_API_TARGET=http://localhost:8082 nohup npx vite preview --port 5180 --strictPort --host 127.0.0.1 >"$LOGS/web.log" 2>&1 & )
 
+# The queue worker. Owner e-mails are queued (App\Jobs\SendOwnerUpdateEmail),
+# and without a worker they sit in the `jobs` table and nothing is ever sent —
+# the in-app notice appears, the e-mail silently does not. Same database and
+# same code as the API above, so it drains exactly what that API queues.
+# --name is how demo-down.sh and demo-deploy.sh find this process again; one
+# worker only, so a stale one is stopped first. See docs/email-setup.md.
+pkill -f 'queue:work --name=biztrack-demo' 2>/dev/null || true
+( cd "$DEMO/api" && DB_DATABASE="$DB" APP_DEBUG=false nohup php artisan queue:work --name=biztrack-demo --sleep=3 >"$LOGS/queue.log" 2>&1 & )
+
 for _ in $(seq 1 30); do curl -sf -o /dev/null http://localhost:5180/ && break; sleep 1; done
 
 # Plumber has no auth of its own; anything that reaches it can read the register.
@@ -52,7 +61,7 @@ done
 echo
 echo "  Testers:  ${URL:-<not ready — see $LOGS/tunnel.log>}"
 echo "  Serving:  $DEMO (branch demo, built bundle — your edits cannot reach it)"
-echo "  Logs:     $LOGS"
+echo "  Logs:     $LOGS  (queue.log: owner e-mails)"
 echo
-echo "  Permits print a verify link from FRONTEND_URL in api/.env."
-echo "  Set it to the URL above before a session that involves printing permits."
+echo "  Permits print a verify link, and owner e-mails a sign-in link, from"
+echo "  FRONTEND_URL in api/.env. Set it to the URL above before a session."

@@ -341,7 +341,11 @@ class BusinessStatusController extends Controller
                     ? "{$business->name} is now registered to you. You are the one who files its "
                         .'renewals from here on.'
                     : "{$business->name} has been transferred to another owner by the BPLO.",
-                '/businesses',
+                // `/dashboard`, not `/businesses`: there is no such route in
+                // App.tsx, and this link is now also the button in the e-mail
+                // the owner gets. Same fix businessStatusChanged() records.
+                '/dashboard',
+                $business,
             );
         }
 

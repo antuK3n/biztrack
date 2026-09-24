@@ -4,4 +4,5 @@ set -uo pipefail
 pkill -f 'cloudflared tunnel --url http://localhost:5180' && echo "tunnel stopped"
 kill $(lsof -ti tcp:5180) 2>/dev/null && echo "preview server stopped"
 kill $(lsof -ti tcp:8082) 2>/dev/null && echo "demo api stopped"
+pkill -f 'queue:work --name=biztrack-demo' && echo "queue worker stopped"
 exit 0
