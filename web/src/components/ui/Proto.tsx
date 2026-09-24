@@ -423,10 +423,25 @@ export interface SortFilterDateRange {
 
 function SortFilterMenuPanel({
   menu,
+  fields,
   dateRange,
   onClose,
 }: {
   menu: SortFilterMenu
+  /**
+   * Further narrowing, each its own labelled select.
+   *
+   * The panel held ONE listbox and an optional date range, which is the whole
+   * of what a sort needs and not enough for a filter that narrows on more than
+   * one thing at once. The permit register narrows on status, on how soon a
+   * certificate lapses, and — for the two readers who see more than one office
+   * — on which office issued it; those are separate questions, so they are
+   * separate controls rather than one list of combinations.
+   *
+   * Optional and additive: the five screens already using this pass only
+   * `menu`, and render exactly as they did.
+   */
+  fields?: FilterField[]
   dateRange?: SortFilterDateRange
   onClose: () => void
 }) {
@@ -439,7 +454,11 @@ function SortFilterMenuPanel({
         className="fixed inset-0 z-30 cursor-default"
         tabIndex={-1}
       />
-      <div className="absolute right-0 top-full z-40 mt-2 w-56 rounded-lg border border-line bg-white p-1.5 text-left shadow-overlay">
+      <div
+        className={`absolute right-0 top-full z-40 mt-2 rounded-lg border border-line bg-white p-1.5 text-left shadow-overlay ${
+          fields?.length || dateRange ? 'w-64' : 'w-56'
+        }`}
+      >
         <ul role="listbox">
           {menu.options.map((option) => {
             const active = option.value === menu.value
@@ -451,7 +470,14 @@ function SortFilterMenuPanel({
                   aria-selected={active}
                   onClick={() => {
                     menu.onChange(option.value)
-                    if (!dateRange) onClose()
+                    /*
+                     * Stay open while the panel holds anything else. Closing
+                     * on the first choice is right for a sort — the menu is
+                     * the whole decision — and wrong for a filter that
+                     * narrows on four things, where it would mean reopening
+                     * the panel between every one of them.
+                     */
+                    if (!dateRange && !fields?.length) onClose()
                   }}
                   className={`w-full rounded-md px-3 py-1.5 text-left text-sm ${
                     active ? 'bg-royal-tint font-semibold text-royal' : 'text-ink hover:bg-canvas'
@@ -463,6 +489,22 @@ function SortFilterMenuPanel({
             )
           })}
         </ul>
+        {fields?.map((field) => (
+          <label key={field.label} className="mt-1.5 block border-t border-line px-3 py-2.5 text-xs font-semibold text-ink-secondary">
+            {field.label}
+            <select
+              value={field.value}
+              onChange={(e) => field.onChange(e.target.value)}
+              className="mt-1 w-full rounded-md border border-input-border bg-input px-2 py-1 text-sm font-normal text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+            >
+              {field.options.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
         {dateRange && (
           <div className="mt-1.5 space-y-2 border-t border-line px-3 py-2.5">
             <label className="block text-xs font-semibold text-ink-secondary">
@@ -506,15 +548,26 @@ function SortFilterMenuPanel({
 export function SortFilter({
   sort,
   filter,
+  filterFields,
   dateRange,
 }: {
   sort?: SortFilterMenu
   filter?: SortFilterMenu
+  /** Extra narrowing controls inside the Filter panel. See the panel's note. */
+  filterFields?: FilterField[]
   dateRange?: SortFilterDateRange
 } = {}) {
   const [openMenu, setOpenMenu] = useState<'sort' | 'filter' | null>(null)
+  /*
+   * "Something is narrowing this" — what colours the Filter button. Each
+   * control is compared against its OWN first option, which is the convention
+   * every caller follows for "no narrowing" ("All", "Any"), rather than
+   * against an empty string: a filter whose neutral value is a word would
+   * otherwise read as permanently active.
+   */
   const filterActive =
     (filter && filter.value !== filter.options[0]?.value) ||
+    Boolean(filterFields?.some((f) => f.value !== f.options[0]?.value)) ||
     Boolean(dateRange && (dateRange.from || dateRange.to))
 
   const sortInner = (
@@ -566,7 +619,12 @@ export function SortFilter({
             {filterInner}
           </button>
           {openMenu === 'filter' && (
-            <SortFilterMenuPanel menu={filter} dateRange={dateRange} onClose={() => setOpenMenu(null)} />
+            <SortFilterMenuPanel
+              menu={filter}
+              fields={filterFields}
+              dateRange={dateRange}
+              onClose={() => setOpenMenu(null)}
+            />
           )}
         </span>
       )}
