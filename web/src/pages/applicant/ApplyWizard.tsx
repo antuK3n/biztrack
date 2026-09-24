@@ -12,9 +12,9 @@ import {
   type OfficeFormCode,
   type OfficeFormData,
 } from './OfficeFormStep'
-import { checkPin, withinMalabon } from '../../lib/malabonGeo'
+import { barangayCentre, checkPin, withinMalabon } from '../../lib/malabonGeo'
 import { OTHER_PSIC_CODE } from '../../lib/psic'
-import { geocodeInMalabon } from '../../lib/geocode'
+import { geocodeInMalabon, streetQuery } from '../../lib/geocode'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -66,6 +66,7 @@ import { ACCEPT_ATTR, fileRejection, uploadErrorMessage } from './uploads'
 import BarangayZoningMap from './BarangayZoningMap'
 import {
   LocationInsightsPanel,
+  ZoningConformanceNote,
   useLocationInsights,
   type LocationInsightsQuery,
 } from './LocationInsightsPanel'
@@ -554,6 +555,14 @@ interface FormState {
    */
   house_bldg_no: string
   street: string
+  /*
+   * Block, Lot and the lot's area (client, 23 September 2026). Optional —
+   * plenty of premises have no block or lot. The area is the LOT; the floor
+   * area the fee engine assesses is Business Operation's item 1.
+   */
+  block: string
+  lot: string
+  lot_area_sqm: string
   line1: string
   line2: string
   barangay_id: string
@@ -599,6 +608,9 @@ const EMPTY: FormState = {
   owner_gender: '',
   house_bldg_no: '',
   street: '',
+  block: '',
+  lot: '',
+  lot_area_sqm: '',
   line1: '',
   line2: '',
   barangay_id: '',
@@ -805,6 +817,12 @@ const ECONOMIC_ORGANIZATIONS: { value: string; label: string; hint: string }[] =
  */
 function hasPresidentOrOfficer(_registrationType: string): boolean {
   return true
+}
+
+/** A lot area in sq. m.: a positive number, commas allowed. Blank is not checked here. */
+function lotAreaValid(raw: string): boolean {
+  const n = Number(plainAmount(raw))
+  return plainAmount(raw) !== '' && Number.isFinite(n) && n > 0 && n <= 10_000_000
 }
 
 /**
@@ -1636,7 +1654,7 @@ function LinesStep({
            * people, and a step where the only escape is picking something
            * else is a trap.
            */}
-          <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-ink-secondary">
+          <p className="text-xs font-bold uppercase tracking-[0.1em] text-ink-secondary">
             Your line of business
           </p>
           <div className="mt-2 space-y-3">
@@ -1674,7 +1692,7 @@ function LinesStep({
                           <p className="truncate text-sm text-ink">
                             {line.line_of_business.trim() || 'Unclassified line'}
                           </p>
-                          <p className="mt-0.5 text-xs text-s-red">
+                          <p className="mt-0.5 text-sm text-s-red">
                             Not on the PSIC list, so this line cannot be assessed. Change it for the
                             closest trade on the list.
                           </p>
@@ -1729,7 +1747,7 @@ function LinesStep({
                     </div>
                   </div>
                   {needsText && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       Type the line of business you want registered.
                     </p>
                   )}
@@ -1760,7 +1778,7 @@ function LinesStep({
                    * objected to.
                    */}
                   <label className="mt-2.5 block">
-                    <span className="text-xs font-medium text-ink-secondary">
+                    <span className="text-sm font-medium text-ink-secondary">
                       Products / Services <span className="text-s-red">*</span>
                     </span>
                     <input
@@ -1809,7 +1827,7 @@ function LinesStep({
            * to the extras the moment the applicant touches the picker.
            */}
           {lines.length > 1 && (
-            <p className="mt-3 text-xs text-ink-secondary">
+            <p className="mt-3 text-sm text-ink-secondary">
               Carried over from an earlier filing, which declared {lines.length} lines. A filing
               declares one now — picking a trade above replaces all of these with the one you pick.
             </p>
@@ -2546,12 +2564,6 @@ export function ApplyWizard() {
   const typeMeta = TYPE_META[applicationType]
 
   const isReuse = applicationType === 'renewal' || applicationType === 'amendment'
-  /*
-   * The wizard does not evaluate zoning; CPDO does, during processing. The
-   * default modal only confirms the pin was recorded. The red non-conforming
-   * modal (p031) is reachable with a `?zoning=deny` debug query param.
-   */
-  const zoningDenied = searchParams.get('zoning') === 'deny'
 
   const [step, setStep] = useState(0)
   /*
@@ -2678,6 +2690,18 @@ export function ApplyWizard() {
    * Kept as state rather than a ref because the caption under the map reads it.
    */
   const [autoPinned, setAutoPinned] = useState<string | null>(null)
+  /*
+   * Where the map suggests the applicant START when their address could not be
+   * found: the centre of the barangay they chose. Never a pin — it is held here
+   * and not in `form`, so it is never saved, never sent to Location Insights,
+   * and never satisfies "A pin on the map". It becomes a pin only when the
+   * applicant drags it, clicks it, or clicks the map (MapPicker's `startAt`).
+   */
+  const [startPoint, setStartPoint] = useState<{
+    latitude: number
+    longitude: number
+    barangay: string
+  } | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -3011,7 +3035,6 @@ export function ApplyWizard() {
       target.scrollIntoView({ block: 'start', behavior: 'smooth' })
     })
   }
-  const [showZoning, setShowZoning] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
 
@@ -3125,6 +3148,9 @@ export function ApplyWizard() {
         // Falls back to the whole line for a business saved before the split,
         // so its street is editable rather than silently empty.
         street: b.address.street ?? b.address.line1 ?? '',
+        block: b.address.block ?? '',
+        lot: b.address.lot ?? '',
+        lot_area_sqm: b.address.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
         line1: b.address.line1 ?? '',
         line2: b.address.line2 ?? '',
         barangay_id: b.address.barangay ? String(b.address.barangay.id) : '',
@@ -3537,8 +3563,7 @@ export function ApplyWizard() {
    * The whole row, not just the name: the zoning step now also needs the
    * barangay's CPDO map path and the classifications drawn on it, and both ride
    * along on the same reference payload. `barangayName` stays as the narrower
-   * thing the zoning modal already reads, rather than making that dialog reach
-   * into an object for one field.
+   * thing the pin checks and the zoning note read.
    */
   const selectedBarangay = barangays.find((b) => String(b.id) === form.barangay_id) ?? null
   const barangayName = selectedBarangay?.name
@@ -3573,19 +3598,37 @@ export function ApplyWizard() {
    *  - the lookup must come back inside Malabon, which `geocodeInMalabon`
    *    already enforces with the same polygon test the click handler uses.
    *
-   * Silence on failure is deliberate. OSM's coverage of Malabon's alleys is
-   * thin — the satellite layer exists for that reason — so "no match" is an
-   * ordinary outcome, not an error. The applicant was always going to click the
-   * map; being told a service they never invoked has failed helps nobody.
+   * A miss is not an error — measured on 41 addresses from the register, the
+   * lookup finds a street in the chosen barangay for about one in four (see
+   * `lib/geocode.ts`) — so it is never announced as a failure. But it is no
+   * longer silent either. With a barangay chosen, a miss puts a hollow START
+   * pin at that barangay's centre and says plainly that it is not their
+   * address: an applicant in Dampalit should not have to find Dampalit on a map
+   * that opened on City Hall before they can begin looking for their street.
+   * The start pin is not a pin (see `startPoint`); the step still wants one.
    */
   useEffect(() => {
     if (form.lines.length === 0) return
     if (form.latitude !== null && autoPinned === null) return
+    // Nothing looked up yet, so nothing has failed: no start pin either.
+    if (streetQuery(streetAddress).length < 4) {
+      setStartPoint(null)
+      return
+    }
 
     const controller = new AbortController()
     const timer = setTimeout(() => {
       void geocodeInMalabon(streetAddress, barangayName ?? null, controller.signal).then((hit) => {
-        if (hit === null || controller.signal.aborted) return
+        if (controller.signal.aborted) return
+        if (hit === null) {
+          const centre = barangayName ? barangayCentre(barangayName) : null
+          setStartPoint(
+            centre && barangayName
+              ? { latitude: centre[0], longitude: centre[1], barangay: barangayName }
+              : null,
+          )
+          return
+        }
         /*
          * Re-checked against the barangay, because the suggestion is only as
          * good as the street name and OSM will happily return the same street
@@ -3600,6 +3643,7 @@ export function ApplyWizard() {
           longitude: hit.longitude,
         }))
         setAutoPinned(hit.label)
+        setStartPoint(null)
         setPinError(null)
       })
     }, 800)
@@ -3613,27 +3657,6 @@ export function ApplyWizard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streetAddress, form.lines.length, barangayName, autoPinned])
 
-  /*
-   * The first line of business the applicant declared, when they have one. It
-   * is chosen on the zoning step itself now (item 69), so by the time the
-   * zoning modal opens there is always one to name.
-   */
-  const declaredLine = psic.find((c) => c.id === form.lines[0]?.psic_code_id)
-
-  /*
-   * What the zoning modal says the verdict is ABOUT. The mockup underlines the
-   * line of business ("The new business for Cafe"), which is what a zoning
-   * decision actually turns on — a use, not a trade name. The business name is
-   * the fallback, and on a fresh filing neither exists yet at Part 1, so the
-   * sentence still has to read as English with no subject at all.
-   *
-   * PSIC titles carry the colloquial name in brackets, and that is the half a
-   * shop owner recognises: "sari-sari store", not "Retail sale in
-   * non-specialized stores (sari-sari store)". Prefer the bracketed name so the
-   * sentence reads like the mockup's "Cafe" instead of a statistical class.
-   */
-  const zoningSubject: string | null =
-    declaredLine?.title.match(/\(([^)]+)\)\s*$/)?.[1] ?? declaredLine?.title ?? (form.name || null)
 
   /*
    * The business as every office sheet carries it is built by the LGU
@@ -3731,7 +3754,10 @@ export function ApplyWizard() {
       insightsQuery.latitude !== livePin.latitude ||
       insightsQuery.longitude !== livePin.longitude ||
       insightsQuery.psicCodeId !== livePin.psicCodeId ||
-      insightsQuery.businessId !== livePin.businessId)
+      insightsQuery.businessId !== livePin.businessId ||
+      // The zoning note reads this response too, and it is keyed on the
+      // barangay — a changed dropdown is a question not yet answered.
+      insightsQuery.barangayId !== livePin.barangayId)
 
   /*
    * The radius the ring on the map is drawn at — the API's own `radius_m`, never
@@ -3837,8 +3863,7 @@ export function ApplyWizard() {
    *
    * A renewal carries whichever permits were ticked. Tick the business permit
    * and this is the BPLO form, with the other clearances opening later at the
-   * clearance stage — the arrangement the "other permits come later" note on
-   * Location & Zoning describes. Tick only the others and there is no BPLO
+   * clearance stage after payment. Tick only the others and there is no BPLO
    * form to fill: the filing IS those offices' applications, so their sheets
    * are the steps.
    *
@@ -4043,6 +4068,9 @@ export function ApplyWizard() {
       address: [
         { label: 'House / Bldg. No.', value: form.house_bldg_no },
         { label: 'Street', value: form.street },
+        { label: 'Block', value: form.block },
+        { label: 'Lot', value: form.lot },
+        { label: 'Lot Area (sq. m.)', value: form.lot_area_sqm },
         { label: 'Barangay', value: barangay },
         {
           label: 'Map pin',
@@ -4917,8 +4945,8 @@ export function ApplyWizard() {
            * Item 69 — the whole Line of Business question is answered here now,
            * and these three checks are the ones the deleted `lines` step used to
            * make. Required on this step, as the mockup marks it, and not merely
-           * because Location Insights wants it: the zoning modal this step opens
-           * into announces conformity *for a named trade*, and CPDO's locational
+           * because Location Insights wants it: the zoning note on this step
+           * reads the ordinance *for a named trade*, and CPDO's locational
            * clearance is a judgment about a use, not about a coordinate.
            */
           if (form.lines.length === 0) missing.push('Line of Business')
@@ -4969,7 +4997,12 @@ export function ApplyWizard() {
            * one would be our rule, not the city's.
            */
           if (!form.street.trim()) missing.push('Street')
-          if (!form.barangay_id) missing.push('Barangay')
+          // Optional, so listed only when what is in it is not an area.
+          if (form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)) {
+            missing.push('A valid Lot Area')
+          }
+          // The field's own label, so the list names something on the screen.
+          if (!form.barangay_id) missing.push('Barangay Name')
           // CPDO rules on the zoning clearance from where the business actually
           // is, so the pin is part of the answer, not a nicety.
           if (form.latitude === null || form.longitude === null) missing.push('A pin on the map')
@@ -5457,6 +5490,10 @@ export function ApplyWizard() {
           ? ''
           : TIN_ERROR
         : 'Enter your Tax Identification Number.',
+    lot_area_sqm:
+      form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)
+        ? 'Enter the lot area in square metres, like 120.'
+        : '',
     /*
      * Both optional, so neither can complain about being empty — only about
      * being wrong. `phoneValid` already accepts a landline with or without its
@@ -5591,6 +5628,10 @@ export function ApplyWizard() {
         // The API composes `line1` from these two — see syncAddressAndLines.
         house_bldg_no: form.house_bldg_no.trim(),
         street: form.street.trim(),
+        // Sent even when blank, so clearing one is stored as the blank it is.
+        block: form.block.trim(),
+        lot: form.lot.trim(),
+        lot_area_sqm: plainAmount(form.lot_area_sqm) || null,
         line2: form.line2.trim() || undefined,
         barangay_id: Number(form.barangay_id),
         latitude: form.latitude ?? undefined,
@@ -5843,22 +5884,9 @@ export function ApplyWizard() {
     } else if (stepMissing.length > 0) {
       return
     }
-    /*
-     * Zoning result (p30) — the conformity message, and only that.
-     *
-     * Location Insights used to be primed here, because the modal was where it
-     * rendered. It is on the step itself now and follows the pin on its own, so
-     * leaving the step is no longer an event the lookup cares about.
-     */
-    if (phase === 'address') {
-      setShowZoning(true)
-      return
-    }
+    // Location & Zoning used to stop here for the zoning dialog; the answer is
+    // inline on the step now, so every step leaves the same way.
     await advance()
-  }
-
-  function closeZoning() {
-    setShowZoning(false)
   }
 
   function back() {
@@ -6724,6 +6752,9 @@ export function ApplyWizard() {
         lines: [],
         house_bldg_no: '',
         street: '',
+        block: '',
+        lot: '',
+        lot_area_sqm: '',
         line1: '',
         line2: '',
         barangay_id: '',
@@ -7007,6 +7038,9 @@ export function ApplyWizard() {
           owner_gender: b.owner?.gender || account?.gender || '',
           house_bldg_no: b.address?.house_bldg_no ?? '',
           street: b.address?.street ?? b.address?.line1 ?? '',
+          block: b.address?.block ?? '',
+          lot: b.address?.lot ?? '',
+          lot_area_sqm: b.address?.lot_area_sqm != null ? String(b.address.lot_area_sqm) : '',
           line1: b.address?.line1 ?? '',
           line2: b.address?.line2 ?? '',
           barangay_id: b.address?.barangay ? String(b.address.barangay.id) : '',
@@ -7590,40 +7624,19 @@ export function ApplyWizard() {
           <h1 className="mb-1 text-2xl font-bold text-ink">
             Zoning Clearance - Selecting Business Location
           </h1>
-          <div className="mb-2 h-px bg-ink/40" />
-          <p className="mb-6 text-xs text-ink-secondary">
-            Pin your location and enter your address. The pin must fall inside Malabon, and inside
-            the barangay you select below. CPDO evaluates your zoning clearance from it during
-            processing.
-          </p>
+          <div className="mb-6 h-px bg-ink/40" />
 
           {/*
-           * Says where the other five clearances went, on the step where they
-           * are missed.
+           * No introduction and no "the other permits come later" box.
            *
-           * A tester reported them "missing" and asked for them back. They
-           * were not deleted — they moved out of this wizard and onto
-           * /applications/:id/clearances when payment went first, which Review
-           * & Submit does explain. But Review is the LAST step, and this is
-           * the step whose heading says "Zoning Clearance", so this is where
-           * somebody looking for the clearances looks and concludes they are
-           * gone. Answering only at the end answers after the alarm.
-           *
-           * The six are named rather than counted, because "six LGU
-           * clearances" does not let an applicant check whether the one THEY
-           * need is among them. Not a link: there is no application to link to
-           * until this filing is submitted.
+           * Both stood here: a paragraph restating the pin rules the map
+           * already enforces, and a note naming the five clearances that open
+           * after payment. The client, 23 September 2026: "no need to mention
+           * once BPLO is approved, clearance sanitary etc on the zoning tab. So
+           * much clutter, user-unfriendly." This step keeps only what is needed
+           * to answer it. The other permits are named where they open, on
+           * the clearance stage after payment.
            */}
-          <div className="mb-6 rounded-xl border border-line-strong bg-white px-4 py-3">
-            <p className="text-xs text-ink-secondary">
-              <span className="font-semibold text-ink">The other permits come later.</span> Fire,
-              Sanitary, Building/Occupancy, Environmental and this Zoning clearance are not part of
-              this form. Once BPLO approves your application and you have paid, all five open under{' '}
-              <span className="font-semibold text-ink">Other Permits</span> — you need every one of
-              them, and for each you either fill in that office’s sheet or hand in the permit you
-              already hold.
-            </p>
-          </div>
 
           {/*
            * Item 69 — the one and only Line of Business question.
@@ -7659,9 +7672,8 @@ export function ApplyWizard() {
              * "Lines". Keep both singular if this is ever reworded.
              */}
             <FieldLabel required>Line of Business</FieldLabel>
-            <p className="mb-3 text-xs text-ink-secondary">
-              What this location will be used for. Choose one trade — the zoning verdict is given
-              against a single line of business, so a filing declares one.
+            <p className="mb-3 text-sm text-ink-secondary">
+              What this location will be used for. Choose one.
             </p>
             <LinesStep
               codes={psic}
@@ -7669,11 +7681,10 @@ export function ApplyWizard() {
               onChange={(lines) => update('lines', lines)}
             />
             {form.lines.length === 0 && (
-              <p className="mt-2.5 text-xs font-medium text-s-red">
+              <p className="mt-2.5 text-sm font-medium text-s-red">
                 {/* "at least one" was the multi-select's phrasing and implied a
                     minimum with no maximum. There is exactly one. */}
-                Required: choose your line of business. The zoning verdict is about a trade, not a
-                coordinate.
+                Required: choose your line of business.
               </p>
             )}
           </div>
@@ -7704,6 +7715,24 @@ export function ApplyWizard() {
              * filing, which is exactly the state the client was looking at.
              */}
             <div className="self-start space-y-6">
+              {/*
+               * Why the pin has to be right, said before it is placed (client,
+               * 23 September 2026). CPDO inspects the spot the pin names; a
+               * wrong one can get the filing disapproved, and fees already
+               * paid are not returned.
+               *
+               * Amber, not red: nothing is wrong yet, and #bd0000 is for errors
+               * (DESIGN.md, Red Means Stop). The bold lead-in carries it in
+               * words, so it survives with colour off.
+               */}
+              <p
+                id="pin-accuracy-note"
+                className="rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
+              >
+                <span className="font-bold">Place the pin exactly on your business.</span> A wrong
+                location can get your application disapproved, and any fees you paid will be
+                forfeited.
+              </p>
               <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
                 <MapPicker
                   latitude={form.latitude}
@@ -7716,6 +7745,9 @@ export function ApplyWizard() {
                    */
                   radiusM={insightsRadiusM}
                   highlightBarangay={barangayName ?? null}
+                  // Only for the barangay it was worked out for — a stale one
+                  // would start the applicant in the wrong place.
+                  startAt={startPoint !== null && startPoint.barangay === barangayName ? startPoint : null}
                   /*
                    * Locked on the LINE OF BUSINESS, and on nothing else.
                    *
@@ -7789,7 +7821,7 @@ export function ApplyWizard() {
                   }}
                 />
                 {form.latitude !== null ? (
-                  <p className="tnum bg-white px-4 py-2 text-xs text-ink-secondary">
+                  <p className="tnum bg-white px-4 py-2 text-sm text-ink-secondary">
                     Pinned at {form.latitude}, {form.longitude}
                     {/*
                      * Item 7 — a suggested pin says it is a suggestion.
@@ -7807,8 +7839,8 @@ export function ApplyWizard() {
                      */}
                     {autoPinned !== null && (
                       <span className="mt-0.5 block text-ink-muted">
-                        Placed from your address. Drag the pin or click the map if it is not exactly
-                        right.
+                        Placed from your address, on {autoPinned} — a point on the street, not
+                        your door. Drag it onto your exact spot.
                       </span>
                     )}
                     {/*
@@ -7826,13 +7858,28 @@ export function ApplyWizard() {
                      */}
                     {insightsRadiusM !== null && (
                       <span className="mt-0.5 block text-ink-muted">
-                        The circle around it covers {insightsRadiusM} m — the area the figures below
-                        count.
+                        The circle is the {insightsRadiusM} m the figures below count.
                       </span>
                     )}
                   </p>
+                ) : form.lines.length > 0 &&
+                  startPoint !== null &&
+                  startPoint.barangay === barangayName ? (
+                  /*
+                   * The start pin's caption. Not red: nothing has gone wrong —
+                   * OSM simply does not know most of Malabon's streets — and
+                   * #bd0000 is for errors. It says what the hollow pin is NOT
+                   * before what to do, because the one misreading that matters
+                   * is taking it for the address.
+                   */
+                  <p className="bg-white px-4 py-2 text-sm text-ink">
+                    <span className="font-semibold">Not pinned yet.</span> We could not find your
+                    street on the map, so the hollow pin starts at the centre of{' '}
+                    {startPoint.barangay}. It is not your address — drag it onto your business, or
+                    click the map there.
+                  </p>
                 ) : (
-                  <p className="bg-white px-4 py-2 text-xs font-medium text-s-red">
+                  <p className="bg-white px-4 py-2 text-sm font-medium text-s-red">
                     {/* Two states, because telling somebody to click a map that is
                       not taking clicks yet sends them to a control that will not
                       answer. The lock's own sentence says what to do about it;
@@ -7843,7 +7890,7 @@ export function ApplyWizard() {
                   </p>
                 )}
                 {pinError && (
-                  <p role="alert" className="bg-white px-4 pb-2 text-xs font-medium text-s-red">
+                  <p role="alert" className="bg-white px-4 pb-2 text-sm font-medium text-s-red">
                     {pinError}
                   </p>
                 )}
@@ -7875,7 +7922,7 @@ export function ApplyWizard() {
                     const verdict = checkPin(form.latitude, form.longitude, barangayName)
                     if (verdict.kind !== 'wrong-barangay') return null
                     return (
-                      <p className="bg-white px-4 pb-2.5 text-xs text-ink-secondary">
+                      <p className="bg-white px-4 pb-2.5 text-sm text-ink-secondary">
                         <span className="font-semibold text-ink">Check this location.</span> The
                         saved pin sits in {verdict.actual ?? 'no barangay we can identify'}, but
                         this application says {barangayName}. Click the map to move the pin, or
@@ -7884,14 +7931,11 @@ export function ApplyWizard() {
                     )
                   })()}
                 {/*
-                 * The pin locates the premises; it does not clear them. Said
-                 * plainly so the boundary check above is not mistaken for a
-                 * verdict on the site itself — there are no zone polygons and no
-                 * water layer here, and CPDO looks at the actual location.
+                 * "CPDO checks the actual site during processing." stood here.
+                 * It went with the rest of the step's explanatory copy
+                 * (client, 23 September 2026); CPDO's final say is now stated
+                 * once, in the zoning note under the map.
                  */}
-                <p className="bg-white px-4 pb-2.5 text-xs text-ink-muted">
-                  CPDO checks the actual site during processing.
-                </p>
               </div>
 
               {/*
@@ -7909,6 +7953,24 @@ export function ApplyWizard() {
                * fetch's state says. That is the whole reason the flag exists —
                * see where it is computed.
                */}
+              {/*
+               * The zoning answer, inline and live (client, 23 September 2026:
+               * "Zoning must not be a popup").
+               *
+               * It was a CONGRATULATIONS / SORRY dialog that opened on Next and
+               * stood between the applicant and the next step, saying the same
+               * thing whatever the ordinance said. This note reads the
+               * ordinance lookup that already rides on the insights response,
+               * so it follows the pin, the barangay and the trade as they
+               * change, and Next simply moves on. It renders nothing while the
+               * lookup is undetermined — see ZoningConformanceNote.
+               */}
+              {livePin !== null && !insights.loading && !insightsStale && (
+                <ZoningConformanceNote
+                  zoning={insights.data?.zoning ?? null}
+                  barangayName={barangayName ?? null}
+                />
+              )}
               {livePin !== null && (
                 <LocationInsightsPanel
                   insights={insights.data}
@@ -7963,9 +8025,56 @@ export function ApplyWizard() {
                       />
                     </label>
                     {fieldErrors.street && (
-                      <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.street}</p>
+                      <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.street}</p>
                     )}
                   </div>
+                </div>
+              </div>
+              {/*
+               * Block, Lot and the lot's area (client, 23 September 2026).
+               * Optional: a market stall or a unit on a numbered street has no
+               * block or lot. "Lot Area" rather than "Area" because Business
+               * Operation asks the FLOOR area the fee engine assesses, and one
+               * word for two quantities is how the same question gets asked
+               * twice by mistake.
+               */}
+              <div className="grid gap-4 sm:grid-cols-3">
+                <label className="block">
+                  <FieldLabel>Block</FieldLabel>
+                  <input
+                    value={form.block}
+                    onChange={(e) => update('block', e.target.value)}
+                    maxLength={40}
+                    className={inputCls}
+                  />
+                </label>
+                <label className="block">
+                  <FieldLabel>Lot</FieldLabel>
+                  <input
+                    value={form.lot}
+                    onChange={(e) => update('lot', e.target.value)}
+                    maxLength={40}
+                    className={inputCls}
+                  />
+                </label>
+                <div>
+                  <label className="block">
+                    <FieldLabel>Lot Area (sq. m.)</FieldLabel>
+                    <input
+                      inputMode="decimal"
+                      value={form.lot_area_sqm}
+                      onChange={(e) => update('lot_area_sqm', e.target.value)}
+                      onBlur={() => touch('lot_area_sqm')}
+                      className={`${inputCls} tnum`}
+                      aria-invalid={Boolean(fieldErrors.lot_area_sqm)}
+                      aria-describedby={fieldErrors.lot_area_sqm ? 'lot-area-error' : undefined}
+                    />
+                  </label>
+                  {fieldErrors.lot_area_sqm && (
+                    <p id="lot-area-error" className="mt-1 text-sm font-medium text-s-red">
+                      {fieldErrors.lot_area_sqm}
+                    </p>
+                  )}
                 </div>
               </div>
               <div>
@@ -8066,7 +8175,7 @@ export function ApplyWizard() {
                   </select>
                 </label>
                 {fieldErrors.barangay_id && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.barangay_id}</p>
+                  <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.barangay_id}</p>
                 )}
               </div>
 
@@ -8110,7 +8219,7 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_name && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       {fieldErrors.emergency_contact_name}
                     </p>
                   )}
@@ -8129,7 +8238,7 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_number && (
-                    <p className="mt-1 text-xs font-medium text-s-red">
+                    <p className="mt-1 text-sm font-medium text-s-red">
                       {fieldErrors.emergency_contact_number}
                     </p>
                   )}
@@ -10728,96 +10837,31 @@ export function ApplyWizard() {
         </ProtoModal>
       )}
 
-      {/* ── Zoning result (p30/p31) — presentational, ?zoning=deny flips it ── */}
-      {showZoning &&
-        (zoningDenied ? (
-          <ProtoModal title="SORRY." tone="red" cancelLabel="Back" onCancel={closeZoning}>
-            <p className="text-base leading-relaxed">
-              The declared use for{' '}
-              <span className="font-bold underline underline-offset-2">
-                {zoningSubject ?? 'your new business'}
-              </span>{' '}
-              appears non-conforming for{' '}
-              <span className="font-bold uppercase underline underline-offset-2">
-                {barangayName ?? 'Area Location'}
-              </span>
-              . The Zoning Office (CPDO) makes the final determination on your zoning clearance.
-            </p>
-          </ProtoModal>
-        ) : (
-          <ProtoModal
-            /*
-             * The mockup's wording (spec §5, screens 124/125). An earlier build
-             * said "Location recorded" instead, on the grounds that the system
-             * holds no zone polygons and therefore determines nothing — the
-             * client's paper overruled that, so the headline is restored.
-             *
-             * The one line kept from the cautious version is CPDO's final say.
-             * The applicant is told the use is conforming AND told who actually
-             * decides, which is the part that stops "CONGRATULATIONS!" reading
-             * as an issued clearance.
-             */
-            title="CONGRATULATIONS!"
-            tone="green"
-            cancelLabel="Back"
-            confirmLabel="Proceed to Application"
-            wide
-            onCancel={closeZoning}
-            onConfirm={() => {
-              closeZoning()
-              void advance()
-            }}
-          >
-            <p className="text-base leading-relaxed">
-              {/*
-               * "The new business for X" is the mockup's sentence and it is right
-               * for a new filing. A renewal is not a new business, so the word
-               * drops out rather than telling someone renewing a ten-year-old
-               * carinderia that it is new.
-               */}
-              {zoningSubject ? (
-                <>
-                  {isReuse ? 'The business for' : 'The new business for'}{' '}
-                  <span className="font-bold underline underline-offset-2">{zoningSubject}</span> is
-                </>
-              ) : (
-                `Your ${isReuse ? 'business' : 'new business'} is`
-              )}{' '}
-              conforming / within the allowed use for{' '}
-              <span className="font-bold uppercase underline underline-offset-2">
-                {barangayName ?? 'Area Location'}
-              </span>
-              . You may now proceed with the processing of your Business Permit Application.
-            </p>
-            {/*
-             * This CPDO line is not decoration and must not be trimmed. It is
-             * the only thing on this dialog that stops "CONGRATULATIONS!" from
-             * reading as an issued clearance — and it is now also the standing
-             * condition under which LocationInsightsPanel's removed disclaimer
-             * would have to come back. See the comment at the foot of that
-             * file before touching either.
-             */}
-            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
-              The Zoning Office (CPDO) makes the final determination on your zoning clearance during
-              processing.
-            </p>
+      {/*
+        ── The zoning result dialog (p30/p31) is gone ──────────────────────
 
-            {/*
-             * Business Location Insights used to render here, and does not any
-             * more (client instruction). Behind this modal the figures arrived
-             * after the location was chosen, which is the wrong order for
-             * decision support — they are on the map step now, visible from the
-             * moment a pin is dropped and while it can still be moved.
-             */}
-          </ProtoModal>
-        ))}
+        It opened on Next from Location & Zoning: CONGRATULATIONS, or SORRY
+        under the `?zoning=deny` debug parameter, and it said the same thing
+        whatever the ordinance said. The client asked for it inline instead
+        (23 September 2026: "Zoning must not be a popup"), so the live
+        ZoningConformanceNote under the map carries the answer and Next just
+        moves on. CPDO's final say — the line this dialog existed to keep — is
+        in that note.
+      */}
 
       {/* ── CONFIRMATION · final submit (p47) ──────────────────────────── */}
       {showConfirm && (
         <ProtoModal
           title="CONFIRMATION"
-          cancelLabel="Cancel"
-          confirmLabel="Proceed"
+          /*
+           * The two answers are the two things the applicant can actually do,
+           * named. "Cancel" and "Proceed" describe the dialog; these describe
+           * the filing — and the cancel side is the one that needed it, because
+           * on a question about reviewing, "Cancel" reads as "cancel my
+           * application" to somebody who has just spent an hour on it.
+           */
+          cancelLabel="Keep reviewing"
+          confirmLabel="Yes, submit"
           confirmDisabled={saving}
           onCancel={() => setShowConfirm(false)}
           onConfirm={() => {

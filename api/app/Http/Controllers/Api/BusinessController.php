@@ -536,6 +536,15 @@ class BusinessController extends Controller
              */
             'address.house_bldg_no' => ['nullable', 'string', 'max:120'],
             'address.street' => ['sometimes', 'required', 'string', 'max:255'],
+            /*
+             * Block, Lot and lot area (client, 23 September 2026). Optional:
+             * a market stall or a unit on a numbered street has no block or
+             * lot. The area is the LOT, not the floor the fee engine assesses
+             * (`fee_profile.floor_area_sqm`) — see the migration.
+             */
+            'address.block' => ['nullable', 'string', 'max:40'],
+            'address.lot' => ['nullable', 'string', 'max:40'],
+            'address.lot_area_sqm' => ['nullable', 'numeric', 'min:0', 'max:10000000'],
             'address.barangay_id' => ['required', 'exists:barangays,id'],
             'address.latitude' => ['nullable', 'numeric', 'between:-90,90'],
             'address.longitude' => ['nullable', 'numeric', 'between:-180,180'],
@@ -844,6 +853,19 @@ class BusinessController extends Controller
         }
         if (array_key_exists('street', $data['address'])) {
             $address->street = $street !== '' ? $street : null;
+        }
+        // Same only-when-sent rule, so a caller that predates these three
+        // cannot blank them on its next save.
+        foreach (['block', 'lot'] as $part) {
+            if (array_key_exists($part, $data['address'])) {
+                $value = trim((string) ($data['address'][$part] ?? ''));
+                $address->{$part} = $value !== '' ? $value : null;
+            }
+        }
+        if (array_key_exists('lot_area_sqm', $data['address'])) {
+            $address->lot_area_sqm = filled($data['address']['lot_area_sqm'])
+                ? (float) $data['address']['lot_area_sqm']
+                : null;
         }
         $address->telephone = filled($data['address']['telephone'] ?? null)
             ? trim($data['address']['telephone'])

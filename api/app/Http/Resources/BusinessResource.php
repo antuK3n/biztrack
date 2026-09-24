@@ -109,6 +109,11 @@ class BusinessResource extends JsonResource
                  */
                 'house_bldg_no' => $this->address->house_bldg_no,
                 'street' => $this->address->street,
+                // Block, Lot and lot area — optional, read back into the
+                // wizard so a reopened draft or a renewal keeps them.
+                'block' => $this->address->block,
+                'lot' => $this->address->lot,
+                'lot_area_sqm' => $this->address->lot_area_sqm,
                 'city' => $this->address->city,
                 'province' => $this->address->province,
                 'postal_code' => $this->address->postal_code,

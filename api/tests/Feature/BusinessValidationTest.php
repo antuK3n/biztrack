@@ -401,3 +401,31 @@ it('leaves a combined address alone when only line1 is sent', function () {
         ->and($address->house_bldg_no)->toBeNull()
         ->and($address->street)->toBeNull();
 });
+
+it('stores block, lot and lot area on the address and reads them back', function () {
+    $address = ['house_bldg_no' => '', 'street' => 'Gen. Luna Street', 'block' => '5', 'lot' => '12',
+        'lot_area_sqm' => 120.5, 'barangay_id' => Barangay::first()->id];
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload(['address' => $address]))
+        ->assertCreated()
+        ->assertJsonPath('data.address.block', '5')
+        ->assertJsonPath('data.address.lot', '12')
+        ->assertJsonPath('data.address.lot_area_sqm', 120.5);
+});
+
+it('keeps block, lot and lot area when a later save does not send them', function () {
+    $headers = authAs('owner@biztrack.local');
+    $barangayId = Barangay::first()->id;
+    $id = $this->withHeaders($headers)->postJson('/api/v1/businesses', businessPayload([
+        'address' => ['street' => 'Gen. Luna Street', 'block' => '5', 'lot' => '12',
+            'lot_area_sqm' => 80, 'barangay_id' => $barangayId],
+    ]))->assertCreated()->json('data.id');
+
+    $this->withHeaders($headers)->putJson("/api/v1/businesses/{$id}", businessPayload([
+        'address' => ['street' => 'Gen. Luna Street', 'barangay_id' => $barangayId],
+    ]))->assertOk()
+        ->assertJsonPath('data.address.block', '5')
+        ->assertJsonPath('data.address.lot', '12')
+        ->assertJsonPath('data.address.lot_area_sqm', 80);
+});
