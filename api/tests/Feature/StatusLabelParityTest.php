@@ -106,11 +106,16 @@ it('uses the wording the design specifies for the stages an admin tracks', funct
      * `ClearanceStatus` rather than dropped. The words the LGU signed off did
      * not change; which enum owns them did.
      */
-    expect(ApplicationStatus::ForApproval->label())->toBe('For Initial Approval')
+    expect(ApplicationStatus::ForApproval->label())->toBe('For Approval')
         ->and(ApplicationStatus::PendingPayment->label())->toBe('Pending Payment')
-        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Awaiting Other Permits')
+        // Renamed 24 September 2026 when the LGU moved the release to payment;
+        // the reasoning is on the enum. BPLO's QUEUE TAB keeps the old words,
+        // which is a different string in QueuePage and not this one.
+        ->and(ApplicationStatus::AwaitingOtherPermits->label())->toBe('Permit Released')
         ->and(ApplicationStatus::ForFinalApproval->label())->toBe('For Final Approval')
-        ->and(ApplicationStatus::Approved->label())->toBe('Approved')
+        // Renamed the same day; the reasoning is on the enum. The CLEARANCE
+        // below keeps "Approved", which is now the only thing that word means.
+        ->and(ApplicationStatus::Approved->label())->toBe('Completed')
         ->and(ApplicationStatus::Rejected->label())->toBe('Rejected');
 
     expect(ClearanceStatus::ForInspection->label())->toBe('For Inspection');

@@ -1075,9 +1075,18 @@ it('releases each permit the moment its own office passes the inspection', funct
     $issued = Application::findOrFail($app->id);
 
     expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::Approved->value)
-        ->and($issued->permits()->count())->toBe(1)
-        ->and($issued->permits()->first()->permit_type_id)
-        ->toBe(PermitType::where('code', 'ZONING')->value('id'))
+        ->and(clearancePermitsIssued($issued))->toBe(1)
+        /*
+         * Named, not `->first()`. That used to be the zoning permit because
+         * it was the only one on the filing; since 24 September 2026 the
+         * business permit is minted at payment and holds the lowest id, so
+         * `first()` would now assert about the wrong certificate — and would
+         * have kept passing if the office had released nothing at all.
+         */
+        ->and($issued->permits()->whereHas(
+            'permitType',
+            fn ($q) => $q->where('code', 'ZONING'),
+        )->count())->toBe(1)
         // Nothing else moved. The other four are untouched and the application
         // is still waiting on them, which is the whole point of rule 7.
         ->and($issued->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
@@ -1153,9 +1162,10 @@ it('refuses BPLO’s final approval outright while a required permit is outstand
 
     $held = Application::findOrFail($app->id);
 
-    // The zoning permit its own office issued stays issued; the business permit
-    // was not minted and the filing was not decided.
-    expect($held->permits()->count())->toBe(1)
+    // The zoning permit its own office issued stays issued, and the filing was
+    // not decided. (The business permit is out too, since payment — which is
+    // why this counts clearances rather than every permit on the filing.)
+    expect(clearancePermitsIssued($held))->toBe(1)
         ->and($held->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
@@ -1189,7 +1199,7 @@ it('reports a permit as approved only once its inspection has passed', function 
 
     // The office has read it and booked nothing yet: still not granted.
     expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::ForInspection->value)
-        ->and(Application::findOrFail($app->id)->permits()->count())->toBe(0);
+        ->and(clearancePermitsIssued($app->id))->toBe(0);
 
     authAs('zoning@biztrack.local');
     $this->postJson("/api/v1/applications/{$app->id}/permits/ZONING/inspection", [
@@ -1203,7 +1213,7 @@ it('reports a permit as approved only once its inspection has passed', function 
     ])->assertOk();
 
     expect(clearanceRow($app, 'ZONING')['state'])->toBe(ClearanceStatus::Approved->value)
-        ->and(Application::findOrFail($app->id)->permits()->count())->toBe(1);
+        ->and(clearancePermitsIssued($app->id))->toBe(1);
 });
 
 // --- authorization -----------------------------------------------------------

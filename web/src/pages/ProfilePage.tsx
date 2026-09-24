@@ -458,6 +458,22 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
               const label = `${typeName} for ${group.name} (${permit.permit_number})`
               const expired = permit.days_until_expiry !== null && permit.days_until_expiry < 0
               const note = permit.status !== 'active' ? permit.status_label : expired ? 'Expired' : null
+              /*
+               * ── Two kinds of badge, because they are two kinds of news ──
+               *
+               * Every note rendered in the same outlined white, so
+               * "Superseded" — the ordinary result of renewing — looked
+               * exactly like "Suspended", which means the business may not
+               * trade on this permit today. One is bookkeeping and the other
+               * is the heaviest thing the system does to an owner.
+               *
+               * Filled red for the two an officer DECIDED, outline for the
+               * two that are just what happened to a date. The word is still
+               * there in both, so the distinction never rests on the colour
+               * (DESIGN.md, Never Color Alone) — the fill is what makes it
+               * findable while scrolling a long profile.
+               */
+              const sanctioned = permit.status === 'suspended' || permit.status === 'revoked'
 
               return (
                 <li
@@ -466,7 +482,13 @@ function BusinessRow({ group }: { group: BusinessGroup }) {
                 >
                   <span className="min-w-0 flex-1 truncate text-base font-bold text-white">{typeName}</span>
                   {note && (
-                    <span className="shrink-0 rounded border border-white/70 px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${
+                        sanctioned
+                          ? 'border border-s-red bg-s-red text-white'
+                          : 'border border-white/70 text-white'
+                      }`}
+                    >
                       {note}
                     </span>
                   )}
@@ -590,7 +612,23 @@ export function ProfilePage() {
       const days = permit.days_until_expiry
       if (days !== null && days < 0) group.expired = true
       if (days !== null && days >= 0 && days <= NEARING_DAYS) group.nearing = true
-      if (permit.status !== 'active') group.flagged = true
+      /*
+       * ── Flagged means SANCTIONED, not merely inactive ─────────────────
+       *
+       * This read `status !== 'active'`, which is every state but one —
+       * including `superseded`, which every renewal produces by design. A
+       * shop that renewed its sanitary permit in September holds last
+       * year's superseded certificate, and the filter above called that
+       * "Suspended or revoked".
+       *
+       * It cost nothing while nothing was ever suspended. Since
+       * 24 September 2026 a refused clearance suspends the business permit,
+       * so the filter is about to be used for real and has to mean what it
+       * says. Expired is excluded for its own reason: `expired` above
+       * already carries it, and a lapsed permit is a date passing rather
+       * than a decision anybody took.
+       */
+      if (permit.status === 'suspended' || permit.status === 'revoked') group.flagged = true
     }
 
     /*
