@@ -338,7 +338,7 @@ export const applications = {
       /** Revenue-code fee inputs (drives the itemized Tax Order of Payment). */
       fee_profile?: FeeProfile
       /** Business tax in full by Jan 20, or in four quarters (Ord. Sec. 2N). */
-      payment_mode?: 'annual' | 'quarterly'
+      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
       /** RA 10173 consent for this filing, so a reopened draft keeps the tick. */
       data_privacy_consent?: boolean
     } & AmendmentAnswers,
@@ -350,7 +350,7 @@ export const applications = {
       title?: string
       permit_type_ids?: number[]
       fee_profile?: FeeProfile | null
-      payment_mode?: 'annual' | 'quarterly'
+      payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
       data_privacy_consent?: boolean
     } & Partial<AmendmentAnswers>,
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
@@ -933,6 +933,20 @@ export const assignments = {
   approve: (id: number, remarks?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/approve`, { remarks })),
   /**
+   * Refuse this office's permit outright. Not a correction — a refusal.
+   *
+   * The difference from `return` below is what it costs: since
+   * 24 September 2026 the business permit is released at payment, and a
+   * refused clearance SUSPENDS it until the applicant re-applies and the
+   * office approves. `return` costs nothing and repeats as often as needed.
+   *
+   * No `target`. A pointer says which answer to fix, and this is not a
+   * request to fix an answer — the reason is prose because what it has to
+   * carry is why the permit cannot be granted at all.
+   */
+  reject: (id: number, reason: string, remedy: string) =>
+    unwrap<Assignment>(api.post(`/assignments/${id}/reject`, { reason, remedy })),
+  /**
    * Send one permit back for the applicant to fix.
    *
    * `target` is the optional POINTER — which checklist row or which answer on
@@ -1119,6 +1133,20 @@ export const permits = {
    * handler; see `viewBlob` for why the popup blocker requires that.
    */
   viewPdf: (id: number, target?: Window | null) => viewBlob(`/permits/${id}/pdf`, target),
+  /**
+   * Lift a suspension on a business permit. BPLO and the super admin only.
+   *
+   * The suspension itself is automatic — a clearance office refusing a permit
+   * suspends the business permit in the same transaction — so this is the
+   * human overruling it, and the reason is required because it is the whole
+   * record of why a sanctioned permit is trading again.
+   *
+   * It does NOT clear the refusal. The permit that was refused stays refused;
+   * what is being decided is that the business may trade on its business
+   * permit while that clearance is unsettled.
+   */
+  liftSuspension: (id: number, reason: string) =>
+    unwrap<Permit>(api.post(`/permits/${id}/lift-suspension`, { reason })),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */

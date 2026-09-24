@@ -64,6 +64,18 @@ class ApplicationListResource extends JsonResource
                 ])->values()
                 : [],
             'created_at' => optional($this->created_at)->toISOString(),
+            /*
+             * When the row was last WRITTEN, which on a draft means the last
+             * autosave — so it is the last time the applicant changed
+             * something, not the last time they opened it.
+             *
+             * Added 24 September 2026 for the drafts list, which could only
+             * sort by when a draft was STARTED: an applicant with six drafts
+             * going had no way to find the one they were in yesterday, since
+             * the one they started first is as likely as not the one they are
+             * still working on.
+             */
+            'updated_at' => optional($this->updated_at)->toISOString(),
         ];
     }
 }

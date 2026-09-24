@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Business;
 use App\Models\User;
 use App\Services\NotificationService;
+use App\Services\WorkflowService;
 use App\Support\Audit;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,7 +18,10 @@ use Illuminate\Validation\ValidationException;
  */
 class BusinessStatusController extends Controller
 {
-    public function __construct(private NotificationService $notifications) {}
+    public function __construct(
+        private NotificationService $notifications,
+        private WorkflowService $workflow,
+    ) {}
 
     private const LABELS = [
         'active' => 'Active',
@@ -203,6 +207,34 @@ class BusinessStatusController extends Controller
             'to' => $data['status'],
             'reason' => $data['reason'],
         ]);
+
+        /*
+         * ── The certificates follow the business ──────────────────────────
+         *
+         * Client's decision, 24 September 2026. Until then this endpoint
+         * wrote one column and barred the owner from filing, and the permits
+         * carried on reading Active — so a business suspended for violations
+         * printed a clean certificate and answered VALID to the QR check at
+         * the counter. The sanction existed everywhere except the one place
+         * an inspector looks.
+         *
+         * Only when the status actually MOVED, the same condition the audit
+         * note and the notification below already use: re-saving a
+         * blacklisting an admin has already applied must not re-suspend
+         * permits a reinstatement had since brought back.
+         *
+         * `flagged` deliberately does nothing here. It is a watch marker, not
+         * a sanction — `isBlockedFromApplying` ignores it too — and taking a
+         * business's certificates away for being watched would be a heavier
+         * act than the status means.
+         */
+        if ($data['status'] !== $from) {
+            if (in_array($data['status'], ['suspended', Business::STATUS_BLACKLISTED], true)) {
+                $this->workflow->suspendPermitsForBusiness($business, $data['reason']);
+            } elseif ($data['status'] === 'active') {
+                $this->workflow->restorePermitsForBusiness($business);
+            }
+        }
 
         /*
          * Tell the owner — but only when something actually moved.

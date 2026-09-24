@@ -107,10 +107,20 @@ it('puts the recorded transitions on the application record, oldest first', func
     expect($history[0])->toHaveKeys(['from_status', 'to_status', 'note', 'changed_by', 'created_at']);
     expect($history[0]['from_status'])->toBe('draft');
 
-    // The note is what the rail shows under a step; it is not decoration either.
-    // It no longer says "Routed for review" because payment routes nobody — the
-    // offices are routed one at a time as the applicant starts each permit.
-    expect($history[2]['note'])->toBe('Payment received. You can now apply for the other permits.');
+    /*
+     * The note is what the rail shows under a step; it is not decoration
+     * either. It no longer says "Routed for review" because payment routes
+     * nobody — the offices are routed one at a time as the applicant starts
+     * each permit.
+     *
+     * It leads with the RELEASE since 24 September 2026. Paying is the moment
+     * the Mayor's Permit is minted, and a note that mentioned only the other
+     * permits would leave the biggest thing that just happened off the one
+     * line the applicant reads about this step.
+     */
+    expect($history[2]['note'])->toBe(
+        'Payment received. Your Business Permit has been released. You can now apply for the other permits.',
+    );
 });
 
 it('names the person behind a transition, and says nothing when there is none', function () {

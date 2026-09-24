@@ -30,7 +30,7 @@ const WITH_DELETED_BUSINESS = [
     application_type: 'new',
     title: null,
     status: 'for_approval',
-    status_label: 'For Initial Approval',
+    status_label: 'For Approval',
     // The register no longer holds this one.
     business: null,
     submitted_at: '2026-01-05T00:00:00.000000Z',
@@ -44,7 +44,7 @@ const WITH_DELETED_BUSINESS = [
     application_type: 'renewal',
     title: null,
     status: 'for_approval',
-    status_label: 'For Initial Approval',
+    status_label: 'For Approval',
     business: { id: 5, name: 'Dela Cruz Trading' },
     submitted_at: '2026-06-01T00:00:00.000000Z',
     deadline_at: null,

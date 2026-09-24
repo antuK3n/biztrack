@@ -8,7 +8,6 @@ import {
   PaymentsIcon,
   SearchIcon,
   ShieldCheckIcon,
-  UploadIcon,
   XCircleIcon,
 } from '../components/icons'
 import type { ChipTone } from '../components/ui/Proto'
@@ -143,12 +142,38 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
    * being refused, and rendering both in red would have told an applicant
    * their filing was dead when it was waiting for them.
    */
-  for_approval: { label: 'For Initial Approval', tone: 'review', icon: ClockIcon },
+  for_approval: { label: 'For Approval', tone: 'review', icon: ClockIcon },
   returned: { label: 'Returned', tone: 'warning', icon: InfoCircleIcon },
   pending_payment: { label: 'Pending Payment', tone: 'attention', icon: PaymentsIcon },
-  awaiting_other_permits: { label: 'Awaiting Other Permits', tone: 'progress', icon: UploadIcon },
+  /*
+   * "Permit Released" since 24 September 2026 — MIRROR OF
+   * `ApplicationStatus::AwaitingOtherPermits->label()`, which carries the
+   * reasoning. StatusLabelParityTest fails if these two drift.
+   *
+   * `verify` (teal), and it took two goes to get right. `progress` blue was
+   * wrong because a stage where the applicant is holding their permit is not
+   * "in progress" from their side. Then it was `success` green, which the
+   * client read off the guide immediately: two green badges in a row, this
+   * one and Completed, so the rail appeared to end twice.
+   *
+   * Teal is the honest middle. The certificate is live — the LABEL carries
+   * that, and the label is what a reader takes the news from — while the
+   * colour says the filing is still moving, which it is: an office can still
+   * refuse a permit here and suspend the certificate. Exactly one badge on
+   * this rail is green now, and it is the one that means finished.
+   */
+  awaiting_other_permits: { label: 'Permit Released', tone: 'verify', icon: CheckCircleIcon },
   for_final_approval: { label: 'For Final Approval', tone: 'verify', icon: ClockIcon },
-  approved: { label: 'Approved', tone: 'success', icon: CheckCircleIcon },
+  /*
+   * "Completed" — MIRROR OF `ApplicationStatus::Approved->label()`, which
+   * carries the reasoning. The only green on the new-application rail.
+   *
+   * CLEARANCE_STATUS below keeps `approved: 'Approved'`, and the two lines
+   * looking almost identical is the whole point: one permit is APPROVED by
+   * its office, and the application is COMPLETED when they all are. They
+   * used to share a word and mean different things.
+   */
+  approved: { label: 'Completed', tone: 'success', icon: CheckCircleIcon },
   issued: { label: 'Permit Issued', tone: 'success', icon: ShieldCheckIcon },
   rejected: { label: 'Rejected', tone: 'danger', icon: XCircleIcon },
   // Grey like a draft, because both are inert — but dashed, so the two are
@@ -171,7 +196,7 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
 const CLEARANCE_STATUS: Record<ClearanceStatus, StatusMeta> = {
   not_started: { label: 'Not Yet Submitted', tone: 'neutral', icon: DotIcon },
   /*
-   * `review`, matching the application's own For Initial Approval. Same fact
+   * `review`, matching the application's own For Approval. Same fact
    * in two vocabularies — an office is reading it — so the same colour, which
    * matters on the status guide where the clearance sub-flow is drawn inside
    * the application step it belongs to. It was `attention`, which now means
@@ -182,11 +207,16 @@ const CLEARANCE_STATUS: Record<ClearanceStatus, StatusMeta> = {
   for_inspection: { label: 'For Inspection', tone: 'scheduled', icon: SearchIcon },
   approved: { label: 'Approved', tone: 'success', icon: CheckCircleIcon },
   /*
-   * No `rejected`. The PHP enum lost the case on 17 September 2026 and this
-   * mirrors it — see `ClearanceStatus` in types.ts. A permit is Returned as
-   * often as it needs to be; only the FILING can be rejected, and that row is
-   * in APPLICATION_STATUS above.
+   * `danger`, and it is the one clearance state that earns the red.
+   *
+   * Returned below keeps `warning` for the reason the tone table gives: being
+   * asked to correct something is not being refused. This IS being refused,
+   * and it costs the applicant their business permit until it is settled, so
+   * it wears the same red as a rejected filing. Two states that cost you
+   * something looking alike is the point — the difference between them is in
+   * the label and the reason, not in how alarmed to be.
    */
+  rejected: { label: 'Rejected', tone: 'danger', icon: XCircleIcon },
   returned: { label: 'Returned', tone: 'warning', icon: InfoCircleIcon },
   available: { label: 'Available', tone: 'neutral', icon: DotIcon },
 }
@@ -276,6 +306,23 @@ export function clearanceStarted(row: {
 }): boolean {
   if (row.state === 'available') return false
 
+  /*
+   * ── A REFUSED permit is not started, and the card must offer Apply ──────
+   *
+   * Added 24 September 2026 with `ClearanceStatus::Rejected`, and it mirrors
+   * the early return `ClearanceService::isAppliedFor` grew on the same day.
+   * Both say the same thing: the office has finished with this permit, so
+   * there is no open application to duplicate, and applying again is what the
+   * applicant does next. It is also the only route out of a suspended
+   * business permit, which makes hiding the button the expensive mistake.
+   *
+   * Without this the row would read as started — `state` is not
+   * `not_started`, and `mode` survives the refusal — and the card would show
+   * "View the form you submitted" over a permit the applicant needs to apply
+   * for again, with no way to do it.
+   */
+  if (row.state === 'rejected') return false
+
   return row.state !== 'not_started' || row.mode !== null
 }
 
@@ -296,7 +343,20 @@ export function clearanceStarted(row: {
  * word into, and locked the applicant out of the sheet Apply had just opened.
  */
 export function clearanceWithOffice(state: ClearanceState): boolean {
-  return state !== 'available' && state !== 'not_started' && state !== 'returned'
+  /*
+   * `rejected` joins the exclusions for the same reason `returned` is in
+   * them, only more so: an office that has refused a permit is not holding
+   * it — it has ruled and is done. The sheet reopens
+   * (`OfficeFormController::ownerMayEdit` allows Rejected) and the applicant
+   * fills it in again, so treating it as "with the office" would lock them
+   * out of the one form they have to change.
+   */
+  return (
+    state !== 'available' &&
+    state !== 'not_started' &&
+    state !== 'returned' &&
+    state !== 'rejected'
+  )
 }
 
 /**
@@ -388,9 +448,13 @@ export const NEXT_ACTION: Partial<Record<ApplicationStatus, string>> = {
   returned: 'BPLO asked for changes. Review the remarks, then resubmit.',
   pending_payment: 'Your fees are assessed. Pay to continue processing.',
   awaiting_other_permits:
-    'Apply for your other permits, or hand in copies of the ones you already hold. Each is approved and released on its own.',
+    'Your Business Permit is released — download it from your profile. Now apply for your other permits, '
+    +'or hand in copies of the ones you already hold. Each is approved on its own, and if one is rejected '
+    +'your Business Permit is suspended until it is settled.',
   for_final_approval: 'Every other permit is in. BPLO is approving the application.',
-  approved: 'Everything checks out. Your permit is being issued.',
+  // Nothing is "being issued" here since 24 September 2026 — the permit went
+  // out at payment. What happens next is that this filing leaves the list.
+  approved: 'Nothing further is needed. This application is now in your Profile.',
   issued: 'Your permit is ready. Download it from your permit vault.',
   rejected: 'This application was rejected. See the reason below.',
   cancelled: 'You cancelled this application.',
@@ -484,15 +548,52 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
   draft: 'Not submitted yet. Submit when you are ready.',
   for_approval: 'BPLO is reading your form. Nothing to do yet.',
   pending_payment: 'Your fees are ready. Pay to carry on.',
+  /*
+   * This said "the last one issues your Mayor's Permit", which stopped being
+   * true on 24 September 2026 — the permit is issued at PAYMENT now, two
+   * steps earlier. A guide is the one place a wrong sentence is worst: it is
+   * read by people checking whether the thing they expected has happened.
+   */
   awaiting_other_permits:
-    'Apply for your other permits. Each is released on its own, and the last one issues your Mayor’s Permit.',
+    'Your Mayor’s Permit is released. Apply for your other permits — each is approved on its own, '
+    +'and a rejected one suspends your Mayor’s Permit until it is settled.',
   /*
    * No longer on a new application's path — see STATUS_FLOW. The line has to
    * describe the cases that still reach it without naming the machinery, since
    * a guide is read by people who do not know what a processing category is.
    */
   for_final_approval: 'BPLO makes a last check before your Mayor’s Permit is issued.',
-  approved: 'Your Mayor’s Permit is issued — download it from your profile.',
+  /*
+   * Not the moment of ISSUE any more — that is two steps back, at payment —
+   * so this has to say what the stage IS for, or it reads as a repeat of
+   * Permit Released. It was read that way, by the client, on the day it
+   * shipped.
+   *
+   * Two facts, both of which the applicant can feel, and neither of which
+   * anything else on the screen tells them:
+   *
+   *  - the suspension risk FROM THIS APPLICATION is over. `approved` is
+   *    terminal and `WorkflowService::rejectAssignment` refuses a terminal
+   *    filing, so no clearance on it can be refused from here. Up to this
+   *    point one could.
+   *
+   *    Scoped to the clearances, deliberately, and the client caught the
+   *    earlier wording for not being: *"'can no longer be suspended' may
+   *    seem misleading. Take note that a business permit can still be
+   *    suspended when violations or reports happen."* Right — and the two
+   *    are different levers. This stage closes the one that belongs to this
+   *    filing; enforcement against a trading business is `businesses.status`
+   *    (suspended / blacklisted, see BusinessStatusController) and
+   *    `PermitStatus::Revoked`, neither of which cares that a filing is
+   *    finished. A sentence promising immunity would be read as a promise.
+   *  - the application LEAVES this page. `FINISHED` in ApplicationsPage
+   *    drops it from Permit Tracking and it lives in Profile — so the guide
+   *    now predicts the one thing the owner is about to watch happen,
+   *    instead of leaving them to find a note at the foot of an empty list.
+   */
+  approved:
+    'All your other permits are approved, so none of them can suspend your Mayor’s Permit any '
+    +'more. This application moves to your Profile.',
   /*
    * Never reached by an application, and so not drawn in the guide — see
    * GUIDE_OMITTED. Kept because this table is exhaustive over the union, and

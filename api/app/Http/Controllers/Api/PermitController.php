@@ -10,6 +10,7 @@ use App\Models\Permit;
 use App\Support\ApplicationVisibility;
 use App\Support\PdfFile;
 use App\Support\PermitFace;
+use App\Services\WorkflowService;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
@@ -25,6 +26,8 @@ use Symfony\Component\HttpFoundation\Response;
 class PermitController extends Controller
 {
     private array $eager = ['permitType', 'business:id,name', 'application:id,tracking_id'];
+
+    public function __construct(private WorkflowService $workflow) {}
 
     /**
      * Issued permits. Paginated, newest issuance first.
@@ -217,6 +220,41 @@ class PermitController extends Controller
     }
 
     /** dompdf permit certificate (CITY OF MALABON header, QR data-URI). */
+    /**
+     * BPLO lifts a suspension on a business permit.
+     *
+     * ── The discretion half of the LGU's rule ────────────────────────────────
+     *
+     * *"can be suspended if the other permits applied to were rejected"* — the
+     * suspension itself fires automatically the moment an office refuses a
+     * permit, so that nothing slips through a queue nobody opened that morning.
+     * This is how a person overrules it: an office that refused in error, or a
+     * refusal BPLO judges not to bear on the business permit.
+     *
+     * Behind `permit.issue`, which BPLO and the super admin hold. The same
+     * authority that mints a certificate is the one that decides it may trade
+     * while a clearance is unsettled; an office reviewer cannot reach it, and
+     * neither can the owner.
+     *
+     * The refusal is NOT cleared — see `WorkflowService::liftOutcomeSuspension`
+     * for why BPLO lifting a suspension is not BPLO granting another office's
+     * permit.
+     */
+    public function liftSuspension(Request $request, Permit $permit): JsonResponse
+    {
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why the suspension is being lifted. This is audited.',
+        ]);
+
+        $this->workflow->liftOutcomeSuspension($permit, $data['reason']);
+
+        return response()->json([
+            'data' => new PermitResource($permit->fresh()->load($this->eager)),
+        ]);
+    }
+
     public function pdf(Request $request, Permit $permit): Response
     {
         $this->authorizeView($request, $permit);

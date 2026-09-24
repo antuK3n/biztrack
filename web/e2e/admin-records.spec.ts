@@ -25,7 +25,7 @@ const APPLICATIONS = [
     application_type: 'new',
     title: null,
     status: 'for_approval',
-    status_label: 'For Initial Approval',
+    status_label: 'For Approval',
     business: { id: 21, name: 'Aling Nena Sari-Sari Store' },
     applicant: { id: 31, name: 'Nena Makiling' },
     submitted_at: '2026-08-14T02:10:00.000000Z',
@@ -39,7 +39,8 @@ const APPLICATIONS = [
     application_type: 'renewal',
     title: null,
     status: 'approved',
-    status_label: 'Approved',
+    // Renamed 24 September 2026 — see ApplicationStatus::label().
+    status_label: 'Completed',
     business: { id: 22, name: 'RxCare Pharmacy' },
     applicant: { id: 32, name: 'Juan Ramos' },
     submitted_at: '2026-08-21T05:30:00.000000Z',
@@ -209,7 +210,7 @@ test('the Applications tab lists filings, and says what it cannot show', async (
   await expect(rows.first()).toContainText('BIZ-2026-00473')
   await expect(rows.first()).toContainText('Aling Nena Sari-Sari Store')
   // Never colour alone: the state is a word in the row, not just a tone.
-  await expect(rows.first()).toContainText('For Initial Approval')
+  await expect(rows.first()).toContainText('For Approval')
 
   /*
    * The two null cases, rendered rather than crashed through. A filing whose

@@ -38,9 +38,26 @@ it('requires the DTI / SEC / CDA registration number and type', function () {
         ->assertJsonValidationErrors(['registration_number', 'registration_type']);
 });
 
-it('requires a TIN', function () {
+/*
+ * The TIN became optional on 24 September 2026. This test asserted the
+ * opposite and is kept, inverted, rather than deleted: a blank TIN going
+ * through is now the RULE, and the rule is what wants a test on it.
+ */
+it('accepts a business with no TIN', function () {
     $this->withHeaders(authAs('owner@biztrack.local'))
         ->postJson('/api/v1/businesses', businessPayload(['tin' => '']))
+        ->assertCreated()
+        ->assertJsonPath('data.tin', null);
+});
+
+/*
+ * And optional does not mean unchecked. A TIN the applicant DID give has to
+ * be a TIN — the row is what BPLO reads the number off later, with nothing
+ * to check it against by then.
+ */
+it('still rejects a malformed TIN now that it is optional', function () {
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson('/api/v1/businesses', businessPayload(['tin' => '12345']))
         ->assertStatus(422)
         ->assertJsonValidationErrors('tin');
 });
@@ -282,9 +299,23 @@ it('stores and returns the lessor and emergency contact block', function () {
         ->and($res->json('data.emergency_contact_name'))->toBe('Mang Tonyo');
 });
 
-it('accepts annual and quarterly payment modes and nothing else', function () {
-    // Ordinance Sec. 2N offers exactly these two; a semi-annual option would be
-    // the system inventing a payment schedule the ordinance does not grant.
+/*
+ * ── Semi-annual was refused here until 24 September 2026 ─────────────────
+ *
+ * The reason was sound: Revenue Code Sec. 2N grants annual and quarterly
+ * instalments and nothing else, so accepting a third was BizTrack inventing a
+ * payment schedule the ordinance does not provide for.
+ *
+ * MCG-BPLO-FO-002 prints three boxes — Annually, Semi-Annually, Quarterly —
+ * and that is the form the city hands over the counter. An applicant who ticks
+ * Semi-Annually on paper must be able to file the same answer here, so the
+ * field records what the paper asks and the ordinance mismatch is BPLO's to
+ * reconcile at the Treasurer's window. Client's instruction, same date.
+ *
+ * Nothing acts on the answer either way — see the picker's own note — so this
+ * accepts a wider set rather than promising a different bill.
+ */
+it('accepts the three payment modes the renewal paper prints, and nothing else', function () {
     $business = Business::where('owner_user_id', User::where('email', 'owner@biztrack.local')->value('id'))->firstOrFail();
     $base = [
         'business_id' => $business->id,
@@ -292,13 +323,20 @@ it('accepts annual and quarterly payment modes and nothing else', function () {
         'permit_type_ids' => [PermitType::where('code', 'BUSINESS')->value('id')],
     ];
 
-    $this->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'quarterly'])
-        ->assertCreated()
-        ->assertJsonPath('data.payment_mode', 'quarterly');
+    foreach (['annual', 'semi_annual', 'quarterly'] as $mode) {
+        $this->withHeaders(authAs('owner@biztrack.local'))
+            ->postJson('/api/v1/applications', $base + ['payment_mode' => $mode])
+            ->assertCreated()
+            ->assertJsonPath('data.payment_mode', $mode);
+    }
 
+    /*
+     * And the list is still a list. Widening it by one is not the same as
+     * opening it, and `payment_mode` reaches a column with no enum behind it —
+     * whatever passes validation is what BPLO reads off the filing.
+     */
     $this->withHeaders(authAs('owner@biztrack.local'))
-        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'semi_annual'])
+        ->postJson('/api/v1/applications', $base + ['payment_mode' => 'monthly'])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['payment_mode']);
 });

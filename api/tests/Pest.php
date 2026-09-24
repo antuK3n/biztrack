@@ -3,6 +3,7 @@
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\Barangay;
+use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Models\User;
@@ -135,6 +136,36 @@ function bploApprovesForm(Application|int $app): Application
     app(WorkflowService::class)->approveMainForm($app->fresh());
 
     return $app->fresh();
+}
+
+/**
+ * How many OTHER permits this filing has released — never the business permit.
+ *
+ * ── Why this exists, and why it is not `permits()->count()` ──────────────────
+ *
+ * Fourteen assertions across seven files counted every permit on a filing and
+ * meant "how many of the five clearances have their offices released". The two
+ * were the same number until 24 September 2026, because the Mayor's Permit was
+ * minted last, by `approveOverall()`, once all five were in.
+ *
+ * The LGU moved the release to PAYMENT — *"after payment, business permit is
+ * already released"* — so the business permit is now present from the moment
+ * the filing is paid, and every one of those counts reads one higher than the
+ * thing it was checking. Adding 1 to each literal would have made them pass
+ * while quietly turning a statement about clearances into arithmetic nobody
+ * could read.
+ *
+ * So the question is asked directly. A test that genuinely wants the business
+ * permit asks for it by name — see `PermitReleasedAtPaymentTest`, which is
+ * where that certificate's own behaviour is pinned.
+ */
+function clearancePermitsIssued(Application|int $app): int
+{
+    $id = $app instanceof Application ? $app->id : $app;
+
+    return Permit::where('application_id', $id)
+        ->whereHas('permitType', fn ($q) => $q->where('code', '!=', PermitType::OUTCOME_CODE))
+        ->count();
 }
 
 function classifyAsOfficer(Application $app, string $email = 'bplo@biztrack.local', ?string $tier = null): Application
