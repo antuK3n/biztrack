@@ -11,11 +11,14 @@ import type { Barangay } from '../../lib/types'
  * It shows a picture and lists what is on it. That is the whole of it.
  *
  * The sheets CPDO supplied are raster images: "Brgy. <Name> Proposed Zoning Map
- * 2018 - 2027", 1:3,000, Luzon 1911 / Philippine Zone III. They carry no vector
- * geometry and no georeference we can compute against, so there is no honest way
- * to turn a pin or a street address into "your lot is C-2". Tracing polygons off
- * pixels would produce an answer, and a wrong one would tell an applicant their
- * site conforms when the city says it does not.
+ * 2018 - 2027", 1:3,000. They carry no vector geometry. They ARE now placed on
+ * the picker map (lib/zoningSheets.data.ts, from each sheet's scale, grid marks
+ * and neighbouring linework; about ±10 m against OpenStreetMap roads — note the
+ * sheets' "Luzon 1911 / Philippine Zone III" caption is wrong, the coordinates
+ * are UTM 51N and sit ~102 m south as printed). That makes the colours visible
+ * under a pin. It does not make a verdict honest: ±10 m straddles a zone line on
+ * a narrow lot, and reading "your lot is C-2" off pixels would tell an applicant
+ * their site conforms when the city says it does not. CPDO decides.
  *
  * Note that having real boundaries now changes nothing here. `lib/malabonGeo.ts`
  * carries city and barangay polygons, so a pin can be placed in a barangay — but
@@ -131,7 +134,7 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
         </a>
       )}
       {mapPath !== null && !broken && (
-        <p className="mt-1.5 text-xs text-ink-muted">
+        <p className="mt-1.5 text-sm text-ink-muted">
           Opens the full sheet in a new tab.
         </p>
       )}
@@ -149,7 +152,7 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
 
       {zones.length > 0 && (
         <div className="mt-4">
-          <h4 id="barangay-zone-list-heading" className="text-[13px] font-semibold text-ink">
+          <h4 id="barangay-zone-list-heading" className="text-sm font-semibold text-ink">
             {/*
              * The count stays; the barangay name goes. It read "The 6
              * classifications drawn on Barangay Baritan" three lines under a
@@ -168,7 +171,7 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
             {zones.map((z) => (
               <li
                 key={z.code}
-                className="inline-flex items-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-xs font-medium text-ink"
+                className="inline-flex items-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-sm font-medium text-ink"
               >
                 {/*
                  * The swatch matches the sheet so a reader can find the zone on
@@ -209,14 +212,14 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
          * precisely the verdict we cannot make.
          */
         <div className="mt-4">
-          <h4 id="barangay-overlay-list-heading" className="text-[13px] font-semibold text-ink">
+          <h4 id="barangay-overlay-list-heading" className="text-sm font-semibold text-ink">
             {overlays.length === 1 ? 'Overlay over this barangay' : `${overlays.length} overlays over this barangay`}
           </h4>
           <ul aria-labelledby="barangay-overlay-list-heading" className="mt-2 flex flex-wrap gap-2">
             {overlays.map((o) => (
               <li
                 key={o.code}
-                className="inline-flex items-center gap-2 rounded-full border border-dashed border-royal/50 bg-royal-tint px-3 py-1 text-xs font-medium text-royal"
+                className="inline-flex items-center gap-2 rounded-full border border-dashed border-royal/50 bg-royal-tint px-3 py-1 text-sm font-medium text-royal"
               >
                 {o.name}
               </li>
@@ -247,13 +250,13 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
             */}
           {overlays.some((o) => o.description !== null) && (
             <details className="group mt-2">
-              <summary className="cursor-pointer list-none text-xs font-medium text-royal underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal">
+              <summary className="cursor-pointer list-none text-sm font-medium text-royal underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal">
                 What these overlays mean
               </summary>
               <div className="mt-2 space-y-1.5 border-l-2 border-royal/25 pl-3">
                 {overlays.map((o) =>
                   o.description === null ? null : (
-                    <p key={o.code} className="text-xs leading-relaxed text-ink-secondary">
+                    <p key={o.code} className="text-sm leading-relaxed text-ink-secondary">
                       <span className="font-semibold text-ink">{o.name}.</span> {o.description}
                     </p>
                   ),

@@ -158,3 +158,61 @@ export function checkPin(
     metres: Math.round(metres),
   }
 }
+
+/*
+ * A point well inside the named barangay, for the pin to START at when the
+ * address could not be found (see the fallback in ApplyWizard's item 7 effect).
+ *
+ * Only ever a starting place. It is not where anybody's business is, and the
+ * caller must never present it as the address or let it stand as the answer —
+ * it is not stored and it does not satisfy the step until the applicant moves
+ * or confirms it themselves.
+ *
+ * The area-weighted centroid of the outer ring, which for all 21 barangays
+ * falls inside its own polygon (checked 24 September 2026). A C-shaped
+ * barangay's centroid could fall outside, so that case is still answered: the
+ * middle of the widest stretch of the barangay along the centroid's latitude.
+ */
+const centres = new Map<string, readonly [number, number] | null>()
+
+export function barangayCentre(barangay: string): readonly [number, number] | null {
+  if (centres.has(barangay)) return centres.get(barangay) ?? null
+  const b = BARANGAY_POLYGONS.find((p) => p.name === barangay)
+  let centre: readonly [number, number] | null = null
+  if (b && b.rings.length > 0) {
+    const ring = b.rings[0]
+    let area = 0
+    let cx = 0
+    let cy = 0
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const f = ring[j][0] * ring[i][1] - ring[i][0] * ring[j][1]
+      area += f
+      cx += (ring[j][0] + ring[i][0]) * f
+      cy += (ring[j][1] + ring[i][1]) * f
+    }
+    const lng = cx / (3 * area)
+    const lat = cy / (3 * area)
+    if (area !== 0 && inPolygon(lng, lat, b.rings)) {
+      centre = [Number(lat.toFixed(6)), Number(lng.toFixed(6))]
+    } else {
+      // Where the centroid's latitude crosses the outer ring, in order; the
+      // widest inside stretch is between an odd crossing and the next.
+      const xs: number[] = []
+      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const [xi, yi] = ring[i]
+        const [xj, yj] = ring[j]
+        if (yi > lat !== yj > lat) xs.push(((xj - xi) * (lat - yi)) / (yj - yi) + xi)
+      }
+      xs.sort((p, q) => p - q)
+      let best = -1
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        if (xs[k + 1] - xs[k] > best) {
+          best = xs[k + 1] - xs[k]
+          centre = [Number(lat.toFixed(6)), Number(((xs[k] + xs[k + 1]) / 2).toFixed(6))]
+        }
+      }
+    }
+  }
+  centres.set(barangay, centre)
+  return centre
+}

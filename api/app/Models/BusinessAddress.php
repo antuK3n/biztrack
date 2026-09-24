@@ -22,13 +22,14 @@ class BusinessAddress extends Model
      * see the note in `syncAddressAndLines`, and the matching one in `flush`.
      */
     protected $fillable = [
-        'business_id', 'line1', 'line2', 'house_bldg_no', 'street', 'barangay_id',
-        'city', 'province', 'postal_code', 'latitude', 'longitude',
+        'business_id', 'line1', 'line2', 'house_bldg_no', 'street', 'block', 'lot',
+        'lot_area_sqm', 'barangay_id', 'city', 'province', 'postal_code', 'latitude', 'longitude',
     ];
 
     protected $casts = [
         'latitude' => 'float',
         'longitude' => 'float',
+        'lot_area_sqm' => 'float',
     ];
 
     public function business(): BelongsTo

@@ -226,7 +226,7 @@ async function completeZoningStep(page: Page) {
     await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
     // Matched on the element, not on a role: the rows carry `role="radio"` now
     // that a filing declares one trade, so `getByRole('button')` finds nothing.
-    await page.locator('#psic-results button').first().click()
+    await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   }
 
   const products = page.getByLabel(/products \/ services/i)
@@ -237,7 +237,7 @@ async function completeZoningStep(page: Page) {
 
   await pinAtMapCentre(page)
 
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 }
@@ -268,10 +268,9 @@ async function openBusinessStep(page: Page) {
   await expect(page.getByText(/part 2 of/i).first()).toBeVisible({ timeout: 20_000 })
   await completeZoningStep(page)
 
+  // Next goes straight to part 3: the zoning answer is inline on the step now,
+  // not a dialog on the way out (client, 23 September 2026).
   await page.getByRole('button', { name: /^next$/i }).click()
-  // Leaving the zoning step opens the conformity finding on the way out; it is
-  // a modal, so part 3 is behind its Proceed button and not behind Next.
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
 

@@ -243,7 +243,7 @@ test('line of business is asked once, and the one ask is the searchable picker',
    * Selected panel pushed the map off the screen on the step whose job is
    * picking a location.
    */
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   await expect(results).toBeHidden()
   await search.click()
   await expect(results).toBeVisible()
@@ -288,7 +288,7 @@ test('choosing a line of business is confirmed where it can be seen', async ({ p
   // screen from the moment before.
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
 
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   // Matched on the element, not on a role: the rows carry `role="radio"` now
   // that a filing declares one trade, so `getByRole('button')` finds nothing.
   const row = results.locator('button').first()
@@ -381,7 +381,7 @@ test('the line of business step reads as one choice, and changing it is not an e
    * of independent checkboxes, and they are easy to lose in a copy rewrite —
    * which is what this test is guarding against.
    */
-  const group = page.locator('#psic-results')
+  const group = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
   await expect(group).toHaveAttribute('role', 'radiogroup')
   await expect(group).toHaveAttribute('aria-label', /line of business/i)
   const rows = group.getByRole('radio')
@@ -419,7 +419,7 @@ test('the line of business step reads as one choice, and changing it is not an e
   // Change puts the applicant back in the picker rather than emptying the
   // answer, and Clear is still there for somebody who wants the box empty.
   await change.click()
-  await expect(page.locator('#psic-results')).toBeVisible()
+  await expect(page.getByRole('radiogroup', { name: 'Line of business', exact: true })).toBeVisible()
   await expect(search).toBeFocused()
   await page.keyboard.press('Escape')
   await clear.click()
@@ -711,7 +711,7 @@ test('every line of business is reachable, and the count is stated', async ({ pa
 
   const search = page.getByLabel(/search for the one line of business/i)
   await search.click()
-  const results = page.locator('#psic-results')
+  const results = page.getByRole('radiogroup', { name: 'Line of business', exact: true })
 
   // Browsing reaches everything. The shortlist is a head start, and it says so.
   // Matched on the element, not on a role: the rows carry `role="radio"` now
@@ -860,7 +860,7 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
   await search.click()
   await search.fill('sari-sari')
   await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
-  await page.locator('#psic-results button').first().click()
+  await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   await expect(page.getByText(/choose your line of business above/i)).toBeHidden()
 
   /*
@@ -970,7 +970,7 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
    * reason is on screen" rather than by clicking it — with every other field
    * answered, the missing pin is the only thing holding the step.
    */
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   const next = page.getByRole('button', { name: /^next$/i })
@@ -988,7 +988,6 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await expect(page.getByText(/pinned at/i)).toBeVisible()
   await expect(next).toBeEnabled()
   await next.click()
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 })
 
@@ -1015,8 +1014,15 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
       contentType: 'application/json',
       // Malabon City Hall — the same point the map opens on, so it is certain
       // to survive `withinMalabon` and to be visibly inside the city outline.
+      // `category` as jsonv2 sends it: only roads are used as a pin.
       body: JSON.stringify([
-        { lat: '14.6572', lon: '120.9573', display_name: 'Rizal Street, Malabon, Metro Manila' },
+        {
+          lat: '14.6572',
+          lon: '120.9573',
+          name: 'Rizal Street',
+          category: 'highway',
+          display_name: 'Rizal Street, Malabon, Metro Manila',
+        },
       ]),
     }),
   )
@@ -1028,7 +1034,7 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
   // Nothing is pinned until the address says something worth looking up.
   await expect(page.getByText(/pinned at/i)).toBeHidden()
 
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
 
   // The debounce is 800ms; the assertion's own timeout covers it rather than a
   // hard wait, so a slower machine does not make this flake.
@@ -1043,6 +1049,118 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
   await map.click()
   await expect(page.getByText(/pinned at/i)).toBeVisible()
   await expect(page.getByText(/placed from your address/i)).toBeHidden()
+})
+
+test('the address lookup asks OSM for the street alone, and once per street', async ({ page }) => {
+  /*
+   * Measured on 41 addresses from the register (lib/geocode.ts): the barangay
+   * in the query text, the house number and a Blk/Lot prefix each cost matches
+   * and bought no precision, so none of them is sent. The barangay is applied
+   * to the answers instead — which is also why choosing it afterwards must not
+   * cost Nominatim a second request (its policy: one a second, no heavy use).
+   */
+  const queries: string[] = []
+  await page.unroute('**://nominatim.openstreetmap.org/**')
+  await page.route('**://nominatim.openstreetmap.org/**', (route) => {
+    queries.push(new URL(route.request().url()).searchParams.get('q') ?? '')
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      // Longos, where the map's own centre is, as a road.
+      body: JSON.stringify([
+        { lat: '14.6572', lon: '120.9573', name: 'Rizal Street', category: 'highway' },
+      ]),
+    })
+  })
+
+  await goToZoningStep(page)
+  await page.getByLabel(/^street/i).fill('Blk 5 Lot 12 24 Rizal St.')
+  await expect(page.getByText(/placed from your address, on rizal street/i)).toBeVisible({
+    timeout: 10_000,
+  })
+  expect(queries).toEqual(['Rizal Street, Malabon City, Metro Manila, Philippines'])
+
+  // Naming the barangay re-checks the same answer; it does not ask again.
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await page.waitForTimeout(1500)
+  expect(queries).toHaveLength(1)
+})
+
+test('a street the map cannot find starts a hollow pin at the barangay centre, which is not a pin', async ({
+  page,
+}) => {
+  /*
+   * The suite's default stub aborts every lookup — the same path as a real
+   * miss. With a barangay chosen, the map offers its centre as a place to
+   * START, and must not let that stand for the address: nothing is pinned,
+   * the step still asks for a pin, and it becomes one only by the applicant's
+   * hand.
+   */
+  await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Dampalit' })
+  await page.getByLabel(/^street/i).fill('Mercedes Street')
+
+  const caption = page.getByText(/we could not find your street on the map/i)
+  await expect(caption).toBeVisible({ timeout: 10_000 })
+  await expect(caption).toContainText(/centre of Dampalit/)
+  await expect(caption).toContainText(/it is not your address/i)
+  // Not the error red: nothing has gone wrong.
+  const colour = await caption.evaluate((el) => getComputedStyle(el).color)
+  expect(colour).not.toBe('rgb(189, 0, 0)')
+
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/still needed on this part/i)).toContainText(/a pin on the map/i)
+
+  // Dampalit is 3.8 km north of where the map opens; the start pin is brought
+  // into view rather than left off the top of the map.
+  const start = page.getByRole('button', { name: /start point, not your address/i })
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await expect(async () => {
+    const m = await map.boundingBox()
+    const p = await start.boundingBox()
+    expect(m && p).toBeTruthy()
+    // The pin's tip (bottom centre) is inside the map's box.
+    const tipX = p!.x + p!.width / 2
+    const tipY = p!.y + p!.height
+    expect(tipX).toBeGreaterThan(m!.x)
+    expect(tipX).toBeLessThan(m!.x + m!.width)
+    expect(tipY).toBeGreaterThan(m!.y)
+    expect(tipY).toBeLessThan(m!.y + m!.height)
+  }).toPass({ timeout: 5_000 })
+
+  // Choosing it is an answer, and only then is there a pin.
+  await start.click()
+  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(caption).toBeHidden()
+  await expect(page.getByText(/still needed on this part/i)).not.toContainText(/a pin on the map/i)
+})
+
+test('an answer that is not a road is not used as a pin', async ({ page }) => {
+  // Asked for "San Bartolome Street", OSM answered with the parish church.
+  await page.unroute('**://nominatim.openstreetmap.org/**')
+  await page.route('**://nominatim.openstreetmap.org/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify([
+        {
+          lat: '14.6572',
+          lon: '120.9573',
+          name: 'San Bartolome Parish Church',
+          category: 'amenity',
+        },
+      ]),
+    }),
+  )
+  await goToZoningStep(page)
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await page.getByLabel(/^street/i).fill('San Bartolome Street')
+  await expect(page.getByText(/we could not find your street on the map/i)).toBeVisible({
+    timeout: 10_000,
+  })
+  await expect(page.getByText(/pinned at/i)).toBeHidden()
 })
 
 test('the map offers satellite imagery as well as streets', async ({ page }) => {
@@ -1285,7 +1403,7 @@ async function goToZoningStep(page: Page) {
     await expect(page.getByText(/trades matching “sari-sari”/)).toBeVisible()
     // Matched on the element, not on a role: the rows carry `role="radio"` now
     // that a filing declares one trade, so `getByRole('button')` finds nothing.
-    await page.locator('#psic-results button').first().click()
+    await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   }
 
   /*
@@ -1379,18 +1497,12 @@ async function goToBusinessStep(page: Page) {
    */
   await pinAtMapCentre(page)
 
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
 
+  // Straight to part 3 — the zoning answer is inline on the step, not a dialog.
   await page.getByRole('button', { name: /^next$/i }).click()
-  /*
-   * Leaving the zoning step opens the conformity modal on the way out. The
-   * modal is now the conformity message and nothing else — Business Location
-   * Insights used to render inside it and does not any more. See the tests
-   * below for why that matters.
-   */
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 }
 
@@ -1430,19 +1542,19 @@ function insightsPanel(page: Page) {
   return page.getByRole('region', { name: /business location insights/i })
 }
 
-test('Business Location Insights answers the pin, not the confirmation modal', async ({ page }) => {
+test('Business Location Insights is two rows on the step, and Next opens no dialog', async ({
+  page,
+}) => {
   /*
-   * The client's item, and it is a sequencing point rather than a layout one.
+   * Two rules from the client's feedback of 23 September 2026.
    *
-   * These four figures are decision support for choosing a location. They used
-   * to render inside the zoning-result modal, which opens on the way OUT of the
-   * step — so they reached the applicant only after the location was chosen,
-   * with a Proceed button under them. Useless there, and quietly misleading:
-   * numbers inside a dialog headed CONGRATULATIONS read as part of the
-   * conformity finding.
+   * "Less is more": the panel is two rows — similar businesses and business
+   * concentration — with the radius said once above them. The other two rows
+   * (most common line of business, average distance) are gone from the screen;
+   * their payload keys stay, pinned by LocationInsightsApiTest.
    *
-   * So this asserts both halves. On the step, with the pin, while it can still
-   * be moved — and NOT in the modal.
+   * "Zoning must not be a popup": the CONGRATULATIONS dialog that opened on
+   * Next is gone. Next moves straight to part 3.
    */
   await goToZoningStep(page)
 
@@ -1451,17 +1563,9 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
 
   const map = page.locator('.leaflet-container')
   await map.scrollIntoViewIfNeeded()
-
-  /*
-   * Read the radius off the wire rather than hard-coding 500. The whole point of
-   * `radius_m` being in the payload is that the server owns the number; a test
-   * that asserts 500 would keep passing on the day the API changed it and the
-   * screen went on saying 500.
-   */
-  // Item 8 — the map takes no pin before a barangay is named. Longos, because
-  // that is where the centre this test clicks actually falls.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
 
+  // Read the radius and thresholds off the wire: the server owns them.
   const answered = page.waitForResponse(
     (r) => r.url().includes('location-insights') && r.status() === 200,
   )
@@ -1472,112 +1576,75 @@ test('Business Location Insights answers the pin, not the confirmation modal', a
   const highFrom = payload.concentration.thresholds.high_from as number
   expect(radiusM).toBeGreaterThan(0)
 
-  // The card is on the step, headed the way the client names it.
   const panel = insightsPanel(page)
-  await expect(panel).toBeVisible()
   await expect(panel.getByRole('heading', { name: /business location insights/i })).toBeVisible()
+  await expect(panel.getByText(new RegExp(`within ${radiusM} m of your pin`, 'i'))).toBeVisible()
 
-  /*
-   * And it has actually reported something — the skeleton is not the answer.
-   * "Registered businesses in total" is the one row that always resolves: it
-   * needs no line of business and it has no unavailable state, so it is the
-   * honest proof that a real payload rendered.
-   */
-  await expect(panel.getByText(/registered businesses in total/i)).toBeVisible()
-  await expect(panel.getByText(new RegExp(`within ${radiusM} m`, 'i')).first()).toBeVisible()
-
-  /*
-   * Four rows, each a Title over a Description, named exactly as the client
-   * specified them. The titles are load-bearing and not decoration: "Nearby
-   * Similar Businesses" counts the applicant's 3-digit PSIC trade GROUP while
-   * "Most Common Line of Business" takes the mode of the 2-digit DIVISION, and
-   * since the client removed the third figure that used to reconcile the two,
-   * these words are now the only thing on screen carrying that difference.
-   */
-  for (const title of [
-    'Nearby Similar Businesses',
-    'Business Concentration',
-    'Most Common Line of Business',
-    'Average Distance to Similar Businesses',
+  // Exactly the two rows, and the retired ones stay retired.
+  await expect(panel.getByRole('row')).toHaveCount(2)
+  await expect(panel.getByText('Similar Businesses', { exact: true })).toBeVisible()
+  await expect(panel.getByText('Business Concentration', { exact: true })).toBeVisible()
+  for (const gone of [
+    /most common line of business/i,
+    /average distance/i,
+    /businesses in your own category/i,
   ]) {
-    await expect(panel.getByText(title, { exact: true })).toBeVisible()
+    await expect(panel.getByText(gone)).toBeHidden()
   }
 
-  /*
-   * And the row that used to sit between them is gone and stays gone. It
-   * reconciled the two widths above with a third count, and the client decided
-   * against it in favour of the titles doing that work — so a reader meeting the
-   * old bug report must not "restore" it. See the panel's module docblock.
-   */
-  await expect(panel.getByText(/businesses in your own category/i)).toBeHidden()
+  // The band is a word with its count named, never a tint alone.
+  await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+ registered\)$/)).toBeVisible()
 
-  /*
-   * The band is a word, not just a tint. DESIGN.md's Never Color Alone rule —
-   * an ordinal scale carried in colour alone is no scale at all for a reader who
-   * cannot separate the tints, and it must never be the error red either,
-   * because a busy block is not a fault.
-   *
-   * Anchored to the count in brackets so this matches the BADGE specifically.
-   */
-  await expect(panel.getByText(/^(Low|Medium|High)\s*\(\d+\)$/)).toBeVisible()
-
-  /*
-   * ── The band scale, behind an info affordance ────────────────────────────
-   *
-   * "Low 0–5 · Medium 6–10 · High 11+" used to be printed inline under this
-   * row. The client moved it into an affordance, which is the right call for
-   * reference material read once — but only if the affordance is a real one.
-   *
-   * A `title=` tooltip would satisfy the request and fail the applicant: there
-   * is no hover on touch, and hover is not reachable by keyboard. So this
-   * asserts the WCAG 2.1 AA SC 1.4.13 behaviour rather than the presence of an
-   * icon — it opens from the KEYBOARD, and Escape dismisses it.
-   *
-   * The scale itself is built from the payload's own thresholds, so a test that
-   * hard-coded 5, 6 and 11 could not catch the legend drifting from the banding.
-   */
+  // The band scale opens from the keyboard and Escape closes it (WCAG 1.4.13).
   const bandScale = `Low 0–${mediumFrom - 1} · Medium ${mediumFrom}–${highFrom - 1} · High ${highFrom}+`
   await expect(panel.getByText(bandScale)).toBeHidden()
-
   const bandInfo = panel.getByRole('button', { name: /business concentration bands/i })
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
-
   await bandInfo.focus()
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'true')
   await expect(panel.getByText(bandScale)).toBeVisible()
-
   await page.keyboard.press('Escape')
   await expect(panel.getByText(bandScale)).toBeHidden()
-  await expect(bandInfo).toHaveAttribute('aria-expanded', 'false')
 
-  /* ── and the modal it used to live in no longer carries it ─────────────── */
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
-  /*
-   * Longos, and not Acacia as this said until the pin gained a barangay.
-   *
-   * These helpers pin the centre of the map, which is Malabon City Hall, which
-   * is in Longos. Naming Acacia there was the exact mismatch the step now
-   * refuses — a pin in one barangay filed under another — so the old value was
-   * not arbitrary test data, it was the bug. Keep this in step with
-   * DEFAULT_CENTER in MapPicker: move the centre and this has to move with it.
-   */
-  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  /* ── and Next goes on without a dialog ─────────────────────────────────── */
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
 
-  const modal = page.getByRole('dialog', { name: /congratulations/i })
-  await expect(modal).toBeVisible()
-  await expect(modal.getByRole('region', { name: /business location insights/i })).toBeHidden()
-  await expect(modal.getByText(/registered businesses in total/i)).toBeHidden()
+  await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
 
+test('the zoning step warns that the pin must be accurate, and asks block, lot and lot area', async ({
+  page,
+}) => {
   /*
-   * What the modal must keep. This CPDO line is the standing condition under
-   * which the panel's removed "not part of the zoning decision" disclaimer would
-   * have to come back — without it, CONGRATULATIONS is the only verdict on
-   * screen and nothing says who actually issues the clearance.
+   * Client, 23 September 2026. The warning is prominent and near the map, in
+   * the attention colour rather than the error red (DESIGN.md: nothing is
+   * wrong yet). Block, Lot and Lot Area are optional — a market stall has none.
    */
-  await expect(modal.getByText(/zoning office \(cpdo\) makes the final determination/i)).toBeVisible()
+  await goToZoningStep(page)
+
+  const warning = page.locator('#pin-accuracy-note')
+  await expect(warning).toBeVisible()
+  await expect(warning).toContainText(/place the pin exactly/i)
+  await expect(warning).toContainText(/disapproved/i)
+  await expect(warning).toContainText(/forfeited/i)
+  const colour = await warning.evaluate((el) => getComputedStyle(el).color)
+  expect(colour, 'the warning must not borrow the error red').not.toBe('rgb(189, 0, 0)')
+
+  // The clutter the client named is gone from this step.
+  await expect(page.getByText(/the other permits come later/i)).toBeHidden()
+  await expect(page.getByText(/once bplo approves your application/i)).toBeHidden()
+
+  for (const label of [/^block$/i, /^lot$/i, /^lot area \(sq\. m\.\)$/i]) {
+    await expect(page.getByLabel(label)).toBeEditable()
+  }
+  // Optional: none is listed as still needed while blank...
+  const still = page.getByText(/still needed on this part/i)
+  await expect(still).not.toContainText(/block|lot/i)
+  // ...but a lot area that is not an area is.
+  await page.getByLabel(/^lot area/i).fill('about half')
+  await expect(still).toContainText(/a valid lot area/i)
 })
 
 test('the pin is ringed at the radius the figures were measured over', async ({ page }) => {
@@ -1616,7 +1683,7 @@ test('the pin is ringed at the radius the figures were measured over', async ({ 
    * and to a screen reader, which cannot see an SVG path at all — and stated as
    * the API's own number, so caption and circle can never disagree.
    */
-  await expect(page.getByText(new RegExp(`circle around it covers ${radiusM} m`, 'i'))).toBeVisible()
+  await expect(page.getByText(new RegExp(`circle is the ${radiusM} m the figures below count`, 'i'))).toBeVisible()
 
   /*
    * The ring is scenery, and this is checked BEFORE zooming so the offset below
@@ -1720,7 +1787,7 @@ test('moving the pin does not stampede the lookup, and never shows the old point
   }
 
   // The figures for the LAST pin arrive and the panel settles.
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeVisible({
     timeout: 15_000,
   })
   /*
@@ -1738,10 +1805,10 @@ test('moving the pin does not stampede the lookup, and never shows the old point
    */
   await map.click({ position: { x: box.width / 2 - 30, y: box.height / 2 - 30 } })
   await expect(insightsPanel(page).getByRole('status', { name: /loading location insights/i })).toBeVisible()
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeHidden()
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeHidden()
 
   // ...and it comes back on its own.
-  await expect(insightsPanel(page).getByText(/registered businesses in total/i)).toBeVisible({
+  await expect(insightsPanel(page).getByText('Business Concentration', { exact: true })).toBeVisible({
     timeout: 15_000,
   })
 })
@@ -1774,8 +1841,8 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   // claim about a distance nothing measured.
   await expect(page.locator('path.biztrack-radius-ring')).toBeHidden()
 
-  // And the step still goes on, all the way through the conformity modal.
-  await page.getByLabel(/house no\. & street name/i).fill('24 Rizal Street')
+  // And the step still goes on.
+  await page.getByLabel(/^street/i).fill('Rizal Street')
   /*
    * Longos, and not Acacia as this said until the pin gained a barangay.
    *
@@ -1789,7 +1856,6 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   await page.getByLabel(/emergency contact person/i).fill('Juan Dela Cruz')
   await page.getByLabel(/emergency contact number/i).fill('0917 123 4567')
   await page.getByRole('button', { name: /^next$/i }).click()
-  await page.getByRole('button', { name: /proceed to application/i }).click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
 })
 
