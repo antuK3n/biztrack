@@ -50,6 +50,7 @@ import type {
   Payment,
   PaymentMethod,
   Permit,
+  PermitRegisterRow,
   PermitType,
   PrefillResult,
   ProcessingTimeReport,
@@ -1076,7 +1077,54 @@ export const inspections = {
 export interface PermitFilters extends PageParams {
   q?: string
   status?: string
+  /**
+   * One office, named by the permit type it issues (`CEC`, `FSIC`, …).
+   *
+   * An office is named by its CERTIFICATE rather than by a department id
+   * because that is what a permit carries: `permits.permit_type_id`, never a
+   * department. The server validates the code against the register, so an
+   * office the City removes — MARKET, gone on 6 September 2026 — is a 422
+   * rather than a filter that silently matches nothing.
+   */
+  permit_type?: string
+  /**
+   * The column to order by, from the server's own whitelist.
+   *
+   * Sorting used to run in the browser over the 25 rows in hand, because
+   * `/permits` accepted no ordering and an unknown key would have been dropped
+   * in silence — a control that looks like it works. The endpoint takes one
+   * now, so the sort reaches the whole register.
+   */
+  sort?: PermitSort
+  dir?: 'asc' | 'desc'
+  /**
+   * Ask for the register row rather than the contracted payload.
+   *
+   * Off everywhere but the administrator's table. It adds the BAN, the
+   * certificate face, the signer, the permit this one replaced and the office
+   * sheet the applicant filled in — four more eager loads that the owner's
+   * Profile and the filing detail screen have no use for.
+   */
+  detail?: boolean
 }
+
+/**
+ * The columns `GET /permits` will order by.
+ *
+ * Must match `PermitController::SORTS` exactly. A key that is not in that
+ * array is a 422, which is the point: the server resolves the key through its
+ * own whitelist and nothing from the query string reaches SQL.
+ */
+export type PermitSort =
+  | 'ban'
+  | 'permit_number'
+  | 'business'
+  | 'permit_type'
+  | 'tracking_id'
+  | 'status'
+  | 'valid_from'
+  | 'valid_until'
+  | 'issued_at'
 
 export const permits = {
   /**
@@ -1088,6 +1136,16 @@ export const permits = {
   list: (params: PageParams = {}) => unwrap<Permit[]>(api.get('/permits', { params })),
   /** Same list, keeping the page meta. */
   page: (params: PermitFilters = {}) => unwrapPaged<Permit>(api.get('/permits', { params })),
+  /**
+   * The register row — every detail the administrator's table prints.
+   *
+   * A separate call rather than a flag on `page` so the TYPE says which
+   * payload came back. `PermitRegisterRow` carries the BAN, the face and the
+   * office sheet; `Permit` does not, and a single method returning either
+   * would make every one of those an optional the table has to guard.
+   */
+  register: (params: Omit<PermitFilters, 'detail'> = {}) =>
+    unwrapPaged<PermitRegisterRow>(api.get('/permits', { params: { ...params, detail: 1 } })),
   get: (id: number) => unwrap<Permit>(api.get(`/permits/${id}`)),
   /**
    * The clearances this applicant submitted a COPY of, across every filing.

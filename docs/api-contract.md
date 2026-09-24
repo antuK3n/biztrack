@@ -76,7 +76,11 @@ admin adds: `analytics.view user.manage owner.manage_status oic.assign reference
 - `POST /inspections/{id}/reschedule` — body `{scheduled_at}`.
 
 ### Permits
-- `GET /permits` — owner sees own (via business), `permit.view_all` sees all. PermitResource `{id,permit_number,status,status_label,valid_from,valid_until,days_until_expiry,permit_type:{code,name},business:{id,name},application:{id,tracking_id},verify_url}`. `verify_url = {FRONTEND_URL}/verify/{permit_number}`.
+- `GET /permits` — owner sees own (via business), `permit.view_all` sees all, and an office reader sees only the certificates ITS office issues (`PermitController::scopeToReader`). PermitResource `{id,permit_number,status,status_label,valid_from,valid_until,days_until_expiry,permit_type:{code,name},business:{id,name},application:{id,tracking_id},verify_url}`. `verify_url = {FRONTEND_URL}/verify/{permit_number}`.
+  - Query: `q` (permit number, BAN, business name, owner name, tracking ID, permit type name or code), `status` (one `PermitStatus`), `permit_type` (one permit type CODE — an office, named by the certificate it issues; validated `exists`), `sort` + `dir`, `detail`, `page`, `per_page`. Every filter is applied AFTER the reader's scope, never instead of it.
+  - `sort` is one of `ban, permit_number, business, permit_type, tracking_id, status, valid_from, valid_until, issued_at`, resolved through `PermitController::SORTS`; anything else is a 422. `dir` is `asc` or `desc` (default `desc`). No sort means the historical order: `issued_at DESC, id DESC`.
+  - `detail=1` answers **PermitRegisterResource** instead — the administrator's register table. It is PermitResource with `ban` FIRST, then `face:{business_name,trade_name,owner_name,address,barangay,city,line_of_business}` (the snapshot from `permits.issued_details` via `PermitFace::forPrinting`, never the live business), `issued_at`, `issued_by`, `prior_permit_number`, `revoked_at`, `revoked_reason`, and `office_form`.
+  - `office_form` is the office's own sheet for that permit — saved answers and derived ones together, through `OfficeFormAnswers::derive`. It is `null` for a permit type that has no sheet (only `BUSINESS`, of the six), which is different from `{}` and is rendered differently.
 - `GET /permits/{id}`
 - **PUBLIC** `GET /verify/{permit_number}` — no auth. Returns `{permit_number,status,status_label,valid_from,valid_until,permit_type:{name},business:{name,address:{barangay:{name},city}}, is_valid}` or 404. This backs the public verify page (guardrail: no PII beyond business name/barangay).
 

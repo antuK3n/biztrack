@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\PermitStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\PermitRegisterResource;
 use App\Http\Resources\PermitResource;
 use App\Models\ApplicationDocument;
 use App\Models\Permit;
@@ -28,6 +29,63 @@ class PermitController extends Controller
     private array $eager = ['permitType', 'business:id,name', 'application:id,tracking_id'];
 
     public function __construct(private WorkflowService $workflow) {}
+
+    /**
+     * What the register TABLE needs on top of the list payload.
+     *
+     * Kept apart from `$eager` because it is three joins and a JSON column
+     * more, and every other caller of this resource — the owner's Profile, the
+     * filing detail screen — is reading one permit or a handful. Loading the
+     * office sheet for those would be work nobody asked for.
+     *
+     * `business` is re-listed WITHOUT the column restriction that `$eager`
+     * puts on it: that one selects id and name only, and the table leads with
+     * the BAN.
+     *
+     * Two entries for one relation do NOT merge, and the FIRST wins — proved
+     * by a test that read `ban: null` off a row whose business has one. So
+     * `registerEager()` drops the narrow entry before adding this wide one
+     * rather than relying on order.
+     */
+    private array $registerEager = [
+        'business:id,name,ban',
+        'issuedBy:id,first_name,middle_name,last_name,suffix',
+        'priorPermit:id,permit_number',
+        'application.officeForms',
+        /*
+         * The filing itself, in full rather than the two columns `$eager`
+         * takes. OfficeFormAnswers::derive reads the application's type, its
+         * submitted_at and its business profile to work out the answers nobody
+         * types; handed a two-column stub it would derive them from nulls and
+         * the sheet would print blank boxes that the paper prints filled.
+         */
+        'application',
+        'application.business.lines.psicCode',
+        'application.business.address.barangay',
+        'application.business.owner',
+    ];
+
+    /**
+     * The columns the register may be ordered by, and the SQL behind each.
+     *
+     * A whitelist, not a passthrough: `orderBy($request->query('sort'))` would
+     * take a column name from the query string straight into SQL. Everything
+     * here is either a column on `permits` or a correlated subquery over a
+     * relation, because two of the five sortable columns — the business name
+     * and the permit type — live on other tables, and a join would multiply
+     * rows on a hasMany the eager loads also touch.
+     */
+    private const SORTS = [
+        'permit_number' => 'permits.permit_number',
+        'status' => 'permits.status',
+        'valid_from' => 'permits.valid_from',
+        'valid_until' => 'permits.valid_until',
+        'issued_at' => 'permits.issued_at',
+        'ban' => '(select ban from businesses where businesses.id = permits.business_id)',
+        'business' => '(select name from businesses where businesses.id = permits.business_id)',
+        'permit_type' => '(select name from permit_types where permit_types.id = permits.permit_type_id)',
+        'tracking_id' => '(select tracking_id from applications where applications.id = permits.application_id)',
+    ];
 
     /**
      * Issued permits. Paginated, newest issuance first.
@@ -78,33 +136,106 @@ class PermitController extends Controller
             // list here would have started rejecting a status the register was
             // already writing.
             'status' => ['sometimes', 'nullable', Rule::enum(PermitStatus::class)],
+            /*
+             * The office, named by its permit type code rather than by a
+             * department id. A permit belongs to an office THROUGH the
+             * certificate it is - CENRO issues the CEC, BFP the FSIC - and
+             * `permits` carries `permit_type_id`, not a department. Filtering
+             * by department would mean a join that answers the same question
+             * one step further away.
+             *
+             * `exists` against the register, so a code the City removes stops
+             * being offered instead of quietly returning nothing: MARKET was a
+             * permit type until 6 September 2026 and a hand-written list here
+             * would still accept it.
+             */
+            'permit_type' => ['sometimes', 'nullable', 'string', 'exists:permit_types,code'],
+            'sort' => ['sometimes', 'nullable', Rule::in(array_keys(self::SORTS))],
+            'dir' => ['sometimes', 'nullable', Rule::in(['asc', 'desc'])],
+            /*
+             * The full register row, for the administrator's table. Off by
+             * default: every other caller wants the contracted payload, and
+             * this one costs four more eager loads and the office sheet.
+             */
+            'detail' => ['sometimes', 'boolean'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $query = Permit::with($this->eager);
+        $detail = $request->boolean('detail');
+
+        $query = Permit::with($detail ? $this->registerEager() : $this->eager);
         $this->scopeToReader($request, $query);
 
         if ($status = $request->query('status')) {
             $query->where('status', $status);
         }
 
+        if ($code = $request->query('permit_type')) {
+            $query->whereHas('permitType', fn ($t) => $t->where('code', $code));
+        }
+
+        /*
+         * -- What `q` matches, and why it grew --------------------------------
+         *
+         * It was permit number, business name and tracking ID - the three
+         * things an administrator is handed over a counter. The register table
+         * now leads with the BAN and prints the owner and the permit type, so
+         * all of those are searchable too: a box that shows a value it will
+         * not match makes a correct query look like missing data, which is the
+         * same reasoning that put the original three in.
+         *
+         * Still applied AFTER scopeToReader, never instead of it. A search
+         * that reached outside the reader's scope would turn the office
+         * boundary into a query string - the leak AGENTS.md section 10
+         * records, reached by typing rather than by a bug.
+         */
         if ($q = $request->query('q')) {
             $query->where(function ($sub) use ($q) {
                 $sub->where('permit_number', 'like', "%{$q}%")
-                    ->orWhereHas('business', fn ($b) => $b->where('name', 'like', "%{$q}%"))
-                    ->orWhereHas('application', fn ($a) => $a->where('tracking_id', 'like', "%{$q}%"));
+                    ->orWhereHas('business', fn ($b) => $b
+                        ->where('name', 'like', "%{$q}%")
+                        ->orWhere('ban', 'like', "%{$q}%")
+                        ->orWhereHas('owner', fn ($o) => $o
+                            ->where('first_name', 'like', "%{$q}%")
+                            ->orWhere('last_name', 'like', "%{$q}%")))
+                    ->orWhereHas('application', fn ($a) => $a->where('tracking_id', 'like', "%{$q}%"))
+                    ->orWhereHas('permitType', fn ($t) => $t
+                        ->where('name', 'like', "%{$q}%")
+                        ->orWhere('code', 'like', "%{$q}%"));
             });
         }
 
-        // issued_at is nullable on legacy rows; the id tiebreak keeps the page
-        // boundary stable instead of letting equal keys shuffle between pages.
-        $permits = $query->orderByDesc('issued_at')
-            ->orderByDesc('id')
-            ->paginate($this->perPage($request));
+        /*
+         * Ordering. The default is unchanged - newest issuance first - so a
+         * request that names no sort gets exactly the order this endpoint has
+         * always answered in.
+         *
+         * `sort` is resolved THROUGH self::SORTS rather than passed to
+         * orderBy, and orderByRaw is safe for that same reason: the string is
+         * a constant this file owns, picked by a key the validator has already
+         * checked against that array. Nothing from the request reaches SQL.
+         *
+         * The id tiebreak stays on every path. issued_at is nullable on legacy
+         * rows, and equal keys without a tiebreak shuffle between pages - a
+         * reader paging the register then sees one row twice and another not
+         * at all.
+         */
+        $sort = $request->query('sort');
+        $dir = $request->query('dir') === 'asc' ? 'asc' : 'desc';
+
+        if ($sort !== null && isset(self::SORTS[$sort])) {
+            $query->orderByRaw(self::SORTS[$sort].' '.$dir);
+        } else {
+            $query->orderByDesc('issued_at');
+        }
+
+        $permits = $query->orderByDesc('id')->paginate($this->perPage($request));
+
+        $resource = $detail ? PermitRegisterResource::class : PermitResource::class;
 
         return response()->json([
-            'data' => PermitResource::collection($permits->items()),
+            'data' => $resource::collection($permits->items()),
             'meta' => $this->pageMeta($permits),
         ]);
     }
@@ -432,5 +563,28 @@ class PermitController extends Controller
             && ApplicationVisibility::readsPermitOf($user, $permit->permitType?->issuing_department_id);
 
         abort_unless($ok, 403, 'This permit is not yours.');
+    }
+
+    /**
+     * The eager loads for one register row.
+     *
+     * Not `array_merge($this->eager, $this->registerEager)`. Eloquent does not
+     * merge two entries for the same relation and the FIRST one wins, so
+     * merging left `business:id,name` in front of `business:id,name,ban` and
+     * every row answered `ban: null` — the column was never selected. A test
+     * caught it; this drops the narrow entries the wide list replaces.
+     *
+     * @return array<int, string>
+     */
+    private function registerEager(): array
+    {
+        $replaced = ['business', 'application'];
+
+        $base = array_values(array_filter(
+            $this->eager,
+            fn (string $relation) => ! in_array(explode(':', $relation)[0], $replaced, true),
+        ));
+
+        return array_merge($base, $this->registerEager);
     }
 }
