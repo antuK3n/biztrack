@@ -12,8 +12,8 @@ import {
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { BARANGAY_POLYGONS, MALABON_OUTLINE } from '../lib/malabonGeo.data'
-import { ZONING_SHEETS } from '../lib/zoningSheets.data'
-import { ZoningSheetOverlay } from './ZoningSheetOverlay'
+import { ZONING_LAYERS } from '../lib/zoningLayers.data'
+import { ZoningKey, ZoningOverlay, type ZoneProperties } from './ZoningLayer'
 
 /*
  * Leaflet + OpenStreetMap map-pin picker (PRODUCT.md GIS requirement).
@@ -31,13 +31,16 @@ import { ZoningSheetOverlay } from './ZoningSheetOverlay'
  * against a boundary the applicant cannot see is a puzzle rather than a
  * validation, so the boundary is on the map before the refusal can happen.
  *
- * And under all of that, the chosen barangay's CPDO zoning sheet, when one is
- * on file (client: "overlay the colour coding on the actual map when picking
- * your zoning area"). It is a picture laid on the streets, placed as well as
- * the sheet allows and no better; `lib/zoningSheets.data.ts` records how, and
- * the map says on its face that CPDO confirms the zone. Nothing reads a colour
- * back out of it. The applicant can switch it off or fade it, because at full
- * strength it hides the street names they came to the map to read.
+ * And under all of that, the chosen barangay's zones, when a tracing is on
+ * file (client: "overlay the colour coding on the actual map when picking your
+ * zoning area"). They are polygons traced from CPDO's sheet, drawn quietly,
+ * named in plain words in a folded key and on hover; see ZoningLayer.tsx for
+ * what they may and may not claim. "Zoning" sits in Leaflet's own layers
+ * control, beside Street map / Satellite, so switching it off is where
+ * switching layers already is. It replaced laying the raw sheet over the
+ * streets with a checkbox and a strength slider under the map, which the
+ * client's lead called ugly, and was: neighbours' colours and printed lettering
+ * floated over the roofs at any strength.
  */
 
 const PIN_SVG = encodeURIComponent(
@@ -321,22 +324,26 @@ export function MapPicker({
   const editable = !locked && !readOnly && onPick !== undefined
   /*
    * Found by the barangay name the caller already passes for the highlight, so
-   * the overlay needs no prop of its own and appears on every map that
-   * highlights a barangay with a sheet on file.
+   * the layer needs no prop of its own and appears on every map that
+   * highlights a barangay with a tracing on file.
    */
-  const sheet = highlightBarangay ? (ZONING_SHEETS[highlightBarangay] ?? null) : null
+  const zoningUrl = highlightBarangay ? (ZONING_LAYERS[highlightBarangay] ?? null) : null
   /*
    * On by default where a pin is being placed, off where one is only being
-   * looked at: the officer reading a filing opened the map to see the pin, and
-   * the sheet sits over it. Either can switch.
+   * looked at: the officer reading a filing opened the map to see the pin.
+   * Either can switch it in the layers control. Tracked here only so the key
+   * shows and hides with the layer.
    */
-  const [showZoning, setShowZoning] = useState(!readOnly)
+  const [zoningOn, setZoningOn] = useState(!readOnly)
+  const [zones, setZones] = useState<ZoneProperties[] | null>(null)
+  // A new barangay remounts the overlay at its default, so the key follows.
+  useEffect(() => setZoningOn(!readOnly), [zoningUrl, readOnly])
   /*
-   * Half strength to start. The sheets are opaque, pastel and full of their
-   * own linework; any stronger and the OSM street names under them are
-   * unreadable, any weaker and the pale R-1 yellow disappears.
+   * Codes after the plain zone names only on a read-only map: that is the
+   * officer's review, where "R-2" is the working word. Every map an applicant
+   * drops a pin on names zones in plain words alone (lib/zoningNames.ts).
    */
-  const [zoningOpacity, setZoningOpacity] = useState(0.5)
+  const withCodes = readOnly
   const center = useMemo<[number, number]>(
     () => (hasPin ? [latitude as number, longitude as number] : DEFAULT_CENTER),
     [hasPin, latitude, longitude],
@@ -422,8 +429,18 @@ export function MapPicker({
                 maxZoom={19}
               />
             </LayersControl.BaseLayer>
+            {zoningUrl !== null && (
+              <ZoningOverlay
+                // Remounted per barangay, so a new barangay starts from the default again.
+                key={zoningUrl}
+                url={zoningUrl}
+                checked={!readOnly}
+                onData={setZones}
+                onToggle={setZoningOn}
+                withCodes={withCodes}
+              />
+            )}
           </LayersControl>
-          {sheet && showZoning && <ZoningSheetOverlay sheet={sheet} opacity={zoningOpacity} />}
           {/*
             * The city border and the barangay seams, under the pin and the ring.
             *
@@ -540,19 +557,13 @@ export function MapPicker({
           )}
         </MapContainer>
         {/*
-          * The caveat, on the map itself and not in a paragraph beside it: a
-          * screenshot of the map with the colours on must carry it too.
-          *
-          * `pointer-events-none` because it sits on clickable map. An applicant
-          * whose lot is in that bottom-left corner still has to be able to pin it.
-          * Solid white so it reads over both the tiles and the satellite imagery.
-        * Raised above the bottom edge so it never covers the attribution line,
-        * which is a licence condition of both tile sources.
+          * The key, beside the Leaflet container rather than in it (see
+          * ZoningKey). Shown only while the layer is, and only once the file
+          * has arrived, so it never lists zones the map is not drawing. Folded
+          * at every width; see ZoningKey.
           */}
-        {sheet && showZoning && (
-          <p className="pointer-events-none absolute bottom-6 left-1 z-[1000] max-w-[calc(100%-0.5rem)] rounded bg-white/95 px-2 py-1 text-[11px] leading-snug text-ink shadow-card">
-            Zoning colours are approximate — CPDO confirms the zone for your exact lot.
-          </p>
+        {zoningUrl !== null && zoningOn && zones !== null && !locked && (
+          <ZoningKey key={zoningUrl} zones={zones} withCodes={withCodes} />
         )}
         {/*
           * The locked state: the map is visible but not clickable, and says so.
@@ -588,57 +599,6 @@ export function MapPicker({
           </div>
         )}
       </div>
-      {/*
-        * The overlay's controls, below the map rather than on it: on the map
-        * they would cover streets, and Leaflet would need telling not to treat
-        * a drag of the slider as a pan. Native checkbox and range, so both are
-        * reachable and announced without any help from here. A barangay with
-        * no sheet on file gets no row at all rather than a control that does
-        * nothing.
-        */}
-      {sheet && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line-strong bg-white px-3 py-2 text-xs text-ink">
-          <label className="flex items-center gap-2 font-medium">
-            <input
-              type="checkbox"
-              className="h-4 w-4 accent-royal"
-              checked={showZoning}
-              onChange={(e) => setShowZoning(e.target.checked)}
-            />
-            Zoning map colours for {highlightBarangay}
-          </label>
-          {/*
-            * Hidden with the colours rather than left inert: a strength for
-            * something not shown answers no question. (Not `disabled` in any
-            * case — DESIGN.md.)
-            */}
-          {showZoning && (
-            <label className="flex items-center gap-2">
-              <span className="text-ink-secondary">Strength</span>
-              <input
-                type="range"
-                min={10}
-                max={100}
-                step={10}
-                value={Math.round(zoningOpacity * 100)}
-                aria-valuetext={`${Math.round(zoningOpacity * 100)}%`}
-                className="w-28 accent-royal"
-                onChange={(e) => setZoningOpacity(Number(e.target.value) / 100)}
-              />
-            </label>
-          )}
-          {/*
-            * The figure sits outside the label so the slider is named
-            * "Strength", not "Strength 50%": the value is already announced
-            * through aria-valuetext, and in the name it would be said twice.
-            */}
-          {showZoning && (
-            <span aria-hidden="true" className="-ml-3 w-8 tabular-nums text-ink-secondary">
-              {Math.round(zoningOpacity * 100)}%
-            </span>
-          )}
-        </div>
-      )}
     </div>
   )
 }

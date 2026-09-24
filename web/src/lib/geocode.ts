@@ -320,3 +320,82 @@ export async function geocodeInMalabon(
   }
   return null
 }
+
+/*
+ * ── The other direction: a pin suggests the address text ───────────────────
+ *
+ * When the applicant places or moves the pin by hand, the wizard asks
+ * Nominatim what is there and offers the answer as a STARTING POINT for the
+ * House/Bldg. No. and Street boxes. The same caveats as the search above, the
+ * other way round: OSM knows Malabon's roads and almost none of its house
+ * numbers, so in practice this fills the street and leaves the number blank.
+ *
+ * Same citizenship rules as `search`: the shared `throttle` (one request per
+ * 1.1 s across both directions, since it is one service and one policy), the
+ * origin-only Referer, a cache, and an abort for a pin that has moved on.
+ * It fires on a click or the END of a drag — never during one — so its rate
+ * is bounded by how fast a person can click.
+ */
+
+const REVERSE_ENDPOINT = 'https://nominatim.openstreetmap.org/reverse'
+
+export interface ReverseHit {
+  /** OSM's house number for the point, when it has one (rare in Malabon). */
+  houseNumber: string | null
+  /** The road name alone — never the barangay, city or postcode. */
+  street: string | null
+}
+
+/*
+ * Keyed on the point rounded to 5 decimals (~1 m). A click back onto the same
+ * spot, or a drag that ends where it started, costs nothing.
+ */
+const reverseCache = new Map<string, ReverseHit>()
+
+/**
+ * What OSM says is at a point, reduced to the two address boxes.
+ *
+ * Returns null for every failure, which the caller treats as "leave the boxes
+ * as they are": a network error, an abort, a point OSM has no road for, or an
+ * answer with neither a road nor a number.
+ */
+export async function reverseGeocode(
+  latitude: number,
+  longitude: number,
+  signal?: AbortSignal,
+): Promise<ReverseHit | null> {
+  const key = `${latitude.toFixed(5)},${longitude.toFixed(5)}`
+  const cached = reverseCache.get(key)
+  if (cached) return cached
+  if (!(await throttle(signal))) return null
+
+  /*
+   * zoom=17 asks for "major and minor streets" — a road rather than a
+   * building footprint, which is the level of detail OSM actually holds here.
+   */
+  const url =
+    `${REVERSE_ENDPOINT}?format=jsonv2&addressdetails=1&zoom=17` +
+    `&lat=${latitude}&lon=${longitude}`
+
+  try {
+    const res = await fetch(url, {
+      signal,
+      headers: { Accept: 'application/json' },
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as {
+      address?: { road?: string; pedestrian?: string; house_number?: string }
+    } | null
+    const a = body && !Array.isArray(body) ? body.address : undefined
+    const street = (a?.road ?? a?.pedestrian ?? '').trim() || null
+    const houseNumber = (a?.house_number ?? '').trim() || null
+    if (street === null && houseNumber === null) return null
+    const hit = { houseNumber, street }
+    reverseCache.set(key, hit)
+    return hit
+  } catch {
+    // AbortError included: the pin moved again, and the newer lookup wins.
+    return null
+  }
+}
