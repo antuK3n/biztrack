@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\PermitStatus;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationOfficeForm;
 use App\Models\Permit;
@@ -463,6 +464,177 @@ it('keeps BPLO reading the whole register, which is deliberate', function () {
     expect($types->count())->toBeGreaterThan(1);
     expect($types->all())->toContain('SANITARY');
     expect($types->all())->toContain('FSIC');
+});
+
+/*
+ * ── Expiring soon, and the issuance window ────────────────────────────────
+ *
+ * The two questions an office asks of its own certificates that neither the
+ * status nor the search answers: what lapses this month, and what was issued
+ * in a given period.
+ */
+
+it('lists only what lapses inside the window, and only what is still in force', function () {
+    $seed = Permit::with('application')->firstOrFail();
+
+    /* One of each case, so every branch of the filter is exercised. */
+    $soon = Permit::create([
+        'permit_number' => 'TEST-SOON-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Active,
+        'valid_from' => now()->subYear(),
+        'valid_until' => now()->addDays(10),
+        'issued_at' => now()->subYear(),
+    ]);
+
+    $later = Permit::create([
+        'permit_number' => 'TEST-LATER-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Active,
+        'valid_from' => now()->subYear(),
+        'valid_until' => now()->addDays(120),
+        'issued_at' => now()->subYear(),
+    ]);
+
+    $gone = Permit::create([
+        'permit_number' => 'TEST-GONE-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Expired,
+        'valid_from' => now()->subYears(2),
+        'valid_until' => now()->subDays(5),
+        'issued_at' => now()->subYears(2),
+    ]);
+
+    /*
+     * A superseded certificate INSIDE its own term. This is the case the
+     * status condition exists for: by date alone it is expiring in ten days,
+     * and listing it would send an office chasing a renewal that has already
+     * happened.
+     */
+    $replaced = Permit::create([
+        'permit_number' => 'TEST-SUPER-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Superseded,
+        'valid_from' => now()->subYear(),
+        'valid_until' => now()->addDays(10),
+        'issued_at' => now()->subYear(),
+    ]);
+
+    $ids = collect(registerRows(['expiring_within' => 30]))->pluck('id')->all();
+
+    expect($ids)->toContain($soon->id);
+    expect($ids)->not->toContain($later->id);
+    // Already lapsed is not "expiring" — that is what the status filter asks.
+    expect($ids)->not->toContain($gone->id);
+    // Replaced early is not the certificate in force.
+    expect($ids)->not->toContain($replaced->id);
+});
+
+it('counts a certificate lapsing today as expiring', function () {
+    /*
+     * `valid_until` is a DATE column. Comparing it against `now()` — a
+     * datetime partway through the day — drops everything expiring today,
+     * which is the one day an office most needs to see.
+     */
+    $seed = Permit::firstOrFail();
+
+    $today = Permit::create([
+        'permit_number' => 'TEST-TODAY-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Active,
+        'valid_from' => now()->subYear(),
+        'valid_until' => now(),
+        'issued_at' => now()->subYear(),
+    ]);
+
+    expect(collect(registerRows(['expiring_within' => 1]))->pluck('id')->all())
+        ->toContain($today->id);
+});
+
+it('refuses a window that selects nothing or everything', function () {
+    $admin = authAs('admin@biztrack.local');
+
+    // Zero days is not a window.
+    test()->withHeaders($admin)->getJson('/api/v1/permits?detail=1&expiring_within=0')->assertStatus(422);
+    // Beyond a year it selects the register and reads as a filter that did nothing.
+    test()->withHeaders($admin)->getJson('/api/v1/permits?detail=1&expiring_within=400')->assertStatus(422);
+});
+
+it('lists what was issued inside the dates asked for, both ends inclusive', function () {
+    $seed = Permit::firstOrFail();
+
+    $inside = Permit::create([
+        'permit_number' => 'TEST-IN-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Active,
+        'valid_from' => '2026-03-15',
+        'valid_until' => '2027-03-15',
+        /*
+         * Late in the day on the LAST date of the range. `issued_at` is a
+         * datetime and the bound is a date, so a bare comparison would put
+         * this outside a range that names its own day — the defect the
+         * endOfDay() in the controller exists to prevent.
+         */
+        'issued_at' => '2026-03-31 22:45:00',
+    ]);
+
+    $before = Permit::create([
+        'permit_number' => 'TEST-BEFORE-1',
+        'application_id' => $seed->application_id,
+        'business_id' => $seed->business_id,
+        'permit_type_id' => $seed->permit_type_id,
+        'status' => PermitStatus::Active,
+        'valid_from' => '2026-02-01',
+        'valid_until' => '2027-02-01',
+        'issued_at' => '2026-02-28 09:00:00',
+    ]);
+
+    $ids = collect(registerRows(['issued_from' => '2026-03-01', 'issued_to' => '2026-03-31']))
+        ->pluck('id')->all();
+
+    expect($ids)->toContain($inside->id);
+    expect($ids)->not->toContain($before->id);
+});
+
+it('refuses an issuance window that ends before it begins', function () {
+    test()->withHeaders(authAs('admin@biztrack.local'))
+        ->getJson('/api/v1/permits?detail=1&issued_from=2026-09-30&issued_to=2026-09-01')
+        ->assertStatus(422);
+});
+
+it('will not let the new filters reach another office’s certificate', function () {
+    /*
+     * The question this file keeps asking of every control it adds. Both
+     * filters are applied AFTER the reader's scope; asked instead of it, a
+     * CENRO session could reach the fire office's certificate by naming a date
+     * they share.
+     */
+    $made = permitPerOffice(['CEC', 'FSIC']);
+
+    foreach ([['expiring_within' => 365], ['issued_from' => '2000-01-01'], ['issued_to' => '2099-12-31']] as $probe) {
+        $types = collect(registerRows($probe, 'cenro@biztrack.local'))
+            ->pluck('permit_type.code')
+            ->unique()
+            ->values()
+            ->all();
+
+        expect(array_diff($types, ['CEC']))->toBe([]);
+    }
+
+    expect(collect(registerRows(['issued_to' => '2099-12-31'], 'cenro@biztrack.local'))->pluck('id')->all())
+        ->not->toContain($made['FSIC']->id);
 });
 
 it('will not let a sort widen an office past its own permits', function () {
