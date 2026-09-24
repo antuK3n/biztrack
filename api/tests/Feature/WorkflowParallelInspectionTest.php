@@ -186,7 +186,7 @@ it('moves only the approving office’s permit, and books no visit at all', func
      * scheduler that does not know whether anyone is free.
      */
     expect(bookedOffices($app))->toBe([]);
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
+    expect(clearancePermitsIssued($app))->toBe(0);
 });
 
 it('books a visit only for the office that picked a date', function () {
@@ -204,9 +204,9 @@ it('books a visit only for the office that picked a date', function () {
     bookOfficeVisit($app, 'FSIC');
     expect(bookedOffices($app))->toBe(['BFP', 'CHO']);
 
-    // Still nothing issued, and the filing has not moved: booking a visit is
-    // not progress on the application, it is progress on one permit.
-    expect(Permit::where('application_id', $app->id)->count())->toBe(0);
+    // Still no CLEARANCE issued, and the filing has not moved: booking a visit
+    // is not progress on the application, it is progress on one permit.
+    expect(clearancePermitsIssued($app))->toBe(0);
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 });
 
@@ -226,7 +226,7 @@ it('releases each permit as its own office passes it, without waiting for the ot
 
     // CHO's permit is out, on CHO's say-so alone.
     expect(permitStatus($app, 'SANITARY'))->toBe(ClearanceStatus::Approved);
-    expect(Permit::where('application_id', $app->id)->count())->toBe(1);
+    expect(clearancePermitsIssued($app))->toBe(1);
 
     // BFP is untouched by that, and so is the application.
     expect(permitStatus($app, 'FSIC'))->toBe(ClearanceStatus::ForApproval);
@@ -249,7 +249,7 @@ it('keeps the application off BPLO’s desk while any required permit is outstan
         conductOfficeVisit($app, $code, bookOfficeVisit($app, $code));
     }
 
-    expect(Permit::where('application_id', $app->id)->count())->toBe(4);
+    expect(clearancePermitsIssued($app))->toBe(4);
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
 
     // The fifth is what tips it, and only the fifth — and since 18 September

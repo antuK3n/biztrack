@@ -12,6 +12,7 @@ use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
+use App\Models\Business;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
 use App\Models\ApplicationStatusHistory;
@@ -775,12 +776,27 @@ class WorkflowService
     }
 
     /** BPLO returns the main form for revision. for_approval → returned. */
-    public function returnMainForm(Application $app, string $remarks): void
+    /**
+     * @param  string|null  $target  Which field the applicant must fix, as a
+     *   code the system owns. Null is a perfectly good return — the prose is
+     *   never parsed to derive one, the same rule `returnClearance` follows.
+     */
+    public function returnMainForm(Application $app, string $remarks, ?string $target = null): void
     {
-        DB::transaction(function () use ($app, $remarks) {
+        DB::transaction(function () use ($app, $remarks, $target) {
+            /*
+             * REPLACED on every return, including with null — `returnClearance`
+             * says why at length: a stale pointer from a previous round flags a
+             * field this return is not about, so the applicant fixes the wrong
+             * thing and is returned twice.
+             */
             $app->assignments()
                 ->where('department_id', $this->bploDepartmentId())
-                ->update(['status' => AssignmentStatus::Returned->value, 'remarks' => $remarks]);
+                ->update([
+                    'status' => AssignmentStatus::Returned->value,
+                    'remarks' => $remarks,
+                    'remarks_target' => $target,
+                ]);
             $this->transition($app, ApplicationStatus::Returned, $remarks);
         });
     }
@@ -900,7 +916,86 @@ class WorkflowService
             $backToBplo ? ApplicationStatus::ForFinalApproval : ApplicationStatus::AwaitingOtherPermits,
             $backToBplo
                 ? 'Payment received. Waiting for BPLO’s final approval.'
-                : 'Payment received. You can now apply for the other permits.',
+                : 'Payment received. Your Business Permit has been released. '
+                    .'You can now apply for the other permits.',
+        );
+
+        if (! $backToBplo) {
+            $this->releaseOutcomePermit($app);
+        }
+    }
+
+    /**
+     * Mint the Business Permit the moment the money lands.
+     *
+     * ── The LGU moved the release, 24 September 2026 ─────────────────────
+     *
+     * *"After payment, business permit is already released, but can be
+     * suspended if the other permits applied to were rejected."*
+     *
+     * It used to be minted by `approveOverall()` at the very end, on the
+     * strength of all five clearances. That inverted the dependency the LGU
+     * actually operates: the business permit is the thing being applied for
+     * and the clearances are conditions ATTACHED to it, so the applicant who
+     * has paid holds the permit and risks losing it, rather than waiting on
+     * five offices before they may trade at all.
+     *
+     * NEW filings only, and the caller decides that — the same `$backToBplo`
+     * split that routes the filing. A renewal and an amendment both go back
+     * to BPLO after payment because there is a human act left in each (BPLO
+     * reads uploaded certificates; the counter completes the amendment on the
+     * LGU's own paper), and issuing ahead of that act would be issuing over
+     * the decision, not before it.
+     *
+     * ── Why the pivot is forced rather than transitioned ─────────────────
+     *
+     * `ClearanceStatus::ForApproval` may legally become ForInspection,
+     * Returned or Rejected — not Approved. That table is about the five
+     * clearances, each of which is read and then visited; the BUSINESS row
+     * has no visit and never did. `approveOverall()` has always forced the
+     * same row for the same reason, and this is the same act moved earlier,
+     * so it forces it the same way rather than widening a table that would
+     * then let a sanitary permit skip its inspection.
+     *
+     * Idempotent at both levels: the status is only written when the row is
+     * not already Approved, and `issuePermitFor()` is a firstOrCreate on
+     * (application, permit type). A duplicate payment webhook cannot mint a
+     * second certificate — though `onPaymentCompleted` returns early on a
+     * filing that is no longer PendingPayment, so it should not get here.
+     *
+     * A filing with no BUSINESS row is left alone. A renewal may carry any
+     * subset of the permits and need not include this one; that path does not
+     * reach here today, and returning quietly is the right answer if it ever
+     * does.
+     */
+    private function releaseOutcomePermit(Application $app): void
+    {
+        $row = $this->pivotFor($app, PermitType::OUTCOME_CODE);
+        if ($row === null || $row->status === ClearanceStatus::Approved) {
+            return;
+        }
+
+        DB::transaction(function () use ($app, $row) {
+            $row->update(['decided_at' => now()]);
+            $row->forceFill(['status' => ClearanceStatus::Approved])->save();
+
+            Audit::log('clearance.status_changed', $row, [
+                'application_id' => $app->id,
+                'permit_type_id' => $row->permit_type_id,
+                'from' => ClearanceStatus::ForApproval->value,
+                'to' => ClearanceStatus::Approved->value,
+                'note' => 'Released on payment.',
+            ]);
+
+            $this->issuePermitFor($app, $row->permitType);
+        });
+
+        $this->notify->applicationStatus(
+            $app,
+            $app->status,
+            'Your Business Permit has been released. The other permits on this '
+            .'application are still being processed — if one of them is rejected, '
+            .'this permit will be suspended until it is settled.',
         );
     }
 
@@ -1168,8 +1263,37 @@ class WorkflowService
             return;
         }
 
-        $resubmitting = $row->status === ClearanceStatus::Returned;
-        if (! in_array($row->status, [ClearanceStatus::NotStarted, ClearanceStatus::Returned], true)) {
+        /*
+         * ── Three states may hand a sheet in, not two ────────────────────
+         *
+         * NotStarted is the first submission and Returned is a correction.
+         * REJECTED joined them on 24 September 2026 and is the third: an
+         * office has refused the permit, the applicant has applied again —
+         * `ClearanceService::isAppliedFor` lets them, and
+         * `OfficeFormController::ownerMayEdit` reopens the sheet — and this
+         * is the act that puts it back in front of the office.
+         *
+         * Leaving it out is what the reinstatement test caught. Everything
+         * up to here worked: the applicant could apply, could type, could
+         * press Submit. This method then returned silently, the permit stayed
+         * at Rejected, and the office's Approve failed with "A Rejected
+         * permit cannot become For Inspection" — an error about the office's
+         * press, on a filing the applicant had already fixed, naming a
+         * transition neither of them had asked for.
+         *
+         * It counts as a resubmission for the note, because that is what it
+         * is from the office's side: the same permit, read a second time.
+         */
+        $resubmitting = in_array(
+            $row->status,
+            [ClearanceStatus::Returned, ClearanceStatus::Rejected],
+            true,
+        );
+        if (! in_array($row->status, [
+            ClearanceStatus::NotStarted,
+            ClearanceStatus::Returned,
+            ClearanceStatus::Rejected,
+        ], true)) {
             return;
         }
 
@@ -1185,7 +1309,20 @@ class WorkflowService
              * back once, which is what an officer re-reading it wants to know.
              * See the migration that added it.
              *
-             * This cleared `rejection_reason`, which is gone with the state.
+             * This cleared `rejection_reason`, a column that is gone. The
+             * refusal's own wording lives in `remarks` with every other
+             * officer note, so it is cleared by the same line — an applicant
+             * who has answered a refusal should not have it sitting on the
+             * row the office is about to re-read.
+             */
+            /*
+             * `rejected_at`, `rejection_note` and `rejection_remedy` are NOT
+             * in this list, and that is the whole point of their existing.
+             * The applicant has answered the instruction, so `remarks` goes;
+             * the fact that this permit was refused once does not, because
+             * the officer about to re-read it is the person who most needs
+             * to know. A clean row is how an office approves what it turned
+             * down last week.
              */
             $row->update([
                 'submitted_at' => now(),
@@ -1227,6 +1364,50 @@ class WorkflowService
      */
     public function approveClearance(ApplicationPermitType $row, ?string $remarks = null): void
     {
+        /*
+         * ── An office may not approve past a requirement it raised ───────
+         *
+         * Client's decision, 24 September 2026, arrived at while working out
+         * whether Return is overused: *"instead of Returning due to a blurry
+         * scan, the admin will leave them not approved and will ask for Other
+         * Requirements"*. That is a better tool for the document case — the
+         * permit stays in the office's own queue instead of being handed back
+         * — and it did not work, because nothing held the permit.
+         *
+         * Open requirements gated `refreshReadiness`, which is the FILING's
+         * final readiness, and nothing else. So the office could raise a
+         * request for a document and then approve the permit without it,
+         * which makes the request advisory — and an advisory request is one
+         * nobody relies on, so the officer reaches for Return again.
+         *
+         * Scoped to THIS office's own requests. An office is answerable for
+         * what it asked for; being blocked by a document CENRO wants would be
+         * a boundary violation in the other direction, and
+         * `refreshReadiness` already holds the whole filing for those.
+         *
+         * `requested_by_user_id` not null, matching refreshReadiness: a
+         * compliance clock this service started after issuance is not an
+         * obligation anybody is waiting on.
+         */
+        $departmentId = $row->permitType?->issuing_department_id;
+        if ($departmentId !== null) {
+            $openHere = $row->application->officerRequests()
+                ->whereNotNull('requested_by_user_id')
+                ->where('department_id', $departmentId)
+                ->where('status', '!=', OfficerRequestStatus::Fulfilled->value)
+                ->count();
+
+            if ($openHere > 0) {
+                throw ValidationException::withMessages([
+                    'requirements' => [
+                        'Your office has asked this applicant for something and has not '
+                        .'closed the request. Accept or withdraw it under Other Requirements '
+                        .'before approving this permit.',
+                    ],
+                ]);
+            }
+        }
+
         $app = $row->application;
         $type = $row->permitType;
 
@@ -1301,30 +1482,408 @@ class WorkflowService
     }
 
     /**
-     * ── `rejectClearance()` and `refileClearance()` were here ────────────────
+     * ── `rejectClearance()` was here, was removed, and is back ───────────────
      *
-     * An office refusing one permit outright, and the applicant filing for it
-     * again. They implemented the client's rule of 6 September 2026 — "only
-     * that permit dies" — and neither was ever reachable: no controller, no
-     * route, no caller in three weeks. The notification `rejectClearance` sent
-     * ended "You can file for it again", pointing at a button nobody built.
+     * It was deleted on 17 September 2026 — *"I think Return is enough
+     * already."* — because nothing could reach it and, under the flow of that
+     * week, nothing needed to: the business permit was withheld until every
+     * clearance was approved, so an unapprovable permit was punished by the
+     * filing simply never finishing.
      *
-     * Removed on 17 September 2026, asked directly and answered: *"I think
-     * Return is enough already."* `returnClearance` above does the fixable
-     * cases and can repeat as often as needed; a genuinely ineligible business
-     * is BPLO's `rejectApplication`, which is a different act on a different
-     * object and is kept.
+     * The LGU moved the release on 24 September 2026. The certificate is out as
+     * soon as the applicant pays, so withholding is no longer available as a
+     * sanction and *"can be suspended if the other permits applied to were
+     * rejected"* is the rule instead. That needs a refusal an office can
+     * actually record, which is what this is.
      *
-     * `refreshReadiness()` was called from the rejection for a reason worth
-     * keeping in view: a permit can be reversed AFTER the filing has reached
-     * `for_final_approval`, and without the recheck BPLO would hold an Approve
-     * over an application that no longer qualifies. `returnClearance` does not
-     * call it — and does not need to, because `ForInspection` and `Approved`
-     * can no longer become `Returned`, so a return can only ever happen while
-     * the filing is still gathering permits. If a route back from Approved is
-     * ever added, that recheck has to come with it.
+     * `refileClearance()` has NOT come back and is not needed. The way out of a
+     * rejection is the ordinary apply path — `Rejected → ForApproval` is legal
+     * in ClearanceStatus::allowedNext, and `startClearance` is the door — so
+     * there is no second mechanism to keep in step with the first. That was
+     * half of what made the August pair dead code.
      */
 
+    /**
+     * An office refuses ONE permit as applied for. Not a correction — a refusal.
+     *
+     * ── Return versus Reject, which the officer has to get right ─────────────
+     *
+     * `returnClearance` above is for everything fixable, and it repeats as often
+     * as it needs to: a cut-off scan, an expired lease, a wrong answer. Nothing
+     * happens to the business permit, because nothing has been decided.
+     *
+     * This is the other kind. The office is saying the permit cannot be granted
+     * on this application — the premises fail, the use is not allowed here, the
+     * inspection found something no re-upload fixes. It costs the applicant
+     * their business permit until it is settled, which is why the reason is
+     * mandatory and why it is quoted to them verbatim rather than summarised.
+     *
+     * ── Why the whole filing is not rejected instead ─────────────────────────
+     *
+     * `rejectApplication` exists and is a different act on a different object:
+     * BPLO deciding the business may not be licensed at all. One office
+     * refusing one clearance is not that, and the LGU was explicit that the
+     * business permit is SUSPENDED rather than destroyed — a suspension can be
+     * lifted, a rejected filing cannot, and the applicant would have to pay and
+     * file again for a problem they may be able to fix this afternoon.
+     *
+     * Refuses an already-issued permit. Once a certificate is minted and
+     * numbered, un-issuing it is a revocation of a legal instrument, which is
+     * not this control — see `PermitStatus::Revoked`, which has no writer yet
+     * and should not gain one by accident.
+     */
+    public function rejectClearance(
+        ApplicationPermitType $row,
+        string $reason,
+        string $remedy = '',
+    ): void {
+        $reason = trim($reason);
+        $remedy = trim($remedy);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Say why this permit is being refused. The applicant is shown this.'],
+            ]);
+        }
+
+        $app = $row->application;
+
+        if ($row->status === ClearanceStatus::Approved) {
+            throw ValidationException::withMessages([
+                'status' => [
+                    'This permit has already been issued. Refusing it now would be a '
+                    .'revocation, which is not done from here.',
+                ],
+            ]);
+        }
+
+        /*
+         * ── Only after a visit ──────────────────────────────────────────
+         *
+         * The legality table in ClearanceStatus already forbids the
+         * transition, so this is the second guard rather than the only one —
+         * and it is worth having, because the message it throws is the one an
+         * officer reads. "A For Approval permit cannot become Rejected" is
+         * true and tells them nothing about what to do instead.
+         *
+         * Checked BEFORE any write, like `approveAssignment`, so a refused
+         * refusal leaves nothing behind.
+         */
+        if ($row->status !== ClearanceStatus::ForInspection) {
+            throw ValidationException::withMessages([
+                'status' => [
+                    'A permit can only be refused after its inspection, because refusing it '
+                    .'suspends the business permit. If a document or an answer is wrong, '
+                    .'return it for correction or ask for the document instead; if the '
+                    .'business should not be licensed at all, that is BPLO’s decision.',
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($row, $app, $reason, $remedy) {
+            /*
+             * `remarks` AND the refusal columns, which look redundant and are
+             * not. `remarks` is what the applicant's card reads as the current
+             * instruction and is cleared when they answer it; the three below
+             * survive that, because the office re-reading this permit needs to
+             * know it has refused it before — see the migration of
+             * 24 September 2026 for the failure that motivated them.
+             */
+            $row->update([
+                'decided_at' => now(),
+                'remarks' => $reason,
+                'rejected_at' => now(),
+                'rejection_note' => $reason,
+                'rejection_remedy' => $remedy !== '' ? $remedy : null,
+            ]);
+            $this->transitionClearance($row, ClearanceStatus::Rejected, $reason);
+
+            /*
+             * The office's own assignment is closed by the refusal. It has
+             * finished deciding; leaving the item open would keep the filing in
+             * its queue for a permit it has already ruled on.
+             */
+            $this->completeAssignment($app, $row->permitType->issuing_department_id, $reason);
+        });
+
+        $this->notify->clearanceRejected($app, $row->permitType, $reason);
+
+        $this->suspendOutcomePermit($app, $row->permitType, $reason);
+
+        /*
+         * The filing's own readiness is rechecked, and this is the recheck the
+         * old tombstone said had to come back with any route out of Approved.
+         * A refusal can land after the filing has reached `for_final_approval`
+         * on a renewal, and without this BPLO would hold an Approve over an
+         * application that no longer qualifies.
+         */
+        $this->refreshReadiness($app->fresh());
+    }
+
+    /**
+     * Suspend the business permit this filing released, naming the reason.
+     *
+     * ── Automatic, on the client's choice of 24 September 2026 ───────────────
+     *
+     * Asked whether a rejection should suspend by itself or raise a decision for
+     * BPLO, the client chose automatic with a manual lift. The reason is the gap:
+     * a business whose fire clearance has been refused should not keep trading
+     * because nobody opened a queue that morning. BPLO can still lift it — see
+     * `liftOutcomeSuspension` — and every lift is audited with a reason, so the
+     * discretion is preserved without the permit staying live by default.
+     *
+     * Only an ACTIVE permit is suspended. An expired or superseded certificate
+     * is not a thing the business can trade on, and moving it to Suspended would
+     * lose the fact of how its term actually ended — the same argument
+     * `PermitStatus::Superseded` was added for.
+     *
+     * Idempotent, because two offices can refuse two permits on one filing. The
+     * second refusal finds the permit already suspended, changes nothing, and
+     * still notifies — the applicant needs to know about the second reason even
+     * though the state did not move.
+     */
+    private function suspendOutcomePermit(Application $app, PermitType $refused, string $reason): void
+    {
+        $permit = $this->outcomePermitFor($app);
+        if ($permit === null) {
+            return;
+        }
+
+        if ($permit->status === PermitStatus::Active) {
+            $permit->update(['status' => PermitStatus::Suspended]);
+
+            Audit::log('permit.suspended', $permit, [
+                'application_id' => $app->id,
+                'business_id' => $app->business_id,
+                'because_permit_type_id' => $refused->id,
+                'because_permit_type' => $refused->name,
+                'reason' => $reason,
+            ]);
+        }
+
+        $this->notify->outcomePermitSuspended($app, $permit, $refused, $reason);
+    }
+
+    /**
+     * Should the suspension still stand? Called whenever a permit is granted.
+     *
+     * ── The reinstatement rule, run as the mirror of the suspension ──────────
+     *
+     * The client chose automatic reinstatement on 24 September 2026: the
+     * applicant re-applies for the refused permit, the office approves it, and
+     * the business permit returns to Active by itself.
+     *
+     * Written as "is anything still refused" rather than "was this the one that
+     * caused it", deliberately. Two offices can refuse on one filing, and a
+     * rule that reinstated on the first approval would hand the permit back
+     * while a second refusal stood. Asking the whole filing means the two rules
+     * cannot disagree — there is one condition, and suspension is its true
+     * branch and reinstatement its false one.
+     *
+     * A permit that is not Suspended is left alone. In particular this never
+     * revives a Revoked one: a revocation is a different decision by a different
+     * authority, and an office approving a sanitary permit is not a review of it.
+     */
+    public function reconsiderSuspension(Application $app): void
+    {
+        $app->load('permitTypes');
+        $stillRefused = $app->permitTypes->contains(
+            fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Rejected,
+        );
+
+        if ($stillRefused) {
+            return;
+        }
+
+        /*
+         * ── EVERY suspended permit on the filing, not only the Mayor's ────
+         *
+         * This read `outcomePermitFor` alone, which was right while a refused
+         * clearance was the only thing that could suspend anything: that
+         * cause only ever touches the business permit.
+         *
+         * `suspendPermitsForBusiness` suspends all of them, so the way back
+         * has to be able to return all of them — otherwise a reinstated
+         * business would keep a suspended Sanitary Permit for ever, with
+         * nothing in the system able to clear it. The condition above is
+         * unchanged and still decides: no refusal on this filing means
+         * nothing here is being held for one.
+         */
+        $suspended = $app->permits()
+            ->where('status', PermitStatus::Suspended->value)
+            ->get();
+
+        foreach ($suspended as $permit) {
+            $permit->update(['status' => PermitStatus::Active]);
+
+            Audit::log('permit.reinstated', $permit, [
+                'application_id' => $app->id,
+                'business_id' => $app->business_id,
+                'reason' => 'Nothing on this application is refused, and its business is active.',
+            ]);
+
+            $this->notify->outcomePermitReinstated($app, $permit);
+        }
+    }
+
+    /**
+     * A business was suspended or blacklisted. Its live permits follow.
+     *
+     * ── Why this cascades at all ─────────────────────────────────────────────
+     *
+     * Client's decision, 24 September 2026. Until then the two sanctions did
+     * not speak: `businesses.status` barred the owner from filing, and the
+     * certificates carried on reading Active — so a business suspended for
+     * violations printed a clean permit and answered VALID to the QR check at
+     * the counter, which is the one place the sanction most needed to land.
+     *
+     * Only ACTIVE permits move. An expired or superseded certificate is not
+     * something the business can trade on, and rewriting its status would lose
+     * how its term actually ended — the argument `PermitStatus::Superseded`
+     * was added for. A permit already Suspended is left alone: it is already
+     * where this would put it, and its own reason still stands.
+     *
+     * Every permit the business holds, not just the Mayor's Permit. A shop
+     * whose licence is suspended for violations should not be able to show a
+     * valid Sanitary Permit against the same premises.
+     */
+    public function suspendPermitsForBusiness(Business $business, string $reason): int
+    {
+        $permits = $business->permits()->where('status', PermitStatus::Active->value)->get();
+
+        foreach ($permits as $permit) {
+            $permit->update(['status' => PermitStatus::Suspended]);
+
+            Audit::log('permit.suspended', $permit, [
+                'business_id' => $business->id,
+                'cause' => 'business_status',
+                'reason' => $reason,
+            ]);
+        }
+
+        return $permits->count();
+    }
+
+    /**
+     * A business was reinstated. Bring back the permits its suspension took.
+     *
+     * ── How it knows which those were, without storing it ────────────────────
+     *
+     * It does not need a column, and the reasoning is worth stating because a
+     * `suspended_cause` column was the obvious first answer and would have
+     * meant a migration against the live register.
+     *
+     * A permit is suspended for exactly one of two reasons: this business was
+     * sanctioned, or a clearance on its filing was refused. The second is
+     * DERIVABLE — the refusal is still sitting on the pivot row — so "no
+     * clearance on this filing is rejected" is precisely "the cause must have
+     * been the business status", and `reconsiderSuspension` already asks that
+     * question for the other half of this feature.
+     *
+     * So the two rules cannot disagree, and the overlap falls out correctly
+     * without a special case: a permit suspended for violations ON a filing
+     * that also has a refused clearance stays suspended when the business is
+     * reinstated, because the clearance reason has not gone anywhere.
+     *
+     * A permit whose filing has been deleted is skipped rather than revived.
+     * Nothing can answer the question for it, and guessing "probably fine" on
+     * a certificate somebody sanctioned is the wrong way to be wrong.
+     */
+    public function restorePermitsForBusiness(Business $business): int
+    {
+        $permits = $business->permits()
+            ->where('status', PermitStatus::Suspended->value)
+            ->with('application')
+            ->get();
+
+        $restored = 0;
+        foreach ($permits as $permit) {
+            if ($permit->application === null) {
+                continue;
+            }
+
+            $this->reconsiderSuspension($permit->application);
+
+            if ($permit->fresh()->status === PermitStatus::Active) {
+                $restored++;
+            }
+        }
+
+        return $restored;
+    }
+
+    /**
+     * BPLO lifts a suspension on its own judgement, with a recorded reason.
+     *
+     * The discretion half of *"can be suspended"*. The suspension fires by
+     * itself so nothing slips, and this is how a human overrules it — an office
+     * that refused in error, or a refusal BPLO judges not to bear on the
+     * business permit.
+     *
+     * The refusal is NOT cleared. The permit that was refused stays refused,
+     * because that is the issuing office's decision and BPLO lifting a
+     * suspension is not BPLO granting somebody else's permit. What it means is
+     * that the business may trade on its business permit while that clearance
+     * is still unsettled, which is exactly the judgement being recorded.
+     *
+     * A consequence worth stating: because the refusal stands,
+     * `reconsiderSuspension` will not touch this permit again — it only ever
+     * moves a Suspended one — so a lift is final until somebody suspends again.
+     */
+    public function liftOutcomeSuspension(Permit $permit, string $reason): Permit
+    {
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                'reason' => ['Say why the suspension is being lifted. This is audited.'],
+            ]);
+        }
+
+        $app = $permit->application;
+
+        if ($permit->status !== PermitStatus::Suspended) {
+            throw ValidationException::withMessages([
+                'permit' => [
+                    'This business permit is '.$permit->status->label().', not suspended.',
+                ],
+            ]);
+        }
+
+        $permit->update(['status' => PermitStatus::Active]);
+
+        Audit::log('permit.suspension_lifted', $permit, [
+            'application_id' => $app?->id,
+            'business_id' => $permit->business_id,
+            'reason' => $reason,
+        ]);
+
+        /*
+         * A permit whose filing has been deleted is still a permit, and the
+         * lift is still worth recording — the audit row above is keyed on the
+         * certificate. Only the applicant's notification needs the filing, so
+         * only that is skipped.
+         */
+        if ($app !== null) {
+            $this->notify->outcomePermitReinstated($app, $permit, $reason);
+        }
+
+        return $permit;
+    }
+
+    /**
+     * The business permit this filing issued, or null.
+     *
+     * Scoped to the APPLICATION and not to the business, which matters on a
+     * business that has renewed: `permits` on the business would find last
+     * year's superseded certificate too, and suspending or reviving that one
+     * would rewrite a closed term.
+     */
+    private function outcomePermitFor(Application $app): ?Permit
+    {
+        return $app->permits()
+            ->whereHas('permitType', fn ($q) => $q->where('code', PermitType::OUTCOME_CODE))
+            ->latest('id')
+            ->first();
+    }
     // ── OP: the inspection ──────────────────────────────────────────────────
 
     /**
@@ -1576,7 +2135,7 @@ class WorkflowService
          * permit is issued, with no further press. There is nothing left to
          * decide by then — the office accepted the paperwork and passed the
          * visit, and the certificate is in the applicant's hand. Leaving the
-         * FILING at For Initial Approval would have it claim an office was
+         * FILING at For Approval would have it claim an office was
          * still reading something it had already granted.
          *
          * Checked before the status gate below, not folded into it, because the
@@ -1731,7 +2290,18 @@ class WorkflowService
                 return;
             }
 
-            $this->approveOverall($app, 'Every clearance approved — business permit issued.');
+            /*
+             * The remark says what CLOSING the filing means, not that a
+             * permit was minted here. It said "business permit issued", which
+             * was true until 24 September 2026 and is now two steps out of
+             * date — the certificate went out at payment. This lands on
+             * BPLO's assignment where an officer reads it back.
+             */
+            $this->approveOverall(
+                $app,
+                'Every other permit approved. The application is closed, so no clearance '
+                .'on it can suspend the business permit.',
+            );
 
             return;
         }
@@ -1803,12 +2373,33 @@ class WorkflowService
              * read by the applicant on their own timeline, so it says what
              * actually happened rather than what usually does.
              */
+            /*
+             * ── What this moment MEANS to the applicant, since the release
+             *    moved to payment ─────────────────────────────────────────
+             *
+             * On a NEW filing `$issuedBusinessPermit` is false now — the
+             * certificate was minted at payment — so this takes the second
+             * branch, and "every permit has been issued" was true but thin.
+             * It reads as a repeat of the step before it, which is exactly
+             * what the client asked about: *"why is there Approved at the end
+             * even though there is already Permit Released?"*
+             *
+             * The answer is a real fact and it is the one thing this stage
+             * adds: `Approved` is TERMINAL, and `rejectAssignment` refuses a
+             * terminal filing — so from this moment no office can refuse a
+             * permit and no suspension can follow. Up to here it could.
+             *
+             * The first branch still exists for the filings that DO mint the
+             * permit here: a renewal or amendment, which go back to BPLO
+             * after payment and are issued on its press.
+             */
             $this->transition(
                 $app,
                 ApplicationStatus::Approved,
                 $issuedBusinessPermit
                     ? 'All requirements met. Business permit issued.'
-                    : 'All requirements met. Every permit on this application has been issued.',
+                    : 'Every other permit is approved. This application is closed, so none of '
+                        .'its permits can suspend your business permit.',
             );
             $this->notify->applicationApproved($app);
             $this->notify->permitsIssued($app);
@@ -2406,6 +2997,53 @@ class WorkflowService
         $this->approveClearance($row, $remarks);
     }
 
+    /**
+     * An office REFUSED its permit. The third of the officer's three answers.
+     *
+     * ── Why BPLO cannot reach this ───────────────────────────────────────────
+     *
+     * BPLO's seat has its own refusal already — `rejectApplication`, which
+     * decides the business may not be licensed at all — and it is a different
+     * act with a different consequence. Letting BPLO through here would let it
+     * suspend a business permit on the strength of refusing the BUSINESS pivot,
+     * which is the row that ISSUED that permit: the certificate would be
+     * suspended for the absence of itself.
+     *
+     * So the office boundary is not a policy detail here, it is what keeps the
+     * two refusals from meeting. The five clearance offices refuse clearances;
+     * BPLO refuses filings.
+     */
+    public function rejectAssignment(
+        ApplicationAssignment $assignment,
+        string $reason,
+        string $remedy = '',
+    ): void {
+        $app = $assignment->application;
+
+        if ($app->status?->isTerminal()) {
+            throw ValidationException::withMessages([
+                'status' => ['This application has been decided, so its permits can no longer be refused.'],
+            ]);
+        }
+
+        if ($assignment->department_id === $this->bploDepartmentId()) {
+            throw ValidationException::withMessages([
+                'permit' => [
+                    'BPLO does not refuse a permit from here. Rejecting the whole '
+                    .'application is the decision BPLO makes, and it is a different act.',
+                ],
+            ]);
+        }
+
+        $row = $this->pivotForDepartment($app, $assignment->department_id);
+        if ($row === null) {
+            throw ValidationException::withMessages([
+                'permit' => ['This office has no permit to refuse on this application.'],
+            ]);
+        }
+
+        $this->rejectClearance($row, $reason, $remedy);
+    }
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
     public function returnAssignment(
         ApplicationAssignment $assignment,
@@ -2462,12 +3100,19 @@ class WorkflowService
              * row to hang one on, and BPLO's remarks reach the applicant through
              * the filing's own Returned state.
              *
+             * The pointer comes too, since 24 September 2026. A target that
+             * named a clearance was handled above; anything else is a field on
+             * the main form, and it is stored verbatim rather than checked
+             * against a list — the valid set is the wizard's own field keys,
+             * which live in TypeScript. A code that matches nothing flags
+             * nothing, which is the same outcome as sending none.
+             *
              * The gap worth naming rather than hiding: an OFFICE that spots a
              * wrong address or line of business still cannot get it fixed this
              * way. `OfficeFormController::ownerMayEdit` only reopens the office
              * form, never sections A–E, so that office has to ask BPLO.
              */
-            $this->returnMainForm($app, $remarks);
+            $this->returnMainForm($app, $remarks, $target);
 
             return;
         }
@@ -2508,6 +3153,14 @@ class WorkflowService
             $app->status,
             $row->permitType->name.' has been approved and issued.',
         );
+
+        /*
+         * A granted permit may be the one that was holding the business
+         * permit suspended. Asked here rather than only on the re-apply path
+         * because this is the single place a clearance becomes Approved, so
+         * it is the single place the suspension can stop being warranted.
+         */
+        $this->reconsiderSuspension($app->fresh());
 
         $this->refreshReadiness($app->fresh());
     }

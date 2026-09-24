@@ -1917,13 +1917,13 @@ test('the type of registration is asked before the number it decides', async ({ 
    */
   await goToBusinessStep(page)
 
-  const structure = page.getByRole('radiogroup', { name: /type of registration/i })
+  const structure = page.getByRole('radiogroup', { name: /form of organization/i })
   await expect(structure).toBeVisible()
 
   // Asked first, on the page and in the "still needed" summary a screen reader
   // hears. Ordering is the item; asserting the fields exist would not be.
   const still = page.getByText(/still needed on this part/i)
-  await expect(still).toContainText(/type of registration.*registration number/is)
+  await expect(still).toContainText(/form of organization.*registration number/is)
 
   /*
    * Before an answer the field is generic — and read-only rather than
@@ -1932,7 +1932,7 @@ test('the type of registration is asked before the number it decides', async ({ 
    * needs the explanation.
    */
   const help = page.locator('#registration-number-help')
-  await expect(help).toHaveText(/choose your type of registration above/i)
+  await expect(help).toHaveText(/item 1 beside this asks which of the three/i)
   const before = page.getByRole('textbox', { name: /registration number/i })
   await expect(before).toHaveAttribute('readonly', '')
 
@@ -2273,7 +2273,7 @@ test('an unusual registration number is questioned, never refused', async ({ pag
    */
   await goToBusinessStep(page)
 
-  const structure = page.getByRole('radiogroup', { name: /type of registration/i })
+  const structure = page.getByRole('radiogroup', { name: /form of organization/i })
   await structure.getByRole('radio', { name: 'Corporation' }).click()
 
   const sec = page.getByRole('textbox', { name: /SEC Registration Number/i })

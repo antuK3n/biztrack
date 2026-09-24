@@ -510,7 +510,7 @@ function RejectionNote({
  * list of colours to keep in step — the swatch beside "Pending Payment" here
  * IS the class the badge on the row puts on itself. Before this, the rows had
  * three colours between ten statuses (orange, green, and one grey covering
- * Draft, For Initial Approval and Returned), so a guide with a colour per
+ * Draft, For Approval and Returned), so a guide with a colour per
  * status would have been describing a screen that did not exist.
  */
 /** The three paths, in the order an applicant meets them. */
@@ -1047,7 +1047,7 @@ function ApplicationRow({
             * with BPLO about to give it the first of its two approvals —
             * announced itself by the one thing that had not happened.
             *
-            * The filing's own status instead. "For Initial Approval" says a
+            * The filing's own status instead. "For Approval" says a
             * person is reading the form; "Returned" says it is back with the
             * applicant; "Draft" says it was never submitted. Each is the
             * answer to the question the row is actually asked.
@@ -1328,8 +1328,8 @@ export function ApplicationsPage() {
   const movedNote = finishedCount > 0 && (
     <p className="mt-6 text-sm text-ink-secondary">
       {finishedCount === 1
-        ? '1 approved application is now in your '
-        : `${finishedCount} approved applications are now in your `}
+        ? '1 completed application is now in your '
+        : `${finishedCount} completed applications are now in your `}
       {/* The link already said "Profile" while pointing at /permits, back when
           that was a second screen wearing the same title. It goes straight
           there now rather than through the redirect. */}

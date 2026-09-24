@@ -218,7 +218,7 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
             ->postJson("/api/v1/inspections/{$visit->id}/conduct", ['result' => 'passed'])
             ->assertOk();
     }
-    expect(Permit::where('application_id', $appId)->count())->toBe(4);
+    expect(clearancePermitsIssued($appId))->toBe(4);
 
     $fire = $visits->firstWhere('department.code', 'BFP');
     $officer = authAs($deptEmail['BFP']);
@@ -234,7 +234,7 @@ it('issues the permit when the re-inspection passes, over the kept failure', fun
     // The fire permit is still for inspection with the booking open — nothing
     // auto-approves, and an office with an open visit has not passed.
     expect(clearanceStatusOf($appId, 'FSIC'))->toBe('for_inspection');
-    expect(Permit::where('application_id', $appId)->count())->toBe(4);
+    expect(clearancePermitsIssued($appId))->toBe(4);
     expect(Application::find($appId)->status->value)->toBe('awaiting_other_permits');
 
     test()->withHeaders($officer)
@@ -413,7 +413,7 @@ it('refuses to conduct, and never issues, once the filing has been decided', fun
             'findings' => 'all clear',
         ])->assertStatus(422);
 
-    expect(Permit::where('application_id', $appId)->count())->toBe(0);
+    expect(clearancePermitsIssued($appId))->toBe(0);
     expect($fire->fresh()->conducted_at)->toBeNull();
 
     // And the permit is left where it stood when the filing was refused, which

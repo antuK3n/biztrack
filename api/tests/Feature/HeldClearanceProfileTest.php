@@ -131,7 +131,7 @@ it('never dresses a submitted copy up as an issued permit', function () {
     // And no Permit row was written for it either — approveAndIssue only issues
     // the permit types ON the filing, and submitting a copy is exactly the act
     // of leaving one off.
-    expect($app->fresh()->permits()->count())->toBe(0);
+    expect(clearancePermitsIssued($app))->toBe(0);
 });
 
 it('keeps ordinary documentary requirements off the list', function () {

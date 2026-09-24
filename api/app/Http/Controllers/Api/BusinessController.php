@@ -255,6 +255,27 @@ class BusinessController extends Controller
             ->orderByDesc('created_at')
             ->first();
 
+        /*
+         * ── Section B, carried forward ───────────────────────────────────
+         *
+         * A renewal asks Section B and nothing else (MCG-BPLO-FO-002), and the
+         * client asked for it to arrive answered. The figures live on the
+         * business record too, but one of them does not survive the trip:
+         * `delivery_units` is stored as the SUM of the paper's two counts, so
+         * the register cannot say how many were motorised. The filing's own
+         * profile can.
+         *
+         * SUBMITTED, not newest. `$lastApplication` above is ordered by
+         * `created_at` and is used to suggest permit types, where a draft is a
+         * fine source. Here it is not: the newest row is frequently the empty
+         * renewal draft the applicant is creating right now, and prefilling
+         * from that would hand back the blanks it is trying to fill.
+         */
+        $lastFiled = $business->applications()
+            ->whereNotNull('submitted_at')
+            ->orderByDesc('submitted_at')
+            ->first();
+
         $suggested = $lastApplication
             ? $lastApplication->permitTypes->pluck('id')->values()
             : collect();
@@ -262,6 +283,12 @@ class BusinessController extends Controller
         return response()->json([
             'data' => [
                 'business' => new BusinessResource($business),
+                /*
+                 * The wizard clears the gross sales out of this before using
+                 * it — last year's receipts are not this year's declaration —
+                 * which is a decision about the FORM and so is taken there.
+                 */
+                'last_fee_profile' => $lastFiled?->fee_profile,
                 'last_permit' => $lastPermit ? [
                     'id' => $lastPermit->id,
                     'permit_number' => $lastPermit->permit_number,
@@ -511,9 +538,24 @@ class BusinessController extends Controller
                     }
                 },
             ],
-            // Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
-            // the taxpayer has one. Normalised above into hyphenated groups.
-            'tin' => ['required', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
+            /*
+             * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
+             * the taxpayer has one. Normalised above into hyphenated groups.
+             *
+             * `nullable` since 24 September 2026, on BPLO's instruction —
+             * an applicant without their TIN to hand is asked for it under
+             * Other Requirements rather than being stopped at the first step
+             * of the form. `nullable` rather than `sometimes` because the
+             * wizard sends the key on every autosave and an empty string
+             * reaches here as null, ConvertEmptyStringsToNull having already
+             * run; `sometimes` would hand the blank to the regex and fail it.
+             *
+             * The FORMAT rule is untouched. Optional means an applicant may
+             * decline to give the number, not that a mistyped one becomes
+             * acceptable — this row is what BPLO reads the TIN off months
+             * later, and there is nothing to check it against by then.
+             */
+            'tin' => ['nullable', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
             'address' => ['required', 'array'],
             /*
              * Not 'required' any more: `line1` is COMPOSED from item 5's two

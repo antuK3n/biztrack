@@ -94,6 +94,7 @@ export function TinInput({
   hintId,
   errorId,
   number,
+  required = true,
 }: {
   /** The dash-joined TIN the form holds — unchanged from the single-field days. */
   value: string
@@ -105,6 +106,15 @@ export function TinInput({
   errorId?: string
   /** The field's position on its step (checklist item 23), inside the legend. */
   number?: number
+  /**
+   * Whether the legend asserts the question must be answered. Default true,
+   * which is how this component behaved before the flag existed.
+   *
+   * BPLO made the TIN optional on 24 September 2026 — an applicant who does
+   * not have it to hand is asked for it later, under Other Requirements,
+   * rather than being stopped at the first step of the form.
+   */
+  required?: boolean
 }) {
   const groupId = useId()
 
@@ -293,8 +303,12 @@ export function TinInput({
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
-        <span className="text-s-red" aria-hidden="true"> *</span>
-        <span className="sr-only"> (required)</span>
+        {required && (
+          <>
+            <span className="text-s-red" aria-hidden="true"> *</span>
+            <span className="sr-only"> (required)</span>
+          </>
+        )}
       </legend>
 
       <div

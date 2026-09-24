@@ -161,9 +161,22 @@ class ApplicationController extends Controller
             // The applicant's own name for this filing; blank falls back to the
             // business name everywhere it is displayed.
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
-            // Ordinance Sec. 2N: annual (first 20 days of January) or quarterly
-            // (first 20 days of Jan/Apr/Jul/Oct). No semi-annual option exists.
-            'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            /*
+             * The three MCG-BPLO-FO-002 prints, which is one more than the
+             * ordinance provides for.
+             *
+             * Revenue Code Sec. 2N allows annual (first 20 days of January) and
+             * quarterly (first 20 days of January, April, July and October).
+             * There is no semi-annual instalment in the Code — but the renewal
+             * form the city hands out at the counter prints one, so an
+             * applicant can and does tick it, and refusing the answer here
+             * would make BizTrack unable to record a paper filing faithfully.
+             *
+             * Recorded, not acted on. Nothing downstream splits a bill — see
+             * the note on the picker in ApplyWizard for why that is stated on
+             * the form rather than left for the applicant to discover.
+             */
+            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
             /*
              * RA 10173 consent, kept with the FILING it was given for.
              *
@@ -208,7 +221,7 @@ class ApplicationController extends Controller
 
         if ($business->isBlockedFromApplying()) {
             throw ValidationException::withMessages([
-                'business_id' => ['This business currently can’t file applications. Please contact the LGU to resolve its account status.'],
+                'business_id' => [$business->filingBlockReason()],
             ]);
         }
 
@@ -295,7 +308,7 @@ class ApplicationController extends Controller
             'title' => ['sometimes', 'nullable', 'string', 'max:120'],
             'permit_type_ids' => ['sometimes', 'array', 'min:1'],
             'permit_type_ids.*' => ['exists:permit_types,id'],
-            'payment_mode' => ['sometimes', 'in:annual,quarterly'],
+            'payment_mode' => ['sometimes', 'in:annual,semi_annual,quarterly'],
             // See the note on the same key in store(): `boolean`, not
             // `accepted`, because a draft may legitimately be saved before the
             // applicant has ticked it. submit() is the gate.
@@ -401,7 +414,7 @@ class ApplicationController extends Controller
         $application->loadMissing('business');
         if ($application->business?->isBlockedFromApplying()) {
             throw ValidationException::withMessages([
-                'business_id' => ['This business currently can’t file applications. Please contact the LGU to resolve its account status.'],
+                'business_id' => [$application->business->filingBlockReason()],
             ]);
         }
 

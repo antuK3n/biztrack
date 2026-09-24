@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import type { SVGProps } from 'react'
 import { ArrowLeftIcon, DownloadIcon } from '../components/icons'
 import { EmptyState, ErrorState, SkeletonList } from '../components/ui/primitives'
@@ -547,14 +548,23 @@ function LetterView({
 /* ── Compose modal (officer) ──────────────────────────────────────────── */
 function ComposeModal({
   apps,
+  initialAppId = '',
   onClose,
   onCreated,
 }: {
   apps: ApplicationListItem[]
+  /** Preselected filing, when an officer arrived from its review sheet. */
+  initialAppId?: string
   onClose: () => void
   onCreated: (created: OfficerRequest) => void
 }) {
-  const [appId, setAppId] = useState('')
+  /*
+   * Seeded, not locked. The officer arrived from one filing so that is the
+   * sensible default, and the picker still works — they may have opened the
+   * page meaning to write about a different one, and taking the control away
+   * would make them go back and start again.
+   */
+  const [appId, setAppId] = useState(initialAppId)
   /*
    * No office picker and no type picker.
    *
@@ -820,7 +830,15 @@ export function RequestsPage() {
   const firstLoad = loading && list.length === 0
 
   const [openId, setOpenId] = useState<number | null>(null)
-  const [composing, setComposing] = useState(false)
+  /*
+   * Opened by `?compose=<applicationId>`, which is how the officer's review
+   * sheet reaches this page. The sheet does NOT carry its own copy of the
+   * composer: two of the same form drift, and this product has already paid
+   * for that once with a retyped PSIC picker.
+   */
+  const [searchParams] = useSearchParams()
+  const composeFor = searchParams.get('compose')
+  const [composing, setComposing] = useState(composeFor !== null)
 
   // Officer compose select needs the visible applications.
   const { data: apps } = useAsync<ApplicationListItem[]>(
@@ -1034,6 +1052,7 @@ export function RequestsPage() {
 
       {composing && (
         <ComposeModal
+          initialAppId={composeFor ?? ''}
           apps={apps ?? []}
           onClose={() => setComposing(false)}
           onCreated={(created) => {

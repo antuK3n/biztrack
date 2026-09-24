@@ -535,6 +535,59 @@ class AssignmentController extends Controller
         ]);
     }
 
+    /**
+     * The office refuses its permit outright. Not a correction — a refusal.
+     *
+     * ── What this costs the applicant, which is why the reason is required ───
+     *
+     * Since 24 September 2026 the business permit is released at payment, so by
+     * the time an office reads its clearance the applicant is already trading on
+     * a certificate. A refusal suspends it — the LGU's rule — and the reason
+     * recorded here is quoted to them verbatim in the notification and on the
+     * filing. "Rejected" with no sentence beside it is a business closed and
+     * nobody able to say what would reopen it.
+     *
+     * `max:1000` matches Return above rather than being generous for its own
+     * sake: the two are written in the same box by the same officer, and a limit
+     * that differed between them would be a trap only discoverable by hitting it.
+     *
+     * The holder check is the same as the other two acts. An officer who is not
+     * holding the case cannot refuse a permit on it, for the same reason they
+     * cannot approve one.
+     */
+    public function reject(Request $request, ApplicationAssignment $assignment): JsonResponse
+    {
+        $this->authorizeHolder($request, $assignment);
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:1000'],
+            /*
+             * ── What would settle it, required alongside what is wrong ──────
+             *
+             * Client's decision, 24 September 2026. A reason is a verdict and
+             * a remedy is a route, and an applicant holding a suspended
+             * business permit needs the route: "no potable water connection"
+             * tells them what the office found, "connect to mains or file a
+             * deep-well permit, then apply again" tells them what to do.
+             *
+             * Required, not optional, because an optional field on a screen an
+             * officer is trying to leave is a field that stays empty — and the
+             * one time it matters is the one time it is hardest to write.
+             */
+            'remedy' => ['required', 'string', 'max:1000'],
+        ], [
+            'reason.required' => 'Say why this permit cannot be granted. The applicant is shown this.',
+            'remedy.required' => 'Say what would settle it, so the applicant knows what to do next.',
+        ]);
+
+        // Decide, then record who decided — the order approve() explains.
+        $this->workflow->rejectAssignment($assignment, $data['reason'], $data['remedy']);
+        $this->recordHolder($request, $assignment);
+
+        return response()->json([
+            'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
+        ]);
+    }
+
     public function return(Request $request, ApplicationAssignment $assignment): JsonResponse
     {
         $this->authorizeHolder($request, $assignment);
@@ -542,12 +595,15 @@ class AssignmentController extends Controller
             'remarks' => ['required', 'string', 'max:1000'],
             /*
              * Which thing the remarks are about — a checklist row's document
-             * code, or an office-form answer key. Optional, and deliberately
-             * NOT validated against a list: the valid set is the union of
-             * `document_types.code` and the sheets' own field keys, and the
-             * second lives in PHP and in the browser rather than in a table.
-             * A code that matches nothing highlights nothing, which is the same
-             * outcome as sending none, so there is nothing here worth a 422.
+             * code, an office-form answer key, a permit type code when BPLO
+             * sends back one clearance, or (since 24 September 2026) a field on
+             * the main application form. Optional, and deliberately NOT
+             * validated against a list: the valid set is the union of
+             * `document_types.code`, the sheets' own field keys and the
+             * wizard's, and all but the first live in PHP and in the browser
+             * rather than in a table. A code that matches nothing highlights
+             * nothing, which is the same outcome as sending none, so there is
+             * nothing here worth a 422.
              */
             'remarks_target' => ['sometimes', 'nullable', 'string', 'max:120'],
         ], [

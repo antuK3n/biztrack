@@ -39,6 +39,14 @@ class ApplicationPermitType extends Model
     protected $fillable = [
         'status', 'mode', 'submitted_at', 'decided_at',
         'remarks', 'remarks_target', 'returned_at',
+        /*
+         * The refusal, kept apart from `remarks` because the two have
+         * opposite lifetimes: `remarks` is the CURRENT instruction and is
+         * cleared the moment the applicant answers it, and these are the
+         * historical fact that they were once refused, which the office needs
+         * on the re-read. See the migration for why that cannot be one column.
+         */
+        'rejected_at', 'rejection_note', 'rejection_remedy',
     ];
 
     protected $casts = [
@@ -48,6 +56,7 @@ class ApplicationPermitType extends Model
         // Or `->toISOString()` on it throws: an uncast timestamp comes back a
         // string, and the resources format these for the wire.
         'returned_at' => 'datetime',
+        'rejected_at' => 'datetime',
     ];
 
     public function application(): BelongsTo

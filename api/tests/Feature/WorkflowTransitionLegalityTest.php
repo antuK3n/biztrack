@@ -197,7 +197,7 @@ it('refuses to revive a rejected filing when another office approves its permit'
      * NOTHING follows the rejection.
      */
     expect(Inspection::where('application_id', $app->id)->count())->toBe(0)
-        ->and(Permit::where('application_id', $app->id)->count())->toBe(0)
+        ->and(clearancePermitsIssued($app))->toBe(0)
         ->and(ApplicationStatusHistory::where('application_id', $app->id)
             ->where('from_status', 'rejected')->count())->toBe(0);
 });

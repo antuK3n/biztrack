@@ -95,26 +95,24 @@ const HOLDER_HINT: Record<'unassigned' | 'mine' | 'others', string> = {
  */
 const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
   /*
-   * ── "Initial" is BPLO's word, and only BPLO's ──────────────────────────
+   * ── The two captions became one ────────────────────────────────────────
    *
-   * BPLO approves a filing TWICE — once on the main form before the bill,
-   * once on the whole application at the end — so "For Initial Approval" is
-   * doing real work in that seat: it says which of the two.
+   * This tab read "For Initial Approval" for BPLO and "For Approval" for a
+   * clearance office, because BPLO approves a filing twice and an office
+   * approves its permit once — the client read the wrong one off the sanitary
+   * account on 17 September 2026: *"This is still sanitary's account, so why
+   * there is Initial Approval? It should be For Approval only."*
    *
-   * A clearance office approves its permit ONCE, by itself, and there is no
-   * second pass. The rule was already written down for the status, in
-   * status.ts: *"CLEARANCE_STATUS below keeps plain 'For Approval' — a single
-   * clearance is approved once, by its own office, and calling that 'initial'
-   * would promise a second pass that never comes."* The tab was breaking that
-   * rule, and the client read it off the screen from the sanitary account:
-   * *"This is still sanitary's account, so why there is Initial Approval? It
-   * should be For Approval only."* (17 September 2026.)
+   * On 24 September they took "initial" out of BPLO's seat too, so both now
+   * say the same thing and the override is gone. See ApplicationStatus for
+   * why the word stopped earning its place.
    *
-   * `officeLabel` rather than a second TABS array, so the two names cannot
-   * get out of step over which tab they belong to. Only this one differs; the
-   * rest are either the same word in both seats or offered in one seat alone.
+   * `officeLabel` stays on the type with no current user. The two seats have
+   * genuinely diverged once and can again — BPLO sees stages an office never
+   * does — and an optional field costs less than rediscovering that a second
+   * TABS array drifts.
    */
-  { value: 'approval', label: 'For Initial Approval', officeLabel: 'For Approval' },
+  { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
   { value: 'gathering', label: 'Awaiting Other Permits' },
   { value: 'inspection', label: 'For Inspection' },
@@ -601,7 +599,7 @@ interface QueueItem {
    *
    * The chip on the right of the row read Unpaid / Paid, and the client
    * asked on 16 September 2026 whether it was worth the space. Nearly not:
-   * the For Initial Approval tab holds `for_approval`, `returned` AND
+   * the For Approval tab holds `for_approval`, `returned` AND
    * `awaiting_other_permits`, so it varies by exactly one of three rows —
    * and payment is implied by the status anyway, since everything past
    * `pending_payment` has been paid.
