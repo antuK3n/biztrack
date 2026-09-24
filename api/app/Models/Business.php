@@ -210,10 +210,81 @@ class Business extends Model
      */
     public const STATUS_BLACKLISTED = 'blacklisted';
 
-    /** Statuses that bar the owner from filing new applications. */
+    /**
+     * May this business start a new filing?
+     *
+     * ── Two causes, one answer, and it is scoped to ONE business ─────────
+     *
+     * The account status was the whole of it until 24 September 2026. A
+     * suspended Mayor'\''s Permit now bars a filing too — client'\''s decision,
+     * the same day the permit began being released at payment and suspended
+     * when one of the other permits is refused. The reasoning they gave is
+     * the right one: a business should not start renewing a permit it is
+     * not currently allowed to trade on.
+     *
+     * SCOPE, because it is the thing most easily got wrong and the client
+     * asked about it directly: this is a method on ONE business, and both
+     * callers pass the business being filed for. An owner with three
+     * businesses, one suspended, files freely for the other two. Nothing
+     * here reads the user.
+     *
+     * What is NOT blocked, and must not be: re-applying for the refused
+     * clearance, filling in its office form, and paying. Those are the way
+     * OUT of the suspension and they go through ClearanceController and
+     * PaymentController, neither of which asks this question. Blocking the
+     * fix along with the filing would be a closed loop.
+     */
     public function isBlockedFromApplying(): bool
     {
-        return in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true);
+        return in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true)
+            || $this->hasSuspendedPermit();
+    }
+
+    /**
+     * Is any certificate this business holds suspended?
+     *
+     * Its own method so the refusal above can say WHICH cause applies: "your
+     * account is suspended, talk to the LGU" and "your permit is suspended,
+     * settle the rejected one" are different problems with different fixes,
+     * and one message covering both sends half the readers to the wrong
+     * place.
+     *
+     * A query rather than a loaded relation: this is asked once per filing
+     * attempt, on one business, so there is no N+1 to avoid and a stale
+     * eager-load would be worse than a round trip.
+     */
+    public function hasSuspendedPermit(): bool
+    {
+        return $this->permits()
+            ->where('status', PermitStatus::Suspended->value)
+            ->exists();
+    }
+
+    /**
+     * Why this business cannot file, in the applicant's own terms.
+     *
+     * One message covered both causes and sent half its readers to the wrong
+     * place: an owner whose PERMIT is suspended was told to contact the LGU
+     * about their ACCOUNT, when the fix is theirs to make and is two screens
+     * away. The account case keeps the original wording, because there the
+     * LGU really is the only route.
+     *
+     * Account status is checked FIRST, and the order matters. A business can
+     * be in both states at once — suspending a business now suspends its
+     * permits — and the account is the heavier of the two: settling a
+     * clearance would not let them file while the account is still
+     * suspended, so pointing them at the clearance would be a wasted trip.
+     */
+    public function filingBlockReason(): string
+    {
+        if (in_array($this->status, ['suspended', self::STATUS_BLACKLISTED], true)) {
+            return 'This business currently can’t file applications. Please contact the '
+                .'LGU to resolve its account status.';
+        }
+
+        return 'This business can’t start a new application while one of its permits is '
+            .'suspended. Settle the rejected permit on your existing application and it is '
+            .'restored as soon as that office approves it.';
     }
 
     public function owner(): BelongsTo

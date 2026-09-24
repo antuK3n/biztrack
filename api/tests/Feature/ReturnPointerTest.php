@@ -285,21 +285,20 @@ it('lets BPLO send back one uploaded clearance and keeps the filing on its desk'
     expect($app->fresh()->status)->toBe(ApplicationStatus::Approved);
 });
 
-it('falls back to returning the whole form when BPLO points at nothing', function () {
-    /*
-     * The safe direction. A pointer naming a permit the filing does not carry —
-     * a stale tab, a renamed code — gives BPLO the behaviour it had before
-     * rather than silently doing nothing.
-     */
-    /*
-     * Built rather than found. The register has no filing sitting at
-     * For Initial Approval — the seeded ones are all further along — and a test
-     * that hunts for a status nothing is in fails with "No query results",
-     * which says nothing about returns.
-     */
+/**
+ * A filing sitting at For Approval with BPLO's own assignment on it.
+ *
+ * Built rather than found. The register has no filing at For Approval — the
+ * seeded ones are all further along — and a test that hunts for a status
+ * nothing is in fails with "No query results", which says nothing about
+ * returns.
+ *
+ * @return array{0: Application, 1: ApplicationAssignment}
+ */
+function bploFilingAtForApproval(): array
+{
     [$business, $permits] = returnBusinessHolding(['BUSINESS']);
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
-    $workflow = app(WorkflowService::class);
 
     $app = Application::create([
         'business_id' => $business->id,
@@ -312,13 +311,70 @@ it('falls back to returning the whole form when BPLO points at nothing', functio
     ]);
     $app->priorPermits()->sync([$permits['BUSINESS']->id]);
     $app->permitTypes()->sync(PermitType::where('code', 'BUSINESS')->pluck('id')->all());
-    $workflow->submit($app->fresh());
+    app(WorkflowService::class)->submit($app->fresh());
 
     $bplo = ApplicationAssignment::where('application_id', $app->id)
         ->where('department_id', Department::where('code', 'BPLO')->value('id'))
         ->firstOrFail();
 
-    $workflow->returnAssignment($bplo, 'The address does not match the plan.', 'NOT_A_PERMIT');
+    return [$app, $bplo];
+}
+
+it('falls back to returning the whole form when BPLO points at nothing', function () {
+    /*
+     * The safe direction. A pointer naming a permit the filing does not carry —
+     * a stale tab, a renamed code — gives BPLO the behaviour it had before
+     * rather than silently doing nothing.
+     */
+    [$app, $bplo] = bploFilingAtForApproval();
+
+    app(WorkflowService::class)
+        ->returnAssignment($bplo, 'The address does not match the plan.', 'NOT_A_PERMIT');
 
     expect($app->fresh()->status)->toBe(ApplicationStatus::Returned);
+});
+
+it('records which field of the main form BPLO wants fixed', function () {
+    /*
+     * Client, 24 September 2026: *"allow me to choose a field that the business
+     * owner will have to comply to. Then, I should also put a reason why."*
+     *
+     * Both halves are asserted, because the pointer without the prose names a
+     * field and gives no reason, and the prose without the pointer is the
+     * behaviour this replaced.
+     */
+    [$app, $bplo] = bploFilingAtForApproval();
+
+    app(WorkflowService::class)->returnAssignment(
+        $bplo,
+        'The trade name does not match your DTI certificate.',
+        'form:trade_name',
+    );
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Returned);
+    expect($bplo->fresh()->remarks_target)->toBe('form:trade_name');
+    expect($bplo->fresh()->remarks)->toBe('The trade name does not match your DTI certificate.');
+});
+
+it('replaces the main form pointer on every return, including with nothing', function () {
+    /*
+     * The rule `returnClearance` already follows, applied to the main form: a
+     * stale target from a previous round flags a field this return is not
+     * about, so the applicant fixes the wrong thing and is returned twice.
+     *
+     * The filing has to be resubmitted between the two returns — Returned is
+     * not a state a second return can be made from — which is also the real
+     * sequence this guards: fix, resubmit, get sent back for something else.
+     */
+    [$app, $bplo] = bploFilingAtForApproval();
+    $workflow = app(WorkflowService::class);
+
+    $workflow->returnAssignment($bplo, 'Trade name is wrong.', 'form:trade_name');
+    expect($bplo->fresh()->remarks_target)->toBe('form:trade_name');
+
+    $workflow->resubmit($app->fresh());
+    $workflow->returnAssignment($bplo->fresh(), 'Now the barangay is wrong.');
+
+    expect($bplo->fresh()->remarks_target)->toBeNull();
+    expect($bplo->fresh()->remarks)->toBe('Now the barangay is wrong.');
 });

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FieldLabel, inputCls } from '../../components/ui/Proto'
+import { FieldError, FieldLabel, inputCls } from '../../components/ui/Proto'
 import type { ApplicationType, FeeProfile, FeeProfileLine } from '../../lib/types'
 
 /*
@@ -297,6 +297,26 @@ function toNumber(raw: string): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
+/**
+ * The total headcount — the two halves added up, or blank until both are.
+ *
+ * Blank rather than a partial sum, deliberately. Showing "3" in the total
+ * while the female box is still empty states a headcount the applicant has
+ * not given, and they would have to notice it was wrong to correct it. An
+ * empty total says plainly that the question is not answered yet.
+ *
+ * Used by the field, by the payload and by the rehydration of a saved
+ * profile, so a draft written before this was derived comes back consistent
+ * rather than carrying a stored total that disagrees with its own halves.
+ */
+function totalEmployees(male: string, female: string): string {
+  const m = toInt(male)
+  const f = toInt(female)
+  if (m === undefined || f === undefined) return ''
+
+  return String(m + f)
+}
+
 function toInt(raw: string): number | undefined {
   const n = toNumber(raw)
   return n === undefined ? undefined : Math.round(n)
@@ -538,18 +558,20 @@ export function feeProfileIssues(
      * Nothing validates `draft.storeys` any more, and nothing writes it. It
      * stays on the type so a filing saved while it was asked still hydrates.
      */
-    push(
-      numericIssue({
-        key: 'employees',
+    /*
+     * The total is derived from the two halves, so it cannot be blank while
+     * they are filled and cannot be a non-integer at all — which is every
+     * rule that used to be checked here except one. A ceiling still applies:
+     * two halves under 100,000 each add up to as much as 199,998.
+     */
+    const derivedTotal = toInt(totalEmployees(draft.male_employees, draft.female_employees))
+    if (derivedTotal !== undefined && derivedTotal > MAX_COUNT) {
+      issues.push({
+        key: 'male_employees',
         label: '2. Total Number of Employees',
-        value: draft.employees,
-        required: true,
-        blankMessage: 'Enter how many people you employ. Enter 0 if you work alone.',
-        integer: true,
-        max: MAX_COUNT,
-        maxMessage: 'Enter a headcount below 100,000.',
-      }),
-    )
+        message: 'Enter a headcount below 100,000.',
+      })
+    }
     /*
      * ── B2 and B3 became REQUIRED on 9 September 2026 ──────────────────────
      *
@@ -601,24 +623,15 @@ export function feeProfileIssues(
         maxMessage: 'Enter a headcount below 100,000.',
       }),
     )
-    const total = toInt(draft.employees)
-    const inLgu = toInt(draft.employees_in_lgu)
     /*
-     * The split has to reconcile with the headcount typed three fields above
-     * it. Checked only when all three parse, so a half-filled step reports
-     * "this is missing" rather than "these do not add up" — being told your
-     * arithmetic is wrong before you have finished typing it is worse than
-     * being told nothing.
+     * ── "These must add up to your total" was checked here ────────────────
+     *
+     * It cannot fail any more. The total is the sum, so the applicant can no
+     * longer be told that the number they typed disagrees with the two they
+     * typed beside it — the form does the addition instead of marking it.
      */
-    const male = toInt(draft.male_employees)
-    const female = toInt(draft.female_employees)
-    if (total !== undefined && male !== undefined && female !== undefined && male + female !== total) {
-      issues.push({
-        key: 'male_employees',
-        label: '2. Number of Male and Female Employees',
-        message: `These must add up to your total of ${total}. You have entered ${male + female}.`,
-      })
-    }
+    const total = derivedTotal
+    const inLgu = toInt(draft.employees_in_lgu)
     if (total !== undefined && inLgu !== undefined && inLgu > total) {
       issues.push({
         key: 'employees_in_lgu',
@@ -823,7 +836,7 @@ export function buildFeeProfile(
     ...(has('BUSINESS')
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
-          employees: toInt(draft.employees),
+          employees: toInt(totalEmployees(draft.male_employees, draft.female_employees)),
           male_employees: toInt(draft.male_employees),
           female_employees: toInt(draft.female_employees),
           employees_in_lgu: toInt(draft.employees_in_lgu),
@@ -878,7 +891,16 @@ export function feeProfileToDraft(
     categories,
     floor_area_sqm: str(profile.floor_area_sqm),
     storeys: str(profile.storeys),
-    employees: str(profile.employees),
+    /*
+     * Derived on the way IN as well, with the stored value as the fallback.
+     * A profile saved before 24 September 2026 can hold a total that its own
+     * halves do not add up to — the form used to allow typing one and only
+     * complained at validation time — and rehydrating that verbatim would put
+     * a number in a box that now claims to compute itself.
+     */
+    employees:
+      totalEmployees(str(profile.male_employees), str(profile.female_employees)) ||
+      str(profile.employees),
     male_employees: str(profile.male_employees),
     female_employees: str(profile.female_employees),
     employees_in_lgu: str(profile.employees_in_lgu),
@@ -1116,18 +1138,13 @@ function FlagCheckbox({
   )
 }
 
-/**
- * Inline error under a field, in the wizard's voice. `id` is optional because
- * most callers sit inside a wrapping <label> and are found by proximity; the
- * ones that point an `aria-describedby` at their error pass one.
+/*
+ * `FieldError` used to be defined here — an inline paragraph under the field,
+ * the same eight lines as the wizard's own copy. It is imported from Proto
+ * now, because on 24 September 2026 it stopped being a paragraph and became a
+ * bubble over the label, and two independent copies of a thing that was about
+ * to change is how one of the two stays a paragraph forever.
  */
-function FieldError({ children, id }: { children: string; id?: string }) {
-  return (
-    <p id={id} className="mt-1 text-xs font-medium text-s-red">
-      {children}
-    </p>
-  )
-}
 
 /**
  * A number input that formats as it is typed: amounts group in thousands,
@@ -1152,6 +1169,9 @@ function NumberField({
   error,
   placeholder,
   locked,
+  className,
+  box,
+  hint,
 }: {
   label: string
   required?: boolean
@@ -1172,6 +1192,28 @@ function NumberField({
    * fields on the office sheets use it.
    */
   locked?: boolean
+  /** Classes for the CELL, so a caller can size it inside a wrapping row. */
+  className?: string
+  /**
+   * A ceiling for the BOX, where the cell's own is wrong.
+   *
+   * The default 9rem suits a count standing alone in the page. Inside one of
+   * the bordered groups below the cell is sized by the group, and the group
+   * stretches to fill the row — so a capped box leaves a band of empty border
+   * beside it and an uncapped one grows to thirty rem for three characters.
+   * Neither is right, and the caller is the only thing that knows which
+   * ceiling its group wants.
+   */
+  box?: string
+  /**
+   * Examples, carried in the accessible name rather than printed.
+   *
+   * "Motorized (truck, van, motor vehicle)" was the widest thing in its
+   * group, over a box holding one digit. The parenthetical is an example, so
+   * it moves where examples belong — but it cannot simply be dropped, because
+   * "Other" alone tells a screen-reader user nothing about what it counts.
+   */
+  hint?: string
 }) {
   const format = kind === 'count' ? formatCountInput : formatAmountInput
   /*
@@ -1187,7 +1229,7 @@ function NumberField({
     onBlur()
   }
   return (
-    <div>
+    <div className={`relative ${className ?? ''}`}>
       {/*
         FieldLabel renders a span, so the visible label was not attached to
         anything: a screen reader announced the placeholder, or on fields
@@ -1197,7 +1239,10 @@ function NumberField({
         label so it is not read as part of the field's name.
       */}
       <label className="block">
-        <FieldLabel required={required}>{label}</FieldLabel>
+        <FieldLabel required={required}>
+          {label}
+          {hint && <span className="sr-only"> ({hint})</span>}
+        </FieldLabel>
         <input
           inputMode={kind === 'count' ? 'numeric' : 'decimal'}
           value={value}
@@ -1207,7 +1252,14 @@ function NumberField({
           readOnly={locked}
           aria-readonly={locked || undefined}
           aria-invalid={Boolean(error)}
-          className={`${inputCls} tnum ${locked ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''}`}
+          /*
+            Capped, not full width. A count is at most a few digits and this
+            box sat in a half-form cell — the "field boxes being too long or
+            big" the client asked about, fourteen times over on this step.
+          */
+          className={`${inputCls} tnum ${box ?? 'max-w-[9rem]'} ${
+            locked ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''
+          }`}
         />
       </label>
       {error && <FieldError>{error}</FieldError>}
@@ -1226,7 +1278,7 @@ export function FeeProfileStep({
 }: {
   applicationType: ApplicationType
   /**
-   * Item 72 — the Type of Registration answered in Business Information, which
+   * Item 72 — the Form of Organization answered in Business Information, which
    * IS the business structure. Given, this step shows the answer instead of
    * asking for it again; blank, it asks (see the section below).
    */
@@ -1314,6 +1366,21 @@ export function FeeProfileStep({
     onChange({ ...value, [key]: v })
   }
 
+  /**
+   * One of the two halves, and the total that follows from it, in a single
+   * update.
+   *
+   * The stored `employees` is kept in step rather than left to be derived at
+   * every read: the Confirm step's summary, the office sheets and the
+   * autosave all take the draft as it stands, and a draft whose total
+   * disagreed with its own halves would be wrong in three places that have no
+   * business doing arithmetic.
+   */
+  function setEmployeeHalf(key: 'male_employees' | 'female_employees', v: string) {
+    const next = { ...value, [key]: v }
+    onChange({ ...next, employees: totalEmployees(next.male_employees, next.female_employees) })
+  }
+
   function setCategory(id: number, patch: Partial<FeeCategoryDraft>) {
     const current = value.categories[id] ?? { category: '', gross_sales: '', capitalization: '' }
     set('categories', { ...value.categories, [id]: { ...current, ...patch } })
@@ -1385,7 +1452,7 @@ export function FeeProfileStep({
       {onExtras && (
       <section>
         <h2 className="text-[15px] font-bold text-ink">How your trade is taxed</h2>
-        <div className="mt-4 space-y-5">
+        <div className="mt-3 space-y-3">
           {derivedStructure ? (
             /*
              * Item 72 — nothing. The ANSWER is in this step's opening line now.
@@ -1516,7 +1583,7 @@ export function FeeProfileStep({
                   >
                     <p className="mb-2.5 truncate text-sm font-semibold text-ink">{line.title}</p>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
+                      <div className="relative">
                         {line.category ? (
                           <DerivedTaxClass
                             line={line}
@@ -1702,8 +1769,17 @@ export function FeeProfileStep({
             which matters on the review sheet and the officer's screen, where
             these values are printed away from this grouping.
           */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          {/*
+            One wrapping row for the section, the shape Business Information's
+            section A already uses. The two bordered groups are cells of it
+            rather than bands across the page, and they are the only things
+            here that `grow`: everything else is a count, and stretching a
+            three-character box across a row is the fault being fixed, not
+            the fix.
+          */}
+          <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
             <NumberField
+              className="shrink-0"
               label="1. Business Area (sq. m.)"
               required
               kind="area"
@@ -1713,75 +1789,99 @@ export function FeeProfileStep({
               error={errorFor('floor_area_sqm', value.floor_area_sqm)}
               placeholder="e.g. 45"
             />
-          </div>
 
-          {/*
-            ── One number per paper item ────────────────────────────────────
+            {/*
+              ── One number per paper item ────────────────────────────────────
 
-            The numbers were on the FIELD labels, so items 2 and 4 printed
-            theirs once per box — "2. Number of Male Employees" beside "2.
-            Number of Female Employees", and "4." twice over on the delivery
-            counts. The client asked for each number to appear once.
+              The numbers were on the FIELD labels, so items 2 and 4 printed
+              theirs once per box — "2. Number of Male Employees" beside "2.
+              Number of Female Employees", and "4." twice over on the delivery
+              counts. The client asked for each number to appear once.
 
-            So a paper item that is several boxes is now a GROUP, and the group
-            carries the number. Inside it the fields say only what they count.
-            Item 3 is its own box on the paper and stays its own field here.
+              So a paper item that is several boxes is now a GROUP, and the group
+              carries the number. Inside it the fields say only what they count.
+              Item 3 is its own box on the paper and stays its own field here.
 
-            A visible heading plus an sr-only <legend>, rather than a visible
-            legend: a legend is laid out inside the fieldset's top border and
-            cut into it on a rounded, filled box — tried, and it looked wrong.
-            The legend still has to exist, because a <fieldset> without one
-            conveys no grouping to a screen reader at all.
-          */}
-          <fieldset className="mt-4 rounded-lg border border-line bg-canvas px-4 py-4">
-            <legend className="sr-only">Total number of employees</legend>
-            <p aria-hidden className="text-[13px] font-semibold text-ink">
-              2. Total No. of Employees
-            </p>
+              A visible heading plus an sr-only <legend>, rather than a visible
+              legend: a legend is laid out inside the fieldset's top border and
+              cut into it on a rounded, filled box — tried, and it looked wrong.
+              The legend still has to exist, because a <fieldset> without one
+              conveys no grouping to a screen reader at all.
+            */}
+            <fieldset className="grow basis-[21rem] rounded-lg border border-line bg-canvas px-3 py-2">
+              <legend className="sr-only">Total number of employees</legend>
+              <p aria-hidden className="mb-1.5 text-[13px] font-semibold text-ink">
+                2. Total No. of Employees
+              </p>
 
             {/*
               MCG-CENRO-FO-001 prints "TOTAL NO. OF EMPLOYEES: MALE ___ FEMALE
               ___", so the two halves ARE the total — which is why they must add
               up to it below rather than merely not exceed it.
             */}
-            <div className="mt-2 grid gap-4 sm:grid-cols-3">
-              <NumberField
-                label="Total"
-                required
-                kind="count"
-                value={value.employees}
-                onChange={(next) => set('employees', next)}
-                onBlur={() => touch('employees')}
-                error={errorFor('employees', value.employees)}
-                placeholder="e.g. 3"
-              />
-              <NumberField
-                label="Male"
-                required
-                kind="count"
-                value={value.male_employees}
-                onChange={(next) => set('male_employees', next)}
-                onBlur={() => touch('male_employees')}
-                error={errorFor('male_employees', value.male_employees)}
-              />
-              <NumberField
-                label="Female"
-                required
-                kind="count"
-                value={value.female_employees}
-                onChange={(next) => set('female_employees', next)}
-                onBlur={() => touch('female_employees')}
-                error={errorFor('female_employees', value.female_employees)}
-              />
-            </div>
-            <p className="mt-2 text-xs leading-relaxed text-ink-secondary">
-              Male and female together must add up to the total.
-            </p>
-          </fieldset>
+              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                {/*
+                  Read-only and derived. `locked` is NumberField's own word for
+                  it and uses `readOnly`, never `disabled` — a disabled box
+                  leaves the tab order and most screen readers skip it, so an
+                  applicant using one would never learn the total exists, let
+                  alone that it adds itself up.
 
-          {/* Item 3 is its own box on the paper, so it is its own field here. */}
-          <div className="mt-4 sm:w-1/2 sm:pr-2">
+                  No `onChange` that does anything and no `onBlur` that marks it
+                  touched: there is nothing to touch. Its errors are reported
+                  against the male box, which is the first one the applicant can
+                  actually act on.
+                */}
+                <NumberField
+                  className="grow basis-[5rem]"
+                  box="max-w-[8rem]"
+                  label="Total"
+                  required
+                  kind="count"
+                  locked
+                  value={totalEmployees(value.male_employees, value.female_employees)}
+                  onChange={() => {}}
+                  onBlur={() => {}}
+                  error=""
+                  placeholder="—"
+                />
+                <NumberField
+                  className="grow basis-[5rem]"
+                  box="max-w-[8rem]"
+                  label="Male"
+                  required
+                  kind="count"
+                  value={value.male_employees}
+                  onChange={(next) => setEmployeeHalf('male_employees', next)}
+                  onBlur={() => touch('male_employees')}
+                  error={errorFor('male_employees', value.male_employees)}
+                />
+                <NumberField
+                  className="grow basis-[5rem]"
+                  box="max-w-[8rem]"
+                  label="Female"
+                  required
+                  kind="count"
+                  value={value.female_employees}
+                  onChange={(next) => setEmployeeHalf('female_employees', next)}
+                  onBlur={() => touch('female_employees')}
+                  error={errorFor('female_employees', value.female_employees)}
+                />
+              </div>
+              {/*
+                Off the page, not deleted. On it, it explained in prose what the
+                boxes demonstrate — type 1 and 1, watch 2 appear in a grey box
+                that will not take a keystroke. Somebody who cannot see that
+                still needs telling, and the total is `aria-readonly` with no
+                reason attached, so this is what carries the reason. Same
+                treatment as the sole proprietor's officer box.
+              */}
+              <p className="sr-only">The total adds itself up from the two counts.</p>
+            </fieldset>
+
+            {/* Item 3 is its own box on the paper, so it is its own field here. */}
             <NumberField
+              className="shrink-0"
               label="3. No. of Employees Residing within Malabon"
               required
               kind="count"
@@ -1790,55 +1890,56 @@ export function FeeProfileStep({
               onBlur={() => touch('employees_in_lgu')}
               error={errorFor('employees_in_lgu', value.employees_in_lgu)}
             />
+
+            {/*
+              ── Item 4 is one box on the paper and two here, on purpose ──────
+
+              The client asked why. Because the Revenue Code taxes the two kinds
+              at different rates and a single number cannot be assessed:
+
+                biztax.delivery_vehicle_motorized  Sec. 2I.01  P750.00 per unit
+                biztax.delivery_vehicle_other      Sec. 2I.01  P100.00 per unit
+
+              The paper gets away with one box because a clerk asks which kind at
+              the counter and writes the tax in by hand. BizTrack computes it, so
+              it has to know. Same reason the tax step exists at all.
+
+              Grouped under one number, with the rates stated, so the split reads
+              as the ordinance's doing rather than as the form asking twice.
+            */}
+            <fieldset className="grow basis-[21rem] rounded-lg border border-line bg-canvas px-3 py-2">
+              <legend className="sr-only">Number of delivery units</legend>
+              <p aria-hidden className="mb-1.5 text-[13px] font-semibold text-ink">
+                4. No. of Delivery Units
+              </p>
+              <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                <NumberField
+                  className="grow basis-[7rem]"
+                  box="max-w-[8rem]"
+                  label="Motorized"
+                  hint="truck, van, motor vehicle"
+                  kind="count"
+                  value={value.delivery_vehicles_motorized}
+                  onChange={(next) => set('delivery_vehicles_motorized', next)}
+                  onBlur={() => touch('delivery_vehicles_motorized')}
+                  error={errorFor('delivery_vehicles_motorized', value.delivery_vehicles_motorized)}
+                  placeholder="0"
+                />
+                <NumberField
+                  className="grow basis-[7rem]"
+                  box="max-w-[8rem]"
+                  label="Other"
+                  hint="pedicab, cart"
+                  kind="count"
+                  value={value.delivery_vehicles_other}
+                  onChange={(next) => set('delivery_vehicles_other', next)}
+                  onBlur={() => touch('delivery_vehicles_other')}
+                  error={errorFor('delivery_vehicles_other', value.delivery_vehicles_other)}
+                  placeholder="0"
+                />
+              </div>
+            </fieldset>
           </div>
-
-          {/*
-            ── Item 4 is one box on the paper and two here, on purpose ──────
-
-            The client asked why. Because the Revenue Code taxes the two kinds
-            at different rates and a single number cannot be assessed:
-
-              biztax.delivery_vehicle_motorized  Sec. 2I.01  P750.00 per unit
-              biztax.delivery_vehicle_other      Sec. 2I.01  P100.00 per unit
-
-            The paper gets away with one box because a clerk asks which kind at
-            the counter and writes the tax in by hand. BizTrack computes it, so
-            it has to know. Same reason the tax step exists at all.
-
-            Grouped under one number, with the rates stated, so the split reads
-            as the ordinance's doing rather than as the form asking twice.
-          */}
-          <fieldset className="mt-4 rounded-lg border border-line bg-canvas px-4 py-4">
-            <legend className="sr-only">Number of delivery units</legend>
-            <p aria-hidden className="text-[13px] font-semibold text-ink">
-              4. No. of Delivery Units
-            </p>
-            <p className="mt-1 text-xs leading-relaxed text-ink-secondary">
-              Counted apart because the Revenue Code taxes them differently &mdash; &#8369;750 a
-              year per motor vehicle, &#8369;100 per pedicab or cart (Sec. 2I.01). Leave both at 0
-              if you have none.
-            </p>
-            <div className="mt-2 grid gap-4 sm:grid-cols-2">
-              <NumberField
-                label="Motorized (truck, van, motor vehicle)"
-                kind="count"
-                value={value.delivery_vehicles_motorized}
-                onChange={(next) => set('delivery_vehicles_motorized', next)}
-                onBlur={() => touch('delivery_vehicles_motorized')}
-                error={errorFor('delivery_vehicles_motorized', value.delivery_vehicles_motorized)}
-                placeholder="0"
-              />
-              <NumberField
-                label="Other (pedicab, cart)"
-                kind="count"
-                value={value.delivery_vehicles_other}
-                onChange={(next) => set('delivery_vehicles_other', next)}
-                onBlur={() => touch('delivery_vehicles_other')}
-                error={errorFor('delivery_vehicles_other', value.delivery_vehicles_other)}
-                placeholder="0"
-              />
-            </div>
-          </fieldset>
         </section>
       )}
 
@@ -1930,7 +2031,7 @@ export function FeeProfileStep({
       {onExtras && showStallCount && (
         <section>
           <h2 className="text-[15px] font-bold text-ink">Market Stall Details</h2>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <NumberField
               label="Number of Stalls"
               required

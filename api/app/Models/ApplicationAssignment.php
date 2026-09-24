@@ -11,7 +11,7 @@ class ApplicationAssignment extends Model
 {
     protected $fillable = [
         'application_id', 'department_id', 'officer_user_id', 'status',
-        'remarks', 'assigned_at', 'completed_at',
+        'remarks', 'remarks_target', 'assigned_at', 'completed_at',
     ];
 
     protected $casts = [

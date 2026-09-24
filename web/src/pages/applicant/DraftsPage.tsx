@@ -67,7 +67,7 @@ function TrashIcon({ size = 24, ...props }: SVGProps<SVGSVGElement> & { size?: n
 export function DraftsPage() {
   const { data, loading, error, reload } = useAsync(() => applications.list({ status: 'draft' }), [])
   const [filter, setFilter] = useState<Filter>('all')
-  const [sort, setSort] = useState<'recent' | 'oldest'>('recent')
+  const [sort, setSort] = useState<'worked' | 'recent' | 'oldest'>('worked')
   /*
    * The draft the confirmation modal is asking about, held whole rather than by
    * id: the dialog names it ("Delete 'Pedro's Snack Bar'?"), and looking the
@@ -106,13 +106,25 @@ export function DraftsPage() {
   const drafts = data ?? []
   const byType = filter === 'all' ? drafts : drafts.filter((d) => d.application_type === filter)
   /*
-   * Ordered by when the draft was started, which is the only date the API gives
-   * for one — there is no `updated_at` on an application, which is also why the
-   * card says "Started" rather than "Edited". Copied rather than sorted in
-   * place: `data` is the hook's array and sorting it would reorder the source
-   * of a memo-free render.
+   * ── Three orders, and the default is the one people open this page for ──
+   *
+   * It could only order by when a draft was STARTED, because that was the
+   * only date the API sent — the note here used to say an application has no
+   * `updated_at`, which was wrong: the column has existed since the table
+   * was created (`timestamps()`) and was simply never serialised.
+   *
+   * "Last worked on" leads and is the default, because it answers the
+   * question somebody arrives with: where was I? An applicant with six
+   * drafts going gets no help from the order they were begun in — the
+   * oldest is as likely as any to be the live one.
+   *
+   * Copied rather than sorted in place: `data` is the hook's array and
+   * sorting it would reorder the source of a memo-free render.
    */
   const visible = [...byType].sort((a, b) => {
+    if (sort === 'worked') {
+      return Date.parse(b.updated_at) - Date.parse(a.updated_at)
+    }
     const diff = Date.parse(a.created_at) - Date.parse(b.created_at)
     return sort === 'recent' ? -diff : diff
   })
@@ -131,6 +143,13 @@ export function DraftsPage() {
             sort={{
               value: sort,
               options: [
+                /*
+                 * "Last worked on" rather than "Last accessed": the date it
+                 * reads moves when the draft is SAVED, and opening one to
+                 * read it saves nothing. Naming it for what it measures is
+                 * the difference between a label and a small lie.
+                 */
+                { value: 'worked', label: 'Last worked on' },
                 { value: 'recent', label: 'Newest first' },
                 { value: 'oldest', label: 'Oldest first' },
               ],

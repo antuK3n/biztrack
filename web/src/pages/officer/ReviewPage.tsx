@@ -19,6 +19,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
 import { toApiError } from '../../lib/api'
 import { formatBytes, formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import { MAIN_FORM_RETURN_TARGETS } from '../../lib/returnTargets'
 import { otherPermitProgress } from '../../lib/status'
 import {
   admin,
@@ -419,6 +420,20 @@ const REMARK_COPY = {
     confirm: 'Reject application',
     confirmCls: 'bg-s-red hover:brightness-110',
   },
+  /*
+   * The office's own refusal — between the other two in severity, and the
+   * help text is where that is said. It names the consequence the officer is
+   * about to cause to a certificate the applicant is already holding, which
+   * is not something to discover from the notification they receive.
+   */
+  reject_permit: {
+    heading: 'Reject this permit',
+    label: 'Why this permit cannot be granted',
+    help: 'Final for this permit — use Return instead if the applicant can fix it. This suspends their '
+      +'Business Permit until they apply again and your office approves it. They see this reason.',
+    confirm: 'Reject permit',
+    confirmCls: 'bg-s-red hover:brightness-110',
+  },
   return: {
     heading: 'Return to the applicant',
     label: 'What the applicant must fix',
@@ -451,8 +466,9 @@ function RemarkPopup({
   error,
   onCancel,
   onConfirm,
+  chrome = 'panel',
 }: {
-  action: 'reject' | 'return'
+  action: 'reject' | 'reject_permit' | 'return'
   officer: string
   /**
    * Evaluator Remarks, carried in rather than discarded (SEP-6).
@@ -481,18 +497,49 @@ function RemarkPopup({
    * Empty on the reject composer and on sheets with nothing to point at, in
    * which case the control is not rendered at all.
    */
-  targets: { value: string; label: string }[]
+  targets: { value: string; label: string; group?: string }[]
   submitting: boolean
   error: string | null
   onCancel: () => void
-  onConfirm: (text: string, target: string | null) => void
+  /*
+   * `remedy` is only ever non-empty for a permit refusal. It is a third
+   * argument rather than a second popup because it is the same act: the
+   * officer is writing one decision, in two halves, and splitting the
+   * screen would let them send the verdict without the route out of it.
+   */
+  onConfirm: (text: string, target: string | null, remedy: string) => void
+  /**
+   * Where this is drawn.
+   *
+   * `panel` is the floating composer in the aside — the original, still used
+   * by Reject and Reject this permit. `modal` puts the same body inside
+   * `ProtoModal`, which traps focus and closes on Escape, and lets that
+   * component own the heading and the two buttons instead of drawing a
+   * second set inside its own frame.
+   */
+  chrome?: 'panel' | 'modal'
 }) {
   const [text, setText] = useState(initialText)
   const [target, setTarget] = useState('')
+  const [remedy, setRemedy] = useState('')
+  /*
+   * A refusal costs the applicant their business permit, so it may not be
+   * sent without saying what would settle it. Every other decision on this
+   * screen leaves this empty and is unaffected.
+   */
+  const needsRemedy = action === 'reject_permit'
   const copy = REMARK_COPY[action]
   const empty = !text.trim()
-  return (
-    <div className="rounded-xl bg-white p-4 shadow-overlay">
+  const blocked = empty || (needsRemedy && remedy.trim() === '')
+  const send = () => onConfirm(text.trim(), target === '' ? null : target, remedy.trim())
+  /*
+   * The heading and the officer's name, drawn only in the panel. In a modal
+   * `ProtoModal` prints the heading in its own bar, and repeating it here
+   * would give the dialog two titles.
+   */
+  const body = (
+    <>
+      {chrome === 'panel' && (
       <div className="flex items-center gap-2.5">
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-royal text-white">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -504,6 +551,7 @@ function RemarkPopup({
           <p className="truncate text-xs text-ink-muted">{officer}</p>
         </div>
       </div>
+      )}
       {/*
         Above the box, because it is the smaller decision and answering it first
         makes the prose easier to write — "what is this about" then "what is
@@ -521,11 +569,39 @@ function RemarkPopup({
             className="mt-1.5 w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
           >
             <option value="">Nothing in particular</option>
-            {targets.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
+            {/*
+              Grouped where the caller says so, flat where it does not.
+
+              An office sheet offers a handful of its own rows and reads fine
+              as a list. BPLO returning the main form offers thirty fields
+              across four sections, and an officer looking for "the barangay"
+              should not have to scroll past seventeen registration questions
+              to find out whether it is in there.
+            */}
+            {Object.entries(
+              targets.reduce<Record<string, typeof targets>>((acc, t) => {
+                const key = t.group ?? ''
+                ;(acc[key] ??= []).push(t)
+
+                return acc
+              }, {}),
+            ).map(([group, rows]) =>
+              group === '' ? (
+                rows.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))
+              ) : (
+                <optgroup key={group} label={group}>
+                  {rows.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ),
+            )}
           </select>
           <span className="mt-1 block text-xs text-ink-secondary">
             Picking one marks it on the applicant's sheet so they can see exactly what to fix. It
@@ -550,36 +626,101 @@ function RemarkPopup({
       <p id={`remark-help-${action}`} className="mt-1 text-xs text-ink-secondary">
         {copy.help}
       </p>
+      {/*
+        ── What would settle it, asked separately from what is wrong ────────
+
+        Two boxes rather than one, because they are two different sentences
+        and an officer given one box writes only the first. "No potable water
+        connection" is a verdict; "connect to mains or file a deep-well
+        permit, then apply again" is a route, and the applicant is holding a
+        suspended business permit until they can follow one.
+
+        It also does work on the OTHER side of the loop. The sheet reopens
+        with every answer still in it, so an applicant can resubmit unchanged
+        — this is the line that tells them what has to be different.
+      */}
+      {needsRemedy && (
+        <label className="mt-3 block">
+          <span className="text-xs font-bold uppercase tracking-wide text-ink-muted">
+            What would settle it
+          </span>
+          <textarea
+            value={remedy}
+            onChange={(e) => setRemedy(e.target.value)}
+            placeholder="e.g. Connect to the mains supply, or file a deep-well permit, then apply again."
+            rows={2}
+            required
+            aria-describedby="remark-remedy-help"
+            className="mt-1.5 w-full rounded-lg border border-input-border bg-input px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+          />
+          <p id="remark-remedy-help" className="mt-1 text-xs text-ink-secondary">
+            The applicant sees this on the form when they apply again, and their Business
+            Permit stays suspended until your office approves it.
+          </p>
+        </label>
+      )}
       {error && <p className="mt-1.5 text-xs font-medium text-s-red">{error}</p>}
       {/*
        * Why the button is off, said out loud. A disabled control with no reason
        * beside it is the officer's problem to solve by guessing.
        */}
-      {empty && (
-        <p aria-live="polite" className="mt-1.5 text-xs font-medium text-ink-muted">
-          Write the reason to continue.
+      {blocked && (
+        <p
+          id={`remark-blocked-${action}`}
+          aria-live="polite"
+          className="mt-1.5 text-xs font-medium text-ink-muted"
+        >
+          {empty
+            ? 'Write the reason to continue.'
+            : 'Say what would settle it to continue.'}
         </p>
       )}
-      <div className="mt-3 flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={submitting}
-          className="rounded-md bg-modal-cancel px-4 py-1.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => onConfirm(text.trim(), target === '' ? null : target)}
-          disabled={submitting || empty}
-          className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 disabled:opacity-60 ${copy.confirmCls}`}
-        >
-          {submitting ? 'Working…' : copy.confirm}
-        </button>
-      </div>
-    </div>
+      {chrome === 'panel' && (
+        <div className="mt-3 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-md bg-modal-cancel px-4 py-1.5 text-sm font-semibold text-ink underline underline-offset-2 hover:brightness-95"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={send}
+            disabled={submitting || blocked}
+            className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 disabled:opacity-60 ${copy.confirmCls}`}
+          >
+            {submitting ? 'Working…' : copy.confirm}
+          </button>
+        </div>
+      )}
+    </>
   )
+
+  if (chrome === 'modal') {
+    return (
+      <ProtoModal
+        title={copy.heading}
+        tone={action === 'return' ? 'blue' : 'red'}
+        confirmLabel={submitting ? 'Working…' : copy.confirm}
+        onCancel={onCancel}
+        onConfirm={send}
+        confirmDisabled={submitting || blocked}
+        /*
+         * The line that says WHY Confirm will not let them out yet. The body
+         * already prints it for the panel; pointing the dialog's own button at
+         * it means a screen-reader user hears the reason from the control they
+         * are stuck on rather than having to go looking for it.
+         */
+        confirmDescribedBy={blocked ? `remark-blocked-${action}` : undefined}
+      >
+        {body}
+      </ProtoModal>
+    )
+  }
+
+  return <div className="rounded-xl bg-white p-4 shadow-overlay">{body}</div>
 }
 
 function ReviewSkeleton() {
@@ -902,7 +1043,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
   const [permitPdfBusy, setPermitPdfBusy] = useState<number | null>(null)
   const [permitPdfError, setPermitPdfError] = useState<string | null>(null)
 
-  const [popup, setPopup] = useState<'reject' | 'return' | null>(null)
+  /*
+   * Three decisions now, not two. `reject` ends the whole FILING and is
+   * BPLO's; `reject_permit` refuses THIS OFFICE'S permit and is every other
+   * office's; `return` asks for a correction and is everybody's. See
+   * `sendRemark`, which dispatches on this and nothing else.
+   */
+  const [popup, setPopup] = useState<'reject' | 'reject_permit' | 'return' | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -1092,7 +1239,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    *
    * ── The bug this `form_saved` check fixes ────────────────────────────────
    *
-   * Reported 16 September 2026 against a filing at For Initial Approval:
+   * Reported 16 September 2026 against a filing at For Approval:
    * section D showed CHO, BFP, OBO and CENRO "form answers" for clearances the
    * applicant had not applied for, let alone answered. Application Date
    * 2026-09-16, Application Type New, Workers Requiring Health Certs None.
@@ -1108,7 +1255,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    *
    * The reviewer's OWN sheet uses it already and says "Not filled in yet" —
    * see ownOfficeForms below. Section D never asked, so it presented seeds as
-   * answers, and at For Initial Approval every one of them is a seed: the
+   * answers, and at For Approval every one of them is a seed: the
    * clearance stage does not open until the first payment clears.
    *
    * An unfilled sheet belonging to ANOTHER office is not context, it is noise.
@@ -1393,6 +1540,26 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           .filter(({ permit }) => permit.mode === 'upload')
           .map(({ permit }) => ({ value: permit.code, label: permit.name }))
       : []),
+    /*
+     * ── BPLO's targets before payment are the FORM's own fields ────────────
+     *
+     * Client, 24 September 2026: *"allow me to choose a field that the
+     * business owner will have to comply to. Then, I should also put a reason
+     * why."*
+     *
+     * Until now this whole list was empty in BPLO's seat on a new filing:
+     * `ownOfficeForms` is empty because BPLO has no sheet of its own, and the
+     * clearance branch above only fires on a renewal at Final Approval. So the
+     * one office that returns the MAIN FORM — the fifty-question one — was the
+     * only one that could not say which part of it was wrong.
+     *
+     * Offered whenever BPLO's return would go to `returnMainForm`, which is
+     * every BPLO return except the renewal-clearance case above. The two lists
+     * can appear together at Final Approval on a renewal, and should: BPLO is
+     * reading five certificates AND the form behind them, and either can be
+     * the thing that is wrong.
+     */
+    ...(canReject ? MAIN_FORM_RETURN_TARGETS : []),
   ]
 
   /**
@@ -1722,18 +1889,25 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * Who set the tier this filing currently carries — the sentence that makes
    * the control safe to hand an officer.
    *
-   * "Set automatically" is deliberately not phrased as a reassurance. It is
-   * our own rule, unapproved by BPLO, and the officer reading this sheet is
-   * usually better placed than it is.
+   * Null unless an officer set it, since 24 September 2026. The two branches
+   * that stood here for an automatic or an absent category both said the
+   * filing could not be approved until somebody confirmed one — which is
+   * true, and is already said twice in amber above the fold whenever it
+   * applies: `#approve-blocked-why`, which the Approve button itself points
+   * at, and the `categoryMissing && canSetTier` block that carries a picker.
+   * A third copy at the foot of the sheet was the client's example of a
+   * description doing no work.
+   *
+   * What is left is not a description. WHO chose the tier and WHEN appears
+   * nowhere else on the sheet, and it is what makes a category somebody else
+   * set safe to rely on.
    */
   const tierProvenance =
     ra?.source === 'officer'
       ? `Category set by ${ra.set_by?.name ?? 'a reviewing officer'}${
           ra.set_at ? ` on ${formatDate(ra.set_at)}` : ''
         }.`
-      : ra?.source === 'automatic'
-        ? 'Category assigned automatically from the filing type and the declared capital. No one has checked it against the Citizen’s Charter, so it cannot be approved until you confirm it — save the category below, whether or not you change it.'
-        : 'This filing has not been categorised yet, so it has no RA 11032 deadline and cannot be approved until one is chosen.'
+      : null
 
   async function saveTier() {
     // Guarded here as well as on the button, because the button is shut with
@@ -2269,7 +2443,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * confirms it — so nothing is dispatched that was not on screen at the moment
    * the button was pressed.
    */
-  async function sendRemark(text: string, target: string | null = null) {
+  async function sendRemark(text: string, target: string | null = null, remedy = '') {
     /*
      * The composer disables Confirm on an empty box, but the guard is here as
      * well as there: both endpoints require the text, and a rejection or return
@@ -2288,6 +2462,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
        * composer does not offer the control there either.
        */
       if (popup === 'reject') await applications.reject(app.id, text)
+      /*
+       * The office's own refusal, and the middle of the three in severity:
+       * it does not end the filing, and it does suspend the business permit
+       * the applicant is already holding. No `target` — see the client.
+       */
+      else if (popup === 'reject_permit') await assignments.reject(assignmentId, text, remedy)
       else await assignments.return(assignmentId, text, target)
       setPopup(null)
       reload()
@@ -2410,9 +2590,42 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
    * eight staff roles cannot reject at all, and they should learn that here
    * rather than by hunting for a button that was never drawn for them.
    */
+  /*
+   * Three sentences were two until 24 September 2026, when an office gained
+   * a refusal of its own. The old line told a clearance office that
+   * "returning is how your office refuses this filing", which is now the
+   * wrong advice for the case that matters — a return asks for a fix, and an
+   * office that cannot grant the permit at all needs the other button.
+   *
+   * What each costs is stated, because that is the whole basis for choosing
+   * between them and an officer should not have to learn it by pressing one.
+   */
+  /*
+   * ── A refusal is only available after the visit ─────────────────────────
+   *
+   * `ClearanceStatus::allowedNext` permits Rejected from ForInspection and
+   * nowhere else, and `rejectClearance` refuses it again with a message. This
+   * is the third and friendliest guard: the button is simply not drawn where
+   * pressing it could not work.
+   *
+   * It is also what answers the client's question about Reject and Return
+   * looking alike. They are never on screen at the same time now — Return
+   * belongs to the stage where an officer is reading paperwork, Reject to the
+   * stage after somebody has been to look — so there is no moment where an
+   * officer picks between two similar red buttons.
+   */
+  const mayRefusePermit = !canReject && data.clearance?.status === 'for_inspection'
+
   const decisionNote = canReject
     ? 'Rejecting ends the application for every office; returning sends it back to the applicant for revision.'
-    : 'Returning is how your office refuses this filing — ending the application outright is the BPLO’s decision.'
+    : mayRefusePermit
+      ? 'The inspection is done, so this is your final call. Reject this permit only if another '
+        +'visit would not settle it — it suspends their Business Permit until they apply again '
+        +'and you approve it. Asking for a document or returning the form still costs them '
+        +'nothing.'
+      : 'Ask for a document if something is missing — the permit stays with you. Return the form '
+        +'if an answer is wrong — they fix it and resubmit. Neither costs the applicant '
+        +'anything, and a permit can only be refused after its inspection.'
 
   /*
    * Named, and no claim about WHERE beyond what is true: most of these live in
@@ -2556,6 +2769,35 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
                   >
                     Reject
+                  </button>
+                )}
+                {/*
+                  ── An office's own refusal, added 24 September 2026 ─────────
+
+                  Shown to the five clearance offices and NOT to BPLO, which is
+                  what `!canReject` selects for: BPLO's refusal is the button
+                  above, which ends the filing, and the API refuses this one
+                  from BPLO's seat anyway (`WorkflowService::rejectAssignment`)
+                  because refusing the BUSINESS row would suspend the permit
+                  that row issued.
+
+                  Named "Reject this permit" and not "Reject". It sits three
+                  inches from a button that ends the whole application, in a
+                  product where both words appear on the same screen, and the
+                  two words that differ are the ones that say which is which.
+
+                  Red like BPLO's, because both are refusals and an officer
+                  should not have to work out that theirs is the gentler red.
+                  What differs is stated in `decisionNote` under the row.
+                */}
+                {mayRefusePermit && (
+                  <button
+                    type="button"
+                    onClick={() => setPopup('reject_permit')}
+                    disabled={busy}
+                    className="rounded-md bg-s-red px-7 py-2.5 text-sm font-semibold text-white underline underline-offset-2 shadow-card hover:brightness-110 disabled:opacity-60"
+                  >
+                    Reject this permit
                   </button>
                 )}
                 {/*
@@ -3142,6 +3384,52 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           )}
 
           {/*
+            ── This office refused this permit once ──────────────────────────
+
+            Drawn whenever the permit carries a `rejected_at`, INCLUDING after
+            the applicant has re-applied and it reads For Approval again —
+            which is the case it exists for.
+
+            When the sheet is handed back in, `submitClearanceForm` clears the
+            remarks, because the instruction has been answered. The row then
+            returns to this queue looking exactly like a first submission, and
+            the form itself is unchanged unless the applicant changed it — one
+            office form row per permit per filing, never one per attempt. So
+            an officer could approve, in good faith, the identical sheet their
+            own office turned down the week before.
+
+            The remedy is shown beside the reason because it is what the
+            officer asked for. Re-reading their own instruction is how they
+            judge whether it was met.
+          */}
+          {data.clearance?.rejected_at && (
+            <section className="mt-6 rounded-lg border border-s-red bg-s-red-tint px-5 py-4">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-s-red">
+                Your office refused this permit on {formatDate(data.clearance.rejected_at)}
+              </p>
+              {data.clearance.rejection_note && (
+                <p className="mt-1.5 text-sm italic leading-relaxed text-ink">
+                  “{data.clearance.rejection_note}”
+                </p>
+              )}
+              {data.clearance.rejection_remedy && (
+                <p className="mt-1.5 text-sm leading-relaxed text-ink-secondary">
+                  You asked for: “{data.clearance.rejection_remedy}”
+                </p>
+              )}
+              {/*
+                The one thing the banner cannot show them, said plainly: the
+                form carries its previous answers between attempts, so "it
+                looks the same" is not evidence either way.
+              */}
+              <p className="mt-2 text-xs text-ink-muted">
+                Their answers carry over when they apply again, so check what changed rather
+                than whether the form looks new.
+              </p>
+            </section>
+          )}
+
+          {/*
             Issue #99 — "the whole initial-approval form should stay visible to
             BPLO; hide it only from the other five offices" — is not an
             instruction to delete A, B, C and E for a clearance office while it
@@ -3473,13 +3761,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <Field label="9. Website Address" value={business.address?.website ?? ''} />
                   {/*
                   Item 10 is "Form of Organization" on the paper, offering
-                  exactly these four. The wizard has always called the question
-                  "Type of Registration" and still does; only the number is
-                  added here, because renaming a question the applicant answers
-                  is a separate decision from numbering it.
+                  exactly these four, and the wizard now asks it under that name
+                  too — the client took the renaming on 24 September 2026, which
+                  the earlier note here called out as a separate decision from
+                  numbering it.
+
+                  The NUMBER stays 10. This sheet is read beside the paper and
+                  keeps the paper's numbering, skips and all — see the two at 5
+                  and 16 above. The wizard's numbers run sequentially instead,
+                  also on the client's instruction, so the two no longer agree
+                  and this is the surface that should not move: an officer is
+                  comparing it against the form in their hand.
                 */}
                   <Field
-                    label="10. Type of Registration"
+                    label="10. Form of Organization"
                     value={
                       business.registration_type ? humanizeKey(business.registration_type) : ''
                     }
@@ -3510,12 +3805,15 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   />
                 </div>
                 {/*
-                 * Items A13-A15. Rendered for every filing, blank for a sole
-                 * proprietorship — where the wizard does not ask, because the
-                 * proprietor IS the officer in charge and is already named as the
-                 * applicant. An officer reading a blank here should read it as
-                 * "not applicable to this structure", which is why the three sit
-                 * together under one sub-heading rather than scattered.
+                 * Items A13-A15, asked of EVERY structure since 16 September 2026
+                 * — both of the paper's arrows point at 13. The note here used to
+                 * say the wizard skipped them for a sole proprietorship and that a
+                 * blank meant "not applicable to this structure"; it does not, and
+                 * a blank now means the applicant left the question unanswered,
+                 * which is a gap an officer may want to chase rather than a rule.
+                 *
+                 * A sole proprietor's name arrives prefilled from their own, so a
+                 * blank 13 on one of those filings is rarer still.
                  */}
                 <div className="grid gap-4 sm:grid-cols-3">
                   <Field
@@ -3599,11 +3897,6 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                   <div className="space-y-4">
                     <Field label="Latitude" value={address.latitude.toFixed(6)} />
                     <Field label="Longitude" value={address.longitude.toFixed(6)} />
-                    <p className="text-xs leading-relaxed text-ink-secondary">
-                      The applicant placed this pin, and the wizard checked it against the city
-                      boundary and the barangay above before accepting it. CPDD decides the
-                      locational clearance from this point.
-                    </p>
                   </div>
                 </div>
               ) : (
@@ -4084,15 +4377,26 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
              * sentence described a panel containing ZERO save buttons while
              * pointing at the only field in it.
              */}
-            <p className="mt-1 text-xs text-ink-secondary">
-              {decided
-                ? 'What this office recorded during its review.'
-                : editing
-                  ? canAdjustFee || issuedGroups.length > 0 || canSetTier
+            {/*
+              Nothing at all in read-only mode. It said "Switch the mode at the
+              top of the page to Edit to fill these in" — under a heading
+              reading FOR OFFICE USE ONLY · READ ONLY, about a Mode control at
+              the top of this page whose two options are Read only and Edit.
+
+              The editing branches stay. They say which fields save with their
+              own button and which ride along with the decision taken at the
+              top, which is written nowhere else and is the thing an officer
+              gets wrong.
+            */}
+            {(decided || editing) && (
+              <p className="mt-1 text-xs text-ink-secondary">
+                {decided
+                  ? 'What this office recorded during its review.'
+                  : canAdjustFee || issuedGroups.length > 0 || canSetTier
                     ? 'This panel is the only part of the sheet you can change. Evaluator Remarks travels with the decision you make at the top of the page; the other fields here each save with their own button.'
-                    : 'This panel is the only part of the sheet you can change. Evaluator Remarks is the only field in it, and it travels with the decision you make at the top of the page.'
-                  : 'Switch the mode at the top of the page to Edit to fill these in.'}
-            </p>
+                    : 'This panel is the only part of the sheet you can change. Evaluator Remarks is the only field in it, and it travels with the decision you make at the top of the page.'}
+              </p>
+            )}
 
             <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-amber-800">
               Taken from the record
@@ -4224,17 +4528,19 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
               <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
                 RA 11032 · Processing Category
               </p>
-              <p id="ra11032-note" className="mt-1 max-w-prose text-xs text-ink-secondary">
-                {tierProvenance}
-                {editing && canSetTier && (
-                  <>
-                    {' '}
-                    The three categories and their day counts are set by RA 11032 and cannot be
-                    edited. Changing which one this filing is re-counts its deadline from the date
-                    it was filed, not from today.
-                  </>
-                )}
-              </p>
+              {(tierProvenance || (editing && canSetTier)) && (
+                <p id="ra11032-note" className="mt-1 max-w-prose text-xs text-ink-secondary">
+                  {tierProvenance}
+                  {editing && canSetTier && (
+                    <>
+                      {' '}
+                      The three categories and their day counts are set by RA 11032 and cannot be
+                      edited. Changing which one this filing is re-counts its deadline from the
+                      date it was filed, not from today.
+                    </>
+                  )}
+                </p>
+              )}
               <div className="mt-3">
                 {editing && canSetTier ? (
                   tierPicker()
@@ -4256,11 +4562,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                 <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
                   {group.name} · Issuance Dates
                 </p>
-                <p className="mt-1 text-xs text-ink-secondary">
-                  {editing
-                    ? 'Enter the dates the issuing office released these documents. Applicants are not asked for them.'
-                    : 'The dates the issuing office released these documents.'}
-                </p>
+                {/* Only while editing: read-only, the heading above says it. */}
+                {editing && (
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    Enter the dates the issuing office released these documents. Applicants are
+                    not asked for them.
+                  </p>
+                )}
                 <div className="mt-3 grid gap-4 sm:grid-cols-3 sm:items-end">
                   {group.fields.map((field) =>
                     editing ? (
@@ -4404,13 +4712,13 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             className="sticky top-8 hidden w-72 shrink-0 space-y-4 lg:block"
             aria-label="Remarks"
           >
-            {popup && (
+            {popup && popup !== 'return' && (
               <RemarkPopup
                 action={popup}
                 officer={officerName}
                 initialText={remarks}
-                /* Only a return points at something; see returnTargets. */
-                targets={popup === 'return' ? returnTargets : []}
+                /* Only a return points at something, and a return is a dialog now. */
+                targets={[]}
                 submitting={busy}
                 error={actionError}
                 onCancel={() => setPopup(null)}
@@ -4432,26 +4740,44 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
        * passed to both. Seeding only one of them would make the carried-through
        * remark (SEP-6) appear on a desktop and vanish on a phone.
        */}
-      {popup && (
+      {popup && popup !== 'return' && (
         <div className="fixed inset-x-4 bottom-6 z-40 lg:hidden">
           <RemarkPopup
             action={popup}
             officer={officerName}
             initialText={remarks}
-            /*
-             * The phone instance gets the same list. It is a second,
-             * independent RemarkPopup rather than one moved by CSS — see the
-             * note above about `initialText` having to be passed twice — so a
-             * prop given to only one of them is a control that exists on a
-             * desktop and not on a phone.
-             */
-            targets={popup === 'return' ? returnTargets : []}
+            targets={[]}
             submitting={busy}
             error={actionError}
             onCancel={() => setPopup(null)}
             onConfirm={sendRemark}
           />
         </div>
+      )}
+
+      {/*
+        Return, as a dialog — and as ONE instance rather than the two the
+        panel needs.
+
+        The aside is hidden below `lg`, so the panel had to be rendered twice
+        and every prop handed to both; a prop given to one of them was a
+        control that existed on a desktop and not on a phone, which is a bug
+        the note on `initialText` records having already happened. A dialog is
+        the same overlay at every width, so there is one of it and nothing to
+        keep in step.
+      */}
+      {popup === 'return' && (
+        <RemarkPopup
+          chrome="modal"
+          action="return"
+          officer={officerName}
+          initialText={remarks}
+          targets={returnTargets}
+          submitting={busy}
+          error={actionError}
+          onCancel={() => setPopup(null)}
+          onConfirm={sendRemark}
+        />
       )}
     </div>
   )

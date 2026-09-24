@@ -159,8 +159,9 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
             ->postJson("/api/v1/assignments/{$assignmentId}/approve", ['remarks' => 'ok'])
             ->assertOk();
 
-        // Paperwork accepted, nobody sent out yet.
-        expect(Permit::where('application_id', $appId)->count())->toBe($issued);
+        // Paperwork accepted, nobody sent out yet. Clearances only — the
+        // business permit has been out since payment.
+        expect(clearancePermitsIssued($appId))->toBe($issued);
 
         $visitId = $this->withHeaders($officer)
             ->postJson("/api/v1/applications/{$appId}/permits/{$code}/inspection", [
@@ -173,15 +174,17 @@ it('walks a filing from draft to an issued Mayor’s Permit, issuing each other 
 
         $issued++;
         /*
-         * The LAST office's pass lands TWO certificates: its own clearance and
-         * the Mayor's Permit, minted in the same transaction since
-         * 18 September 2026. Spelled out as `+ 1` on the final turn rather than
-         * relaxed to `>=`, because five offices issuing five and the sixth
-         * having a different cause is the fact worth keeping.
+         * The LAST office's pass used to land TWO certificates — its own
+         * clearance and the Mayor's Permit, minted in the same transaction
+         * between 18 and 24 September 2026. The LGU then moved the release to
+         * payment, so the Mayor's Permit is out long before this loop starts
+         * and the `+ 1` is gone with the rule behind it.
+         *
+         * What the loop is about survives intact, and reads more plainly for
+         * it: five offices release five certificates, one each, as each one
+         * finishes.
          */
-        $isLast = $issued === count(HAPPY_PATH_OFFICE);
-        expect(Permit::where('application_id', $appId)->count())
-            ->toBe($issued + ($isLast ? 1 : 0));
+        expect(clearancePermitsIssued($appId))->toBe($issued);
     }
 
     /*

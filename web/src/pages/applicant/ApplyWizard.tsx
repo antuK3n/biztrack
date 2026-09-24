@@ -27,7 +27,14 @@ import { TinInput } from '../../components/TinInput'
 import { LandlineInput, MobileNumberInput } from '../../components/ContactNumberInput'
 import { MOBILE_ERROR, canonicalMobile, mobileValid } from '../../lib/phone'
 import { Skeleton } from '../../components/ui/primitives'
-import { FieldLabel, PillButton, ProtoModal, inputCls } from '../../components/ui/Proto'
+import {
+  FieldError,
+  FieldLabel,
+  OriginalsNotice,
+  PillButton,
+  ProtoModal,
+  inputCls,
+} from '../../components/ui/Proto'
 import { formatBytes, formatDate, formatMoney } from '../../lib/format'
 import { toApiError } from '../../lib/api'
 import {
@@ -300,7 +307,44 @@ const BASE_PHASES: BasePhase[] = [
  * CPDD's sheet becomes a step between the changes and the documents; one that
  * only corrects how an address is written does not, and never sees it.
  */
+/**
+ * Mode of Payment, as MCG-BPLO-FO-002 prints it.
+ *
+ * Three boxes on the paper. Revenue Code Sec. 2N provides for two — annual,
+ * in the first twenty days of January, and quarterly, in the first twenty of
+ * January, April, July and October. There is no semi-annual instalment in the
+ * Code, and it is offered here because the form the city hands out at the
+ * counter offers it: an applicant who ticked it on paper has to be able to
+ * file the same answer online.
+ */
+const PAYMENT_MODES = [
+  { value: 'annual', label: 'Annually' },
+  { value: 'semi_annual', label: 'Semi-Annually' },
+  { value: 'quarterly', label: 'Quarterly' },
+] as const
+
+type PaymentMode = (typeof PAYMENT_MODES)[number]['value']
+
 const AMENDMENT_PHASES: BasePhase[] = ['privacy', 'amendments', 'documents', 'review']
+
+/**
+ * A renewal of the business permit: MCG-BPLO-FO-002, and only what it asks.
+ *
+ * The paper has two sections. A is the amendment question, which came out of
+ * this wizard on 9 September 2026 when amendments became their own filing
+ * type. B is Business Operation. That leaves Section B, its documents and the
+ * review — which is this array.
+ *
+ * `address` and `business` are NOT here, on the client's instruction of
+ * 24 September 2026. They asked the applicant to retype a registration
+ * number, a TIN, an owner's name and a pin on a map that the city has held
+ * since the business first filed and that a renewal, by definition, is not
+ * changing. A renewal that does need them changed files an amendment.
+ *
+ * The FORM STATE for those sections is untouched — see the note on
+ * `sequence`. What goes is the asking.
+ */
+const RENEWAL_PHASES: BasePhase[] = ['privacy', 'operation', 'documents', 'review']
 
 /*
  * `business` is captioned with the paper's full section title now — "Business
@@ -850,7 +894,7 @@ function percentValid(raw: string): boolean {
   return Number.isFinite(n) && n >= 0 && n <= 100
 }
 
-/* ── Type of registration, and the agency it decides (item 94) ──────────── */
+/* ── Form of organization, and the agency it decides (item 94) ──────────── */
 
 type RegistrationAgency = 'DTI' | 'SEC' | 'CDA'
 
@@ -897,7 +941,19 @@ const REGISTRATION_AGENCIES: Record<
   { label: string; placeholder: string; hint: string; shape: RegExp | null; unusual: string }
 > = {
   DTI: {
-    label: 'DTI Business Name Registration Number',
+    /*
+     * "DTI Registration Number", shortened 24 September 2026.
+     *
+     * It read "DTI Business Name Registration Number" — the certificate's
+     * full title, and the longest field name on the form by half again. Once
+     * the fields were packed to their own widths it was the only label that
+     * wrapped, which dropped its input a line below everything beside it.
+     *
+     * It also said "Business Name" in a field that is not the business name
+     * — item 3 is — so the shorter version is the clearer one as well. The
+     * hint underneath still names the certificate in full.
+     */
+    label: 'DTI Registration Number',
     placeholder: 'as printed on your DTI certificate',
     hint: 'Issued by the Department of Trade and Industry. Copy it from your Certificate of Business Name Registration.',
     /*
@@ -1026,17 +1082,23 @@ function registrationNumberValid(raw: string): boolean {
   return trimmed.length >= 4 && /^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-/]*$/.test(trimmed)
 }
 
-/**
- * A registration number reduced to what identifies the certificate.
+/*
+ * `normalizeRegistrationNumber` was here, mirroring
+ * `Business::normalizeRegistrationNumber` so the browser and the API agreed
+ * about when two numbers are the same one.
  *
- * Mirrors `Business::normalizeRegistrationNumber` exactly, and has to: the API
- * refuses a number already held by ANOTHER account on this comparison, so a
- * browser comparing differently would either miss the notice or show one the
- * server does not agree with. Keep the two in step.
+ * Its only caller was the "already registered under this number" notice,
+ * removed on 24 September 2026 — see the note where that notice was drawn.
+ * `tsc` found this the moment the notice went, which is the argument for
+ * taking a whole chain out rather than just the markup: a helper still
+ * computing an answer nobody reads is how the next person concludes the
+ * feature is still live.
+ *
+ * The API's own comparison is untouched. Nothing in the browser needs to
+ * agree with it any more, and if something does again, copy it back from
+ * the PHP rather than from memory — the two drifting is the failure the
+ * original note was warning about.
  */
-function normalizeRegistrationNumber(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
-}
 
 /**
  * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where the taxpayer
@@ -1240,7 +1302,7 @@ function WizardSection({
   const incomplete = missing.length > 0
 
   return (
-    <section aria-labelledby={`review-${name}`} className="scroll-mt-4">
+    <section aria-labelledby={`review-${name}`} className="scroll-mt-3">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-t-sm border-b-2 border-royal bg-royal-tint px-5 py-3">
         <h2 id={`review-${name}`} className="text-[15px] font-bold text-ink">
           {label}
@@ -1258,7 +1320,7 @@ function WizardSection({
             {incomplete ? `${missing.length} still needed` : 'Complete'}
           </span>
         </h2>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => onEdit()}
@@ -1287,7 +1349,7 @@ function WizardSection({
       <div
         id={`review-body-${name}`}
         hidden={!open}
-        className="rounded-b-sm bg-white px-5 py-4 shadow-card"
+        className="rounded-b-sm bg-white px-5 py-3 shadow-card"
       >
         <dl hidden={editing}>
           {answers.length === 0 ? (
@@ -1448,7 +1510,7 @@ function FormSheet({
           </p>
           <h1 className="mt-1.5 text-2xl font-bold text-ink">{meta.title}</h1>
           <p className="mt-1 text-xs text-ink-muted">Form Ref: {meta.ref}</p>
-          <div className="mb-6 mt-3 h-px bg-royal" />
+          <div className="mb-4 mt-3 h-px bg-royal" />
         </>
       )}
       {/*
@@ -1471,7 +1533,7 @@ function FormSheet({
           form and a panel that has to be scrolled past six times is a panel
           that stops being read.
         */
-        <div className="mb-6 rounded-lg border border-royal/30 border-l-4 border-l-royal bg-royal-tint/60 px-4 py-3">
+        <div className="mb-4 rounded-lg border border-royal/30 border-l-4 border-l-royal bg-royal-tint/60 px-4 py-3">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-royal">
             This filing is for
           </p>
@@ -1602,7 +1664,7 @@ function LinesStep({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <PsicPicker
         ref={pickerRef}
         codes={codes}
@@ -1636,7 +1698,7 @@ function LinesStep({
       </p>
 
       {lines.length > 0 && (
-        <div className="rounded-lg border border-input-border bg-royal-tint p-4">
+        <div className="rounded-lg border border-input-border bg-royal-tint p-3">
           {/*
            * One answer, presented as one answer.
            *
@@ -1685,7 +1747,7 @@ function LinesStep({
                */
               return (
                 <div key={line.psic_code_id}>
-                  <div className="flex items-start gap-3">
+                  <div className="relative flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       {isOther ? (
                         <div>
@@ -1747,9 +1809,9 @@ function LinesStep({
                     </div>
                   </div>
                   {needsText && (
-                    <p className="mt-1 text-sm font-medium text-s-red">
+                    <FieldError>
                       Type the line of business you want registered.
-                    </p>
+                    </FieldError>
                   )}
                   {/*
                    * Products / Services, back — because the step now REFUSES
@@ -2226,7 +2288,7 @@ function IdentifyFilingModal({
       </p>
 
       {/* ── 1. Which business ────────────────────────────────────────────── */}
-      <label className="mt-5 block">
+      <label className="mt-3 block">
         <FieldLabel required>Which business are you {verb}?</FieldLabel>
         <select
           className={inputCls}
@@ -2282,7 +2344,7 @@ function IdentifyFilingModal({
         question nobody needs to be asked.
       */}
       {businessId !== null && applicationType !== 'amendment' && (
-        <div className="mt-5">
+        <div className="mt-3">
           <FieldLabel required>Which permits are you {verb}?</FieldLabel>
           {/*
             One bill, said where the ticking happens.
@@ -2492,7 +2554,7 @@ function IdentifyFilingModal({
            * work out what happened.
            */}
           {!loadingPermits && !loadError && permits.length === 0 && (
-            <div className="rounded-lg border border-input-border bg-royal-tint/40 p-4">
+            <div className="rounded-lg border border-input-border bg-royal-tint/40 p-3">
               <p className="text-[13px] font-semibold text-ink">
                 This business has no permit to renew yet.
               </p>
@@ -3112,6 +3174,13 @@ export function ApplyWizard() {
   }
   const [showConfirm, setShowConfirm] = useState(false)
   const [consent, setConsent] = useState(false)
+  /*
+   * Defaults to annual, which is both the Code's ordinary case and what the
+   * server has always written when the key is absent. A renewal that never
+   * reaches the picker therefore records what it would have recorded before
+   * this existed.
+   */
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('annual')
 
   const refs = useAsync(
     async () => ({
@@ -3271,6 +3340,44 @@ export function ApplyWizard() {
          */
         permit_type_ids: f.permit_type_ids,
       }))
+      /*
+        ── Section B, answered before the applicant reaches it ──────────────
+
+        Client, 24 September 2026: *"make sure the fields already have answers
+        (auto-filled from the information submitted in the new permit
+        application)."* A renewal asks Section B and nothing else now, so an
+        applicant meeting it blank would be retyping figures the city has held
+        since they first filed.
+
+        `feeProfileToDraft` is the same reader the reopened-draft path uses, so
+        there is one mapping from the wire shape to this form's state.
+
+        GROSS SALES IS CLEARED, and that is the point of doing this here rather
+        than on the server. Everything else in Section B is a standing fact
+        about the business that changes rarely and is worth starting from. Last
+        year's receipts are not: they are THIS renewal's declaration, they are
+        what the assessment is computed from, and a prefilled figure is one an
+        applicant can accept by pressing Next. So the boxes arrive empty and
+        the question gets asked.
+      */
+      if (result.last_fee_profile) {
+        const carried = feeProfileToDraft(
+          result.last_fee_profile,
+          (b.lines ?? []).map((l) => l.psic_code.id),
+        )
+        setFeeDraft({
+          ...carried,
+          categories: Object.fromEntries(
+            Object.entries(carried.categories).map(([id, c]) => [id, { ...c, gross_sales: '' }]),
+          ),
+          /*
+           * And the "no gross sales to declare" tick with it. It is an answer
+           * about the year being declared, so carrying last year's would have
+           * the form assert something on the applicant's behalf.
+           */
+          no_gross_sales: false,
+        })
+      }
       // Item 85: the choice of permit is the applicant's to make, so the list
       // arrives unticked. `last_permit` only suggests where to look — it is
       // the newest issued, which is rarely the one about to lapse.
@@ -3971,6 +4078,23 @@ export function ApplyWizard() {
     ).map((code): OfficeStep => `office:${code}`)
   }, [applicationType, permitTypes, form.permit_type_ids])
 
+  /**
+   * Is this the BPLO renewal — the one FO-002 is the paper for?
+   *
+   * Distinct from `officeSteps.length === 0`, which is also true of a renewal
+   * with nothing ticked yet: the entry dialog is still open then, and giving
+   * that transient state the cut-down sequence would move the step bar under
+   * the applicant as they answer it.
+   */
+  const renewsBusinessPermit = useMemo(
+    () =>
+      applicationType === 'renewal' &&
+      permitTypes.some(
+        (pt) => pt.code === BUSINESS_PERMIT_CODE && form.permit_type_ids.includes(pt.id),
+      ),
+    [applicationType, permitTypes, form.permit_type_ids],
+  )
+
   const sequence: Phase[] = useMemo(() => {
     if (applicationType === 'amendment') {
       if (!amendMovesPremises) return AMENDMENT_PHASES
@@ -3986,8 +4110,14 @@ export function ApplyWizard() {
      */
     if (officeSteps.length > 0) return ['privacy', ...officeSteps, 'review']
 
+    /*
+     * Section B, its documents, and the review. See RENEWAL_PHASES for why
+     * the other two steps are not asked and why their answers survive anyway.
+     */
+    if (renewsBusinessPermit) return RENEWAL_PHASES
+
     return BASE_PHASES
-  }, [applicationType, amendMovesPremises, officeSteps])
+  }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit])
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
@@ -4139,6 +4269,19 @@ export function ApplyWizard() {
       }
     })
 
+    /*
+     * Renewal only, because the picker is — MCG-BPLO-FO-002 prints the box and
+     * MCG-BPLO-FO-001 does not. Appended after the uploads so it reads in the
+     * order the paper does: the requirements list, then the payment line at
+     * the foot of it.
+     */
+    if (applicationType === 'renewal') {
+      documents.push({
+        label: 'Mode of Payment',
+        value: PAYMENT_MODES.find((m) => m.value === paymentMode)?.label ?? '',
+      })
+    }
+
     return {
       address: [
         { label: 'House / Bldg. No.', value: form.house_bldg_no },
@@ -4165,41 +4308,78 @@ export function ApplyWizard() {
       ],
       business: [
         {
-          label: `1. ${structure ? `${structure.agency} Registration Number` : 'Registration Number'}`,
+          label: `2. ${structure ? `${structure.agency} Registration Number` : 'Registration Number'}`,
           value: form.registration_number,
         },
-        { label: '2. Tax Identification Number (TIN)', value: form.tin },
-        { label: '3. Business Name', value: form.name },
-        { label: '4. Trade Name / Franchise', value: form.trade_name },
+        {
+          label: '3. Tax Identification Number (TIN)',
+          /*
+           * The one row on this summary that says something when it is empty.
+           *
+           * Every other blank is a question the applicant chose to skip and an
+           * em dash is the whole story. This blank has a consequence attached
+           * to it — an Other Requirement that holds the filing — and the
+           * Confirm step is the last place it can be mentioned before that
+           * becomes news rather than a choice.
+           */
+          value:
+            form.tin.trim() ||
+            'Not given — an officer will ask for it under Other Requirements.',
+        },
+        { label: '4. Business Name', value: form.name },
+        { label: '5. Trade Name / Franchise', value: form.trade_name },
         /*
-         * Items 5 and 16 are absent on purpose — Main Office Address is asked
-         * on Location & Zoning with the map, and Residential Address is not
-         * collected at all. The gaps in the numbering are the record of that.
+         * Numbered in the order the step ASKS, 1 to 13, matching the labels on
+         * the form itself. These were the paper's item numbers and carried its
+         * gaps — 5 and 16 are asked elsewhere or not at all — until the client
+         * ruled against them on 24 September 2026. The reasoning is on the
+         * form's own labels; what matters here is only that the two agree,
+         * because this list is read back to the applicant beside them.
          */
         { label: '6. Telephone (Landline)', value: form.telephone },
         { label: '7. Mobile Number', value: form.mobile_number },
         { label: '8. E-mail Address', value: form.email },
         { label: '9. Website Address', value: form.website },
-        { label: '10. Type of Registration', value: structure?.label ?? '' },
-        { label: '11 / 12. Owner / Representative', value: owner },
-        { label: '11 / 12. Gender', value: form.owner_gender },
-        /* A15-A17 are asked only of the structures that have a president. */
-        ...(form.president_officer_name || form.citizenship || form.capital_participation_filipino
-          ? [
-              {
-                label: '13. Name of President / Officer in Charge',
-                value: form.president_officer_name,
-              },
-              {
-                label: '14. Citizenship (of President/OIC)',
-                value: form.citizenship,
-              },
-              {
-                label: '15. Capital Participation (% Filipino)',
-                value: form.capital_participation_filipino,
-              },
-            ]
-          : []),
+        { label: '1. Form of Organization', value: structure?.label ?? '' },
+        /*
+         * ── 10 to 13, one range for four boxes ───────────────────────────
+         *
+         * The form numbers surname, given name, middle name and suffix
+         * separately; the summary reads them back as the one name they
+         * compose, so it carries the range rather than repeating the four
+         * labels over four near-empty rows.
+         *
+         * MCG-BPLO-FO-001 numbers this block 11 or 12 depending on the
+         * structure, and skips one either way. This form has not followed
+         * the paper's numbering since the client asked for it to run
+         * sequentially on 24 September 2026 — what matters is that the page
+         * and this summary agree with each other, which is why they are
+         * always renumbered in the same edit.
+         */
+        { label: '10–13. Owner / Representative', value: owner },
+        { label: '14. Gender', value: form.owner_gender },
+        /*
+         * 15 to 17 are asked of EVERY structure — both arrows on the paper
+         * point at its item 13 — so they are always read back, blank or not.
+         * The
+         * comment here used to say they were "asked only of the structures
+         * that have a president", which stopped being true on 16 September
+         * 2026, and the condition below it hid the rows whenever all three
+         * were empty: a summary that silently drops the questions somebody
+         * left unanswered is the one place that should not.
+         */
+        {
+          label: '15. Name of President / Officer in Charge',
+          value: form.president_officer_name,
+        },
+        {
+          label: '16. Citizenship (of President/OIC)',
+          value: form.citizenship,
+        },
+        {
+          label: '17. Capital Participation (% Filipino)',
+          value: form.capital_participation_filipino,
+        },
         {
           label: 'Emergency Contact Person',
           value: form.emergency_contact_name,
@@ -4478,24 +4658,6 @@ export function ApplyWizard() {
     }
   }, [phase, applicationId, feeDraft, applicationType, form.lines, form.capital_investment])
 
-  const registrationNumberOwnedElsewhere: string[] = useMemo(() => {
-    const key = normalizeRegistrationNumber(form.registration_number)
-    if (key === '') return []
-
-    /*
-     * Every match, not the first. The register already holds an account with
-     * two businesses on one number, and `.find()` named one of them — which
-     * reads as "there is one other" when there are two, and the applicant
-     * checking their records against it finds a discrepancy we invented.
-     */
-    return (ownedBusinesses.data ?? [])
-      .filter(
-        (b) =>
-          b.id !== prefillBusinessId &&
-          normalizeRegistrationNumber(b.registration_number ?? '') === key,
-      )
-      .map((b) => b.name)
-  }, [form.registration_number, ownedBusinesses.data, prefillBusinessId])
 
 
   /**
@@ -4859,7 +5021,7 @@ export function ApplyWizard() {
            * Asking the mapping instead means only a real structure counts.
            */
           const agency = agencyFor(form.registration_type)
-          if (agency === null) missing.push('Type of Registration')
+          if (agency === null) missing.push('1. Form of Organization')
           const numberLabel = agency
             ? REGISTRATION_AGENCIES[agency].label
             : 'Your registration number'
@@ -4867,8 +5029,15 @@ export function ApplyWizard() {
           else if (!registrationNumberValid(form.registration_number)) {
             missing.push(`A valid ${numberLabel}`)
           }
-          if (!form.tin.trim()) missing.push('Tax Identification Number (TIN)')
-          else if (!tinValid(form.tin)) missing.push('A valid TIN (9 digits, plus branch code)')
+          /*
+           * Optional since 24 September 2026, so a blank one does not hold
+           * the step back. A TYPED one still has to be a TIN: somebody who
+           * meant to give it and mistyped it wants to hear about it, and the
+           * server rejects the same value either way.
+           */
+          if (form.tin.trim() && !tinValid(form.tin)) {
+            missing.push('A valid TIN (9 digits, plus branch code)')
+          }
           /*
            * ── The blanket "paper fields are optional" rule ended here ────────
            *
@@ -4892,7 +5061,13 @@ export function ApplyWizard() {
            *    carinderias and market stalls genuinely have none, so requiring
            *    one buys a false answer rather than a real one (client's
            *    decision, 9 September 2026).
-           *  OPTIONAL — Website and Trade Name: the same, more so.
+           *  REQUIRED — Trade Name: optional under the 9 September reading
+          *    ("Website and Trade Name: the same, more so"), and reversed by
+          *    the client on 24 September 2026. A business that trades under
+          *    its registered name answers with that name; the field asks
+          *    what is over the door, which every business has.
+          *  OPTIONAL — Website: most of these businesses have none, so
+          *    requiring one buys a false answer rather than a real one.
            *
            * Anything still optional is validated when filled and never demanded
            * when blank, which is what these three checks were doing for
@@ -4902,6 +5077,7 @@ export function ApplyWizard() {
           else if (!phoneValid(form.mobile_number)) missing.push('A valid Mobile Number')
           if (!form.email.trim()) missing.push('E-mail Address')
           else if (!emailValid(form.email)) missing.push('A valid E-mail Address')
+          if (!form.trade_name.trim()) missing.push('Trade Name / Franchise')
           if (form.telephone.trim() && !phoneValid(form.telephone)) {
             missing.push('A valid Telephone (Landline)')
           }
@@ -5498,11 +5674,82 @@ export function ApplyWizard() {
   const registrationNumberLabel =
     registrationAgencyInfo?.label ?? 'DTI / SEC / CDA Registration Number'
   /*
-   * Whether to put BPLO items A13-A15 at all. Gated on the Type of Registration
-   * chosen a few fields above — see hasPresidentOrOfficer for why a sole
-   * proprietor is not asked to name their own president.
+   * Whether to put BPLO items A13-A15 at all. Gated on the Form of
+   * Organization chosen at the top of the step — see hasPresidentOrOfficer,
+   * which has answered "yes, for every structure" since 16 September 2026.
+   * A sole proprietor IS asked, and their answer arrives prefilled from the
+   * name they gave in items 10 to 13.
    */
   const presidentAsked = hasPresidentOrOfficer(form.registration_type)
+  /**
+   * Item 15 is an answer rather than a question.
+   *
+   * Client, 24 September 2026: *"In the sole proprietorship, make the name of
+   * president/OIC uneditable."* A sole proprietor IS their own officer in
+   * charge, and the box has filled itself from items 10 to 13 since the
+   * prefill went in — it just used to invite them to change it afterwards.
+   */
+  const oicIsProprietor = form.registration_type === 'sole_proprietorship'
+
+  /*
+   * ── Item 13 fills itself for a sole proprietor ─────────────────────────
+   *
+   * The note under this box has said "this is filled in from your name
+   * above" since 16 September 2026, and nothing filled it. The field
+   * rendered `form.president_officer_name` raw, so a sole proprietor met an
+   * empty box under a sentence claiming it was already answered — which is
+   * what made item 13 read as the same question as item 11, and what the
+   * client reported on 24 September.
+   *
+   * A WRITE, not a placeholder. The paper wants a name in box 13 and the
+   * officer's sheet prints one, so a grey hint that submits nothing would
+   * have fixed the appearance and left the dash — the exact failure the
+   * 16 September decision was made to remove.
+   *
+   * ── It stops the moment the applicant types ────────────────────────────
+   *
+   * `oicTouched` is the whole of the care here. Without it the effect would
+   * re-impose the proprietor's name over whatever they typed on the next
+   * keystroke in item 11 — and the note explicitly invites them to change
+   * it, because a sole proprietorship may be run day to day by somebody
+   * else. A prefill that fights the person filling it in is worse than none.
+   *
+   * Only for a sole proprietorship. A corporation's president is a different
+   * person from the account holder by definition, and seeding their name
+   * there would be inventing an answer.
+   */
+  const proprietorFullName = useMemo(
+    () =>
+      [form.owner_given_name, form.owner_middle_name, form.owner_surname, form.owner_suffix]
+        .map((part) => part.trim())
+        .filter((part) => part !== '')
+        .join(' '),
+    [
+      form.owner_given_name,
+      form.owner_middle_name,
+      form.owner_surname,
+      form.owner_suffix,
+    ],
+  )
+  useEffect(() => {
+    if (!oicIsProprietor) return
+    if (form.president_officer_name === proprietorFullName) return
+
+    /*
+     * Mirrored, not seeded — including back to blank while items 10 to 13
+     * are still being typed. The box is read-only for a sole proprietor, so
+     * there is nothing of the applicant's to overwrite and nothing to defer
+     * to; a value left standing here after they cleared their surname would
+     * be a name the form invented and nobody could delete.
+     *
+     * `oicTouched` used to guard this. It recorded "the applicant has taken
+     * this box over", which stopped being a thing that can happen.
+     */
+    update('president_officer_name', proprietorFullName)
+    // `update` is stable and `form.president_officer_name` is read only to
+    // avoid a redundant write; depending on it would not change the outcome.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oicIsProprietor, proprietorFullName])
 
   /**
    * Item 94 — choosing a structure, and what that does to the number already
@@ -5523,16 +5770,45 @@ export function ApplyWizard() {
   function chooseRegistrationType(next: string) {
     const from = agencyFor(form.registration_type)
     const to = agencyFor(next)
+    const structureChanged = next !== form.registration_type
     setForm((f) => ({
       ...f,
       registration_type: next,
       registration_number: from !== null && from !== to ? '' : f.registration_number,
+      /*
+       * Item 15 is emptied on any change of structure, and the effect
+       * above refills it from items 10 to 13 when the new answer is a sole
+       * proprietorship. Client, 24 September 2026: *"when sole
+       * proprietorship is used, the name of Pres/OIC will be autofilled by
+       * the input Surname to Suffix. Otherwise, the name of Pres/OIC will
+       * be blank."*
+       *
+       * Without this, a sole proprietor who corrected item 1 to Corporation
+       * left their OWN name standing in the president's box — an answer
+       * they never gave about a company officer, and one that looks
+       * deliberate rather than left over.
+       */
+      president_officer_name: structureChanged ? '' : f.president_officer_name,
     }))
     if (from !== null && from !== to) setTouched((t) => ({ ...t, registration_number: false }))
   }
 
   const fieldErrors = {
     name: touched.name && !form.name.trim() ? 'Enter your business name.' : '',
+    /*
+     * Required since 24 September 2026, on the client's instruction. It had
+     * been optional under this file's standing rule that none of the paper
+     * forms marks anything required — the same rule the employee split was
+     * taken out of on 9 September.
+     *
+     * Silent until they leave the box, like every other blank-value message
+     * on this step: complaining about an empty field the moment focus lands
+     * in it is telling somebody off for not having typed yet.
+     */
+    trade_name:
+      touched.trade_name && !form.trade_name.trim()
+        ? 'Enter the name your business trades under. Repeat your business name if they are the same.'
+        : '',
     /*
      * Nothing to complain about before a structure is chosen: the field is not
      * being asked yet, and an error on a question that has not been put is just
@@ -5555,16 +5831,15 @@ export function ApplyWizard() {
      * is a non-empty value that is not a valid TIN. That was merely untidy in a
      * single box; across four it paints the whole group red for the eleven
      * digits it takes to get to a right answer, which teaches the applicant to
-     * ignore the colour. What is still needed is never hidden — the step's
-     * "still needed on this part" list names the TIN from the start.
+     * ignore the colour.
+     *
+     * An EMPTY TIN is no longer an error. Client, 24 September 2026: *"remove
+     * TIN as required. This is optional field."* A wrong TIN is still worth
+     * saying so about — a transposed digit is a different failure from a
+     * deliberate blank, and only one of the two is the applicant's choice.
      */
-    tin: !touched.tin
-      ? ''
-      : form.tin.trim()
-        ? tinValid(form.tin)
-          ? ''
-          : TIN_ERROR
-        : 'Enter your Tax Identification Number.',
+    tin:
+      touched.tin && form.tin.trim() && !tinValid(form.tin) ? TIN_ERROR : '',
     lot_area_sqm:
       form.lot_area_sqm.trim() && !lotAreaValid(form.lot_area_sqm)
         ? 'Enter the lot area in square metres, like 120.'
@@ -5813,6 +6088,7 @@ export function ApplyWizard() {
       application_type: applicationType,
       title: title.trim() || undefined,
       data_privacy_consent: consent,
+      payment_mode: paymentMode,
       permit_type_ids: form.permit_type_ids,
       ...(priorPermitIds.length > 0 ? { prior_permit_ids: priorPermitIds } : {}),
       ...(priorPermitId ? { prior_permit_id: priorPermitId } : {}),
@@ -5913,7 +6189,20 @@ export function ApplyWizard() {
       }
       return true
     } catch (err) {
-      setSubmitError(toApiError(err).message)
+      /*
+       * A 422 here is the step being incomplete, which the form already says
+       * field by field and again in "Still needed on this part". Bannering it
+       * repeats one of those in the API's wording, at the top of the page,
+       * about a question the applicant may not have reached — see the autosave
+       * catch for the full reasoning and for which failures still surface.
+       *
+       * `false` is still returned either way: an unsaved step must not be
+       * left, silently or otherwise, so the navigation is refused as before.
+       */
+      const failure = toApiError(err)
+      if (failure.status !== 422) {
+        setSubmitError(failure.message)
+      }
       return false
     } finally {
       inFlightRef.current = false
@@ -6568,7 +6857,12 @@ export function ApplyWizard() {
      */
     registrationAgency !== null &&
     registrationNumberValid(form.registration_number) &&
-    tinValid(form.tin) &&
+    /*
+     * Blank is allowed through; wrong is not. `tinValid('')` is false — the
+     * pattern needs at least one character — so an optional field would have
+     * silently blocked every draft without the first clause.
+     */
+    (form.tin.trim() === '' || tinValid(form.tin)) &&
     form.lines.length > 0 &&
     form.street.trim() !== '' &&
     form.barangay_id !== '' &&
@@ -6646,6 +6940,12 @@ export function ApplyWizard() {
            * otherwise be created with `false` and never corrected.
            */
           data_privacy_consent: consent,
+          /*
+           * On every autosave, for the reason the consent tick is: the picker
+           * is on the documents step, and a draft created before the applicant
+           * reaches it would otherwise keep the default for good.
+           */
+          payment_mode: paymentMode,
           // Items 82/84: what is being amended can change while the draft is
           // open, so it rides on every autosave, not only on creation.
           ...amendmentPayload(),
@@ -6667,7 +6967,37 @@ export function ApplyWizard() {
     } catch (err) {
       // Leave the draft dirty: the indicator keeps saying so, and the next
       // edit tries again.
-      setSubmitError(toApiError(err).message)
+      const failure = toApiError(err)
+
+      /*
+        ── A 422 from AUTOSAVE is not news ─────────────────────────────────
+
+        This banner printed every validation error the API raised while the
+        applicant was still typing. Opening the form and reaching the second
+        field was enough: autosave fires, the API refuses a business with no
+        registration number, and a red bar appears at the top of the page
+        saying "Enter your DTI Business Name registration number." — above a
+        field already saying the same thing in its own words, about a
+        question they had not reached yet.
+
+        Client, 24 September 2026: *"These warnings are redundant. Remove the
+        one at the top."*
+
+        Dropped rather than reworded, because a 422 here carries nothing the
+        screen is not already saying better: `fieldErrors` names each box
+        under the box itself, and "Still needed on this part" lists them all
+        by number above Continue — which is disabled until they are answered,
+        so an incomplete step cannot be submitted regardless.
+
+        Only 422. Everything else still surfaces, and has to: a 401 means
+        their session went, a 403 that the business was suspended under them,
+        a 5xx or a network failure that their typing is not being saved at
+        all. Those are invisible without this banner, and the draft stays
+        dirty either way so the next edit retries.
+      */
+      if (failure.status !== 422) {
+        setSubmitError(failure.message)
+      }
     } finally {
       inFlightRef.current = false
       setSaving(false)
@@ -7062,6 +7392,13 @@ export function ApplyWizard() {
         // as the applicant's own words and stop generating over it, even if the
         // text happens to match what we would have produced.
         setTitleEdited(Boolean(app.title?.trim()))
+        /*
+         * Reopened as it was left. Without this the picker resets to annual and
+         * the next autosave writes that over a quarterly election the applicant
+         * made — the draft losing an answer silently, which is the failure the
+         * amendment ticks above were restored to avoid.
+         */
+        if (app.payment_mode) setPaymentMode(app.payment_mode)
         setBusinessId(b.id)
         if (app.application_type !== 'new') setPrefillBusinessId(b.id)
         /*
@@ -7339,7 +7676,7 @@ export function ApplyWizard() {
   /*
    * Item 72 — Business Structure is not a second question.
    *
-   * "Type of Registration" on the business section and "Business Structure" on
+   * "Form of Organization" on the business section and "Business Structure" on
    * the tax profile are the same fact under two names: a sole proprietorship is
    * registered with DTI and taxed as one, and no applicant has ever answered
    * them differently on purpose. So the registration type IS the structure, and
@@ -7372,7 +7709,7 @@ export function ApplyWizard() {
      * prefill this field instead of asking for it.
      *
      * Skipping leaves the structure blank, which is the honest state — the
-     * applicant is asked for their Type of Registration on this same step, and
+     * applicant is asked for their Form of Organization on this same step, and
      * that picker offers exactly the four, so answering it fills this in.
      */
     if (!REGISTRATION_TYPES.some((rt) => rt.value === form.registration_type)) return
@@ -7420,11 +7757,11 @@ export function ApplyWizard() {
         <span className="mx-auto flex h-16 w-16 items-center justify-center text-s-green">
           <CheckCircleFilledIcon size={64} />
         </span>
-        <h1 className="mt-4 text-2xl font-bold text-ink">Application submitted</h1>
+        <h1 className="mt-3 text-2xl font-bold text-ink">Application submitted</h1>
         <p className="mt-2 text-sm text-ink-secondary">
           Keep this tracking ID. You can follow every step of processing on your Track page.
         </p>
-        <p className="display-serif mt-6 rounded-2xl bg-white px-4 py-4 text-xl text-ink shadow-card">
+        <p className="display-serif mt-4 rounded-2xl bg-white px-4 py-3 text-xl text-ink shadow-card">
           {tracking}
         </p>
         {/*
@@ -7433,12 +7770,12 @@ export function ApplyWizard() {
          * a filing that sits still with no explanation is the state testers
          * report as broken.
          */}
-        <p className="mt-6 text-sm text-ink-secondary">
+        <p className="mt-4 text-sm text-ink-secondary">
           BPLO is now reviewing your form. No action needed from you right now — we will tell you
           when your Tax Order of Payment is ready, and your five LGU clearances open once it is
           paid.
         </p>
-        <div className="mt-4 flex flex-wrap justify-center gap-3">
+        <div className="mt-3 flex flex-wrap justify-center gap-3">
           <PillButton onClick={() => navigate(`/applications/${applicationId}`)}>
             Track this application
           </PillButton>
@@ -7449,7 +7786,7 @@ export function ApplyWizard() {
 
   if (refs.loading || hydrating) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-3">
         <Skeleton className="h-6 w-64" />
         <Skeleton className="h-80 w-full rounded-lg" />
       </div>
@@ -7473,7 +7810,7 @@ export function ApplyWizard() {
         <Alert variant="error" title="We couldn’t open this draft">
           {hydrateFailed} Your saved draft has not been changed.
         </Alert>
-        <div className="mt-6 flex justify-center gap-3">
+        <div className="mt-4 flex justify-center gap-3">
           <PillButton onClick={() => window.location.reload()}>Try again</PillButton>
           <PillButton
             className="border-2 border-royal bg-white !text-royal hover:bg-royal-tint"
@@ -7491,7 +7828,7 @@ export function ApplyWizard() {
   return (
     <div className="mx-auto max-w-5xl pb-4">
       {/* ── Persistent wizard chrome (p32/p34) ─────────────────────────── */}
-      <div className="mb-5 flex items-center gap-4">
+      <div className="mb-3 flex items-center gap-3">
         <ClipboardIcon size={34} className="shrink-0 text-royal" />
         {/*
           Name the filing, not the business: one business can have three
@@ -7628,7 +7965,7 @@ export function ApplyWizard() {
       {reviewAll && (
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <h1 className="display-serif mb-1 text-2xl text-ink-secondary">Review &amp; Submit</h1>
-          <div className="mb-5 h-px bg-ink/40" />
+          <div className="mb-3 h-px bg-ink/40" />
           <p className="text-sm text-ink">
             Here is everything you entered. Read it over, and press{' '}
             <span className="font-semibold">Change</span> on any answer you need to correct.
@@ -7647,7 +7984,7 @@ export function ApplyWizard() {
             asked for and planted the idea that something might have been lost.
             It says what the button does instead.
           */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
+          <div className="mt-3 flex flex-wrap items-center gap-3">
             <button
               type="button"
               onClick={() => setAllSections(!allSectionsOpen)}
@@ -7764,7 +8101,7 @@ export function ApplyWizard() {
             )}
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-[1.15fr_1fr]">
+          <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr]">
             {/*
              * The map column: the picker, then the figures for whatever it is
              * pointing at. One column, because they are one question — "is this
@@ -8076,7 +8413,7 @@ export function ApplyWizard() {
                 />
               )}
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <div>
                 {/*
                   ── Item 5's two boxes, as the paper prints them ─────────────
@@ -8096,7 +8433,7 @@ export function ApplyWizard() {
                   known only by its building's name — and the paper prints a
                   line for it without marking it required.
                 */}
-                <div className="grid gap-4 sm:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label className="block">
                       <FieldLabel>House / Bldg. No.</FieldLabel>
@@ -8117,7 +8454,7 @@ export function ApplyWizard() {
                       />
                     </label>
                   </div>
-                  <div className="sm:col-span-2">
+                  <div className="relative sm:col-span-2">
                     <label className="block">
                       <FieldLabel required>Street</FieldLabel>
                       <input
@@ -8133,7 +8470,9 @@ export function ApplyWizard() {
                       />
                     </label>
                     {fieldErrors.street && (
-                      <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.street}</p>
+                      <FieldError>
+                        {fieldErrors.street}
+                      </FieldError>
                     )}
                   </div>
                 </div>
@@ -8180,7 +8519,7 @@ export function ApplyWizard() {
                     className={inputCls}
                   />
                 </label>
-                <div>
+                <div className="relative">
                   <label className="block">
                     <FieldLabel>Lot Area (sq. m.)</FieldLabel>
                     <input
@@ -8194,13 +8533,11 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.lot_area_sqm && (
-                    <p id="lot-area-error" className="mt-1 text-sm font-medium text-s-red">
-                      {fieldErrors.lot_area_sqm}
-                    </p>
+                    <FieldError id="lot-area-error">{fieldErrors.lot_area_sqm}</FieldError>
                   )}
                 </div>
               </div>
-              <div>
+              <div className="relative">
                 <label className="block">
                   <FieldLabel required>Barangay Name</FieldLabel>
                   <select
@@ -8298,7 +8635,9 @@ export function ApplyWizard() {
                   </select>
                 </label>
                 {fieldErrors.barangay_id && (
-                  <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.barangay_id}</p>
+                  <FieldError>
+                    {fieldErrors.barangay_id}
+                  </FieldError>
                 )}
               </div>
 
@@ -8330,8 +8669,8 @@ export function ApplyWizard() {
                 </label>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="relative">
                   <label className="block">
                     <FieldLabel required>Emergency Contact Person</FieldLabel>
                     <input
@@ -8344,12 +8683,12 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_name && (
-                    <p className="mt-1 text-sm font-medium text-s-red">
+                    <FieldError>
                       {fieldErrors.emergency_contact_name}
-                    </p>
+                    </FieldError>
                   )}
                 </div>
-                <div>
+                <div className="relative">
                   <label className="block">
                     <FieldLabel required>Emergency Contact Number</FieldLabel>
                     <input
@@ -8363,9 +8702,9 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.emergency_contact_number && (
-                    <p className="mt-1 text-sm font-medium text-s-red">
+                    <FieldError>
                       {fieldErrors.emergency_contact_number}
-                    </p>
+                    </FieldError>
                   )}
                 </div>
               </div>
@@ -8410,8 +8749,8 @@ export function ApplyWizard() {
            * route to reopen the dialog, so it must not be removed with it.
            */}
           {isReuse && (
-            <div className="mt-4 rounded-lg border border-royal/30 bg-royal-tint px-4 py-4">
-              <div className="flex items-start justify-between gap-4">
+            <div className="mt-3 rounded-lg border border-royal/30 bg-royal-tint px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-[13px] font-semibold text-ink">
                     {applicationType === 'renewal' ? 'Renewing' : 'Amending'}
@@ -8528,8 +8867,80 @@ export function ApplyWizard() {
               )}
             </div>
           )}
-          <div className="mt-4 space-y-4">
-            <div>
+          {/*
+            ── One wrapping row, 24 September 2026 ──────────────────────
+
+            Every field is a flex item the width of its own answer. They
+            pack along the line and wrap when it is full, so items 1, 2 and
+            3 share the first line instead of each taking a half. Nothing
+            carries `flex-1`, because stretching is what recreated the equal
+            halves the last two attempts were trying to remove.
+          */}
+          <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-3">
+            {/* `contents`: these children join the wrap rather than form a row. */}
+            <div className="contents">
+            {/*
+              Shares its row with item 2, the number it governs.
+
+              This was `w-full` after an attempt to float it up beside two
+              18rem text boxes wrapped the pills onto two lines and left a
+              hole in the page. The field beside it now is 13rem, so four
+              pills and a number fit on one line — and the pair reads as the
+              one question it is: which register, and the number it issued.
+
+              `shrink-0` rather than a basis, on the client's instruction of
+              24 September 2026: *"Form of Org. should be one row only."* At a
+              basis the cell was sized as a SHARE of the row, which at some
+              widths came out under the four pills and dropped Cooperative
+              onto a second line. Unshrinkable, the cell is exactly as wide as
+              the pills need and item 2 takes what is left.
+
+              `max-w-full` is the escape hatch: on a phone the four pills are
+              wider than the page, and without a ceiling `shrink-0` would push
+              the whole form into a horizontal scroll rather than wrap.
+            */}
+            <div className="max-w-full shrink-0">
+              <FieldLabel required>1. Form of Organization</FieldLabel>
+              {/*
+               * A radiogroup, not four toggle buttons. These are four mutually
+               * exclusive answers to one question, and `aria-pressed` announced
+               * them as four independent switches — a screen-reader user was
+               * told "Corporation, pressed" with no way to hear that it was one
+               * of four or that picking it unpicked another. Same markup as the
+               * "which permit are you renewing" picker above.
+               */}
+              <div
+                role="radiogroup"
+                aria-label="Form of Organization"
+                className="flex flex-wrap gap-2.5"
+              >
+                {REGISTRATION_TYPES.map((rt) => {
+                  const selected = form.registration_type === rt.value
+                  return (
+                    <button
+                      key={rt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => chooseRegistrationType(selected ? '' : rt.value)}
+                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`h-3.5 w-3.5 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {rt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="relative grow basis-[13rem] max-w-full">
               <label className="block">
                 {/*
                  * The label TEXT changes with the chosen structure, so the
@@ -8544,7 +8955,7 @@ export function ApplyWizard() {
                 have read "Enter your 1. DTI Business Name registration
                 number."
               */}
-                <FieldLabel required>1. {registrationNumberLabel}</FieldLabel>
+                <FieldLabel required>2. {registrationNumberLabel}</FieldLabel>
                 <input
                   value={form.registration_number}
                   onChange={(e) => update('registration_number', e.target.value)}
@@ -8587,74 +8998,62 @@ export function ApplyWizard() {
                * agency and giving its example. This element is always mounted
                * so the live region exists before the text it will announce.
                */}
+              {/*
+                `sr-only` since 24 September 2026, not deleted. On the page it
+                restated its own label — "Issued by the Department of Trade and
+                Industry" under a box called DTI Registration Number — and the
+                client asked for it gone. It is still the live region that
+                announces the label CHANGING when the structure is picked, and
+                still the target of `aria-describedby`, both of which break if
+                the element goes.
+              */}
               <p
                 id="registration-number-help"
                 aria-live="polite"
-                className="mt-1 text-xs text-ink-secondary"
+                className="sr-only"
               >
                 {registrationAgencyInfo
                   ? registrationAgencyInfo.hint
-                  : 'Enter the number from your DTI, SEC or CDA certificate. Item 10 below asks which of the three, and this label will narrow to it.'}
+                  : 'Enter the number from your DTI, SEC or CDA certificate. Item 1 beside this asks which of the three, and this label will narrow to it.'}
               </p>
               {/*
-               * A notice, not an error, and in the notice colour — the filing
-               * is valid and Next is not blocked. Below the help text and
-               * above the error, because the error is about this field being
-               * wrong and this is about it being right in two places.
-               *
-               * `aria-live="polite"`: it appears as the applicant types, and a
-               * screen-reader user who has already passed the field would
-               * otherwise never learn of it.
-               */}
-              {/*
-               * "YOUR OTHER BUSINESS", said first and said plainly.
-               *
-               * The first wording opened with the business name — "Johnny's
-               * Fried Chicken is already registered under this number" — and
-               * never said whose business that was. The client read it the only
-               * way it could be read, as somebody else's data on their screen,
-               * and asked whether an owner should be seeing it.
-               *
-               * They were right about the sentence and wrong about the leak:
-               * this reads `businesses.list()`, which is scoped to
-               * `owner_user_id`, so it can only ever name the caller's own.
-               * What made it look otherwise is that the seeded demo account is
-               * shared between testers, so the business it named had been filed
-               * by somebody else using the same login.
-               *
-               * A notice that can be mistaken for a privacy breach is a broken
-               * notice even when the scoping behind it is sound, so the
-               * possessive leads and the name follows it.
-               */}
-              {registrationNumberOwnedElsewhere.length > 0 && (
-                <p
-                  aria-live="polite"
-                  className="mt-1 rounded-md border border-s-orange bg-s-orange-tint px-2.5 py-2 text-xs leading-relaxed text-ink"
-                >
-                  {registrationNumberOwnedElsewhere.length === 1 ? (
-                    <>
-                      Your own business{' '}
-                      <span className="font-semibold">{registrationNumberOwnedElsewhere[0]}</span>{' '}
-                      is already registered under this number.
-                    </>
-                  ) : (
-                    <>
-                      {registrationNumberOwnedElsewhere.length} of your own businesses are already
-                      registered under this number:{' '}
-                      <span className="font-semibold">
-                        {registrationNumberOwnedElsewhere.join(', ')}
-                      </span>
-                      .
-                    </>
-                  )}{' '}
-                  That is fine if you are opening another branch. If you meant to renew instead, go
-                  back and start a renewal.
-                </p>
-              )}
+                ── The "already registered under this number" notice was here ──
+
+                An orange box listing the applicant's other businesses on the
+                same DTI number, ending "That is fine if you are opening
+                another branch. If you meant to renew instead, go back and
+                start a renewal."
+
+                Removed 24 September 2026, asked directly: *"Does this
+                description matter? Remove it if not."* It does not, and the
+                clearest evidence is its own last sentence — a warning that
+                tells you the situation is fine is not a warning. A DTI
+                Business Name Registration Number legitimately covers several
+                branches, so almost everyone who saw this box was doing
+                nothing wrong, and it was three orange lines on the FIRST
+                field of the form.
+
+                The mistake it guarded — filing new when you meant to renew —
+                is guarded earlier and better. The applicant chose New Permit
+                at the entry dialog, where Renewal sits beside it and lists
+                the permits they already hold; advising them to go back, two
+                steps into the form they chose, is late.
+
+                It had been questioned once before, for naming a business
+                without saying whose it was — it reads `businesses.list()`,
+                which is scoped to `owner_user_id`, so it could only ever name
+                the caller's own, but the seeded demo login is shared between
+                testers and the business it named had been filed by somebody
+                else. That was fixed by leading with the possessive. Being
+                asked about twice is the part worth recording.
+
+                `registrationNumberOwnedElsewhere` went with it rather than
+                being left computing an answer nobody reads.
+              */}
               {fieldErrors.registration_number && (
-                <p id="registration-number-error" className="mt-1 text-xs font-medium text-s-red">
+                <FieldError id="registration-number-error">
                   {fieldErrors.registration_number}
-                </p>
+                </FieldError>
               )}
               {/*
                 * The advisory shape check (items 21 and 26). Not an error, not
@@ -8673,7 +9072,6 @@ export function ApplyWizard() {
                   </p>
                 )}
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
               {/*
                * Item 105 — four boxes of three digits, not one box with
                * `000-000-000-000` greyed out inside it.
@@ -8686,8 +9084,17 @@ export function ApplyWizard() {
                * autosave, BusinessController's normalisation, the stored value
                * — knows the difference.
                */}
-              <div>
+              {/* Fixed boxes: growing the cell would only pad it. */}
+              <div className="relative shrink-0">
                 <TinInput
+                  /*
+                   * It showed no number, alone among the questions on this
+                   * step — TinInput has taken one since the numbering went in
+                   * and this call site never passed it, so the sequence read
+                   * 1, (nothing), 3.
+                   */
+                  number={3}
+                  required={false}
                   value={form.tin}
                   onChange={(tin) => update('tin', tin)}
                   onBlur={() => touch('tin')}
@@ -8695,19 +9102,51 @@ export function ApplyWizard() {
                   hintId="tin-hint"
                   errorId="tin-error"
                 />
-                <p id="tin-hint" className="mt-1 text-xs text-ink-secondary">
+                {/*
+                  What skipping it costs, said once and only when it applies.
+
+                  Client: *"put a message or something somewhere that not
+                  submitting a TIN here will be asked for the Other
+                  Requirements."* A modal was offered; this is not one. A
+                  dialog would interrupt every applicant who tabs past the
+                  field on their way to the next question, to tell them about a
+                  consequence they can undo by typing twelve digits — and this
+                  form has spent the week having descriptions taken OUT of it.
+
+                  So it appears where the error used to, on the same trigger:
+                  the applicant has left the question and left it empty. It is
+                  silent for anybody who fills it in, and the Confirm step says
+                  the same thing again for anybody who never reached the field
+                  at all.
+                */}
+                {!fieldErrors.tin && touched.tin && !form.tin.trim() && (
+                  <FieldError tone="note">
+                    Optional. Leave it blank and an officer will ask for it under Other
+                    Requirements, which holds the filing until you answer.
+                  </FieldError>
+                )}
+                {/*
+                  Off the page, still announced. The shape is visible in the
+                  four boxes themselves, but "leave the last box empty if you
+                  have no branch code" is not — and `aria-describedby` above
+                  points here, so deleting it would aim a screen reader at
+                  nothing.
+                */}
+                <p id="tin-hint" className="sr-only">
                   As printed on your BIR certificate, like 123-456-789-000. Leave the last box empty
                   if you have no branch code.
                 </p>
                 {fieldErrors.tin && (
-                  <p id="tin-error" className="mt-1 text-xs font-medium text-s-red">
+                  <FieldError id="tin-error">
                     {fieldErrors.tin}
-                  </p>
+                  </FieldError>
                 )}
               </div>
-              <div>
+            </div>
+            <div className="contents">
+              <div className="relative grow basis-[24rem] max-w-full">
                 <label className="block">
-                  <FieldLabel required>3. Business Name</FieldLabel>
+                  <FieldLabel required>4. Business Name</FieldLabel>
                   <input
                     value={form.name}
                     onChange={(e) => update('name', e.target.value)}
@@ -8717,19 +9156,24 @@ export function ApplyWizard() {
                   />
                 </label>
                 {fieldErrors.name && (
-                  <p className="mt-1 text-xs font-medium text-s-red">{fieldErrors.name}</p>
+                  <FieldError>
+                    {fieldErrors.name}
+                  </FieldError>
                 )}
               </div>
-            </div>
-            <div>
+            <div className="grow basis-[12rem] max-w-full">
               <label className="block">
-                <FieldLabel>4. Trade Name / Franchise</FieldLabel>
+                <FieldLabel required>5. Trade Name / Franchise</FieldLabel>
                 <input
                   value={form.trade_name}
                   onChange={(e) => update('trade_name', e.target.value)}
+                  onBlur={() => touch('trade_name')}
                   className={inputCls}
+                  aria-invalid={Boolean(fieldErrors.trade_name)}
                 />
               </label>
+              {fieldErrors.trade_name && <FieldError>{fieldErrors.trade_name}</FieldError>}
+            </div>
             </div>
 
             {/*
@@ -8750,8 +9194,8 @@ export function ApplyWizard() {
              * Neither is required. A sari-sari store has no landline and no
              * website, and no paper form marks either with an asterisk.
              */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
+            <div className="contents">
+              <div className="relative shrink-0">
                 {/*
                  * Item 10 — the area code is its own group, not a convention
                  * the applicant has to remember. A single box with "Area code
@@ -8774,16 +9218,12 @@ export function ApplyWizard() {
                   errorId="telephone-error"
                 />
                 {fieldErrors.telephone && (
-                  <p
-                    id="telephone-error"
-                    role="alert"
-                    className="mt-1 text-xs font-medium text-s-red"
-                  >
+                  <FieldError id="telephone-error">
                     {fieldErrors.telephone}
-                  </p>
+                  </FieldError>
                 )}
               </div>
-              <div>
+              <div className="relative shrink-0">
                 {/*
                  * Item 10 — +63 and ten digits, and the 09 form does not
                  * appear here at all.
@@ -8808,17 +9248,14 @@ export function ApplyWizard() {
                   hintId="mobile-number-hint"
                   errorId="mobile-number-error"
                 />
-                <p id="mobile-number-hint" className="mt-1 text-xs text-ink-secondary">
+                {/* Says what "Mobile Number" on a business form already says. */}
+                <p id="mobile-number-hint" className="sr-only">
                   The number the city should ring about this business.
                 </p>
                 {fieldErrors.mobile_number && (
-                  <p
-                    id="mobile-number-error"
-                    role="alert"
-                    className="mt-1 text-xs font-medium text-s-red"
-                  >
+                  <FieldError id="mobile-number-error">
                     {fieldErrors.mobile_number}
-                  </p>
+                  </FieldError>
                 )}
               </div>
 
@@ -8834,8 +9271,7 @@ export function ApplyWizard() {
               they are the same and retyping a number you gave at sign-up is not
               a question worth asking. Editable, and stored on the business.
             */}
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
+                <div className="grow basis-[14rem] max-w-full">
                   <label className="block">
                     <FieldLabel required>8. E-mail Address</FieldLabel>
                     <input
@@ -8848,8 +9284,7 @@ export function ApplyWizard() {
                     />
                   </label>
                 </div>
-              </div>
-              <div>
+              <div className="relative grow basis-[13rem] max-w-full">
                 <label className="block">
                   <FieldLabel>9. Website Address</FieldLabel>
                   <input
@@ -8864,13 +9299,9 @@ export function ApplyWizard() {
                   />
                 </label>
                 {fieldErrors.website && (
-                  <p
-                    id="website-error"
-                    role="alert"
-                    className="mt-1 text-xs font-medium text-s-red"
-                  >
+                  <FieldError id="website-error">
                     {fieldErrors.website}
-                  </p>
+                  </FieldError>
                 )}
               </div>
             </div>
@@ -8895,53 +9326,9 @@ export function ApplyWizard() {
              * DTI for a sole proprietorship, SEC for a partnership or a
              * corporation, CDA for a cooperative.
              */}
-            <div>
-              <FieldLabel required>10. Type of Registration</FieldLabel>
-              <p className="mb-2 text-xs text-ink-secondary">
-                Which agency you registered with. It narrows the label on item 1 above to that next.
-              </p>
-              {/*
-               * A radiogroup, not four toggle buttons. These are four mutually
-               * exclusive answers to one question, and `aria-pressed` announced
-               * them as four independent switches — a screen-reader user was
-               * told "Corporation, pressed" with no way to hear that it was one
-               * of four or that picking it unpicked another. Same markup as the
-               * "which permit are you renewing" picker above.
-               */}
-              <div
-                role="radiogroup"
-                aria-label="Type of Registration"
-                className="flex flex-wrap gap-2.5"
-              >
-                {REGISTRATION_TYPES.map((rt) => {
-                  const selected = form.registration_type === rt.value
-                  return (
-                    <button
-                      key={rt.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => chooseRegistrationType(selected ? '' : rt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {rt.label}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
 
             {/*
-              ── Items 11 / 12 — the named person on the form ─────────────────
+              ── Items 10 to 14 — the named person on the form ────────────────
 
               Surname, given name, middle name, SUFFIX and GENDER. All five have
               had columns on `business_owners` since the schema was aligned with
@@ -8949,60 +9336,54 @@ export function ApplyWizard() {
               paper that asks for a suffix and a gender had nowhere to put
               either.
 
-              Item 11 is the sole proprietor; item 12 is the corporation's,
-              partnership's or cooperative's named officers, and the paper prints
-              TWO rows for it. One is written here (the primary); the relation is
-              plural on both sides so the second needs no migration when it is
-              asked for.
+              The paper prints TWO rows here for a corporation, partnership or
+              cooperative. One is written (the primary); the relation is plural
+              on both sides, so the second needs no migration when it is asked
+              for.
             */}
-            <div>
+            <div className="contents">
               {/*
-                Numbered on the GROUP, not on each of the five boxes. Item 11
-                is one question on the paper — a row with Surname, Given Name,
-                Middle Name, Suffix and Gender across it — and numbering each
-                box would print "11." five times for one item. Same reasoning
-                as the employee counts on Business Operation.
+                Numbered one by one, 10 to 14, on the client's instruction of
+                24 September 2026: *"remove Name on the Registration, and
+                include the Surname to Gender in the numbering instead."*
 
-                11 or 12 depending on the answer to item 10: the paper routes a
-                sole proprietor to 11 and a corporation, partnership or
-                cooperative to 12, and this is the same question either way.
+                The heading that stood here carried the paper's numbering,
+                where these five boxes are one item on one printed row. Ours
+                has not followed the paper's numbering since it was made
+                sequential earlier the same day — it counts what is ASKED —
+                so the heading was a row of page spent on a grouping the
+                numbers no longer expressed.
+
+                `contents` so the five join section A's single wrap and pack
+                with the fields either side of them.
               */}
-              <p className="text-sm font-bold text-ink">
-                {form.registration_type === 'sole_proprietorship'
-                  ? '11. Sole Proprietor'
-                  : '12. Name on the Registration'}
-              </p>
-              <p className="mb-2 text-xs text-ink-secondary">
-                Filled in from your account. Change it if the business is registered in another
-                name.
-              </p>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block">
-                  <FieldLabel required>Surname</FieldLabel>
+              <div className="contents">
+                <label className="block grow basis-[11rem]">
+                  <FieldLabel required>10. Surname</FieldLabel>
                   <input
                     value={form.owner_surname}
                     onChange={(e) => update('owner_surname', e.target.value)}
                     className={inputCls}
                   />
                 </label>
-                <label className="block">
-                  <FieldLabel required>Given Name</FieldLabel>
+                <label className="block grow basis-[11rem]">
+                  <FieldLabel required>11. Given Name</FieldLabel>
                   <input
                     value={form.owner_given_name}
                     onChange={(e) => update('owner_given_name', e.target.value)}
                     className={inputCls}
                   />
                 </label>
-                <label className="block">
-                  <FieldLabel>Middle Name</FieldLabel>
+                <label className="block grow basis-[11rem]">
+                  <FieldLabel>12. Middle Name</FieldLabel>
                   <input
                     value={form.owner_middle_name}
                     onChange={(e) => update('owner_middle_name', e.target.value)}
                     className={inputCls}
                   />
                 </label>
-                <label className="block">
-                  <FieldLabel>Suffix</FieldLabel>
+                <label className="block grow basis-[7rem]">
+                  <FieldLabel>13. Suffix</FieldLabel>
                   <input
                     value={form.owner_suffix}
                     onChange={(e) => update('owner_suffix', e.target.value)}
@@ -9011,12 +9392,18 @@ export function ApplyWizard() {
                   />
                 </label>
               </div>
-              <div className="mt-4">
-                <FieldLabel required>Gender</FieldLabel>
+              {/*
+                Ends the line so items 14 to 17 begin one of their own —
+                see the note on this section's wrap. Zero height, and the
+                negative margin cancels the row gap it would double.
+              */}
+              <div className="-my-1.5 basis-full" aria-hidden="true" />
+              <div className="shrink-0">
+                <FieldLabel required>14. Gender</FieldLabel>
                 {/*
                   Two options, as the paper's M / F boxes print. A radiogroup
                   rather than toggles, so a screen reader announces that picking
-                  one unpicks the other — the same treatment Type of Registration
+                  one unpicks the other — the same treatment Form of Organization
                   and Economic Organization get above.
                 */}
                 <div role="radiogroup" aria-label="Gender" className="flex flex-wrap gap-2">
@@ -9069,31 +9456,76 @@ export function ApplyWizard() {
              * typed, and a screen-reader user should hear that rather than
              * discover it by tabbing back.
              */}
-            <div aria-live="polite">
+            {/*
+              One cell on Gender's row, holding a box rather than three loose
+              fields. Client, 24 September 2026: *"You may group 15 to 17 in a
+              bigger box to group them."*
+
+              All three are about ONE person, which is the reason items 16 and
+              17 carry "(of President/OIC)" inside their own labels — the
+              wording was compensating for a grouping the page did not show.
+              The border shows it, and the labels can stay as the paper prints
+              them.
+
+              The live region stays on the element: `presidentAsked` is true
+              for every structure since 16 September, so nothing toggles here
+              and there is no announcement to lose.
+            */}
+            <div aria-live="polite" className="grow basis-[34rem] max-w-full">
               {presidentAsked && (
-                <div className="space-y-4 rounded-xl border border-line p-4">
-                  <p className="text-xs text-ink-secondary">
-                    The city asks who runs the business.{' '}
-                    {form.registration_type === 'sole_proprietorship'
-                      ? 'As a sole proprietor you are your own officer in charge, so this is filled in from your name above — change it if somebody else runs the business.'
-                      : 'Name the president or officer in charge.'}
-                  </p>
-                  <div>
-                    <label className="block">
-                      <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                        13. Name of President / Officer in Charge
-                      </FieldLabel>
-                      <input
-                        value={form.president_officer_name}
-                        onChange={(e) => update('president_officer_name', e.target.value)}
-                        placeholder="Full name"
-                        maxLength={255}
-                        className={inputCls}
-                      />
-                    </label>
-                  </div>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <div>
+                <div className="rounded-xl border border-line p-3">
+                  {/*
+                    All three describe ONE person — the paper labels item 12
+                    "Citizenship (of President/OIC)" — so they read as a row
+                    rather than as three questions that happen to follow each
+                    other. It also takes two rows out of the form.
+                  */}
+                  {/* The box packs its own three, the way the section packs its own. */}
+                  <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+                    <div className="grow basis-[15rem]">
+                      <label className="block">
+                        <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
+                          15. Name of President / Officer in Charge
+                        </FieldLabel>
+                        <input
+                          value={form.president_officer_name}
+                          onChange={(e) => update('president_officer_name', e.target.value)}
+                          placeholder={oicIsProprietor ? '' : 'Full name'}
+                          maxLength={255}
+                          readOnly={oicIsProprietor}
+                          aria-readonly={oicIsProprietor || undefined}
+                          aria-describedby={oicIsProprietor ? 'oic-prefilled' : undefined}
+                          /*
+                           * The same grey as the carried-over fields on the office
+                           * sheets and the locked counts on the fee step. Read-only
+                           * has no appearance of its own, so without this the box
+                           * looks editable and refuses to be edited.
+                           */
+                          className={`${inputCls} ${
+                            oicIsProprietor ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''
+                          }`}
+                          title={
+                            oicIsProprietor
+                              ? 'A sole proprietor is their own officer in charge. This is taken from items 10 to 13.'
+                              : undefined
+                          }
+                        />
+                      </label>
+                      {/*
+                        Why the box will not take a keystroke, for the reader who
+                        cannot see that it is grey. `sr-only` rather than on the
+                        page: this form has spent the week having explanations
+                        taken out of it, and a sighted applicant has the grey box,
+                        the name already in it and the title on hover.
+                      */}
+                      {oicIsProprietor && (
+                        <p id="oic-prefilled" className="sr-only">
+                          A sole proprietor is their own officer in charge, so this is filled in from
+                          items 10 to 13 and cannot be edited here.
+                        </p>
+                      )}
+                    </div>
+                    <div className="grow basis-[11rem]">
                       <label className="block">
                         {/*
                         The paper's own wording, item 14: "Citizenship (of
@@ -9103,7 +9535,7 @@ export function ApplyWizard() {
                         it is read before the field it qualifies.
                       */}
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                          14. Citizenship (of President/OIC)
+                          16. Citizenship (of President/OIC)
                         </FieldLabel>
                         <input
                           value={form.citizenship}
@@ -9113,10 +9545,10 @@ export function ApplyWizard() {
                         />
                       </label>
                     </div>
-                    <div>
+                    <div className="relative grow basis-[11rem]">
                       <label className="block">
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
-                          15. Capital Participation (% Filipino)
+                          17. Capital Participation (% Filipino)
                         </FieldLabel>
                         <input
                           inputMode="decimal"
@@ -9134,13 +9566,9 @@ export function ApplyWizard() {
                         />
                       </label>
                       {fieldErrors.capital_participation_filipino && (
-                        <p
-                          id="capital-participation-error"
-                          role="alert"
-                          className="mt-1 text-xs font-medium text-s-red"
-                        >
+                        <FieldError id="capital-participation-error">
                           {fieldErrors.capital_participation_filipino}
-                        </p>
+                        </FieldError>
                       )}
                     </div>
                   </div>
@@ -9195,9 +9623,6 @@ export function ApplyWizard() {
       >
         <FormSheet meta={typeMeta} filing={filingIdentity} compact={reviewAll}>
           <SectionMarker letter="B" label="Business Operation" />
-          <p className="mt-3 text-sm text-ink-secondary">
-            Section B of the paper form, in the paper&rsquo;s own order and numbered with it.
-          </p>
           {/*
             ── The paper's order, numbered 1-8 ───────────────────────────────
 
@@ -9220,7 +9645,7 @@ export function ApplyWizard() {
             9. Anybody reconciling the two needs to know that, which is why it
             is written down here rather than left to be worked out.
           */}
-          <div className="mt-4 space-y-6">
+          <div className="mt-3 space-y-4">
             {/* Items 1-4 — business area, the employee counts, delivery units. */}
             {/*
             Section B items 1-4: business area, employees and their split, how
@@ -9232,7 +9657,7 @@ export function ApplyWizard() {
             `FeeProfileDraft`, so nothing about the calculation changed — only
             where the questions are put.
           */}
-            <div className="mt-6">
+            <div className="mt-4">
               <FeeProfileStep
                 scope="paper"
                 applicationType={applicationType}
@@ -9248,7 +9673,7 @@ export function ApplyWizard() {
              * ── Item B6 — Economic Organization ───────────────────────────
              *
              * Six mutually exclusive answers, so a real radiogroup with an
-             * accessible name, matching the Type of Registration picker above
+             * accessible name, matching the Form of Organization picker above
              * and the "which permit are you renewing" list. `aria-pressed`
              * toggles would announce six independent switches and never say
              * that picking one unpicks another.
@@ -9259,10 +9684,6 @@ export function ApplyWizard() {
              */}
             <div>
               <FieldLabel required>5. Economic Organization</FieldLabel>
-              <p className="mb-2 text-xs text-ink-secondary">
-                What this place of business is to your business — not how your business is
-                registered, which you answered above.
-              </p>
               <div
                 role="radiogroup"
                 aria-label="Economic Organization"
@@ -9303,7 +9724,7 @@ export function ApplyWizard() {
                * "Others" with no other named says less than choosing nothing.
                */}
               {form.economic_organization === 'others' && (
-                <div className="mt-3">
+                <div className="relative mt-3">
                   <label className="block">
                     <FieldLabel required>Others — what kind of establishment is it?</FieldLabel>
                     <input
@@ -9322,13 +9743,9 @@ export function ApplyWizard() {
                     />
                   </label>
                   {fieldErrors.economic_organization_others && (
-                    <p
-                      id="economic-organization-others-error"
-                      role="alert"
-                      className="mt-1 text-xs font-medium text-s-red"
-                    >
+                    <FieldError id="economic-organization-others-error">
                       {fieldErrors.economic_organization_others}
-                    </p>
+                    </FieldError>
                   )}
                 </div>
               )}
@@ -9344,209 +9761,217 @@ export function ApplyWizard() {
             and `businesses.capital_investment` — a column that existed and was
             written by nothing — is finally where this one lands.
           */}
-            <div className="mt-6 max-w-sm">
-              <label className="block">
-                <FieldLabel required={applicationType === 'new'}>
-                  6. Capital Investment (₱)
-                </FieldLabel>
-                <input
-                  inputMode="decimal"
-                  value={form.capital_investment}
-                  onChange={(e) => update('capital_investment', formatAmountInput(e.target.value))}
-                  /*
-                   * Padded to centavos on blur, not on change.
-                   *
-                   * `formatAmountInput` groups thousands as you type, so "1000"
-                   * showed as "1,000" and stayed there — a peso amount printed
-                   * without its centavos. Padding on every keystroke instead
-                   * would fight the caret: typing "1000.5" would become
-                   * "1,000.50" mid-entry and put the cursor behind the digit
-                   * still being typed.
-                   *
-                   * `padAmountInput` leaves a digit-free string alone, so a blank
-                   * field stays blank rather than becoming "0.00" — a
-                   * capitalization of zero is a declaration nobody made, and on a
-                   * new filing this field is required precisely so it cannot be
-                   * skipped silently.
-                   */
-                  onBlur={() => {
-                    update('capital_investment', padAmountInput(form.capital_investment))
-                    touch('capital_investment')
-                  }}
-                  placeholder="e.g. 250,000.00"
-                  className={inputCls}
-                />
-              </label>
-              <p className="mt-1 text-xs text-ink-secondary">
-                {applicationType === 'new'
-                  ? 'The total capital you are putting into this business.'
-                  : 'The total capital in this business. A renewal is assessed on last year’s gross sales, so this is optional.'}
-              </p>
-            </div>
-
             {/*
-             * ── Item B8 (new form) / B7 (renewal) — tax incentives ────────
-             *
-             * A general Yes/No, and deliberately NOT read off the `is_bmbe` or
-             * `is_cooperative` flags on the Business & Tax Profile. Those two
-             * name particular statutory exemptions the fee calculator acts on;
-             * this asks whether ANY government entity has granted an incentive,
-             * which is true of a PEZA registrant or a Board of Investments
-             * pioneer whose Revenue Code assessment is unchanged. Neither
-             * answer can be derived from the other in either direction.
-             *
-             * Two radios rather than a lone checkbox, because "No" is a real
-             * answer the officer needs to see given, not an unticked box that
-             * could equally mean the applicant skipped the question.
-             */}
-            <div>
-              <FieldLabel>7. Do you have tax incentives from any Government Entity?</FieldLabel>
-              <div
-                role="radiogroup"
-                aria-label="Do you have tax incentives from any Government Entity?"
-                className="flex flex-wrap gap-2"
-              >
-                {/*
-                  Yes first, which is the paper's own order: item 8 on the
-                  printed form reads "Yes (Please attach a copy of your
-                  certificate)" and then "No". Asking in the order the form
-                  asks is one less thing for a clerk reconciling the two to
-                  trip over.
-                */}
-                {[
-                  { value: true, label: 'Yes' },
-                  { value: false, label: 'No' },
-                ].map((opt) => {
-                  const selected = form.has_tax_incentives === opt.value
-                  return (
-                    <button
-                      key={opt.label}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => update('has_tax_incentives', opt.value)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {opt.label}
-                    </button>
-                  )
-                })}
-              </div>
-              {/*
-                It used to say "attach it under Other Requirements", which is
-                the instruction the client objected to: Other Requirements is a
-                bin, so a certificate put there is indistinguishable from a
-                filing that never needed one, and no office can tell which it is
-                looking at. The certificate has its own requirement now
-                (TAX_INCENTIVE_CERT, gated on this answer), so the note points
-                at the slot instead of at the bin.
-              */}
-              {form.has_tax_incentives && (
-                <p className="mt-2 text-xs text-ink-secondary">
-                  The paper asks for a copy of the certificate. A slot for it appears under
-                  Documentary Requirements.
-                </p>
-              )}
-            </div>
-
-            {/*
-              ── Item 8 — rent, MOVED HERE from Location & Zoning ─────────────
-
-              The paper asks it in section B and BizTrack asked it on the
-              address step, alongside the lessor fields. The client's decision
-              of 16 September 2026 was to move the whole block — question and
-              the four lessor fields — rather than carry the answer read-only,
-              so this step matches the paper and the question is asked exactly
-              once.
-
-              Nothing about the DATA moved with it: is_rented, lessor_name,
-              lessor_address, lessor_contact and monthly_rental are the
-              same fields on the same business record, and every reader of them
-              — the zoning sheet's items VIII.C/D, CPDD's owned-or-rented
-              checklist branch, the lease-contract documentary requirement — is
-              unchanged. Only the step that asks moved.
+              Items 6, 7 and 8 on one row, at the client's ask. A money box and
+              four Yes/No pills had three bands of page to themselves because
+              each sat in its own block-level div — nothing about the controls
+              needed the height.
             */}
-            {/*
-             * Unified form asks who owns the premises. Only a renter has a
-             * lessor, so the block stays closed until they say so rather
-             * than showing four fields most applicants must leave blank.
-             */}
-            <div>
-              <FieldLabel>8. Do you pay rent for occupying a place of business?</FieldLabel>
-              {/*
-                  ── "Yes" and "No", in the paper's order ────────────────────
-
-                  These read "Owned or occupied by me" and "Rented", which
-                  answered a question the form does not put. The paper asks a
-                  yes-or-no — "Do you pay rent for occupying a place of
-                  business? [ ] Yes (Please attach a copy of your lease
-                  contract) [ ] No" — so the buttons say Yes and No, Yes first,
-                  as printed.
-
-                  A real radiogroup, not two aria-pressed toggles. The two
-                  answers are mutually exclusive and `aria-pressed` announces
-                  them as independent switches, never saying that picking one
-                  unpicks the other — the same reasoning the Economic
-                  Organization picker above already carries, and item 7 beside
-                  this one was already a radiogroup while this was not.
-                */}
-              <div
-                role="radiogroup"
-                aria-label="Do you pay rent for occupying a place of business?"
-                className="flex flex-wrap gap-2"
-              >
-                {[
-                  { rented: true, label: 'Yes' },
-                  { rented: false, label: 'No' },
-                ].map((opt) => {
-                  const selected = form.is_rented === opt.rented
-                  return (
-                    <button
-                      key={opt.label}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => update('is_rented', opt.rented)}
-                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
-                        selected
-                          ? 'border-royal bg-input text-ink'
-                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
-                      }`}
-                    >
-                      <span
-                        className={`h-3.5 w-3.5 rounded-full border-2 ${
-                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
-                        }`}
-                      />
-                      {opt.label}
-                    </button>
-                  )
-                })}
+            <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+              <div className="grow basis-[13rem] max-w-full">
+                <label className="block">
+                  <FieldLabel required={applicationType === 'new'}>
+                    6. Capital Investment (₱)
+                  </FieldLabel>
+                  <input
+                    inputMode="decimal"
+                    value={form.capital_investment}
+                    onChange={(e) => update('capital_investment', formatAmountInput(e.target.value))}
+                    /*
+                     * Padded to centavos on blur, not on change.
+                     *
+                     * `formatAmountInput` groups thousands as you type, so "1000"
+                     * showed as "1,000" and stayed there — a peso amount printed
+                     * without its centavos. Padding on every keystroke instead
+                     * would fight the caret: typing "1000.5" would become
+                     * "1,000.50" mid-entry and put the cursor behind the digit
+                     * still being typed.
+                     *
+                     * `padAmountInput` leaves a digit-free string alone, so a blank
+                     * field stays blank rather than becoming "0.00" — a
+                     * capitalization of zero is a declaration nobody made, and on a
+                     * new filing this field is required precisely so it cannot be
+                     * skipped silently.
+                     */
+                    onBlur={() => {
+                      update('capital_investment', padAmountInput(form.capital_investment))
+                      touch('capital_investment')
+                    }}
+                    placeholder="e.g. 250,000.00"
+                    className={inputCls}
+                  />
+                </label>
+                {applicationType !== 'new' && (
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    A renewal is assessed on last year’s gross sales, so this is optional.
+                  </p>
+                )}
               </div>
+
               {/*
-                  The paper's parenthesis, moved out of the label.
-                  MCG-BPLO-FO-001 item 9 reads "Yes (Please attach a copy of
-                  your lease contract)", and the instruction was lost when the
-                  buttons became a bare Yes/No — item 7 beside it kept its note
-                  and this one had none at all, so an applicant answering Yes
-                  here was told nothing about the document it commits them to.
-                  Shown only on Yes, because on No there is nothing to attach.
+               * ── Item B8 (new form) / B7 (renewal) — tax incentives ────────
+               *
+               * A general Yes/No, and deliberately NOT read off the `is_bmbe` or
+               * `is_cooperative` flags on the Business & Tax Profile. Those two
+               * name particular statutory exemptions the fee calculator acts on;
+               * this asks whether ANY government entity has granted an incentive,
+               * which is true of a PEZA registrant or a Board of Investments
+               * pioneer whose Revenue Code assessment is unchanged. Neither
+               * answer can be derived from the other in either direction.
+               *
+               * Two radios rather than a lone checkbox, because "No" is a real
+               * answer the officer needs to see given, not an unticked box that
+               * could equally mean the applicant skipped the question.
+               */}
+              <div className="shrink-0">
+                <FieldLabel>7. Tax incentives from a Government Entity?</FieldLabel>
+                <div
+                  role="radiogroup"
+                  aria-label="Tax incentives from a Government Entity?"
+                  className="flex flex-wrap gap-2"
+                >
+                  {/*
+                    Yes first, which is the paper's own order: item 8 on the
+                    printed form reads "Yes (Please attach a copy of your
+                    certificate)" and then "No". Asking in the order the form
+                    asks is one less thing for a clerk reconciling the two to
+                    trip over.
+                  */}
+                  {[
+                    { value: true, label: 'Yes' },
+                    { value: false, label: 'No' },
+                  ].map((opt) => {
+                    const selected = form.has_tax_incentives === opt.value
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => update('has_tax_incentives', opt.value)}
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-royal bg-input text-ink'
+                            : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                        }`}
+                      >
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full border-2 ${
+                            selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                          }`}
+                        />
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {/*
+                  It used to say "attach it under Other Requirements", which is
+                  the instruction the client objected to: Other Requirements is a
+                  bin, so a certificate put there is indistinguishable from a
+                  filing that never needed one, and no office can tell which it is
+                  looking at. The certificate has its own requirement now
+                  (TAX_INCENTIVE_CERT, gated on this answer), so the note points
+                  at the slot instead of at the bin.
                 */}
-              {form.is_rented && (
-                <p className="mt-2 text-xs text-ink-secondary">
-                  The paper asks for a copy of your lease contract and your lessor&rsquo;s business
-                  permit. Slots for both appear under Documentary Requirements.
-                </p>
-              )}
+                {form.has_tax_incentives && (
+                  <p className="mt-2 text-xs text-ink-secondary">
+                    The paper asks for a copy of the certificate. A slot for it appears under
+                    Documentary Requirements.
+                  </p>
+                )}
+              </div>
+
+              {/*
+                ── Item 8 — rent, MOVED HERE from Location & Zoning ─────────────
+
+                The paper asks it in section B and BizTrack asked it on the
+                address step, alongside the lessor fields. The client's decision
+                of 16 September 2026 was to move the whole block — question and
+                the four lessor fields — rather than carry the answer read-only,
+                so this step matches the paper and the question is asked exactly
+                once.
+
+                Nothing about the DATA moved with it: is_rented, lessor_name,
+                lessor_address, lessor_contact and monthly_rental are the
+                same fields on the same business record, and every reader of them
+                — the zoning sheet's items VIII.C/D, CPDD's owned-or-rented
+                checklist branch, the lease-contract documentary requirement — is
+                unchanged. Only the step that asks moved.
+              */}
+              {/*
+               * Unified form asks who owns the premises. Only a renter has a
+               * lessor, so the block stays closed until they say so rather
+               * than showing four fields most applicants must leave blank.
+               */}
+              <div className="shrink-0">
+                <FieldLabel>8. Do you pay rent for the premises?</FieldLabel>
+                {/*
+                    ── "Yes" and "No", in the paper's order ────────────────────
+
+                    These read "Owned or occupied by me" and "Rented", which
+                    answered a question the form does not put. The paper asks a
+                    yes-or-no — "Do you pay rent for occupying a place of
+                    business? [ ] Yes (Please attach a copy of your lease
+                    contract) [ ] No" — so the buttons say Yes and No, Yes first,
+                    as printed.
+
+                    A real radiogroup, not two aria-pressed toggles. The two
+                    answers are mutually exclusive and `aria-pressed` announces
+                    them as independent switches, never saying that picking one
+                    unpicks the other — the same reasoning the Economic
+                    Organization picker above already carries, and item 7 beside
+                    this one was already a radiogroup while this was not.
+                  */}
+                <div
+                  role="radiogroup"
+                  aria-label="Do you pay rent for the premises?"
+                  className="flex flex-wrap gap-2"
+                >
+                  {[
+                    { rented: true, label: 'Yes' },
+                    { rented: false, label: 'No' },
+                  ].map((opt) => {
+                    const selected = form.is_rented === opt.rented
+                    return (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() => update('is_rented', opt.rented)}
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                          selected
+                            ? 'border-royal bg-input text-ink'
+                            : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                        }`}
+                      >
+                        <span
+                          className={`h-3.5 w-3.5 rounded-full border-2 ${
+                            selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                          }`}
+                        />
+                        {opt.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {/*
+                    The paper's parenthesis, moved out of the label.
+                    MCG-BPLO-FO-001 item 9 reads "Yes (Please attach a copy of
+                    your lease contract)", and the instruction was lost when the
+                    buttons became a bare Yes/No — item 7 beside it kept its note
+                    and this one had none at all, so an applicant answering Yes
+                    here was told nothing about the document it commits them to.
+                    Shown only on Yes, because on No there is nothing to attach.
+                  */}
+                {form.is_rented && (
+                  <p className="mt-2 max-w-[22rem] text-xs text-ink-secondary">
+                    The paper asks for a copy of your lease contract and your lessor&rsquo;s business
+                    permit. Slots for both appear under Documentary Requirements.
+                  </p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -9608,14 +10033,7 @@ export function ApplyWizard() {
       >
         <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
           <SectionMarker letter="C" label="Documentary Requirements" />
-          <p className="mt-2 text-xs text-ink-muted">
-            Upload each requirement as a PDF or image (max 10 MB). Items marked with{' '}
-            <span className="font-semibold text-s-red">*</span> are required. You can change files
-            before submitting.{' '}
-            {applicationType === 'amendment'
-              ? 'What is asked for is the list MCG-BPLO-FO-003 prints against the boxes you ticked, narrowed by whether you rent and how the business is registered.'
-              : 'What is asked for depends on your answers — whether you rent, whether you hold a tax incentive, and who is filing.'}
-          </p>
+          <OriginalsNotice />
 
           {/*
             ── Which boxes produced this list ──────────────────────────────
@@ -9652,7 +10070,7 @@ export function ApplyWizard() {
 
           {/* OCR-lite suggestion banner (v2) — dismissible, suggestions only. */}
           {ocr && (
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800">
               <span className="min-w-0 flex-1">
                 We read your document:{' '}
                 {ocr.business_name && (
@@ -9685,7 +10103,7 @@ export function ApplyWizard() {
               </button>
             </div>
           )}
-          <div className="mt-5 space-y-3.5">
+          <div className="mt-3 space-y-3.5">
             {requiredDocs.length === 0 ? (
               <p className="text-sm text-ink-secondary">
                 No documents required for the selected permits.
@@ -9708,7 +10126,7 @@ export function ApplyWizard() {
                       has, and only the numbered requirements above changed.
                     */}
                     <label
-                      className={`flex cursor-pointer items-center gap-4 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
+                      className={`flex cursor-pointer items-center gap-3 rounded-lg border-2 border-dashed border-input-border bg-input/50 px-5 py-3.5 transition-colors hover:bg-input ${
                         busy ? 'opacity-60' : ''
                       }`}
                     >
@@ -9734,7 +10152,13 @@ export function ApplyWizard() {
                           {dt.is_required === false ? (
                             <span className="ml-1 font-normal text-ink-muted">(optional)</span>
                           ) : (
-                            <span className="text-s-red"> *</span>
+                            <span>
+                              <span className="text-s-red" aria-hidden="true">
+                                {' '}
+                                *
+                              </span>
+                              <span className="sr-only"> (required)</span>
+                            </span>
                           )}
                         </span>
                         <span className="block truncate text-xs text-ink-muted">
@@ -9828,7 +10252,7 @@ export function ApplyWizard() {
           {/* Other Requirements — repeatable: add as many files as needed. */}
           {otherType && (
             <div className="mt-7">
-              <p className="text-sm font-bold text-ink">
+              <p className="mb-1.5 block text-[13px] font-semibold text-ink">
                 Other Requirements <span className="font-normal text-ink-muted">(optional)</span>
               </p>
               <p className="mt-1 text-xs text-ink-muted">
@@ -9897,6 +10321,68 @@ export function ApplyWizard() {
               </label>
             </div>
           )}
+
+          {/*
+            ── Mode of Payment (MCG-BPLO-FO-002, foot of page 1) ─────────────
+
+            Renewal only, because only the renewal paper asks it. FO-001 has no
+            such box, and putting one on a new application would be BizTrack
+            inventing a question.
+
+            ── The sentence under it is the whole point of the design ────────
+
+            This picker existed before and the client had it removed on
+            16 September 2026, because nothing read the answer: the fee engine,
+            the Tax Order of Payment and the payment stage all bill the full
+            year regardless. An applicant could elect quarterly and be handed
+            an annual bill with no explanation.
+
+            None of that has been built since, so the honest way to put the
+            field back is to record the answer AND say what it does. The client
+            chose that over a silent field when asked, 24 September 2026.
+          */}
+          {applicationType === 'renewal' && (
+            <div className="mt-8 border-t border-line pt-6">
+              <FieldLabel>Mode of Payment</FieldLabel>
+              <div
+                role="radiogroup"
+                aria-label="Mode of Payment"
+                aria-describedby="payment-mode-note"
+                className="flex flex-wrap gap-2"
+              >
+                {PAYMENT_MODES.map((opt) => {
+                  const selected = paymentMode === opt.value
+
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setPaymentMode(opt.value)}
+                      className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        selected
+                          ? 'border-royal bg-input text-ink'
+                          : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
+                      }`}
+                    >
+                      <span
+                        className={`h-3.5 w-3.5 rounded-full border-2 ${
+                          selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
+                        }`}
+                      />
+                      {opt.label}
+                    </button>
+                  )
+                })}
+              </div>
+              <p id="payment-mode-note" className="mt-2 max-w-prose text-xs text-ink-secondary">
+                Recorded on your filing for BPLO. Your Tax Order of Payment is issued for the
+                full year either way — arrange an instalment with the City Treasurer when you
+                pay.
+              </p>
+            </div>
+          )}
         </div>
       </WizardSection>
 
@@ -9908,7 +10394,7 @@ export function ApplyWizard() {
           </p>
           <h1 className="mt-1.5 text-2xl font-bold text-ink">Data Privacy Consent</h1>
           <p className="mt-1 text-xs text-ink-muted">Data Privacy Act of 2012 (RA 10173)</p>
-          <div className="mb-6 mt-3 h-px bg-royal" />
+          <div className="mb-4 mt-3 h-px bg-royal" />
 
           {/*
            * First, before a single answer is collected.
@@ -9930,7 +10416,7 @@ export function ApplyWizard() {
             government units, pursuant to the Data Privacy Act of 2012 (RA 10173).
           </p>
 
-          <label className="mt-6 flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3.5 text-sm font-semibold text-royal">
+          <label className="mt-4 flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3.5 text-sm font-semibold text-royal">
             <input
               type="checkbox"
               checked={consent}
@@ -9943,7 +10429,7 @@ export function ApplyWizard() {
             </span>
           </label>
 
-          <p className="mt-4 max-w-2xl text-xs text-ink-muted">
+          <p className="mt-3 max-w-2xl text-xs text-ink-muted">
             You can withdraw this consent by contacting the BPLO, though doing so means the office
             can no longer process an application in your name.
           </p>
@@ -10004,7 +10490,7 @@ export function ApplyWizard() {
               <h2 className="text-[13px] font-bold uppercase tracking-[0.12em] text-royal">
                 A. Business Information and Registration
               </h2>
-              <div className="mb-6 mt-2 h-px bg-royal/30" />
+              <div className="mb-4 mt-2 h-px bg-royal/30" />
             </>
           )}
 
@@ -10073,7 +10559,7 @@ export function ApplyWizard() {
 
           {/* ── A1 = No · the form is finished ─────────────────────────── */}
           {applicationType !== 'amendment' && amendment.hasChanges === false && (
-            <div className="mt-5 max-w-2xl rounded-lg border border-input-border bg-royal-tint px-5 py-4">
+            <div className="mt-3 max-w-2xl rounded-lg border border-input-border bg-royal-tint px-5 py-3">
               <p className="text-sm font-semibold text-royal">Your renewal is ready to submit.</p>
               <p className="mt-1.5 text-xs leading-relaxed text-ink-secondary">
                 Nothing has changed, so there is nothing further to fill in. Every detail carries
@@ -10084,7 +10570,7 @@ export function ApplyWizard() {
 
           {/* ── A2 ─── renewal only ─────────────────────────────────────── */}
           {applicationType !== 'amendment' && amendment.hasChanges === true && (
-            <fieldset ref={amendmentRef} className="mt-6 border-0 p-0">
+            <fieldset ref={amendmentRef} className="mt-4 border-0 p-0">
               <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
                 2. If yes, please check the appropriate box/es
                 <span className="text-s-red"> *</span>
@@ -10151,7 +10637,7 @@ export function ApplyWizard() {
           {applicationType !== 'amendment' &&
             amendment.hasChanges === true &&
             amendment.ownership && (
-              <fieldset className="mt-6 border-0 p-0">
+              <fieldset className="mt-4 border-0 p-0">
                 <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
                   3. Amendment
                 </legend>
@@ -10159,7 +10645,7 @@ export function ApplyWizard() {
                   Only if the business converted from one legal structure to another. Leave both as
                   they are if ownership changed hands without the structure changing.
                 </p>
-                <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+                <div className="grid max-w-2xl gap-3 sm:grid-cols-2">
                   {[
                     { key: 'fromRegistrationType' as const, label: 'From' },
                     { key: 'toRegistrationType' as const, label: 'To' },
@@ -10232,7 +10718,7 @@ export function ApplyWizard() {
                 have to be typed somewhere. Only the false provenance goes.
                 Awaiting the paper to name it as FO-003 names it.
               */}
-              <p className="mb-5 max-w-3xl text-xs leading-relaxed text-ink-secondary">
+              <p className="mb-3 max-w-3xl text-xs leading-relaxed text-ink-secondary">
                 The paper form has four boxes and so does this. Tick the ones you are amending and
                 fill in the new values — BPLO writes them to your business record when they
                 approve, so you do not need to change anything yourself. Clearing a value withdraws
@@ -10550,7 +11036,7 @@ export function ApplyWizard() {
               */}
 
               {amendRows.length > 0 && !amendRows.some((r) => r.requested) && (
-                <p className="mt-4 max-w-2xl text-xs font-medium text-ink">
+                <p className="mt-3 max-w-2xl text-xs font-medium text-ink">
                   Nothing is being changed yet. Tick a box above and fill in at least one new
                   value, or this amendment has nothing for BPLO to act on.
                 </p>
@@ -10756,7 +11242,7 @@ export function ApplyWizard() {
               accepts the form, so a total here that read as a bill would
               promise a debt nobody has incurred.
             */}
-            <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-4">
+            <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
                   Estimated fees so far
@@ -10820,7 +11306,7 @@ export function ApplyWizard() {
               says what was just filed, and it said it in a reference code.
             */}
             {priorPermitChoice && (
-              <p className="mt-6 text-sm text-ink-secondary">
+              <p className="mt-4 text-sm text-ink-secondary">
                 {applicationType === 'renewal' ? 'Renewing' : 'Amending'}{' '}
                 <span className="font-semibold text-ink">
                   {priorPermitChoice.permit_type?.name ?? 'your permit'}
@@ -10838,7 +11324,7 @@ export function ApplyWizard() {
              */}
             {applicationType === 'amendment' && amendmentSummary && (
               <>
-                <p className="mt-6 text-lg font-medium text-royal">Amending</p>
+                <p className="mt-4 text-lg font-medium text-royal">Amending</p>
                 <p className="text-sm text-ink-muted">{amendmentSummary}</p>
               </>
             )}
@@ -10854,9 +11340,9 @@ export function ApplyWizard() {
        * floor — the bar and its "Part n of 7" caption sat 135px right of the
        * card's centre line, which is exactly where the eye checks alignment.
        */}
-      <div className="mt-10 grid items-start gap-6 sm:grid-cols-[minmax(9rem,1fr)_minmax(0,28rem)_minmax(9rem,1fr)]">
+      <div className="mt-10 grid items-start gap-4 sm:grid-cols-[minmax(9rem,1fr)_minmax(0,28rem)_minmax(9rem,1fr)]">
         <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {/*
              * Next or Submit, and nothing else. The third branch here read
              * "Save & back to clearances" and belonged to an office sheet

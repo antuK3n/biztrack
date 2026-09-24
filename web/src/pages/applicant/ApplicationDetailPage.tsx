@@ -14,6 +14,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import { mainFormTargetLabel } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
@@ -459,13 +460,26 @@ export function ApplicationDetailPage() {
   const otherPermits = otherPermitProgress(app.permit_types)
 
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
-  const remarks: { who: string; text: string }[] = [
+  const remarks: { who: string; text: string; field: string | null }[] = [
     ...(app.rejection_reason
-      ? [{ who: 'Reason for rejection', text: app.rejection_reason }]
+      ? [{ who: 'Reason for rejection', text: app.rejection_reason, field: null }]
       : []),
     ...app.assignments
       .filter((a) => a.remarks)
-      .map((a) => ({ who: a.officer?.name ?? a.department.name, text: a.remarks as string })),
+      .map((a) => ({
+        who: a.officer?.name ?? a.department.name,
+        text: a.remarks as string,
+        /*
+         * Which field the office named, when it named one.
+         *
+         * `mainFormTargetLabel` returns null for anything that is not one of the
+         * wizard's own fields — the same column also carries document codes and
+         * permit codes, and printing `CHO_SANITARY_PERMIT` under a heading that
+         * says "Fix" would read as a field name to somebody who has never seen
+         * one.
+         */
+        field: mainFormTargetLabel(a.remarks_target),
+      })),
   ]
 
   /*
@@ -561,7 +575,7 @@ export function ApplicationDetailPage() {
           <StatusCard tone="orange">
             <div className="flex items-center gap-5 py-2 text-ink">
               <HourglassIcon />
-              <span className="text-4xl font-medium">For Initial Approval</span>
+              <span className="text-4xl font-medium">For Approval</span>
             </div>
             {/*
               * What this stage IS, said plainly, because the client's whole
@@ -596,18 +610,37 @@ export function ApplicationDetailPage() {
           * progress, orange for a decision pending, matching the cards that
           * survived.
           */}
+        {/*
+          ── The card leads with the permit, since 24 September 2026 ────────
+
+          It led with "Awaiting Other Permits" in 4xl type, which was the
+          status label and was the right thing to shout while the applicant
+          had nothing yet. They have their Mayor's Permit by the time they
+          reach this card now — it is released at payment — so the biggest
+          words on the screen were telling them they were still waiting for
+          the thing in their vault.
+
+          Green rather than yellow for the same reason. Yellow was "work in
+          progress", and the work that remains is real but it is no longer
+          between the applicant and their permit — it is a condition on a
+          permit they hold. The sentence under it carries that, including
+          what a rejection would cost, because a green card that mentioned
+          only good news would be the other half of the same mistake.
+        */}
         {status === 'awaiting_other_permits' && (
-          <StatusCard tone="yellow">
+          <StatusCard tone="green">
             <div className="flex items-center gap-5 py-2 text-ink">
               <MagnifierCheckIcon />
-              <span className="text-4xl font-medium">Awaiting Other Permits</span>
+              <span className="text-4xl font-medium">Business Permit Released</span>
             </div>
             <p className="mt-2 text-sm italic text-ink-secondary">
               {otherPermits.outstanding.length === 0
-                ? `All ${otherPermits.total} other permits are approved. BPLO is picking up your application.`
-                : `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
+                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. BPLO is closing your application.`
+                : `Your Business Permit is issued — download it from your profile. ` +
+                  `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
                   ` · still to come: ${otherPermits.outstanding.join(', ')}.` +
-                  ' Apply for each one, or upload the permit you already hold.'}
+                  ' Apply for each one, or upload the permit you already hold.' +
+                  ' If one is rejected, your Business Permit is suspended until it is settled.'}
             </p>
             {inspection?.scheduled_at && (
               <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
@@ -943,7 +976,7 @@ export function ApplicationDetailPage() {
             <ul className="mt-5 space-y-4">
               {(remarks.length > 0
                 ? remarks
-                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.' }]
+                : [{ who: 'Reviewing office', text: 'No detailed remarks were recorded.', field: null }]
               ).map((r, i) => (
                 <li
                   key={i}
@@ -951,6 +984,26 @@ export function ApplicationDetailPage() {
                 >
                   <span className="text-sm italic text-ink-muted underline underline-offset-2">{r.who}:</span>
                   <span className="text-sm text-ink">{r.text}</span>
+                  {/*
+                    The field the office named, when it named one.
+
+                    A chip rather than a sentence, and AFTER the remark rather
+                    than before it: the remark is what the applicant has to
+                    understand, and the field is where they have to go. Reading
+                    it the other way round — "5. Trade Name / Franchise: the
+                    name does not match your DTI certificate" — buries the
+                    reason behind a label.
+
+                    It carries the wizard's own numbering, so "5. Trade Name /
+                    Franchise" here is the question headed "5. Trade Name /
+                    Franchise" on the form that reopens. That is the whole point
+                    of the pointer: a lookup instead of a hunt.
+                  */}
+                  {r.field && (
+                    <span className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink">
+                      Fix: {r.field}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

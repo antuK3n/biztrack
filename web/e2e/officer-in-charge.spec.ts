@@ -53,7 +53,7 @@ function assignment(
       tracking_id: tracking,
       application_type: 'new',
       status: 'for_approval',
-      status_label: 'For Initial Approval',
+      status_label: 'For Approval',
       business: { id: 900 + id, name: business },
       submitted_at: '2026-09-01T00:00:00.000000Z',
       deadline_at: null,
@@ -316,7 +316,7 @@ const REGISTER = [
     status: 'pending',
     status_label: 'Pending',
     application_status: 'for_approval',
-    application_status_label: 'For Initial Approval',
+    application_status_label: 'For Approval',
   },
   {
     id: 13,
@@ -331,7 +331,7 @@ const REGISTER = [
     status: 'in_progress',
     status_label: 'In progress',
     application_status: 'for_approval',
-    application_status_label: 'For Initial Approval',
+    application_status_label: 'For Approval',
   },
 ]
 
@@ -456,7 +456,7 @@ test.describe('the business owner is told who holds their filing', () => {
     tracking_id: 'BIZ-2026-00777',
     application_type: 'new',
     status: 'for_approval',
-    status_label: 'For Initial Approval',
+    status_label: 'For Approval',
     business: { id: 777, name: 'Aling Nena Bakery', address: null, lines: [] },
     applicant: { id: 4, name: 'Nena Dela Cruz' },
     submitted_at: '2026-09-01T00:00:00.000000Z',

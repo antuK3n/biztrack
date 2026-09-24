@@ -58,19 +58,79 @@ enum ApplicationStatus: string
             /*
              * "For INITIAL Approval", renamed 16 September 2026.
              *
-             * BPLO approves a filing twice — once on the form before there is
-             * a bill, once again after every other permit is in — and the two
-             * were called "For Approval" and "For Final Approval". The second
+             * "For Initial Approval" from 17 September to 24 September 2026,
+             * and "For Approval" either side of it.
+             *
+             * BPLO approves a filing twice — once on the form before there is a
+             * bill, once again after every other permit is in. The word was
+             * added because the second was called "For Final Approval": it
              * announced itself as one of a pair and the first did not, so an
-             * applicant at the start could not tell they were at the start, and
-             * the tracking card fell back to saying only that no bill existed
-             * yet.
+             * applicant at the start could not tell they were at the start.
+             *
+             * The client took it out again when the LGU moved the release:
+             * *"There is no Final Approval here since business permit is
+             * already given after payment."* ForFinalApproval is still a real
+             * status and still reachable — see `allowedNext` — but it now closes
+             * a filing whose permit the applicant is already holding. The pair
+             * exists for BPLO's clerks; it is no longer a pair the applicant
+             * waits through, and "initial" promised them a second gate that
+             * holds nothing of theirs.
              */
-            self::ForApproval => 'For Initial Approval',
+            self::ForApproval => 'For Approval',
             self::PendingPayment => 'Pending Payment',
-            self::AwaitingOtherPermits => 'Awaiting Other Permits',
+            /*
+             * "Permit Released", renamed 24 September 2026.
+             *
+             * It was "Awaiting Other Permits", which described the filing
+             * accurately and described the APPLICANT'S POSITION wrongly the
+             * moment the LGU moved the release: *"after payment, business
+             * permit is already released."* The filing is still waiting on
+             * five offices, but the person reading the tracker is not waiting
+             * for anything they can act on — they are holding their permit —
+             * and a status headed "Awaiting" over a certificate they have
+             * already downloaded is the tracker contradicting the vault.
+             *
+             * The old words are kept where they are still true: BPLO's queue
+             * tab is "Awaiting Other Permits", because from that seat the
+             * filing genuinely is out with the other offices and that is what
+             * the officer is waiting for. Same fact, two seats, and only one
+             * of them is waiting.
+             */
+            self::AwaitingOtherPermits => 'Permit Released',
             self::ForFinalApproval => 'For Final Approval',
-            self::Approved => 'Approved',
+            /*
+             * "Completed", renamed 24 September 2026.
+             *
+             * The client, reading the applicant's guide: *"Why is there
+             * Approved at the end even though there is already Permit
+             * Released?"* Because this stage stopped being the moment the
+             * permit was granted — that moved to payment — and "Approved"
+             * never said approved WHAT. Two green badges in a row, the
+             * second of which appeared to repeat the first.
+             *
+             * What this stage actually is: the filing is CLOSED. Every other
+             * permit is in, the status is terminal, and two things follow
+             * that the applicant can feel — `rejectAssignment` refuses a
+             * terminal filing, so no CLEARANCE ON THIS FILING can cause a
+             * suspension any more; and ApplicationsPage drops a FINISHED
+             * filing from Permit Tracking, so the application moves to their
+             * Profile. "Completed" is the word for both.
+             *
+             * It does NOT mean the permit is safe. Enforcement against a
+             * trading business is a separate lever and always was —
+             * `businesses.status` carries suspended and blacklisted, and
+             * `PermitStatus::Revoked` exists — and neither asks whether a
+             * filing is finished. The client flagged the first draft of this
+             * wording for implying otherwise, and anything written here has
+             * to stay narrow: what closes is this application's own route to
+             * a suspension, not suspension itself.
+             *
+             * `ClearanceStatus::Approved` KEEPS the word, deliberately. One
+             * permit is approved by its own office, and that is what the
+             * word now means with nothing else competing for it — the two
+             * machines stop sharing a label that meant different things.
+             */
+            self::Approved => 'Completed',
             self::Rejected => 'Rejected',
             self::Returned => 'Returned',
             self::Cancelled => 'Cancelled',

@@ -222,9 +222,21 @@ class Application extends Model
             ->withPivot([
                 'status', 'mode', 'submitted_at', 'decided_at',
                 // The return note, the thing it points at, and when it was sent
-                // back. 'rejection_reason' was here until clearance-level
-                // rejection was removed on 17 September 2026.
+                // back.
                 'remarks', 'remarks_target', 'returned_at',
+                /*
+                 * The refusal, back on 24 September 2026 with
+                 * `ClearanceStatus::Rejected` — under three columns this time
+                 * rather than the single 'rejection_reason' that was dropped
+                 * on 17 September.
+                 *
+                 * They have to be NAMED here or nothing can read them:
+                 * Eloquent loads only the pivot columns this list mentions, so
+                 * a missing name is not an error, it is a null. The officer's
+                 * "you refused this once" banner and the applicant's remedy
+                 * both hang off these, and both would simply have been blank.
+                 */
+                'rejected_at', 'rejection_note', 'rejection_remedy',
             ])
             ->withTimestamps()
             ->using(ApplicationPermitType::class);

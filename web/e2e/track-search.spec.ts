@@ -26,7 +26,7 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'for_approval',
-    status_label: 'For Initial Approval',
+    status_label: 'For Approval',
     business: { id: 1, name: 'Aling Nena Sari-Sari Store' },
     submitted_at: '2026-06-01T00:00:00.000000Z',
     deadline_at: '2026-08-20T00:00:00.000000Z',
@@ -66,7 +66,8 @@ const OWNER_APPS = [
     application_type: 'new',
     title: null,
     status: 'awaiting_other_permits',
-    status_label: 'Awaiting Other Permits',
+    // Renamed 24 September 2026 with the flow — see ApplicationStatus::label().
+    status_label: 'Permit Released',
     business: { id: 4, name: 'Dagupan Auto Supply' },
     submitted_at: '2026-07-20T00:00:00.000000Z',
     deadline_at: '2026-09-01T00:00:00.000000Z',
@@ -472,12 +473,12 @@ test.describe('officer queue', () => {
     /*
      * `exact` because the tab and one of its statuses are both called "For
      * Approval" now, so the listbox holds "All in For Approval" as well as
-     * "For Initial Approval" itself. That is the intended wording — the tab is
+     * "For Approval" itself. That is the intended wording — the tab is
      * what is with the offices awaiting a decision (under review, or sent
      * back), the status is the first of BPLO's two approvals — and it is only
      * ambiguous to a substring match, which is why this asks for an exact one.
      */
-    await page.getByRole('option', { name: 'For Initial Approval', exact: true }).click()
+    await page.getByRole('option', { name: 'For Approval', exact: true }).click()
 
     // The proof that this is a query change and not a browser-side slice: the
     // page asked the server for the narrowed set. Filtering a page in the
@@ -558,6 +559,6 @@ test.describe('officer queue', () => {
     // ever return nothing.
     await expect(page.getByRole('option', { name: 'All in Pending Payment' })).toBeVisible()
     await expect(page.getByRole('option', { name: 'Pending Payment', exact: true })).toBeVisible()
-    await expect(page.getByRole('option', { name: 'For Initial Approval', exact: true })).toBeHidden()
+    await expect(page.getByRole('option', { name: 'For Approval', exact: true })).toBeHidden()
   })
 })

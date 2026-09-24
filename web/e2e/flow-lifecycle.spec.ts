@@ -203,27 +203,21 @@ function assignmentOf(
 /*
  * ── The tab is named by STAGE here, not by its caption ────────────────────
  *
- * One tab has two captions. BPLO approves twice, so its first tab says "For
- * Initial Approval"; a clearance office approves once and its says "For
- * Approval" — the rule status.ts already states for the status itself, applied
- * to the tab on 17 September 2026 when the client read the wrong one from the
- * sanitary account.
+ * This tab used to have two captions — "For Initial Approval" for BPLO, "For
+ * Approval" for a clearance office — and the alternation here was what let one
+ * helper serve both seats. The client took "initial" out of BPLO's seat on
+ * 24 September 2026, so there is one caption again and the alternation with it.
  *
- * Every caller of this helper passed the caption, so every office caller would
- * now be pressing a button that does not exist — and failing on the row it was
- * looking for, several assertions later, with a message about the queue. So the
- * helper takes the stage and matches either wording, ANCHORED: `^For Approval$`
- * cannot match "For Initial Approval", so this stays a real locator rather than
- * a substring that would pass against either.
+ * Naming the STAGE rather than the caption stays, and is the point: every
+ * caller used to pass the caption, so a rename left them pressing a button
+ * that does not exist and failing several assertions later with a message
+ * about the queue. One place to change is why this rename was three lines.
  *
- * Being permissive about the wording here is deliberate and is paid for
- * elsewhere: the caption per seat is asserted directly, once, in the per-office
- * loop and in the BPLO block, which is where a test can say WHICH word it
- * expects. A navigation helper that also policed the wording would fail every
- * stage of the narrative for one label.
+ * Anchored, not a substring: `^For Approval$` must not match "For Final
+ * Approval", which is a real tab two entries down.
  */
 const TAB_BUTTON: Record<'approval' | 'inspection' | 'final', RegExp> = {
-  approval: /^(For Initial Approval|For Approval)$/,
+  approval: /^For Approval$/,
   inspection: /^For Inspection$/,
   final: /^For Final Approval$/,
 }
@@ -824,7 +818,7 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
    *
    * All three are asserted, not just the one that should be there. A row
    * drawing two of them is the failure nobody looks for, and "Paid is absent"
-   * is a different statement from "For Initial Approval is present".
+   * is a different statement from "For Approval is present".
    *
    * That block used to read "Not billed yet", and this assertion used to hold
    * it to naming the absence of a bill. The client asked for the stage instead
@@ -836,7 +830,7 @@ test('the filing shows on Track as awaiting BPLO, with nothing to pay yet', asyn
    * on the applicant rather than on BPLO.
    */
   await expect(
-    row.getByText('For Initial Approval', { exact: true }),
+    row.getByText('For Approval', { exact: true }),
     'a filing waiting on BPLO’s first read should say that is the stage it is at',
   ).toBeVisible()
   await expect(
@@ -954,7 +948,7 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
       ).toHaveCount(0)
 
       /*
-       * ── "Initial" is BPLO's word, and this loop is why it is asserted here ─
+       * ── Every office reads this tab, so every office is checked ───────────
        *
        * The client, from the sanitary account: *"This is still sanitary's
        * account, so why there is Initial Approval? It should be For Approval
@@ -969,18 +963,19 @@ test('a newly filed application is BPLO’s alone, and no other office can reach
        * and the super admin do), so one of them being wrong would mean all five
        * were; a test that only checked sanitary would not have said so.
        *
-       * Exact, both ways. "For Approval" is a substring of "For Initial
-       * Approval", so a non-exact match on the first would pass against the
-       * second and assert nothing at all.
+       * A second assertion stood here, that "For Initial Approval" was NOT
+       * offered. It went with the word on 24 September 2026, when BPLO's seat
+       * stopped saying it either — an assertion that a string nothing renders
+       * is absent passes for the wrong reason and tells the next reader that a
+       * distinction still exists.
+       *
+       * `exact`, still: "For Approval" must not be allowed to match "For Final
+       * Approval", which BPLO has and these five do not.
        */
       await expect(
         page.getByRole('button', { name: 'For Approval', exact: true }),
         `${office.code} is not offered a For Approval tab`,
       ).toHaveCount(1)
-      await expect(
-        page.getByRole('button', { name: 'For Initial Approval', exact: true }),
-        `${office.code} is offered "For Initial Approval" — it approves its permit once, so there is no second pass for "initial" to distinguish`,
-      ).toHaveCount(0)
 
       // The office captions, not BPLO's — see the assertion above.
       for (const tab of ['For Approval', 'For Inspection'] as const) {
@@ -1021,7 +1016,7 @@ test('the applicant’s row says which permit is moving and which have not start
    * This was one of this file's standing bug reports, written to FAIL: an
    * unpaid filing was routed to nobody, and the applicant's expanded row said
    * "For Approval" anyway, because `permitChip()` and `fallbackChip()` both fell
-   * through to a hardcoded `{ tone: 'orange', label: 'For Initial Approval' }`. The cost
+   * through to a hardcoded `{ tone: 'orange', label: 'For Approval' }`. The cost
    * named at the time was real — an applicant who reads "For Approval" has no
    * reason to pay, and nobody could move the filing but them.
    *
@@ -1083,7 +1078,7 @@ test('the applicant’s row says which permit is moving and which have not start
    * clearances have not been applied for and say so. A row where every chip
    * reads the same thing is the old defect, whichever label it has settled on.
    */
-  const moving = chips.filter((c) => c.includes('For Initial Approval'))
+  const moving = chips.filter((c) => c.includes('For Approval'))
   expect(
     moving.length,
     'the row does not name exactly one permit as being read by an office',
@@ -1587,9 +1582,19 @@ test('one office’s approval closes its own review and moves nobody else’s', 
    * query could not tell "this filing is For Approval" from "this filing was
    * For Approval on Tuesday".
    */
+  /*
+   * "Permit Released" since 24 September 2026, when the LGU moved the
+   * issuance to payment. The status is the same one — `awaiting_other_permits`
+   * — and only its words changed, because the applicant reading this card is
+   * holding the certificate rather than waiting for it.
+   *
+   * BPLO's queue tab still says "Awaiting Other Permits" and the assertions
+   * on THAT are further down this file, unchanged: from the officer's seat
+   * the filing really is out with the other offices.
+   */
   await expect(
-    page.getByText('Awaiting Other Permits', { exact: true }).first(),
-    'the applicant’s status card should still read Awaiting Other Permits',
+    page.getByText('Permit Released', { exact: true }).first(),
+    'the applicant’s status card should read Permit Released',
   ).toBeVisible()
 
   /*
@@ -1644,7 +1649,7 @@ test('one office’s approval closes its own review and moves nobody else’s', 
      * says which of the two approvals this tab is.
      */
     await expect(
-      bploPage.getByRole('button', { name: 'For Initial Approval', exact: true }),
+      bploPage.getByRole('button', { name: 'For Approval', exact: true }),
       'BPLO lost the word that distinguishes its first approval from its second',
     ).toHaveCount(1)
 
@@ -2132,9 +2137,18 @@ test('the owner is shown the approval and every permit it produced', async ({ pa
    * card at the top still announcing a stage that is over, so the card is what
    * is read.
    */
-  const statusCard = page.getByText(/^(Approved|For Inspection|For Approval|Pending)$/).first()
-  await expect(statusCard, 'the applicant’s status card does not announce the approval').toHaveText(
-    'Approved',
+  /*
+   * "Completed", not "Approved", since 24 September 2026 — see
+   * `ApplicationStatus::Approved->label()`. The alternation keeps the old
+   * words as well, because the point of matching several is to catch the
+   * card announcing a stage that is OVER: a card still reading "Approved"
+   * would now be stale rather than merely early.
+   */
+  const statusCard = page
+    .getByText(/^(Completed|Approved|For Inspection|For Approval|Pending)$/)
+    .first()
+  await expect(statusCard, 'the applicant’s status card does not announce the completion').toHaveText(
+    'Completed',
   )
 
   /*

@@ -536,13 +536,22 @@ class OfficeFormController extends Controller
          * returning it puts the permit at `Returned` and the sheet back in
          * their hands.
          *
-         * So two states are the applicant's: NotStarted, where they are still
-         * filling it in, and Returned, where an office has handed it back for
-         * exactly that purpose.
+         * So three states are the applicant's: NotStarted, where they are
+         * still filling it in; Returned, where an office has handed it back
+         * for exactly that purpose; and Rejected.
+         *
+         * Rejected joined them on 24 September 2026, and it is the same
+         * argument as Returned rather than a loosening. A refused permit is
+         * finished as far as the office is concerned — it has ruled, and the
+         * applicant's only move is to apply again, which is the route out of
+         * a suspended business permit. Applying again with the sheet still
+         * locked would open a form they could not type in, which is the exact
+         * dead end this method was rewritten to remove.
          */
         return $row !== null && in_array($row->status, [
             ClearanceStatus::NotStarted,
             ClearanceStatus::Returned,
+            ClearanceStatus::Rejected,
         ], true);
     }
 

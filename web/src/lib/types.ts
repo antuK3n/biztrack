@@ -426,14 +426,20 @@ export type ClearanceStatus =
   | 'for_inspection'
   | 'approved'
   /*
-   * 'rejected' was here and is gone with the PHP case, 17 September 2026.
+   * 'rejected' is back, 24 September 2026, with the PHP case.
    *
-   * An office refusing one permit outright was never reachable — neither the
-   * rejection nor the re-file had a route — and the client settled it: Return
-   * is enough. A fixable problem is a Return, which can repeat as often as it
-   * needs to; a business that genuinely cannot have the permit is BPLO
-   * rejecting the FILING, which is `ApplicationStatus` above and still exists.
+   * It was removed on 17 September — *"I think Return is enough already"* —
+   * and that was right while the business permit was withheld until every
+   * clearance was in: an unapprovable permit was punished by the filing never
+   * finishing, and there was no certificate to take away.
+   *
+   * The LGU moved the release to payment, so withholding is no longer the
+   * sanction and *"can be suspended if the other permits applied to were
+   * rejected"* is. That needs a refusal an office can record, and this is it.
+   * Return still exists and still means the fixable kind — see
+   * `App\Enums\ClearanceStatus`, which carries the argument in full.
    */
+  | 'rejected'
   | 'returned'
   | 'available'
 
@@ -556,6 +562,13 @@ export interface ApplicationListItem {
     status_label: string | null
   }[]
   created_at: string
+  /**
+   * Last WRITE, which on a draft is the last autosave.
+   *
+   * Not "last opened": reading a draft changes nothing, so this does not
+   * move. The drafts list sorts by it and labels it accordingly.
+   */
+  updated_at: string
 }
 
 export interface AppDocument {
@@ -698,6 +711,18 @@ export interface Assignment {
   status: string
   status_label: string
   remarks: string | null
+  /**
+   * WHICH field those remarks are about, when BPLO named one.
+   *
+   * A `form:` code from `returnTargets.ts` for a field on the main form, or
+   * a permit type code when BPLO sent back one clearance at Final Approval.
+   * Null on every other kind of remark, and null is a perfectly good return
+   * — the prose is never parsed to derive one.
+   *
+   * Behind the same visibility gate as `remarks`: a pointer without its
+   * reason names a field and says nothing about it.
+   */
+  remarks_target: string | null
   department: { code: string; name: string }
   officer: { id: number; name: string } | null
   /**
@@ -776,6 +801,19 @@ export interface Assignment {
      * and Malabon has given us no response window (open question A10).
      */
     returned_at: string | null
+    /**
+     * When this office REFUSED the permit, and what it said.
+     *
+     * Survives the re-application, unlike the return note: the applicant
+     * answering an instruction clears the instruction, and this is the
+     * historical fact that the office turned this permit down once. It is
+     * what draws the banner on the re-read — without it an officer sees a
+     * clean For Approval row and an unchanged form, because the sheet keeps
+     * its answers between attempts.
+     */
+    rejected_at: string | null
+    rejection_note: string | null
+    rejection_remedy: string | null
   } | null
 }
 
@@ -1015,7 +1053,17 @@ export interface Application extends ApplicationListItem {
    */
   open_requirements?: number
   /** How the business tax is settled: in full by Jan 20, or in four quarters. */
-  payment_mode?: 'annual' | 'quarterly'
+  /**
+   * Mode of Payment, as MCG-BPLO-FO-002 prints it.
+   *
+   * `semi_annual` has no equivalent in Revenue Code Sec. 2N, which provides
+   * for annual and quarterly only. It is here because the paper offers it and
+   * applicants tick it.
+   *
+   * Recorded, never acted on: the Tax Order of Payment bills the full year
+   * whatever this says, and the form tells the applicant so.
+   */
+  payment_mode?: 'annual' | 'semi_annual' | 'quarterly'
   /**
    * RA 10173 consent, as given for THIS filing.
    *
@@ -2700,6 +2748,18 @@ export interface PrefillResult {
   renewable_permits: Permit[]
   last_application: { id: number; permit_type_ids: number[] } | null
   suggested_permit_type_ids: number[]
+  /**
+   * The fee profile of the last SUBMITTED filing, which is Section B as this
+   * business last declared it.
+   *
+   * A renewal asks Section B and nothing else, and the client asked for it to
+   * arrive answered. Read in preference to the business record because the
+   * register stores delivery units as one total and the paper asks for two
+   * counts — only the profile knows the split.
+   *
+   * Null for a business that has never filed.
+   */
+  last_fee_profile: FeeProfile | null
 }
 
 /**
@@ -3002,6 +3062,18 @@ export interface Clearance {
    * reason was recorded" beside a reason that was.
    */
   return_note: string | null
+  /**
+   * The refusal, which outlives the re-application it causes.
+   *
+   * `return_note` above is the CURRENT instruction and goes null when the
+   * applicant answers it. These three survive that on purpose: the sheet
+   * reopens with every answer still in it, so the remedy has to stay in
+   * front of the applicant while they fill it in again, and the office has
+   * to be able to see it refused this once when the same form comes back.
+   */
+  rejected_at: string | null
+  rejection_note: string | null
+  rejection_remedy: string | null
   /**
    * WHICH document or answer the note is about, as a stable code — a
    * `document_types.code` or an office-form answer key. Null when the officer

@@ -1,7 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
-import { FieldLabel, inputCls } from '../../components/ui/Proto'
+import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
 import { formatBytes, formatDate } from '../../lib/format'
 import type { OfficeFormRequirement } from '../../lib/types'
 import { ACCEPT_ATTR } from './uploads'
@@ -574,13 +574,13 @@ function DerivedField({
  */
 function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
   return (
-    <section className="space-y-4">
+    <section className="space-y-3">
       <SectionMarker letter="✓" label="Business Details" />
       <p className="text-xs text-ink-muted">
         From your earlier answers. Change it on Business Information or Location &amp; Zoning and every
         office form follows.
       </p>
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />
         {business.tradeName !== '' && (
           <DerivedField
@@ -717,7 +717,7 @@ function ZoningFields({
 
   return (
     <div className="space-y-7">
-      <section className="space-y-4">
+      <section className="space-y-3">
         <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">
           Application for Locational Clearance (Business Activities)
         </h2>
@@ -731,7 +731,7 @@ function ZoningFields({
           the placeholder shows the shape of the number the applicant will
           eventually be given rather than a shape we made up for the box.
         */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ControlNoField
             label={
               <>
@@ -745,7 +745,7 @@ function ZoningFields({
         </div>
 
         {/* I. NAME OF PROPRIETOR/PRESIDENT/GENERAL MANAGER · CONTACT NO. · EMAIL ADD. */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
             label={
               <>
@@ -785,7 +785,7 @@ function ZoningFields({
         </label>
 
         {/* III. NAME OF FIRM · CONTACT NO.  |  IV. ADDRESS OF FIRM */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
             label={<>Name of Firm<FromApplicationTag /></>}
             value={business.name}
@@ -841,7 +841,7 @@ function ZoningFields({
           </p>
         </label>
 
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
             label={<>Floor Area to be / being Utilized<FromApplicationTag /></>}
             value={get(data, 'total_floor_area_sqm')}
@@ -976,9 +976,9 @@ function SanitaryFields({
   const ro = useReadOnly()
   return (
     <div className="space-y-7">
-      <section className="space-y-4">
+      <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/* New vs Renewal is the application's own type — never re-asked. */}
           <DerivedField
             label={
@@ -1002,7 +1002,7 @@ function SanitaryFields({
         </div>
       </section>
 
-      <section className="space-y-4">
+      <section className="space-y-3">
         <SectionMarker letter="B" label="Establishment Sanitation Profile" />
         <div>
           <FieldLabel required>Sanitary Classification</FieldLabel>
@@ -1013,7 +1013,7 @@ function SanitaryFields({
           />
           <CarriedTag field="sanitary_classification" />
         </div>
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
            * Asked once, on the Business & Tax Profile, and asked there because
            * that is where it is PRICED: the health certificate fee (Sec.
@@ -1197,9 +1197,16 @@ function RequirementsChecklist({
   }
 
   return (
-    <section className="space-y-4 border-t border-line pt-7">
+    <section className="space-y-3 border-t border-line pt-7">
       <div>
         <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">{meta.title}</h2>
+        {/*
+          Not in read-only. There, this list is the record of what the office
+          RECEIVED — the heading above it says so — and telling somebody their
+          originals will be checked, about an upload already made and already
+          checked, is advice arriving after the thing it is advice about.
+        */}
+        {!ro && <OriginalsNotice />}
         <p className="mt-1 text-xs leading-relaxed text-ink-muted">
           {ro
             ? `What ${meta.office} received with this application.`
@@ -1236,7 +1243,7 @@ function RequirementsChecklist({
         </p>
       )}
 
-      <div className="space-y-5">
+      <div className="space-y-3">
         {rows.map((row) => (
           <RequirementRow
             key={row.key}
@@ -1482,7 +1489,7 @@ function DenrRequirementsPanel({ data }: { data: OfficeFormData }) {
       </div>
 
       {basis === '' ? (
-        <div className="rounded-lg border border-line bg-canvas px-4 py-4">
+        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
           <p className="text-sm text-ink">
             CENRO will confirm which DENR permits your business needs.
           </p>
@@ -1506,7 +1513,7 @@ function DenrRequirementsPanel({ data }: { data: OfficeFormData }) {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-4">
+        <div className="rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">
           {/*
             One sentence, in the client's own framing: "put a very short,
             user-friendly explanation stating that this is based on the line of
@@ -1661,13 +1668,13 @@ function CecFields({
 
   return (
     <div className="space-y-7">
-      <section className="space-y-4">
+      <section className="space-y-3">
         <h2 className="text-[15px] font-bold uppercase tracking-wide text-ink">
           Ownership and Documentation
         </h2>
 
         {/* TYPE OF APPLICATION | TYPE OF BUSINESS */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ApplicationDateField data={data} />
           <ControlNoField
             label={
@@ -1699,7 +1706,7 @@ function CecFields({
         </div>
 
         {/* BUSINESS AREA | TOTAL NO. OF EMPLOYEES (MALE / FEMALE) */}
-        <div className="grid gap-5 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <DerivedField
             label={<>Business Area (in sq. m.)<FromApplicationTag /></>}
             value={business.businessAreaSqm}
@@ -1715,7 +1722,7 @@ function CecFields({
         </div>
 
         {/* OWNER | BUSINESS NAME */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
             label={
               <>
@@ -1729,7 +1736,7 @@ function CecFields({
         </div>
 
         {/* OWNER&rsquo;S ADDRESS | BUSINESS ADDRESS */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
             The one address the register does not hold. `business_addresses` has
             an `address_type` column and nothing has ever written a residential
@@ -1756,8 +1763,8 @@ function CecFields({
         </div>
 
         {/* BIRTHDAY | SEX */}
-        <div className="grid gap-5 sm:grid-cols-2">
-          <div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="relative">
             <FieldLabel>Birthday</FieldLabel>
             {/* Birthdays can never be in the future: capped here, re-checked by the API. */}
             <input
@@ -1771,16 +1778,16 @@ function CecFields({
             />
             <CarriedTag field="owner_birthday" />
             {birthdayInFuture && (
-              <p className="mt-1 text-xs font-medium text-s-red">
+              <FieldError>
                 The birthday must be a date in the past.
-              </p>
+              </FieldError>
             )}
           </div>
           <DerivedField label={<>Sex<FromApplicationTag /></>} value={business.ownerSex} />
         </div>
 
         {/* LINE OF BUSINESS | PRODUCTS/SERVICES | CONTACT NUMBERS */}
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <DerivedField
             label={<>Line of Business<FromApplicationTag /></>}
             value={business.lineOfBusiness}
@@ -1805,7 +1812,7 @@ function CecFields({
           already knows; what the applicant supplies is the act of certifying, so
           that is the control.
         */}
-        <div className="rounded-lg border border-line bg-canvas px-4 py-4">
+        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
           <label className="flex items-start gap-3">
             <input
               type="checkbox"
@@ -1819,7 +1826,7 @@ function CecFields({
               I hereby certify that all information contained herein is true and correct.
             </span>
           </label>
-          <div className="mt-4 sm:w-2/3">
+          <div className="mt-3 sm:w-2/3">
             <DerivedField
               label={<>Printed Name of Owner<FromApplicationTag /></>}
               value={business.ownerName}
@@ -1866,9 +1873,9 @@ function FsicFields({
   const ro = useReadOnly()
   return (
     <div className="space-y-7">
-      <section className="space-y-4">
+      <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <ControlNoField
             label={
               <>
@@ -1907,7 +1914,7 @@ function FsicFields({
         </div>
       </section>
 
-      <section className="space-y-4">
+      <section className="space-y-3">
         <SectionMarker letter="B" label="Certificate Applied For" />
         {/*
          * The permits you picked and the application type already decide this,
@@ -1938,9 +1945,9 @@ function OccupancyFields({
   const ro = useReadOnly()
   return (
     <div className="space-y-7">
-      <section className="space-y-4">
+      <section className="space-y-3">
         <SectionMarker letter="A" label="Application & Permit Details" />
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {/*
            * Full vs Partial is how much of the building will be occupied — a
            * real applicant decision, not the new/renewal the system knows.
@@ -2061,7 +2068,7 @@ export function OfficeFormSheet({
       <CarriedContext.Provider value={carriedKeys}>
     <div className="rounded-sm bg-white px-6 py-7 shadow-card sm:px-9 sm:py-8">
       {readOnly && (
-        <div className="mb-6 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">
+        <div className="mb-4 rounded-lg border border-s-green/40 bg-s-green-tint px-4 py-3">
           <p className="text-sm font-semibold text-ink">
             This is what you submitted to this office.
           </p>
@@ -2118,7 +2125,7 @@ export function OfficeFormSheet({
           back. Your fees do not change either way.
         </p>
       )}
-      <div className="mb-6 mt-3 h-px bg-royal" />
+      <div className="mb-4 mt-3 h-px bg-royal" />
       <div className="space-y-7">
         {/* First, so the sheet opens by showing what it already knows rather
           * than by asking. */}

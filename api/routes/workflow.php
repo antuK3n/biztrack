@@ -249,6 +249,21 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('assignments/{assignment}/release', [AssignmentController::class, 'release']);
         Route::post('assignments/{assignment}/approve', [AssignmentController::class, 'approve']);
         Route::post('assignments/{assignment}/return', [AssignmentController::class, 'return']);
+        /*
+         * The office's third answer, on the same permission as its other two.
+         *
+         * It is not behind an extra gate, and that is deliberate rather than
+         * an oversight: refusing a permit is the same officer, on the same
+         * case they are holding, making the same kind of decision as
+         * approving it. A separate permission would mean an office whose
+         * officer can GRANT a clearance cannot refuse one, which is not a
+         * shape any LGU works in.
+         *
+         * What it costs — the business permit is suspended — is a
+         * consequence the WORKFLOW applies, not a second authority the
+         * officer needs. BPLO holds the lift.
+         */
+        Route::post('assignments/{assignment}/reject', [AssignmentController::class, 'reject']);
         Route::post('assignments/{assignment}/checks', [AssignmentController::class, 'checks']);
         /*
          * The filing's RA 11032 processing category, set by the office reading
@@ -318,6 +333,14 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('permits/{permit}', [PermitController::class, 'show']);
     // Permit certificate PDF (owner-of or permit.view_all, enforced in controller)
     Route::get('permits/{permit}/pdf', [PermitController::class, 'pdf']);
+    /*
+     * Lifting a suspension is BPLO's, on the same permission that mints the
+     * certificate in the first place. The suspension is automatic; this is
+     * the human overruling it, and it is the only door back for a permit
+     * whose refused clearance is not going to be re-applied for.
+     */
+    Route::middleware('permission:permit.issue')
+        ->post('permits/{permit}/lift-suspension', [PermitController::class, 'liftSuspension']);
 
     // Chatbot (rule-based assistant; self-scoped, one conversation per user)
     Route::get('chatbot/messages', [ChatbotController::class, 'index']);
