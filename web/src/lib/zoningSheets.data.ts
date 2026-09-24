@@ -1,14 +1,22 @@
 /*
- * Where each CPDO zoning sheet sits on the ground, so the picker map can draw
- * it under the pin.
+ * Where each CPDO zoning sheet sits on the ground.
+ *
+ * ## Who reads this
+ *
+ * Only `scripts/trace-zoning-sheets.py`, which uses these placements to turn
+ * each sheet's coloured areas into approximate zone polygons
+ * (web/public/zoning/<slug>.geojson) that the picker map draws. Nothing in the
+ * app imports this file any more: the raw sheet used to be laid over the map
+ * through the affine below (ZoningSheetOverlay, removed 2026-09-24 when the
+ * traced layer replaced it). If a sheet overlay is ever wanted back, the
+ * placement is here and the component is in git history.
  *
  * ## What this is, and what it is not
  *
- * A placement for a PICTURE. The sheets are raster PNGs; nothing here turns a
- * pixel into a zone, and nothing may. The overlay lets an applicant see the
- * colours around their street; CPDO still says which zone covers their lot.
- * `BarangayZoningMap.tsx` sets out why no verdict can be derived, and a better
- * placement changes none of it.
+ * A placement for a PICTURE, and so a placement for whatever is traced from
+ * it. Tracing makes zones drawable and nameable on hover, as "approximate"; it
+ * does not make a verdict honest. `BarangayZoningMap.tsx` sets out why no
+ * verdict can be derived, and a better placement changes none of it.
  *
  * ## How each placement was derived (2026-09-23)
  *
@@ -46,7 +54,8 @@
  * [lat, lng], from UTM 51N after the correction. Three, because the frame is a
  * rectangle in UTM, and UTM grid north here is about 0.5° off true north: an
  * axis-aligned latitude/longitude box would misplace a frame corner by up to
- * 28 m on the 1:12,000 sheets. The overlay applies the affine these three fix.
+ * 28 m on the 1:12,000 sheets. The tracing script applies the affine these
+ * three fix, in Web Mercator, exactly as the removed overlay did.
  *
  * What remains: after the one correction, the per-sheet road fits scatter
  * about ±6 m, so call it ±10 m against OSM.
@@ -60,7 +69,7 @@
  */
 
 export interface ZoningSheetPlacement {
-  /** Same file `BarangayZoningMap` shows; placement is tied to these pixels. */
+  /** Same file `BarangayZoningMap` links to; placement is tied to these pixels. */
   url: string
   /** Image size in pixels, [width, height]. */
   size: [number, number]

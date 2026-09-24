@@ -1,37 +1,40 @@
-import { useState } from 'react'
-
 import type { Barangay } from '../../lib/types'
+import { ZoneSwatch } from '../../components/ZoningLayer'
+import { plainOverlay, plainZoneName } from '../../lib/zoningNames'
 
 /**
- * The applicant's barangay's official zoning sheet, and the classifications it
- * draws.
+ * The applicant's barangay's zoning, in words: the zones CPDO's sheet draws
+ * there, in plain names (lib/zoningNames.ts), and a link to the sheet itself.
  *
  * ── What this is allowed to say, and what it is not ──────────────────────────
  *
- * It shows a picture and lists what is on it. That is the whole of it.
+ * It lists what the barangay's sheet contains somewhere. That is the whole of it.
  *
  * The sheets CPDO supplied are raster images: "Brgy. <Name> Proposed Zoning Map
- * 2018 - 2027", 1:3,000. They carry no vector geometry. They ARE now placed on
- * the picker map (lib/zoningSheets.data.ts, from each sheet's scale, grid marks
- * and neighbouring linework; about ±10 m against OpenStreetMap roads — note the
- * sheets' "Luzon 1911 / Philippine Zone III" caption is wrong, the coordinates
- * are UTM 51N and sit ~102 m south as printed). That makes the colours visible
- * under a pin. It does not make a verdict honest: ±10 m straddles a zone line on
- * a narrow lot, and reading "your lot is C-2" off pixels would tell an applicant
- * their site conforms when the city says it does not. CPDO decides.
+ * 2018 - 2027". Their coloured areas are now TRACED into approximate polygons
+ * (scripts/trace-zoning-sheets.py) that the picker map beside this card draws,
+ * with a key and a name on hover for each zone. That geometry is
+ * approximate three times over: the sheet's placement is about ±10 m
+ * (lib/zoningSheets.data.ts), the barangay polygons it is clipped to are
+ * simplified to ~100 m (lib/malabonGeo.data.ts), and the trace itself rounds.
+ * On a street of 6 m lots that straddles zone lines, so reading "your lot is
+ * C-2" off it would tell an applicant their site conforms when the city may say
+ * it does not. Nothing reads a zone back out for the pin, and CPDO decides.
  *
- * Note that having real boundaries now changes nothing here. `lib/malabonGeo.ts`
- * carries city and barangay polygons, so a pin can be placed in a barangay — but
- * a barangay is not a zone. The zones are the coloured areas WITHIN each sheet,
- * and those are still only pixels. And even with zone polygons the answer would
- * not follow: the ordinance itself cannot be resolved into a conformance verdict
- * (`docs/zoning-ordinance/README.md` sets out the four independent reasons, from
- * a Fishpond Zone that lists no uses at all to inheritance chains that omit a
- * zone). Better geometry moves this no closer to a verdict.
+ * And even exact zone polygons would not make a verdict follow: the ordinance
+ * itself cannot be resolved into one (`docs/zoning-ordinance/README.md` sets
+ * out four independent reasons, from a Fishpond Zone that lists no uses at all
+ * to inheritance chains that omit a zone). Better geometry moves this no
+ * closer to a verdict.
  *
  * So: no verdict, no "your zone is", no conforming/non-conforming, no colour
- * that reads as a pass. The list is a list of what the barangay contains
- * somewhere. CPDO confirms which one covers a specific location.
+ * that reads as a pass. CPDO confirms which zone covers a specific location,
+ * and the step says so once, in ZoningConformanceNote.
+ *
+ * The sheet itself used to be shown here as a large image. It went when the
+ * map started drawing the zones: the same picture twice, the second one too
+ * small to read, cost most of the card. The link to the original stays, for
+ * anyone who wants CPDO's own document.
  *
  * ── Overlay zones ────────────────────────────────────────────────────────────
  *
@@ -39,8 +42,9 @@ import type { Barangay } from '../../lib/types'
  * designates three overlay zones — Flood over all 21 barangays, Heritage over
  * five, Eco-Tourism over Dampalit. An overlay is a "transparent zone overlain on
  * a Base Zone" (Art. V §4): it lies over the base zones rather than being one of
- * them, so it gets its own heading and list below the classifications and is
- * never mixed into them.
+ * them, so it gets its own heading and list below the zones and is never mixed
+ * into them. On screen it is "Areas with extra rules", named in plain words
+ * ("Flood-prone areas") by the same table as the zones.
  *
  * The trap is Flood. It is a designation the ordinance makes over an area, and
  * it must not be dressed as a warning about the applicant's property — not red,
@@ -55,17 +59,16 @@ import type { Barangay } from '../../lib/types'
  * as one it would read as "no flood zone here", which is a claim about a
  * property that nobody has made.
  *
- * If the vector data ever arrives (asked for in `docs/questions-for-malabon.md`
- * C2), a real per-location check becomes a contained change and this panel can
- * gain an answer. Until then, adding one here would be inventing it.
+ * If CPDO's own vector data ever arrives (asked for in
+ * `docs/questions-for-malabon.md` C2), the traced layer can be replaced by it;
+ * a per-location answer would still need the ordinance problems above solved
+ * first. Until then, adding one here would be inventing it.
  */
 export default function BarangayZoningMap({ barangay }: { barangay: Barangay | null }) {
-  const [broken, setBroken] = useState(false)
-
   if (barangay === null) return null
 
   const zones = barangay.zoning_classifications
-  const overlays = barangay.zoning_overlays
+  const overlays = barangay.zoning_overlays.map((o) => ({ code: o.code, ...plainOverlay(o.code, o.name, o.description) }))
   const mapPath = barangay.zoning_map_path
 
   return (
@@ -73,147 +76,78 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
       className="rounded-2xl bg-white px-5 py-4 shadow-card"
       aria-labelledby="barangay-zoning-heading"
     >
+      {/*
+        * "Zones in <barangay>", which is what the card lists. It read "Zoning
+        * map for Barangay <name>" from when the sheet itself was shown here;
+        * the picture went to a link long ago and the heading kept promising it.
+        */}
       <h3 id="barangay-zoning-heading" className="text-base font-semibold text-ink">
-        Zoning map for Barangay {barangay.name}
+        Zones in {barangay.name}
       </h3>
 
       {/*
-        * One line, and it still does both jobs: dates the sheet, and says who
-        * decides. It ran to three lines naming the office in full and spelling
-        * out "classifications and overlays that apply to your exact location
-        * when it reviews your zoning clearance" — all true, none of it load
-        * bearing. This card is one field in a long form; the applicant is
-        * placing a pin, not reading a briefing. "CPDO decides" is the whole of
-        * the disclaimer and it survives the cut.
+        * No caution line here any more. The step says "the zoning office
+        * checks your exact spot" once, in ZoningConformanceNote, beside the
+        * only sentence on the step that says what is allowed; see the note
+        * there. This card only lists what the barangay's sheet draws, which
+        * needs no caveat. It said "CPDO's proposed map for 2018–2027. CPDO
+        * confirms what applies to your exact location." until the client's
+        * lead (24 September 2026) found the step saying it three times over.
         */}
-      <p className="mt-1 text-sm text-ink-secondary">
-        CPDO&rsquo;s proposed map for 2018&ndash;2027. CPDO confirms what applies to your exact
-        location.
-      </p>
-
-      {mapPath !== null && !broken && (
-        <a
-          href={mapPath}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 block overflow-hidden rounded-xl border border-line focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
-        >
-          {/*
-            * Cropped to the map panel, not the whole sheet.
-            *
-            * The supplied sheet is 1825x1243 and spends its right-hand quarter
-            * on the city seal, the scale bar and a legend printed at about 8pt.
-            * Shown whole in a card this wide, the map itself lands around 300px
-            * across and the legend is unreadable anyway — so the width goes to
-            * the part the applicant can actually use. `object-cover` +
-            * `object-left` against the map panel's own aspect ratio does it
-            * without a second cropped copy of every file to keep in step.
-            *
-            * Nothing is hidden by this: the link opens the full sheet, legend
-            * and all, and the readable version of that legend is the list below
-            * — which is the same 19 classifications, from the same source.
-            */}
-          <span className="block aspect-[1305/1220]">
-            <img
-              src={mapPath}
-              /*
-               * A real alt, not aria-hidden: for a screen-reader user this image
-               * is the only thing on the card they cannot get any other way, and
-               * the alt has to say what it is AND that the list below carries the
-               * readable version. Never Color Alone applies to a whole map as
-               * much as to a chart series.
-               */
-              alt={`Official zoning map of Barangay ${barangay.name}. The classifications it shows are listed below.`}
-              width={1825}
-              height={1243}
-              loading="lazy"
-              onError={() => setBroken(true)}
-              className="h-full w-full object-cover object-left"
-            />
-          </span>
-        </a>
-      )}
-      {mapPath !== null && !broken && (
-        <p className="mt-1.5 text-sm text-ink-muted">
-          Opens the full sheet in a new tab.
-        </p>
-      )}
-
-      {(mapPath === null || broken) && (
-        /*
-         * A missing sheet must not read as "your barangay has no zoning". It
-         * says the image is missing and leaves the classification list standing,
-         * because the list is the part the applicant can act on.
-         */
-        <p className="mt-3 rounded-xl border border-line bg-canvas px-4 py-3 text-sm text-ink-secondary">
-          The map image for this barangay isn&rsquo;t available right now.
-        </p>
-      )}
-
       {zones.length > 0 && (
-        <div className="mt-4">
-          <h4 id="barangay-zone-list-heading" className="text-sm font-semibold text-ink">
-            {/*
-             * The count stays; the barangay name goes. It read "The 6
-             * classifications drawn on Barangay Baritan" three lines under a
-             * heading that already says "Zoning map for Barangay Baritan" —
-             * naming it twice is what made the card feel like a document.
-             */}
-            {zones.length === 1 ? 'Classification on this map' : `${zones.length} classifications on this map`}
-          </h4>
-          {/*
-            * Named by its own heading. There are two lists on this card now and
-            * "repeated controls need distinct accessible names" applies to them
-            * as much as to buttons: a screen-reader user landing on the second
-            * list has to be told it is the overlays and not more of the zones.
-            */}
-          <ul aria-labelledby="barangay-zone-list-heading" className="mt-2 flex flex-wrap gap-2">
-            {zones.map((z) => (
-              <li
-                key={z.code}
-                className="inline-flex items-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-sm font-medium text-ink"
-              >
-                {/*
-                 * The swatch matches the sheet so a reader can find the zone on
-                 * the image. It is decoration and is marked as such: the name
-                 * beside it is the content, which is Never Color Alone — and it
-                 * is why no zone is ever distinguished by colour alone here.
-                 */}
-                <span
-                  aria-hidden="true"
-                  className="h-3 w-3 shrink-0 rounded-sm border border-line"
-                  style={z.legend_color !== null ? { backgroundColor: z.legend_color } : undefined}
-                />
-                {z.name}
-              </li>
-            ))}
-          </ul>
-        </div>
+        /*
+         * Named by the card's heading. There are two lists on this card and
+         * "repeated controls need distinct accessible names" applies to them
+         * as much as to buttons: a screen-reader user landing on the second
+         * list has to be told it is the extra rules and not more of the zones.
+         */
+        <ul aria-labelledby="barangay-zoning-heading" className="mt-3 flex flex-wrap gap-2">
+          {zones.map((z) => (
+            <li
+              key={z.code}
+              className="inline-flex items-center gap-2 rounded-full border border-line bg-canvas px-3 py-1 text-sm font-medium text-ink"
+            >
+              {/*
+               * The same swatch the map's key draws, from the same function,
+               * so a reader can find the zone on the map beside this card.
+               * Decorative and marked so: the name beside it is the content
+               * (Never Color Alone). The name is the plain one, from the same
+               * table the key and the tooltip use (lib/zoningNames.ts).
+               */}
+              <ZoneSwatch color={z.legend_color} />
+              {plainZoneName(z.code, z.name)}
+            </li>
+          ))}
+        </ul>
       )}
 
       {zones.length === 0 && (
-        <p className="mt-4 text-sm text-ink-secondary">
-          We haven&rsquo;t recorded the classifications for this barangay yet.
+        <p className="mt-3 text-sm text-ink-secondary">
+          We don&rsquo;t have the zones for this barangay yet.
         </p>
       )}
 
       {overlays.length > 0 && (
         /*
-         * Set apart from the classification list on four counts at once, because
-         * an applicant mistaking an overlay for a base zone is the failure this
-         * block exists to avoid: it sits in its own bordered panel, under its
-         * own heading, as full-width rows rather than pills, each row carrying
-         * the word "Overlay" as text. Never Color Alone — remove every colour
-         * here and the two lists are still plainly different things.
+         * Set apart from the zone list, because an applicant mistaking an
+         * overlay for a base zone is the failure this block exists to avoid:
+         * its own heading, and dashed royal pills rather than solid neutral
+         * ones. Never Color Alone — remove every colour here and the two lists
+         * are still plainly different things, by heading and by outline.
+         *
+         * The heading says what an overlay IS in the ordinance's own terms, a
+         * layer of "additional regulations" over the base zones (Art. V §4),
+         * without the word "overlay", which nobody outside a planning office
+         * uses. "Some areas" because that is what each one is designated over.
          *
          * Royal, not red. #bd0000 is for errors and destructive actions; a
-         * designation made by ordinance is neither, and a Flood overlay printed
-         * in red would read as a warning about this applicant's lot, which is
-         * precisely the verdict we cannot make.
+         * designation made by ordinance is neither, and a flood designation
+         * printed in red would read as a warning about this applicant's lot,
+         * which is precisely the verdict we cannot make.
          */
         <div className="mt-4">
           <h4 id="barangay-overlay-list-heading" className="text-sm font-semibold text-ink">
-            {overlays.length === 1 ? 'Overlay over this barangay' : `${overlays.length} overlays over this barangay`}
+            Areas with extra rules
           </h4>
           <ul aria-labelledby="barangay-overlay-list-heading" className="mt-2 flex flex-wrap gap-2">
             {overlays.map((o) => (
@@ -226,38 +160,27 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
             ))}
           </ul>
           {/*
-            * The ordinance's explanation, folded away.
-            *
-            * It used to be a bordered panel with a heading, a sentence about
-            * Ordinance 24-2018, and a two-to-three line paragraph per overlay —
-            * roughly half the card, for something most applicants will never
-            * read. Collapsed, it costs one line and is still one click away for
-            * the applicant who wants to know what "Heritage" means.
+            * What each one asks, folded away: most applicants will never open
+            * it, and it is one click away for whoever wants to know what
+            * "Heritage houses" means for them.
             *
             * <details> rather than a custom disclosure: it is keyboard operable,
             * announces its own expanded state, and works before React hydrates.
             *
-            * The distinction from base zones is now carried by the dashed pill,
-            * the royal tint, the separate heading and the word "overlay" in it —
-            * four signals, none of them colour alone, which is what the earlier
-            * full-width rows were for. An applicant still cannot mistake one for
-            * a base zone.
-            *
-            * Still not red, and still no alert role. Flood here is a designation
-            * the ordinance makes over an area, not a finding about this
-            * applicant's lot — we have no geometry and "your site floods" is not
-            * ours to say.
+            * Still not red, and still no alert role. The flood wording says what
+            * the rule asks of a building and that it changes no uses, and stops
+            * there; see lib/zoningNames.ts.
             */}
-          {overlays.some((o) => o.description !== null) && (
+          {overlays.some((o) => o.meaning !== null) && (
             <details className="group mt-2">
               <summary className="cursor-pointer list-none text-sm font-medium text-royal underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal">
-                What these overlays mean
+                What these mean
               </summary>
               <div className="mt-2 space-y-1.5 border-l-2 border-royal/25 pl-3">
                 {overlays.map((o) =>
-                  o.description === null ? null : (
+                  o.meaning === null ? null : (
                     <p key={o.code} className="text-sm leading-relaxed text-ink-secondary">
-                      <span className="font-semibold text-ink">{o.name}.</span> {o.description}
+                      <span className="font-semibold text-ink">{o.name}.</span> {o.meaning}
                     </p>
                   ),
                 )}
@@ -265,6 +188,26 @@ export default function BarangayZoningMap({ barangay }: { barangay: Barangay | n
             </details>
           )}
         </div>
+      )}
+
+      {/*
+        * The source document, as a text link in a new tab so the form stays
+        * put. It read "Open CPDO's original sheet": two words the public does
+        * not use ("CPDO", "sheet") for one thing they understand, the City's
+        * own zoning map.
+        */}
+      {mapPath !== null && (
+        <p className="mt-4 text-sm">
+          <a
+            href={mapPath}
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-royal underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+          >
+            See the City&rsquo;s official zoning map
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        </p>
       )}
     </section>
   )

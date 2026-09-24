@@ -90,8 +90,9 @@ export interface Barangay {
   zoning_map_path: string | null
   /**
    * What that sheet DRAWS, in the legend's order. Not what any given address
-   * is: the maps are rasters with no geometry, so nothing here answers "is my
-   * site conforming". CPDO decides that. See the docblock on
+   * is: the zones the picker map draws are traced from the raster, approximate,
+   * and nothing reads one back out for a location, so nothing here answers "is
+   * my site conforming". CPDO decides that. See the docblock on
    * `BarangayZoningMap.tsx` for why real city and barangay polygons in
    * `lib/malabonGeo.ts` do not change that.
    */

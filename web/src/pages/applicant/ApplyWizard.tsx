@@ -14,7 +14,7 @@ import {
 } from './OfficeFormStep'
 import { barangayCentre, checkPin, withinMalabon } from '../../lib/malabonGeo'
 import { OTHER_PSIC_CODE } from '../../lib/psic'
-import { geocodeInMalabon, streetQuery } from '../../lib/geocode'
+import { geocodeInMalabon, reverseGeocode, streetQuery } from '../../lib/geocode'
 import {
   CheckCircleFilledIcon,
   CheckIcon,
@@ -1793,7 +1793,10 @@ function LinesStep({
                           ),
                         )
                       }
-                      placeholder="What you actually sell — e.g. milk tea, fried snacks"
+                      // Shape, not an answer (AGENTS.md §6.4): "e.g. milk tea, fried
+                      // snacks" was an answer, and a sari-sari store owner is not
+                      // selling milk tea.
+                      placeholder="What customers buy from you, in a few words"
                       className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none"
                     />
                     {/*
@@ -2702,6 +2705,78 @@ export function ApplyWizard() {
     longitude: number
     barangay: string
   } | null>(null)
+  /*
+   * ── The pin suggests the address text (the reverse of item 7) ─────────────
+   *
+   * When the applicant places or moves the pin by hand, OSM is asked what is
+   * there, and the answer is written into House/Bldg. No. and Street as a
+   * starting point. Context, not truth: OSM holds Malabon's roads and almost
+   * none of its house numbers, so usually only the street arrives.
+   *
+   * `autoFilled` is what we last WROTE into each box (null where we wrote
+   * nothing). A box is filled only if it is empty or still holds that value,
+   * so anything the applicant typed is never overwritten. The barangay select
+   * is deliberately not touched: the barangay is chosen first and the pin
+   * checked against it, not the other way round, and the mismatch message
+   * already handles the two disagreeing.
+   *
+   * No loop with the address-to-pin lookup above: that effect stands down once
+   * a pin exists that it did not place (`autoPinned === null`), which is
+   * exactly the state a hand-placed pin leaves behind, so a street written in
+   * here never re-pins anything.
+   */
+  const [autoFilled, setAutoFilled] = useState<{
+    house_bldg_no: string | null
+    street: string | null
+  } | null>(null)
+  const reverseAbortRef = useRef<AbortController | null>(null)
+  // The latest committed form, for a lookup that resolves after it was asked.
+  const formRef = useRef(form)
+  const autoFilledRef = useRef(autoFilled)
+  useEffect(() => {
+    formRef.current = form
+    autoFilledRef.current = autoFilled
+  })
+  useEffect(() => () => reverseAbortRef.current?.abort(), [])
+
+  function fillAddressFromPin(latitude: number, longitude: number) {
+    // A newer pin supersedes an older question, answered or not.
+    reverseAbortRef.current?.abort()
+    const controller = new AbortController()
+    reverseAbortRef.current = controller
+    void reverseGeocode(latitude, longitude, controller.signal).then((hit) => {
+      // Silent on every failure: the boxes simply stay as they were.
+      if (hit === null || controller.signal.aborted) return
+      const current = formRef.current
+      const prev = autoFilledRef.current
+      const ours = (key: 'house_bldg_no' | 'street') =>
+        current[key].trim() === '' || (prev?.[key] != null && current[key] === prev[key])
+      const next = {
+        house_bldg_no: ours('house_bldg_no') ? hit.houseNumber : null,
+        street: ours('street') ? hit.street : null,
+      }
+      /*
+       * A box we filled earlier is emptied when the new point has nothing for
+       * it, so an old pin's house number does not ride along to a new street.
+       * A box the applicant typed in is left alone either way.
+       */
+      const writes: Partial<Pick<FormState, 'house_bldg_no' | 'street'>> = {}
+      for (const key of ['house_bldg_no', 'street'] as const) {
+        const value = hit[key === 'street' ? 'street' : 'houseNumber'] ?? ''
+        if (ours(key) && current[key] !== value) writes[key] = value
+      }
+      if (Object.keys(writes).length > 0) setForm((f) => ({ ...f, ...writes }))
+      setAutoFilled(next.house_bldg_no === null && next.street === null ? null : next)
+    })
+  }
+  /*
+   * The "filled in from your pin" note shows while every box we filled still
+   * holds what we put there, and goes the moment the applicant edits one.
+   */
+  const autoFillNoteShown =
+    autoFilled !== null &&
+    (autoFilled.house_bldg_no === null || form.house_bldg_no === autoFilled.house_bldg_no) &&
+    (autoFilled.street === null || form.street === autoFilled.street)
 
   const [saving, setSaving] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -7724,14 +7799,27 @@ export function ApplyWizard() {
                * Amber, not red: nothing is wrong yet, and #bd0000 is for errors
                * (DESIGN.md, Red Means Stop). The bold lead-in carries it in
                * words, so it survives with colour off.
+               *
+               * "Choose your barangay first" is back (client's lead, 24
+               * September 2026). 079092f cut the intro line that said the pin
+               * must fall inside the selected barangay, but the rule never
+               * went: onPick refuses a pin outside the chosen barangay, a new
+               * barangay removes a pin that contradicts it, and the step will
+               * not advance on a mismatch (`missingFor`). All of that is
+               * client-side — the API validates only that the coordinates are
+               * numbers. The map DOES take a pin before a barangay is named
+               * (any point in Malabon), so this is advice about order, not a
+               * lock, and the second clause says what happens if the order is
+               * reversed. Merged into this box rather than stacked above it:
+               * one amber note read before the map, not two.
                */}
               <p
                 id="pin-accuracy-note"
                 className="rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
               >
-                <span className="font-bold">Place the pin exactly on your business.</span> A wrong
-                location can get your application disapproved, and any fees you paid will be
-                forfeited.
+                <span className="font-bold">Place the pin exactly on your business.</span> Choose
+                your barangay first. Your pin has to be inside it. A wrong location can get your
+                application disapproved, and any fees you paid will be forfeited.
               </p>
               <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
                 <MapPicker
@@ -7797,8 +7885,10 @@ export function ApplyWizard() {
                      */
                     const verdict = checkPin(lat, lng, barangayName ?? null)
                     if (verdict.kind === 'outside-city') {
+                      // No coordinates in the message: they mean nothing to an
+                      // applicant, and the map already shows where they clicked.
                       setPinError(
-                        `That point (${lat}, ${lng}) is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.`,
+                        'That point is outside Malabon, so we can’t use it. Zoom in on your street within the city and click there.',
                       )
                       return
                     }
@@ -7818,47 +7908,54 @@ export function ApplyWizard() {
                      */
                     setAutoPinned(null)
                     setForm((f) => ({ ...f, latitude: lat, longitude: lng }))
+                    // And the pin, now the applicant's, suggests the address
+                    // text — see `fillAddressFromPin`.
+                    fillAddressFromPin(lat, lng)
                   }}
                 />
                 {form.latitude !== null ? (
-                  <p className="tnum bg-white px-4 py-2 text-sm text-ink-secondary">
-                    Pinned at {form.latitude}, {form.longitude}
+                  /*
+                   * One quiet line that the pin is down, and how to move it.
+                   *
+                   * It read "Pinned at 14.675351, 120.945833 · the ring is the
+                   * 500 m counted below". The client's lead (24 September
+                   * 2026): coordinates mean nothing to the public, and they
+                   * don't. The ring's meaning moved to the insights card, the
+                   * only place that counts inside it ("Within 500 m of your
+                   * pin, the ring on the map"). What is left is the
+                   * confirmation — the partner of the red "Required: click the
+                   * map" line it replaces — and the one thing an applicant may
+                   * not know, that the pin can be moved.
+                   *
+                   * The coordinates ride on data attributes, not on screen, for
+                   * the e2e checks that a pin survived or moved.
+                   */
+                  <p
+                    className="bg-white px-4 py-2 text-xs text-ink-muted"
+                    data-latitude={form.latitude}
+                    data-longitude={form.longitude ?? undefined}
+                    data-testid="pin-status"
+                  >
+                    {autoPinned === null && 'Pin placed. Drag it or click the map to move it.'}
                     {/*
                      * Item 7 — a suggested pin says it is a suggestion.
                      *
                      * An applicant who did not place this pin needs to know two
                      * things before they walk past it: that the form guessed
                      * from their address, and that the guess is theirs to
-                     * overrule. Saying only "Pinned at ..." would let a
+                     * overrule. Saying only "Pin placed" would let a
                      * street-centroid guess be mistaken for a confirmed
                      * location, which on a zoning clearance is the wrong thing
-                     * to be relaxed about.
+                     * to be relaxed about. Body size, because this one asks the
+                     * applicant to do something.
                      *
                      * Disappears the moment they click or drag, because from
                      * then on the pin is not a guess.
                      */}
                     {autoPinned !== null && (
-                      <span className="mt-0.5 block text-ink-muted">
-                        Placed from your address, on {autoPinned} — a point on the street, not
+                      <span className="block text-sm text-ink-secondary">
+                        Pin placed from your address, on {autoPinned} — a point on the street, not
                         your door. Drag it onto your exact spot.
-                      </span>
-                    )}
-                    {/*
-                     * Says in words what the ring on the map means.
-                     *
-                     * DESIGN.md's Never Color Alone rule: the circle carries
-                     * meaning — "everything counted below is inside here" — and a
-                     * blue ring alone carries it in colour and shape only. This
-                     * sentence is the same fact in text, so it survives with
-                     * colour off, at low vision, and on a screen reader that
-                     * cannot see an SVG path at all.
-                     *
-                     * It appears only alongside the ring, off the same radius, so
-                     * the caption can never describe a circle that is not drawn.
-                     */}
-                    {insightsRadiusM !== null && (
-                      <span className="mt-0.5 block text-ink-muted">
-                        The circle is the {insightsRadiusM} m the figures below count.
                       </span>
                     )}
                   </p>
@@ -7934,7 +8031,7 @@ export function ApplyWizard() {
                  * "CPDO checks the actual site during processing." stood here.
                  * It went with the rest of the step's explanatory copy
                  * (client, 23 September 2026); CPDO's final say is now stated
-                 * once, in the zoning note under the map.
+                 * once, as the last line of the zoning note under the map.
                  */}
               </div>
 
@@ -8007,7 +8104,15 @@ export function ApplyWizard() {
                         value={form.house_bldg_no}
                         onChange={(e) => update('house_bldg_no', e.target.value)}
                         onBlur={() => touch('house_bldg_no')}
-                        placeholder="e.g. 17"
+                        /*
+                         * The shape of the answer, not an answer (AGENTS.md
+                         * §6.4). "e.g. 17" read as a real number, and filings
+                         * exist whose whole street address is "17". Saying a
+                         * building name also counts is the thing an applicant
+                         * in a market stall or a named building needs to hear.
+                         * Short, because the box is narrow on a desktop.
+                         */
+                        placeholder="No. or building"
                         className={inputCls}
                       />
                     </label>
@@ -8019,7 +8124,10 @@ export function ApplyWizard() {
                         value={form.street}
                         onChange={(e) => update('street', e.target.value)}
                         onBlur={() => touch('street')}
-                        placeholder="e.g. Gen. Luna Street"
+                        // Shape, not an answer: "e.g. Gen. Luna Street" is a real
+                        // Malabon street and read as a prefilled one. The barangay
+                        // has its own field below, so it is the one thing to leave out.
+                        placeholder="Street name only, no barangay"
                         className={inputCls}
                         aria-invalid={Boolean(fieldErrors.street)}
                       />
@@ -8028,6 +8136,21 @@ export function ApplyWizard() {
                       <p className="mt-1 text-sm font-medium text-s-red">{fieldErrors.street}</p>
                     )}
                   </div>
+                </div>
+                {/*
+                 * Says the boxes were written by us, from the pin, and are
+                 * theirs to correct. Only while every filled box still holds
+                 * what we put there (`autoFillNoteShown`): once the applicant
+                 * edits, the text is theirs and the note would be describing
+                 * the wrong thing. The live region is always mounted so the
+                 * sentence is announced when it appears.
+                 */}
+                <div role="status" aria-live="polite">
+                  {autoFillNoteShown && (
+                    <p className="mt-2 text-sm text-ink-secondary" data-testid="address-autofill-note">
+                      Filled in from your pin. Check it and fix anything that’s wrong.
+                    </p>
+                  )}
                 </div>
               </div>
               {/*
@@ -8180,7 +8303,8 @@ export function ApplyWizard() {
               </div>
 
               {/*
-               * CPDO's own sheet for whichever barangay was just picked.
+               * The zones on CPDO's sheet for whichever barangay was just
+               * picked, in plain names, and a link to the sheet.
                *
                * Directly under the picker, not beside the map: it answers the
                * question the applicant has at the moment they choose ("what is
@@ -8199,7 +8323,8 @@ export function ApplyWizard() {
                   <input
                     value={form.line2}
                     onChange={(e) => update('line2', e.target.value)}
-                    placeholder="Nearest landmark"
+                    // "Nearest landmark" restated the label. This says what kind.
+                    placeholder="A place nearby that people know"
                     className={inputCls}
                   />
                 </label>
