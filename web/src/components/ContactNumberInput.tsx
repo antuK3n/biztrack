@@ -334,7 +334,8 @@ export function MobileNumberInput({
           */}
         <span
           aria-hidden="true"
-          className="tnum shrink-0 rounded-lg border border-input-border bg-line/40 px-2.5 py-2.5 text-sm font-medium text-ink-secondary"
+          // Same height as the boxes it sits against — see boxCls.
+          className="tnum shrink-0 rounded-lg border border-input-border bg-line/40 px-2.5 py-2 text-sm font-medium text-ink-secondary"
         >
           +63
         </span>
@@ -465,4 +466,7 @@ const legendCls = 'mb-1.5 block text-[13px] font-semibold text-ink'
  * each box.
  */
 const boxCls =
-  'tnum shrink-0 rounded-lg border border-input-border bg-input px-2 py-2.5 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'
+  // `py-2` matches `inputCls`. It was `py-2.5` and stayed behind when the
+  // shared input tightened on 24 September, which left a landline box four
+  // pixels taller than the text box beside it on the same row.
+  'tnum shrink-0 rounded-lg border border-input-border bg-input px-2 py-2 text-center text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal'

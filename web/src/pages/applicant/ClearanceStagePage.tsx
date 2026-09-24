@@ -1688,20 +1688,75 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
               */}
 
               {/*
-                ── The "This office refused it" panel was here ─────────────────
+                ── The refusal panel, rebuilt 24 September 2026 ────────────────
 
-                It rendered for `state === 'rejected'` and read
-                `assignment.remarks`, and it was wrong twice over. The state
-                was unreachable — nothing could reject a clearance — and the
-                column was the wrong one: a return writes the PIVOT's remarks,
-                and the assignment's are written on an APPROVAL, so the panel
-                could have shown an approval note under "refused".
+                There was one here until 17 September, and it was wrong twice
+                over: the state was unreachable — nothing could reject a
+                clearance — and it read `assignment.remarks`, which are
+                written on an APPROVAL, so it could have shown an approval
+                note under the heading "refused". It was removed with the
+                state (*"I think Return is enough already"*).
 
-                Removed with the state on 17 September 2026 (*"I think Return is
-                enough already"*). What the applicant needs in its place is the
-                RETURN note, which is what follows and reads `return_note` — the
-                column the office actually writes.
+                Both halves are fixed rather than repeated. The state is
+                reachable now — an office's Reject sets it, which is what the
+                LGU's suspension rule needs — and this reads `return_note`,
+                the PIVOT's remarks, which is the column `rejectClearance`
+                writes and the same one the return panel below reads.
+
+                It says the consequence out loud. The applicant's Business
+                Permit is suspended at this moment, and the notification that
+                told them so is one of many in a list; this card is where
+                they come to find out what to do about it, so it carries both
+                the cost and the way back rather than only the refusal.
               */}
+              {row.state === 'rejected' && (
+                <div className="mt-3 rounded-md border border-s-red bg-s-red-tint px-3 py-2.5">
+                  <p className="text-xs font-bold text-ink">
+                    {row.permit_type.department?.name ?? 'This office'} rejected this permit
+                  </p>
+                  {/*
+                    The officer's own words, quoted for the reason the return
+                    panel quotes them: it reads as a person who decided rather
+                    than as the system's wording. The reason is required by the
+                    API, so the guard is for an empty string rather than a
+                    realistic absence.
+                  */}
+                  {row.return_note !== null && row.return_note.trim() !== '' && (
+                    <p className="mt-1 text-xs italic leading-relaxed text-ink-secondary">
+                      “{row.return_note}”
+                    </p>
+                  )}
+                  {/*
+                    ── What would settle it, in the office's own words ───────
+
+                    The reason above says what is wrong; this says what to do,
+                    and the API requires the officer to write it for exactly
+                    that purpose. Quoted rather than paraphrased: it is an
+                    instruction from a named office and the applicant may have
+                    to act on it literally.
+                  */}
+                  {row.rejection_remedy !== null && row.rejection_remedy.trim() !== '' && (
+                    <p className="mt-2 text-xs font-semibold leading-relaxed text-ink">
+                      To settle it: “{row.rejection_remedy}”
+                    </p>
+                  )}
+                  <p className="mt-1.5 text-xs text-ink-secondary">
+                    Your Business Permit is suspended while this stands. Apply for this permit
+                    again below — it is restored as soon as this office approves it.
+                    {/*
+                      Said here because the form keeps its answers: one row per
+                      permit per filing, never one per attempt, so re-applying
+                      reopens the sheet exactly as they left it. That is the
+                      right default — retyping twenty fields to fix one invites
+                      new errors — and it makes an unchanged resubmission easy,
+                      which is the thing worth warning about.
+                    */}{' '}
+                    Your answers are still on the form; change what the office asked for
+                    before you submit it again.
+                  </p>
+                </div>
+              )}
+
 
               {row.state === 'returned' && (
                 <div className="mt-3 rounded-md border border-s-rose bg-s-rose-tint px-3 py-2.5">

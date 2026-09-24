@@ -173,7 +173,7 @@ it('lets each of the five clearance offices book a visit, and books none for the
      */
     expect($offices)->toBe(['BFP', 'CENRO', 'CHO', 'CPDO', 'OBO'])
         ->and($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits)
-        ->and($app->permits()->count())->toBe(0);
+        ->and(clearancePermitsIssued($app))->toBe(0);
 });
 
 it('gives every inspecting office an active officer to book the visit to', function () {
@@ -233,15 +233,17 @@ it('lets each of the five offices see and close its own visit, releasing that pe
          * office had finished, which is what the client asked to be changed.
          *
          * The LAST pass lands two permits, not one: since 18 September 2026 the
-         * fifth clearance being approved also issues the business permit, in the
-         * same transaction. Written as an explicit `+ 1` on the final iteration
-         * rather than by loosening the assertion to `>=`, because the exact
-         * count is the point — five offices release five, and the sixth has a
-         * different cause.
+         * fifth clearance being approved ALSO issued the business permit, in
+         * the same transaction, so the last iteration expected one more than
+         * it had released.
+         *
+         * That `+ 1` is gone with the rule behind it. The business permit is
+         * minted at PAYMENT since 24 September 2026, long before this loop
+         * starts, so the clean statement is back: five offices release five,
+         * one each, and the count asks about clearances only.
          */
         $released++;
-        $isLast = $released === count(OFFICE_INSPECTOR);
-        expect($app->permits()->count())->toBe($released + ($isLast ? 1 : 0));
+        expect(clearancePermitsIssued($app))->toBe($released);
         expect(app(WorkflowService::class)->pivotFor($app->fresh(), $permitCode)->status)
             ->toBe(ClearanceStatus::Approved);
     }
@@ -286,9 +288,10 @@ it('holds the business permit until the last of the five visits passes', functio
         expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
     }
 
-    // Four permits are out — each released by its own office — while the
-    // application itself has not moved.
-    expect($app->permits()->count())->toBe(4);
+    // Four clearances are out — each released by its own office — while the
+    // application itself has not moved. (The business permit has been out
+    // since payment; this counts the five, which is what the visits release.)
+    expect(clearancePermitsIssued($app))->toBe(4);
 
     $last = end($offices);
     $visitId = bookVisitFor($app, $last);

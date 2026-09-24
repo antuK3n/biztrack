@@ -9,6 +9,7 @@ use App\Models\AppNotification;
 use App\Models\Business;
 use App\Models\OfficerRequest;
 use App\Models\Permit;
+use App\Models\PermitType;
 use App\Models\User;
 use App\Services\Sms\SmsChannel;
 use Illuminate\Support\Facades\Bus;
@@ -240,6 +241,105 @@ class NotificationService
         $this->fanOut($app->applicant, "BizTrack: permit(s) for {$app->tracking_id} issued.");
     }
 
+    // --- A refused permit, and the suspension it causes ----------------------
+
+    /**
+     * One office has refused one permit. Said separately from the suspension.
+     *
+     * Two notifications rather than one, because they are two facts with two
+     * different next steps: this one is the office's decision and points at the
+     * permit, and `outcomePermitSuspended` below is what it costs and points at
+     * the certificate. Rolling them together would bury whichever half the
+     * applicant most needed.
+     *
+     * The reason is quoted rather than summarised. It is the office's wording
+     * and the only thing that tells the applicant what to do next.
+     */
+    public function clearanceRejected(Application $app, PermitType $type, string $reason): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'decision',
+            "{$type->name} was rejected",
+            "The office reviewing your {$type->name} on {$app->tracking_id} has refused it. "
+                ."Reason: {$reason} You can apply for it again once the issue is settled.",
+            "/applications/{$app->id}/clearances",
+        );
+        $this->fanOut(
+            $app->applicant,
+            "BizTrack: your {$type->name} on {$app->tracking_id} was rejected. Open BizTrack for the reason.",
+        );
+    }
+
+    /**
+     * The business permit has been suspended because a permit was refused.
+     *
+     * The heaviest thing this flow does to a citizen, so it says all four things
+     * they need: that the certificate is suspended, which permit caused it, the
+     * office's reason, and the way back. An owner who reads only the title still
+     * learns the one fact that changes what they may do today.
+     *
+     * Links to the permit rather than to the filing. The certificate is the
+     * object that changed and the one they will be asked to show.
+     */
+    public function outcomePermitSuspended(
+        Application $app,
+        Permit $permit,
+        PermitType $refused,
+        string $reason,
+    ): void {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'decision',
+            'Business Permit suspended',
+            "Your Business Permit {$permit->permit_number} has been suspended because your "
+                ."{$refused->name} was rejected. Reason: {$reason} Apply for that permit again, "
+                .'and your Business Permit is restored as soon as it is approved.',
+            '/permits',
+        );
+        $this->fanOut(
+            $app->applicant,
+            "BizTrack: Business Permit {$permit->permit_number} suspended — your {$refused->name} was rejected.",
+        );
+    }
+
+    /**
+     * The suspension is over, either by itself or by BPLO lifting it.
+     *
+     * One method for both, because to the owner it is one event — their permit
+     * is valid again — and the difference is in WHY, which the body carries.
+     * `$reason` present means a person decided it; absent means the condition
+     * that caused it simply stopped holding.
+     */
+    public function outcomePermitReinstated(Application $app, Permit $permit, ?string $reason = null): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+        $this->push(
+            $app->applicant,
+            'issuance',
+            'Business Permit restored',
+            "Your Business Permit {$permit->permit_number} is active again."
+                .($reason !== null
+                    ? " BPLO lifted the suspension. Reason: {$reason}"
+                    : ' No permit on this application is rejected any more.'),
+            '/permits',
+        );
+        $this->fanOut(
+            $app->applicant,
+            "BizTrack: Business Permit {$permit->permit_number} is active again.",
+        );
+    }
     // --- Messaging -----------------------------------------------------------
     public function newMessage(Application $app, User $recipient): void
     {
