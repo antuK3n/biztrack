@@ -160,6 +160,10 @@ export interface Address {
   /** BPLO item 5, in the paper's own two boxes. `line1` is composed from them. */
   house_bldg_no?: string | null
   street?: string | null
+  /** Block, Lot and the lot's area in sq. m. — optional, all three. */
+  block?: string | null
+  lot?: string | null
+  lot_area_sqm?: number | null
   barangay: Barangay
   latitude: number | null
   longitude: number | null
@@ -350,6 +354,10 @@ export interface BusinessPayload {
      */
     house_bldg_no?: string
     street?: string
+    block?: string
+    lot?: string
+    /** Plain decimal string, or null to clear. */
+    lot_area_sqm?: string | null
     line1?: string
     line2?: string
     barangay_id: number
