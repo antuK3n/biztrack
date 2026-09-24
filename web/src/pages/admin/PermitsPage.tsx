@@ -1,102 +1,75 @@
 import { useEffect, useMemo, useState } from 'react'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
+import { businessName } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
-import { businessName, formatDate } from '../../lib/format'
-import type { Permit } from '../../lib/types'
+import type { Permit, PermitRegisterRow } from '../../lib/types'
+import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
 import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
+import { OFFICES, columnsFor, officeOf, type OfficeCode, type PermitColumn } from './permitColumns'
 
 /*
- * Permits — every certificate the City has issued, as one table.
+ * Permits — every certificate the City has issued, as one long table.
  *
- * Issue #103: "A page listing ALL approved permits as a table, with only the
- * necessary columns, allowing the admin to view a permit, revoke it, and the
- * other actions in the use case diagram."
+ * Issue #103 asked for "a page listing ALL approved permits as a table". It
+ * shipped with five columns and the reasoning, written here at the time, that
+ * "only the necessary columns" meant the fewest a reader could decide on.
  *
- * Two of those three are here. The third is not, and its absence is decided
- * rather than unfinished — see "Revoke is not on this screen" below.
+ * The client read that table and asked for the opposite, in plain terms:
+ * "ilagay lahat sa isang mahabang table pahaba left to right ... lahat ng info
+ * about sa permit na kailangan sa kada office pati mga finill outan kada
+ * permit ... mauuna ang BAN". This is that table.
  *
- * ── Five columns, and what was deliberately left off ───────────────────────
+ * ── Both halves of the ask, and why they are not in conflict ───────────────
  *
- * The register holds 5,475 issued permits, 2,182 of them active. At that depth
- * a column is not free: every one added is one more thing the eye has to skip
- * on every row, and a table wide enough to scroll sideways hides the column
- * that decides the answer. "Only the necessary columns" is the instruction, so:
+ * Two sentences that look like they pull apart: one long table with everything
+ * in it, AND "naka depende kung anong office ito" — each office sees what it
+ * needs. They are the same table read two ways, so the office filter decides:
  *
- *   Permit No.    the identifier. It is what an administrator is handed over
- *                 the counter or down the phone, and the only value on the row
- *                 that is unique.
- *   Business      whose it is. A permit number alone is unreadable to a person.
- *   Type          which of the six. A business holds several at once, so the
- *                 number and the name together still do not say which document
- *                 this row is.
- *   Valid until   whether it is still good. The one date that decides anything.
- *   Status        active / expired / superseded — because the date does not
- *                 settle it: a superseded permit is inside its own term and is
- *                 not the one in force.
+ *   No office chosen  the register. Every shared column plus all five office
+ *                     sheets, scrolling sideways. This is the long table.
+ *   An office chosen  that office. The shared columns plus its own sheet, and
+ *                     the other four sheets drop away.
  *
- * Left off on purpose:
+ * ── What the columns are, and where each comes from ────────────────────────
  *
- *   Valid from      the pair reads as one fact and only the end of it is ever
- *                   scanned. It is on the certificate, one click away.
- *   Tracking ID     names the FILING, not the permit. Records already lists
- *                   filings by tracking ID; repeating it here invites the two
- *                   identifiers to be used interchangeably, which AGENTS.md §11
- *                   is explicit that they are not. It is still SEARCHABLE — an
- *                   administrator holding one can find the permit it produced —
- *                   it just does not earn a column.
- *   Owner           the business name answers "whose" for the purpose of this
- *                   screen, and the owner is on the certificate.
- *   Days to expiry  the expiry date said twice. Ranking permits by how close
- *                   they are to lapsing is Renewal Risk's whole screen, and it
- *                   weights more than the date.
- *   Issued on       not in PermitResource, and not a question asked of this
- *                   table. `valid_from` is the operative start date anyway.
- *   Verify URL      a public link for a third party checking a certificate, not
- *                   an internal reader who is already looking at the register.
+ * `permitColumns.ts` holds them as data — heading, value and whether the
+ * SERVER can sort on it — so the head and the body are drawn from one list and
+ * cannot fall out of step. A column in the body but not the head shifts every
+ * cell to its right by one, silently, and the table still renders.
  *
- * ── Where search, sort and paging run ──────────────────────────────────────
+ * The face — trade name, owner, address, barangay, city, line of business — is
+ * read off the SNAPSHOT taken when the certificate was signed, never off the
+ * register as it reads today. See `PermitFace` and the `issued_details`
+ * migration.
  *
- * Same split RecordsPage settled on, for the same reasons:
+ * ── Where search, filter, sort and paging run ──────────────────────────────
  *
- *  - Search → server (`q`), so it reaches all 5,475 rows rather than the 25 in
- *    hand. It matches permit number, business name and tracking ID; the field's
- *    label says exactly that, because a search box that quietly matches one
- *    column makes a correct query look like missing data.
- *  - Status → server (`status`), so the count line under the table is the
- *    count of what was asked for and not of the page.
- *  - Paging → server.
- *  - Sort → browser, over the page in hand, because /permits accepts no
- *    ordering: PermitController::index is `issued_at DESC, id DESC`,
- *    unconditionally. Do NOT add an `order` param to "fix" this — an unknown
- *    key is dropped in silence, which is a control that looks like it works.
- *    The footer therefore names the sort's reach whenever one is active.
+ * All four on the server now. Sorting used to run in the browser over the 25
+ * rows in hand, because `/permits` accepted no ordering; the note here warned
+ * against adding an `order` param to "fix" it, since an unknown key is dropped
+ * in silence. The endpoint takes `sort` and `dir` against its own whitelist,
+ * so the sort reaches the whole register and an unknown key is a 422.
  *
- * ── Revoke is not on this screen ───────────────────────────────────────────
+ * Nine columns can be ordered. The office-sheet answers cannot: they live in a
+ * JSON column no index reaches, and their headers are plain text rather than
+ * buttons — an unsortable header that looked pressable would be a control that
+ * appears to work.
  *
- * The issue asks for it. It is not built, and adding it here without the
- * decisions below would be worse than leaving the gap:
+ * ── Revoke is still not on this screen ─────────────────────────────────────
  *
- *  - PermitStatus::Revoked and ::Suspended exist as enum cases, and
- *    `permits.revoked_at` / `permits.revoked_reason` exist as columns — but
- *    NOTHING in the codebase writes any of them, and the live register holds
- *    zero rows in either state (active 2,182 / expired 3,162 / superseded 131).
- *    So revocation is not a status that is merely unexposed; it is a terminal
- *    state nothing has ever entered, with no writer, no audit entry, no
- *    notification and no rule about the PDF already in the owner's hands.
- *  - A revoked permit means a business is trading unlawfully. That is an
- *    enforcement act with a real-world consequence, not a row update, and it
- *    needs the City to say who may do it and on what grounds.
- *  - The issue cites "the other actions in the use case diagram" and that
- *    diagram is not in this repository. Guessing at the actions is how the
- *    wrong ones get shipped.
+ * Unchanged, and still decided rather than unfinished. `PermitStatus::Revoked`
+ * and `permits.revoked_at` / `revoked_reason` exist, nothing writes them, and
+ * the live register holds no row in that state. A revoked permit means a
+ * business is trading unlawfully — an enforcement act with a real-world
+ * consequence, needing the City to say who may do it and on what grounds.
  *
- * The open questions are written up for the client rather than answered here;
- * when they come back, the control belongs in this row's action group beside
- * View, in #bd0000, behind a confirmation that takes a reason.
+ * What DID change: the table now carries "Revoked on" and "Revocation reason"
+ * as columns. The day a writer exists, a revoked permit reads as one rather
+ * than rendering as an ordinary row whose status chip quietly turned red.
  */
 
 /** Rows per request. Matches Records and Owner Status. */
@@ -141,77 +114,32 @@ const STATUS_TONES: Record<string, ChipTone> = {
   revoked: 'tint-red',
 }
 
-/** Which column a sort is on. The actions column is not one of them. */
-type SortKey = 'number' | 'business' | 'type' | 'validUntil' | 'status'
-
 interface Sort {
-  key: SortKey
+  key: PermitSort
   dir: 'asc' | 'desc'
 }
 
-interface Column {
-  key: SortKey
-  label: string
-}
-
-const COLUMNS: Column[] = [
-  { key: 'number', label: 'Permit No.' },
-  { key: 'business', label: 'Business' },
-  { key: 'type', label: 'Type' },
-  { key: 'validUntil', label: 'Valid until' },
-  { key: 'status', label: 'Status' },
-]
-
 /**
- * The sortable text behind each cell.
+ * What a cell shows for a column belonging to ANOTHER office's sheet.
  *
- * `business` goes through `businessName`, not `permit.business.name`: the
- * `Permit` type claims that relation is non-nullable and it is not. Business
- * soft-deletes and its permits stay on the register, so the payload answers
- * null on an orphaned row (AGENTS.md §11) — the helper prints "Business removed
- * from register" where a dereference would throw.
+ * The sheets share field names — `application_type` is on four of the five —
+ * and every one of them reads the same `office_form` object. Without this
+ * guard a zoning permit's "Nature of Application" would also appear under the
+ * Sanitary and CEC headings, which is not a blank cell but a wrong one: it
+ * would state that the health office asked a question and got an answer on a
+ * filing it never had a sheet for.
  */
-function cellText(permit: Permit, key: SortKey): string {
-  switch (key) {
-    case 'number':
-      return permit.permit_number
-    case 'business':
-      return businessName(permit.business)
-    case 'type':
-      return permit.permit_type?.name ?? '—'
-    case 'validUntil':
-      return permit.valid_until ?? ''
-    case 'status':
-      return permit.status_label
-  }
-}
-
-function sortPermits(rows: Permit[], sort: Sort): Permit[] {
-  const dir = sort.dir === 'asc' ? 1 : -1
-
-  return [...rows].sort((a, b) => {
-    if (sort.key === 'validUntil') {
-      const at = a.valid_until ? Date.parse(a.valid_until) : NaN
-      const bt = b.valid_until ? Date.parse(b.valid_until) : NaN
-      /*
-       * A permit with no recorded expiry sorts last whichever way the column
-       * points. Floating it to the top of an ascending sort would state it was
-       * the first to lapse, which is the opposite of what a blank date means.
-       */
-      if (Number.isNaN(at) || Number.isNaN(bt)) {
-        if (Number.isNaN(at) && Number.isNaN(bt)) return 0
-        return Number.isNaN(at) ? 1 : -1
-      }
-      return dir * (at - bt)
-    }
-    return dir * cellText(a, sort.key).localeCompare(cellText(b, sort.key))
-  })
+function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
+  if (column.office && row.permit_type?.code !== column.office) return '—'
+  const value = column.value(row)
+  return value === null || value.trim() === '' ? '—' : value
 }
 
 export function PermitsPage() {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
+  const [office, setOffice] = useState<OfficeCode | ''>('')
   const [sort, setSort] = useState<Sort | null>(null)
   const [page, setPage] = useState(1)
 
@@ -236,8 +164,17 @@ export function PermitsPage() {
   const [liftError, setLiftError] = useState<string | null>(null)
 
   const { data, loading, error, reload } = useAsync(
-    () => permits.page({ q: query || undefined, status: status || undefined, page, per_page: PAGE_SIZE }),
-    [query, status, page],
+    () =>
+      permits.register({
+        q: query || undefined,
+        status: status || undefined,
+        permit_type: office || undefined,
+        sort: sort?.key,
+        dir: sort?.dir,
+        page,
+        per_page: PAGE_SIZE,
+      }),
+    [query, status, office, sort?.key, sort?.dir, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -249,22 +186,35 @@ export function PermitsPage() {
     return () => window.clearTimeout(id)
   }, [search])
 
+  /*
+   * Page 9 of the whole register is not page 9 of a narrowed set, and landing
+   * past the end shows an empty table that reads as "no permits here".
+   */
   function selectStatus(next: StatusFilter) {
     setStatus(next)
-    // Page 9 of the whole register is not page 9 of the active permits, and
-    // landing past the end of the narrowed set shows an empty table that reads
-    // as "no active permits".
     setPage(1)
   }
 
-  function toggleSort(key: SortKey) {
+  function selectOffice(next: OfficeCode | '') {
+    setOffice(next)
+    setPage(1)
+    /*
+     * A sort on a column that is about to disappear would keep ordering the
+     * table by something the reader can no longer see. Only office columns
+     * vanish and none of them is sortable, so the sort always survives — the
+     * page reset is the whole of what changing office costs.
+     */
+  }
+
+  function toggleSort(key: PermitSort) {
     setSort((prev) => {
       if (!prev || prev.key !== key) return { key, dir: 'asc' }
       if (prev.dir === 'asc') return { key, dir: 'desc' }
       // A third press clears it, so a reader can get back to the order the
-      // server actually counts in without leaving the screen.
+      // register itself counts in without leaving the screen.
       return null
     })
+    setPage(1)
   }
 
   /**
@@ -275,7 +225,7 @@ export function PermitsPage() {
    * payload would show less and look just as authoritative, and would drift
    * from the paper the moment either renderer changed.
    */
-  async function view(permit: Permit) {
+  async function view(permit: PermitRegisterRow) {
     /*
      * The tab is opened inside the click, before any await. By the time the
      * authenticated fetch resolves the user gesture has expired and the popup
@@ -296,15 +246,14 @@ export function PermitsPage() {
     }
   }
 
-  const rows = useMemo(() => {
-    const loaded = data?.data ?? []
-    return sort ? sortPermits(loaded, sort) : loaded
-  }, [data, sort])
-
+  const columns = useMemo(() => columnsFor(office), [office])
+  const rows = data?.data ?? []
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
-  const sortedColumn = sort ? COLUMNS.find((c) => c.key === sort.key)?.label : null
+
   const filterLabel = STATUS_FILTERS.find((f) => f.value === status)?.label ?? 'All'
+  const officeLabel = office === '' ? 'every office' : officeOf(office)
+  const sortedColumn = sort ? columns.find((c) => c.sort === sort.key)?.label : null
 
   return (
     <div>
@@ -313,21 +262,21 @@ export function PermitsPage() {
           <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pb-1">
             {/*
               A placeholder is not an accessible name — it disappears on the
-              first keystroke — so the field carries a real label, hidden only
-              because a search box is obvious to look at. The label names all
-              three things `q` matches, because that is the whole of what it
-              matches.
+              first keystroke — so the field carries a real label, and that
+              label names EVERYTHING `q` matches. The list grew with the table:
+              a box that shows a value it will not match makes a correct query
+              look like missing data.
             */}
             <label htmlFor="permits-search" className="sr-only">
-              Search permits by permit number, business name or tracking ID
+              Search permits by permit number, BAN, business name, owner, tracking ID or permit type
             </label>
             <input
               id="permits-search"
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Permit no., business or tracking ID…"
-              className="w-64 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+              placeholder="Permit no., BAN, business, owner or tracking ID…"
+              className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
             <button
               type="button"
@@ -348,8 +297,37 @@ export function PermitsPage() {
         Permits
       </PageTitle>
 
-      <div className="mb-5">
-        <FilterPills options={STATUS_FILTERS} value={status} onChange={selectStatus} />
+      <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
+        <div>
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+            Status
+          </span>
+          <FilterPills options={STATUS_FILTERS} value={status} onChange={selectStatus} />
+        </div>
+
+        {/*
+          The office, as a select rather than pills. Six offices plus "All" is
+          more than a pill row holds without wrapping onto a second line, and
+          it is a real <label for> because unlike the search box there is
+          nothing about a closed select that says what it narrows.
+        */}
+        <label className="block">
+          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+            Office
+          </span>
+          <select
+            value={office}
+            onChange={(e) => selectOffice(e.target.value as OfficeCode | '')}
+            className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
+          >
+            <option value="">All offices — every column</option>
+            {OFFICES.map((o) => (
+              <option key={o.code} value={o.code}>
+                {o.office} — {o.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {/*
@@ -375,37 +353,80 @@ export function PermitsPage() {
           title={query ? 'No permits match your search' : `No ${filterLabel.toLowerCase()} permits`}
           description={
             query
-              ? 'Search matches the permit number, the business name and the tracking ID. Try another spelling.'
+              ? 'Search matches the permit number, the BAN, the business name, the owner, the tracking ID and the permit type. Try another spelling.'
               : 'Permits appear here as offices approve filings and issue certificates.'
           }
         />
       ) : (
         <ProtoCard className="overflow-hidden rounded-xl">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[52rem] text-left text-sm">
+          {/*
+            The table is wider than the screen by design, so the scroller is
+            focusable and labelled: a region that scrolls but cannot be reached
+            by keyboard hides every column past the fold from a reader who does
+            not use a mouse. `tabIndex={0}` on a scroll container is the one
+            case where that is correct rather than a stray tab stop.
+          */}
+          <div
+            className="overflow-x-auto focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-royal"
+            tabIndex={0}
+            role="region"
+            aria-label={`Issued permits for ${officeLabel}, scrolls sideways`}
+          >
+            <table className="w-max text-left text-sm">
               <thead>
                 <tr className="bg-canvas/50 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                  {COLUMNS.map((column) => {
-                    const active = sort?.key === column.key
+                  {columns.map((column) => {
+                    const active = sort !== null && column.sort === sort.key
                     return (
                       <th
                         key={column.key}
                         scope="col"
                         // The sort state belongs on the column: a screen reader
-                        // announces `aria-sort` and cannot read a glyph.
-                        aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className="px-5 py-3"
+                        // announces `aria-sort` and cannot read a glyph. An
+                        // unsortable column says nothing rather than "none",
+                        // which would claim it could be sorted.
+                        aria-sort={
+                          column.sort === undefined
+                            ? undefined
+                            : active
+                              ? sort.dir === 'asc'
+                                ? 'ascending'
+                                : 'descending'
+                              : 'none'
+                        }
+                        className="whitespace-nowrap px-4 py-3"
                       >
-                        <button
-                          type="button"
-                          onClick={() => toggleSort(column.key)}
-                          className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
-                        >
-                          {column.label}
-                          <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
-                            {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                        {column.sort === undefined ? (
+                          /*
+                            Plain text, not a button. The server orders through
+                            a whitelist of nine columns and an office-sheet
+                            answer lives in a JSON blob no index reaches, so a
+                            pressable header here would do nothing.
+                          */
+                          <span>{column.label}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleSort(column.sort as PermitSort)}
+                            className="inline-flex items-center gap-1 rounded uppercase tracking-wider hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-royal"
+                          >
+                            {column.label}
+                            <span aria-hidden="true" className={active ? 'text-royal' : 'opacity-40'}>
+                              {active ? (sort.dir === 'asc' ? '▲' : '▼') : '⇅'}
+                            </span>
+                          </button>
+                        )}
+                        {/*
+                          Which office's form this column comes from. Only
+                          drawn with every office in view: once an office is
+                          chosen, repeating its name on nine headings is noise,
+                          and the table already says whose it is above.
+                        */}
+                        {column.office && office === '' && (
+                          <span className="mt-0.5 block text-[10px] font-medium normal-case tracking-normal text-royal">
+                            {officeOf(column.office)} form
                           </span>
-                        </button>
+                        )}
                       </th>
                     )
                   })}
@@ -415,7 +436,7 @@ export function PermitsPage() {
                     accessible name is announced as blank. The word is there and
                     hidden.
                   */}
-                  <th scope="col" className="px-5 py-3 text-right">
+                  <th scope="col" className="px-4 py-3 text-right">
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -423,23 +444,37 @@ export function PermitsPage() {
               <tbody>
                 {rows.map((permit) => (
                   <tr key={permit.id} className="border-t border-line">
-                    <td className="px-5 py-3.5 font-bold text-ink">{permit.permit_number}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{businessName(permit.business)}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{permit.permit_type?.name ?? '—'}</td>
-                    <td className="px-5 py-3.5 text-ink-secondary">{formatDate(permit.valid_until)}</td>
-                    <td className="px-5 py-3.5">
-                      {/*
-                        The chip is tinted AND worded — "Never Color Alone"
-                        (DESIGN.md). The label comes from the server so the
-                        browser never has to name a status it has not been
-                        taught, which is how a `revoked` row would otherwise
-                        render as a blank pill.
-                      */}
-                      <StatusChip tone={STATUS_TONES[permit.status] ?? 'tint-gray'}>
-                        {permit.status_label}
-                      </StatusChip>
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
+                    {columns.map((column) => {
+                      const text = cellFor(permit, column)
+                      return (
+                        <td
+                          key={column.key}
+                          className={[
+                            'whitespace-nowrap px-4 py-3.5',
+                            column.tnum ? 'tnum' : '',
+                            column.key === 'ban' ? 'font-bold text-ink' : 'text-ink-secondary',
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
+                        >
+                          {column.key === 'status' ? (
+                            /*
+                              The chip is tinted AND worded — "Never Color
+                              Alone" (DESIGN.md). The label comes from the
+                              server so the browser never has to name a status
+                              it has not been taught, which is how a `revoked`
+                              row would otherwise render as a blank pill.
+                            */
+                            <StatusChip tone={STATUS_TONES[permit.status] ?? 'tint-gray'}>
+                              {permit.status_label}
+                            </StatusChip>
+                          ) : (
+                            text
+                          )}
+                        </td>
+                      )
+                    })}
+                    <td className="px-4 py-3.5 text-right">
                       <button
                         type="button"
                         onClick={() => view(permit)}
@@ -584,14 +619,23 @@ export function PermitsPage() {
               <p role="status" aria-live="polite" className="text-sm text-ink-muted">
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
+                {office !== '' && ` issued by ${officeOf(office)}`}
                 {query && ' matching your search'}
               </p>
-              {sortedColumn && (
-                <p className="mt-1 text-xs text-ink-muted">
-                  Sorted by {sortedColumn} within this page. The register itself is ordered by issue
-                  date, newest first.
-                </p>
-              )}
+              <p className="mt-1 text-xs text-ink-muted">
+                {/*
+                  The sort's REACH, said plainly. It used to run in the browser
+                  over the page in hand and the footer had to admit it; the
+                  server orders the whole register now, and saying so is what
+                  tells a reader that page 2 continues the order rather than
+                  restarting it.
+                */}
+                {sortedColumn
+                  ? `Sorted by ${sortedColumn}, ${sort?.dir === 'asc' ? 'ascending' : 'descending'}, across the whole register.`
+                  : 'Ordered by issue date, newest first.'}
+                {office === '' &&
+                  ' Every office’s form is shown; pick an office above to see only its own columns.'}
+              </p>
             </div>
             <div className="flex items-center gap-1.5">
               <button
