@@ -943,6 +943,67 @@ export interface Permit {
 }
 
 /**
+ * What was printed on the certificate, as it was when it was signed.
+ *
+ * Read off `permits.issued_details` through `PermitFace::forPrinting`, never
+ * off the live business. A permit is a snapshot: showing today's address
+ * beside a certificate issued under the old one would be quietly wrong about
+ * a legal document.
+ *
+ * Every field is nullable, and the nulls mean different things — "the business
+ * was removed from the register" and "this was never recorded" — so the table
+ * prints a dash rather than inventing a value.
+ */
+export interface PermitFace {
+  business_name: string | null
+  trade_name: string | null
+  owner_name: string | null
+  address: string | null
+  barangay: string | null
+  city: string | null
+  line_of_business: string | null
+}
+
+/**
+ * One permit as the administrator's register table reads it.
+ *
+ * `GET /permits?detail=1` → `PermitRegisterResource`, which is `Permit` plus
+ * the four groups the client asked to see in one wide table: the BAN that
+ * leads it, the certificate face, the record of issuance, and the office sheet
+ * the applicant filled in for this permit's office.
+ */
+export interface PermitRegisterRow extends Permit {
+  /**
+   * The business account number — `BP-YYYY-NNNN`, the number the City files a
+   * business under across every permit it ever holds.
+   *
+   * It leads the table because it is the only one of the three identifiers
+   * that is stable: a permit number names one certificate and a tracking ID
+   * names one filing. Null when the business has been removed from the
+   * register and the certificate outlived it.
+   */
+  ban: string | null
+  face: PermitFace
+  /** ISO 8601. Null on the permits issued before the column existed. */
+  issued_at: string | null
+  /** The officer who signed it, or null where the register never recorded one. */
+  issued_by: string | null
+  /** The permit this one replaced, by number. Null on an original issuance. */
+  prior_permit_number: string | null
+  revoked_at: string | null
+  revoked_reason: string | null
+  /**
+   * The office's own form for this permit, saved answers and derived ones
+   * together.
+   *
+   * `null` means this office asks for NO sheet — only the Mayor's Permit, of
+   * the six types. An empty object would mean it asks and was not answered,
+   * and the table says each of those differently.
+   */
+  office_form: Record<string, unknown> | null
+}
+
+/**
  * A clearance the applicant already held and submitted a COPY of, instead of
  * asking the office to issue it (`GET /permits/held`).
  *

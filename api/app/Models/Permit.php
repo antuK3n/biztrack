@@ -142,6 +142,23 @@ class Permit extends Model
         return $this->belongsTo(PermitType::class);
     }
 
+    /**
+     * The officer who signed this certificate.
+     *
+     * `issued_by_user_id` has been written since the column was created; there
+     * was simply no relation to read it back through, so every screen that
+     * wanted the signer's name had to look the user up itself. The register
+     * table names them, so the relation exists now.
+     *
+     * Nullable, and not only in theory: the 8 permits issued before the
+     * column existed carry null, and a user row can be removed while the
+     * certificate it signed stays on the register.
+     */
+    public function issuedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'issued_by_user_id');
+    }
+
     /** Days until expiry (negative if already past). */
     public function daysUntilExpiry(): int
     {
