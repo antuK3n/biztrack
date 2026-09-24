@@ -71,6 +71,38 @@ export function officeOf(code: string): string {
 }
 
 /**
+ * The certificate an office issues, from the DEPARTMENT code on its officers.
+ *
+ * Not `OFFICES.find(o => o.office === code)`. The office short names above are
+ * what the letterhead says, and one of them disagrees with the register:
+ * zoning's department is seeded `CPDO` while the department itself signs as
+ * CPDD. Matching on the display name would leave the zoning office as the one
+ * that fell through to `null` and saw a picker it should not have.
+ *
+ * Keyed by what `users.department` actually carries, checked against the
+ * register on 24 September 2026:
+ *
+ *   BPLO -> BUSINESS   CHO -> SANITARY   BFP  -> FSIC
+ *   OBO  -> OCCUPANCY  CENRO -> CEC      CPDO -> ZONING
+ *
+ * Null for an account with no department, or one whose department issues
+ * nothing — and null means "this reader is not a single-office reader", which
+ * is the safe direction: they keep the picker.
+ */
+const DEPARTMENT_ISSUES: Record<string, OfficeCode> = {
+  BPLO: 'BUSINESS',
+  CHO: 'SANITARY',
+  BFP: 'FSIC',
+  OBO: 'OCCUPANCY',
+  CENRO: 'CEC',
+  CPDO: 'ZONING',
+}
+
+export function permitCodeForDepartment(departmentCode: string | null | undefined): OfficeCode | null {
+  return departmentCode ? (DEPARTMENT_ISSUES[departmentCode] ?? null) : null
+}
+
+/**
  * Read one answer off an office sheet.
  *
  * The sheet is `Record<string, unknown>` because it is a JSON column the
@@ -103,27 +135,68 @@ function answerDate(row: PermitRegisterRow, key: string): CellValue {
  * under the old one would be quietly wrong about a legal document.
  */
 export const SHARED_COLUMNS: PermitColumn[] = [
-  /* -- Identifiers ------------------------------------------------------- */
-  {
-    key: 'ban',
-    label: 'BAN',
-    sort: 'ban',
-    tnum: true,
-    // The business account number, and it leads. It is the only one of the
-    // three identifiers that is stable: a permit number names one certificate
-    // and a tracking ID names one filing.
-    value: (r) => r.ban,
-  },
-  { key: 'permit_number', label: 'Permit No.', sort: 'permit_number', tnum: true, value: (r) => r.permit_number },
+  /*
+   * -- Identifiers, in the order a permit is actually reached ------------
+   *
+   * The client named this order twice, the second time to correct the first:
+   * "BIZ-2026-0000x tracking id sa pag aapply at pagbayad na ang application,
+   * the next permit no. sa permit ng office na inapplyan nya ... then info
+   * na."
+   *
+   * That is the sequence of the thing itself. An applicant files and pays
+   * under a TRACKING ID; each office that filing was routed to then issues its
+   * own certificate under its own PERMIT NO. — six filings, six different
+   * numbers, one per office. So the filing leads and the certificate follows
+   * it, and the rest of the record follows both.
+   *
+   * "Mauuna ang BAN" was the first phrasing and the BAN led the table for a
+   * day. The clarification named BIZ-2026-0000x, which is the tracking ID —
+   * the BAN is BP-YYYY-NNNN and belongs to the BUSINESS rather than to
+   * anything on this row. It keeps a column, third, because a register is also
+   * read by business; it simply is not what a reader arrives holding.
+   */
   {
     key: 'tracking_id',
     label: 'Tracking ID',
     sort: 'tracking_id',
     tnum: true,
-    // Names the FILING, not the permit. It earns a column on this table —
-    // which is about the whole record — while staying distinct from the permit
-    // number beside it, which AGENTS.md section 11 is explicit about.
+    /*
+     * The FILING — what the applicant applied and paid under. It leads
+     * because it is the number that exists first and the one every office on
+     * the filing shares; the certificates below it are what each office then
+     * issued against it.
+     *
+     * Null on a permit whose filing was removed, which the table prints as a
+     * dash rather than a blank.
+     */
     value: (r) => r.application?.tracking_id ?? null,
+  },
+  {
+    key: 'permit_number',
+    label: 'Permit No.',
+    sort: 'permit_number',
+    tnum: true,
+    /*
+     * The CERTIFICATE, and the column that differs per office on one filing:
+     * MCB- for the Mayor's Permit, MCS- sanitary, MCF- fire, MCZ- zoning,
+     * MCE- environmental, MCO- occupancy. Reading down a tracking ID's rows,
+     * this is the column that says which office issued what.
+     */
+    value: (r) => r.permit_number,
+  },
+  {
+    key: 'ban',
+    label: 'BAN',
+    sort: 'ban',
+    tnum: true,
+    /*
+     * The BUSINESS account number — `BP-YYYY-NNNN`. One per business for its
+     * whole life, where a tracking ID is minted per filing and a permit number
+     * per certificate, so it is what groups every filing a shop has ever made.
+     * Third rather than first: it is how a register is browsed, not how a
+     * particular permit is looked up.
+     */
+    value: (r) => r.ban,
   },
 
   /* -- Which certificate, and whose ------------------------------------- */
@@ -351,15 +424,30 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
  * other four, which is the other half of the same sentence ("naka depende kung
  * anong office ito"). Both readings are in the ask and neither is a
  * compromise: the wide table is the register, the narrow one is the office.
+ *
+ * ── `withBan` ─────────────────────────────────────────────────────────────
+ *
+ * The BAN is dropped for a reader who sees one office [client, 24 September
+ * 2026: "paki remove muna ang BAN sa permits page ng mga offices"].
+ *
+ * It is the number that groups every certificate a business has ever held,
+ * across offices and across years, which is a register-wide question: BPLO and
+ * the super admin read six offices at once and the BAN is what ties their rows
+ * together. A clearance office reads only its own certificates, reaches them
+ * by certificate number or by business name, and never has six offices on
+ * screen to tie together — so for them it was a column that answered a
+ * question they were not asking.
  */
-export function columnsFor(office: OfficeCode | ''): PermitColumn[] {
+export function columnsFor(office: OfficeCode | '', withBan = true): PermitColumn[] {
+  const shared = withBan ? SHARED_COLUMNS : SHARED_COLUMNS.filter((c) => c.key !== 'ban')
+
   if (office !== '') {
-    return [...SHARED_COLUMNS, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
+    return [...shared, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
   }
 
   const sheets = OFFICES.flatMap(({ code }) =>
     OFFICE_COLUMNS[code].map((c) => ({ ...c, office: code })),
   )
 
-  return [...SHARED_COLUMNS, ...sheets]
+  return [...shared, ...sheets]
 }
