@@ -1,5 +1,9 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { sessionFor } from './helpers'
+import { OFFICES } from '../src/pages/admin/permitColumns'
+
+/** Six offices; the picker adds an "All offices" option on top. */
+const OFFICE_COUNT = OFFICES.length
 
 /*
  * PERMITS — every issued certificate as one table (issue #103).
@@ -181,6 +185,29 @@ const PERMITS = [
   },
 ]
 
+/*
+ * The Sort and Filter menus.
+ *
+ * The header carried five controls laid out in a row — status pills, an office
+ * select, expiry pills and two date inputs — and now carries the two menus the
+ * rest of the app uses (Proto's `SortFilter`). Everything that narrowed the
+ * table still narrows it; it is reached by opening a panel first, so these
+ * open it.
+ */
+const openSort = async (page: Page) => {
+  await page.getByRole('button', { name: /^Sort/ }).click()
+  await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
+}
+
+const openFilter = async (page: Page) => {
+  await page.getByRole('button', { name: /^Filter/ }).click()
+  await expect(page.getByRole('option', { name: 'All', exact: true })).toBeVisible()
+}
+
+/** A labelled select inside the open Filter panel. */
+const filterField = (page: Page, label: string) =>
+  page.locator('.shadow-overlay label').filter({ hasText: label }).locator('select')
+
 /** Every query string the screen sent, so a narrowing can be pinned to the server. */
 let asked: string[]
 
@@ -241,21 +268,26 @@ test.describe('the permit register table', () => {
     await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
   })
 
-  test('the table leads with the BAN and carries the whole record beside it', async ({ page }) => {
+  test('the table leads with the tracking ID, then the office’s own permit no.', async ({ page }) => {
     /*
-     * The client's ordering, asserted as an ordering rather than as a
-     * presence: "mauuna ang BAN then the rest of info na meron sa permit".
+     * The client's ordering, asserted as an ORDERING rather than as a
+     * presence: "BIZ-2026-0000x tracking id sa pag aapply at pagbayad na ang
+     * application, the next permit no. sa permit ng office na inapplyan nya
+     * ... then info na."
+     *
      * A column that is merely PRESENT somewhere in forty-five satisfies a
-     * `toBeVisible` and misses the instruction entirely.
+     * `toBeVisible` and misses the instruction entirely — which is how the
+     * first cut shipped with the BAN in front for a day.
      */
     const headers = page.locator('thead th')
-    await expect(headers.first()).toContainText('BAN')
+    await expect(headers.nth(0)).toContainText('Tracking ID')
+    await expect(headers.nth(1)).toContainText('Permit No.')
 
     // The identifiers, then the face, then the record — in that order.
     const order = [
-      'BAN',
-      'Permit No.',
       'Tracking ID',
+      'Permit No.',
+      'BAN',
       'Permit / Certificate',
       'Office',
       'Business',
@@ -284,9 +316,9 @@ test.describe('the permit register table', () => {
     await expect(rows).toHaveCount(PERMITS.length)
 
     const first = rows.first()
-    await expect(first).toContainText('BP-2026-0001')
+    await expect(first.locator('td').first()).toHaveText('BIZ-2026-00473')
     await expect(first).toContainText('MCB-2026-000001')
-    await expect(first).toContainText('BIZ-2026-00473')
+    await expect(first).toContainText('BP-2026-0001')
     await expect(first).toContainText('Nena Makiling')
     await expect(first).toContainText('Longos')
     await expect(first).toContainText('Liza Reyes')
@@ -388,7 +420,8 @@ test.describe('the permit register table', () => {
      */
     const wide = await page.locator('thead th').count()
 
-    await page.locator('select').first().selectOption('SANITARY')
+    await openFilter(page)
+    await filterField(page, 'Office').selectOption('SANITARY')
 
     await expect.poll(() => asked.at(-1)).toContain('permit_type=SANITARY')
     await expect(page.locator('tbody tr')).toHaveCount(1)
@@ -437,8 +470,9 @@ test.describe('the permit register table', () => {
     await expect(rows.first()).toContainText('MCZ-2026-000014')
   })
 
-  test('the status pills filter on the server and are counted there', async ({ page }) => {
-    await page.getByRole('button', { name: 'Active', exact: true }).click()
+  test('status filters on the server and is counted there', async ({ page }) => {
+    await openFilter(page)
+    await page.getByRole('option', { name: 'Active', exact: true }).click()
 
     await expect(page.locator('tbody tr')).toHaveCount(1)
     await expect.poll(() => asked.at(-1)).toContain('status=active')
@@ -450,15 +484,77 @@ test.describe('the permit register table', () => {
      */
     await expect(page.getByText('Showing 1 of 1 active permits')).toBeVisible()
 
-    // FilterPills marks the open filter with aria-pressed, so "what am I
-    // looking at" is a fact a screen reader can get at, not a colour.
-    await expect(page.getByRole('button', { name: 'Active', exact: true })).toHaveAttribute(
-      'aria-pressed',
+    /*
+     * The panel marks the chosen option with `aria-selected`, so "what am I
+     * looking at" is a fact a screen reader can get at rather than a colour —
+     * the same guarantee the pills gave with `aria-pressed`.
+     */
+    await expect(page.getByRole('option', { name: 'Active', exact: true })).toHaveAttribute(
+      'aria-selected',
       'true',
     )
 
-    await page.getByRole('button', { name: 'All', exact: true }).click()
+    await page.getByRole('option', { name: 'All', exact: true }).click()
     await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+  })
+
+  test('expiring-soon and the issue-date range narrow on the server', async ({ page }) => {
+    /*
+     * The two filters an office asks for that Status cannot answer: what is
+     * about to lapse, and what was issued in a given month. Both are the
+     * server's — a browser filtering the rows in hand would find nothing past
+     * the first page of a register that holds thousands.
+     */
+    await openFilter(page)
+
+    await filterField(page, 'Expiring').selectOption('90')
+    await expect.poll(() => asked.at(-1)).toContain('expiring_within=90')
+
+    await filterField(page, 'Expiring').selectOption('')
+    await page.locator('.shadow-overlay input[type=date]').first().fill('2026-01-01')
+    await expect.poll(() => asked.at(-1)).toContain('issued_from=2026-01-01')
+
+    await page.locator('.shadow-overlay input[type=date]').last().fill('2026-12-31')
+    await expect.poll(() => asked.at(-1)).toContain('issued_to=2026-12-31')
+  })
+
+  test('the sort menu names orderings, not columns and directions', async ({ page }) => {
+    /*
+     * Nine sortable columns times two directions is eighteen entries, and a
+     * reader picking "Valid until, ascending" has to work out for themselves
+     * that it means "expiring soonest". The menu names the answer.
+     */
+    await openSort(page)
+
+    await page.getByRole('option', { name: 'Expiring soonest' }).click()
+    await expect.poll(() => asked.at(-1)).toContain('sort=valid_until')
+    await expect.poll(() => asked.at(-1)).toContain('dir=asc')
+
+    /*
+     * The default is expressed as NO sort, so the request for it is the one
+     * the endpoint has always answered — one fewer way for the first page to
+     * differ from what the totals are counted over.
+     */
+    await openSort(page)
+    await page.getByRole('option', { name: 'Newest issued' }).click()
+    await expect.poll(() => asked.at(-1)).not.toContain('sort=')
+  })
+
+  test('the menu and the column headers agree about the ordering', async ({ page }) => {
+    /*
+     * Two ways to sort one table is two chances to disagree. The menu's choice
+     * is DERIVED from the sort state rather than held beside it, so pressing a
+     * header moves the menu's tick and picking from the menu moves the
+     * header's arrow.
+     */
+    await page.getByRole('button', { name: /^BAN/ }).click()
+    await expect(page.locator('th', { has: page.getByRole('button', { name: /^BAN/ }) })).toHaveAttribute(
+      'aria-sort',
+      'ascending',
+    )
+
+    await openSort(page)
+    await expect(page.getByRole('option', { name: 'BAN (A–Z)' })).toHaveAttribute('aria-selected', 'true')
   })
 
   test('columns sort on the server, across the whole register', async ({ page }) => {
@@ -585,6 +681,159 @@ test.describe('viewing a certificate', () => {
     await expect(page.getByRole('alert')).toHaveCount(0)
     expect(tab.isClosed(), 'a failed fetch closes the tab it opened').toBe(false)
     await tab.close()
+  })
+})
+
+/*
+ * ── The Office picker belongs to the readers who have a choice ────────────
+ *
+ * The client: "yung pilian ng offices kasi kung anong permit lang sa kanila
+ * yung lang dapat, bplo lang dapat may ganyan."
+ *
+ * `PermitController::scopeToReader` already gives a clearance office only the
+ * certificates its own office issues, so for five of the six the picker
+ * offered one answer they were already on — and choosing any other returned an
+ * empty table. A control that can only fail is worse than no control.
+ *
+ * These sessions are UNSTUBBED and read the real endpoint, because the
+ * question is what the SERVER hands each office. A stub would have to decide
+ * the scoping itself, which is the thing being relied on.
+ */
+test.describe('the office picker, and whose columns each reader gets', () => {
+  const single = [
+    { account: 'sanitary', office: 'CHO', own: /Sanitary Classification/i, foreign: /Floor Area/i },
+    { account: 'fire', office: 'BFP', own: /Certificate Applied For/i, foreign: /Sanitary Classification/i },
+    { account: 'zoning', office: 'CPDD', own: /Floor Area/i, foreign: /Certificate Applied For/i },
+    { account: 'cenro', office: 'CENRO', own: /DENR Permits Required/i, foreign: /Water Source/i },
+    { account: 'obo', office: 'OBO', own: /Building Permit Date Issued/i, foreign: /DENR Basis/i },
+  ] as const
+
+  for (const { account, office, own, foreign } of single) {
+    test.describe(`${office}`, () => {
+      test.use({ storageState: sessionFor(account) })
+
+      test(`${office} is offered no office picker, and sees only its own sheet`, async ({ page }) => {
+        await page.goto('/staff/admin/permits')
+        await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
+
+        /*
+         * No office control at all — asserted with the Filter panel OPEN,
+         * because that is where it would be if it existed. Checking the closed
+         * header would pass whatever the panel holds, which is a test that
+         * stops covering the thing it names.
+         *
+         * On the field rather than on the word "Office": that word is also a
+         * column heading on this table, so a text query would pass while the
+         * control was still on screen.
+         */
+        await openFilter(page)
+        await expect(filterField(page, 'Office')).toHaveCount(0)
+        // The filters this office DOES get are still there.
+        await expect(filterField(page, 'Expiring')).toBeVisible()
+        await page.keyboard.press('Escape')
+
+        // Its own sheet is there…
+        await expect(page.getByRole('columnheader', { name: own })).toBeVisible()
+        // …and no other office's is.
+        await expect(page.getByRole('columnheader', { name: foreign })).toHaveCount(0)
+
+        // And the screen says whose certificates these are, rather than
+        // leaving a reader to work out why the table is short.
+        await expect(page.getByText(`These are ${office}’s certificates`)).toBeVisible()
+      })
+
+      test(`${office} is not shown the BAN, here or in the sort menu`, async ({ page }) => {
+        /*
+         * Client, 24 September 2026: "paki remove muna ang BAN sa permits page
+         * ng mga offices."
+         *
+         * The BAN groups every certificate a business has ever held, across
+         * offices and across years — a register-wide question. An office reads
+         * only its own certificates and never has six offices on screen to tie
+         * together, so the column answered a question it was not asking.
+         *
+         * The SORT menu is asserted beside it, because an ordering by a column
+         * that is not on screen reorders the rows by something invisible —
+         * which reads as the sort having done nothing.
+         */
+        await page.goto('/staff/admin/permits')
+        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+
+        await expect(page.getByRole('columnheader', { name: /^BAN/ })).toHaveCount(0)
+
+        await page.getByRole('button', { name: /^Sort/ }).click()
+        await expect(page.getByRole('option', { name: 'Newest issued' })).toBeVisible()
+        await expect(page.getByRole('option', { name: /^BAN/ })).toHaveCount(0)
+        // The orderings that DO name a visible column are still there.
+        await expect(page.getByRole('option', { name: 'Expiring soonest' })).toBeVisible()
+      })
+
+      test(`${office} sees only certificates its own office issued`, async ({ page }) => {
+        /*
+         * The row content, not just the columns. Hiding a control is a screen
+         * decision; this is the boundary underneath it, and the two are worth
+         * separating — a page that dropped the picker while still listing the
+         * whole register would pass the test above.
+         */
+        await page.goto('/staff/admin/permits')
+        /*
+         * The heading first, then the table head, then a row. Going straight
+         * for `tbody tr` flaked once under a loaded stack: the skeleton is on
+         * screen while the request is in flight, so "no row yet" and "no row
+         * ever" look identical to a bare visibility wait. Each step here is a
+         * different stage of the same load, so a failure says which one.
+         */
+        await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+        await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+        await expect(page.locator('tbody tr').first()).toBeVisible({ timeout: 30_000 })
+
+        const headers = page.locator('thead th')
+        const count = await headers.count()
+        let at = -1
+        for (let i = 0; i < count; i++) {
+          if (/PERMIT \/ CERTIFICATE/.test((await headers.nth(i).innerText()).replace(/\s+/g, ' '))) at = i
+        }
+        expect(at, 'no Permit / Certificate column').toBeGreaterThanOrEqual(0)
+
+        const types = new Set(
+          await page.locator('tbody tr').locator(`td:nth-child(${at + 1})`).allTextContents(),
+        )
+        expect(types.size, `${office} was handed ${[...types].join(', ')}`).toBe(1)
+      })
+    })
+  }
+
+  test.describe('BPLO', () => {
+    test.use({ storageState: sessionFor('bplo') })
+
+    test('BPLO keeps the picker, because it is the one office with a choice', async ({ page }) => {
+      /*
+       * BPLO issues the Mayor's Permit and coordinates every other office's
+       * clearance — its final approval is gated on all five — so it reads the
+       * whole register and the picker is the only way to narrow it.
+       */
+      await page.goto('/staff/admin/permits')
+      await expect(page.locator('thead th').first()).toBeVisible({ timeout: 20_000 })
+
+      await openFilter(page)
+      const picker = filterField(page, 'Office')
+      await expect(picker).toBeVisible()
+      await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 1) // six offices + "All"
+      await page.keyboard.press('Escape')
+
+      /*
+       * And it keeps the BAN, which the five clearance offices lose. BPLO
+       * reads six offices at once, and the BAN is what ties one business's
+       * rows together across them.
+       */
+      await expect(page.getByRole('columnheader', { name: /^BAN/ })).toBeVisible()
+
+      // With nothing picked it carries every office's sheet.
+      await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: /DENR Basis/i })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: /Floor Area/i })).toBeVisible()
+    })
   })
 })
 

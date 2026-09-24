@@ -13,6 +13,7 @@ use App\Support\PdfFile;
 use App\Support\PermitFace;
 use App\Support\QrCode;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -150,6 +151,24 @@ class PermitController extends Controller
             'sort' => ['sometimes', 'nullable', Rule::in(array_keys(self::SORTS))],
             'dir' => ['sometimes', 'nullable', Rule::in(['asc', 'desc'])],
             /*
+             * "Which of mine lapse soon" — the one question an office asks of
+             * its own certificates that no other control answers. A window in
+             * DAYS rather than a date, because that is how the question is
+             * asked at a counter ("this month", "the next 90 days"), and the
+             * answer changes every midnight if it is stored as a date.
+             *
+             * Capped at a year: beyond that it selects the whole register and
+             * reads as a filter that did nothing.
+             */
+            'expiring_within' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:365'],
+            /*
+             * Issuance window, for the report an office is asked for at the
+             * end of a month. Both ends optional — "everything since March" is
+             * as ordinary a question as a closed range.
+             */
+            'issued_from' => ['sometimes', 'nullable', 'date'],
+            'issued_to' => ['sometimes', 'nullable', 'date', 'after_or_equal:issued_from'],
+            /*
              * The full register row, for the administrator's table. Off by
              * default: every other caller wants the contracted payload, and
              * this one costs four more eager loads and the office sheet.
@@ -170,6 +189,44 @@ class PermitController extends Controller
 
         if ($code = $request->query('permit_type')) {
             $query->whereHas('permitType', fn ($t) => $t->where('code', $code));
+        }
+
+        /*
+         * Lapsing inside the window. Two conditions, and the second is the one
+         * that makes it an answer rather than a date comparison:
+         *
+         *  - `valid_until` between today and today + N, so a certificate that
+         *    lapsed LAST month is not "expiring in 30 days" — it has expired,
+         *    and the status pill beside this is where that is asked; and
+         *  - the permit is still live. A superseded certificate inside its own
+         *    term is not the one in force, so listing it as about to lapse
+         *    would send an office chasing a renewal that has already happened.
+         *
+         * Dates, not datetimes: `valid_until` is a DATE column, and comparing
+         * it against `now()` would drop everything expiring today.
+         */
+        if ($days = $request->integer('expiring_within')) {
+            $query->whereNotNull('valid_until')
+                ->whereBetween('valid_until', [
+                    now()->startOfDay()->toDateString(),
+                    now()->startOfDay()->addDays($days)->toDateString(),
+                ])
+                ->whereIn('status', [PermitStatus::Active->value, PermitStatus::Suspended->value]);
+        }
+
+        /*
+         * The issuance window. `issued_at` is a datetime and these are dates,
+         * so the upper bound takes the whole of its day — `issued_to=2026-09-24`
+         * meaning "up to and including the 24th" is what anybody typing it
+         * intends, and a bare comparison would silently exclude everything
+         * issued after midnight on the last day of the range.
+         */
+        if ($from = $request->query('issued_from')) {
+            $query->where('issued_at', '>=', Carbon::parse($from)->startOfDay());
+        }
+
+        if ($to = $request->query('issued_to')) {
+            $query->where('issued_at', '<=', Carbon::parse($to)->endOfDay());
         }
 
         /*
