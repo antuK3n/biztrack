@@ -1440,6 +1440,25 @@ class WorkflowService
         Audit::log('inspection.recorded', $inspection, ['result' => $result->value]);
 
         if (! $result->progresses()) {
+            /*
+             * The owner is told. A failed visit used to be recorded in silence
+             * — a pass reached them through grantClearance(), a failure through
+             * nothing — so the one inspection result they have to act on (fix
+             * the findings before the re-inspection) was the one they could only
+             * discover by opening the filing. Found while listing every owner
+             * update for the e-mail work, 24 September 2026. The findings are
+             * the inspector's own words, as a returned clearance's remarks are.
+             */
+            $app = $inspection->application;
+            $office = $inspection->department?->name ?? 'The office';
+            $this->notify->applicationStatus(
+                $app,
+                $app->status,
+                "{$office} inspection did not pass."
+                .($findings ? " Findings: {$findings}" : '')
+                .' The office will schedule a re-inspection.',
+            );
+
             return;
         }
 

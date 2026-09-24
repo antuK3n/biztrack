@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ApplicationStatus;
+use App\Jobs\SendOwnerUpdateEmail;
 use App\Models\Application;
 use App\Models\AppNotification;
 use App\Models\Business;
@@ -10,14 +11,24 @@ use App\Models\OfficerRequest;
 use App\Models\Permit;
 use App\Models\User;
 use App\Services\Sms\SmsChannel;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Throwable;
 
 /**
- * In-app notification fan-out (master plan §4 — polling, no websockets). Status
- * changes, issuance and request events also fan out to mail (log mailer) and SMS
- * (log driver) via the simulation pattern (§5.5). Generic payloads only
- * (guardrail §9.5) — no PII beyond the tracking id.
+ * In-app notification fan-out (master plan §4 — polling, no websockets).
+ *
+ * Every notice written for a BUSINESS OWNER is also e-mailed to them, queued,
+ * from push() — see queueOwnerEmail() and App\Jobs\SendOwnerUpdateEmail. That
+ * replaced a synchronous `Mail::raw('BizTrack notification')` in fanOut(),
+ * which sent a one-line mail to every recipient, staff included, inside the
+ * request: harmless while the mailer was `log`, but with a real SMTP relay it
+ * would have held every officer action on a network round-trip and turned an
+ * unreachable relay into a failed approval. SMS (log driver, §5.5) still goes
+ * through fanOut() unchanged — SMS is out of scope for now.
+ *
+ * Generic payloads only (guardrail §9.5) — no PII beyond the tracking id.
  */
 /*
  * Link targets must be real routes in web/src/App.tsx. `/track/{id}` and
@@ -41,8 +52,23 @@ class NotificationService
 {
     public function __construct(private SmsChannel $sms) {}
 
-    public function push(User $user, string $type, string $title, string $body, ?string $link = null): void
-    {
+    /**
+     * Write one in-app notice, and e-mail it too when the reader is an owner.
+     *
+     * `$about` is what the notice concerns — the filing, the permit or the
+     * business — and exists only so the e-mail can print a reference and the
+     * business's name; the in-app row does not store it. `$disapproval` marks
+     * the one notice whose title the e-mail may show in red.
+     */
+    public function push(
+        User $user,
+        string $type,
+        string $title,
+        string $body,
+        ?string $link = null,
+        Application|Permit|Business|null $about = null,
+        bool $disapproval = false,
+    ): void {
         AppNotification::create([
             'user_id' => $user->id,
             'type' => $type,
@@ -50,6 +76,90 @@ class NotificationService
             'body' => $body,
             'link' => $link,
         ]);
+
+        if ($user->hasRole('business_owner')) {
+            $this->queueOwnerEmail($user, $title, $body, $link, $about, $disapproval);
+        }
+    }
+
+    /**
+     * Queue the e-mail copy of an owner's notice. Never throws.
+     *
+     * ── Who gets one ─────────────────────────────────────────────────────────
+     *
+     * Holders of the `business_owner` role — the people the assignment is
+     * about. Staff notices (a reply on a thread, a reassigned caseload, an
+     * amendment another office should know of) stay in-app: officers are signed
+     * in all day, and mailing them every queue event would bury the one mail an
+     * owner actually needs among hundreds they do not.
+     *
+     * ── Why after commit, and why the try ────────────────────────────────────
+     *
+     * Most notices are written inside the DB::transaction of the action that
+     * caused them. Dispatched immediately, a worker could pick the job up
+     * before that transaction commits — or after it rolled back, e-mailing an
+     * owner about a decision that never happened. DB::afterCommit() holds the
+     * dispatch until the change is real (and runs it at once outside a
+     * transaction).
+     *
+     * The try is inside the callback, not around it, because that is where the
+     * dispatch actually happens. A queue that will not take the job (a missing
+     * `jobs` table, a dead Redis) and, under the `sync` driver, a mail relay
+     * that refuses the message both surface here, and both are logged and
+     * dropped: the action that caused the notice has already been recorded and
+     * must not answer 500 for a mail that did not go.
+     */
+    private function queueOwnerEmail(
+        User $owner,
+        string $title,
+        string $body,
+        ?string $link,
+        Application|Permit|Business|null $about,
+        bool $disapproval,
+    ): void {
+        [$reference, $businessName] = $this->describe($about);
+
+        DB::afterCommit(function () use ($owner, $title, $body, $link, $reference, $businessName, $disapproval) {
+            try {
+                // Bus::dispatch, not the static ::dispatch(): that one queues
+                // from a PendingDispatch destructor, outside this try.
+                Bus::dispatch(new SendOwnerUpdateEmail(
+                    $owner, $title, $body, $link, $reference, $businessName, $disapproval,
+                ));
+            } catch (Throwable $e) {
+                Log::warning('Owner update e-mail was not queued', [
+                    'user_id' => $owner->id,
+                    'title' => $title,
+                    'reference' => $reference,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
+    }
+
+    /**
+     * The reference and business name an e-mail prints for what it is about.
+     *
+     * A filing is named by its tracking ID, a permit by its permit number, a
+     * business by its account number — the three identifiers AGENTS.md §11
+     * lists, each for the thing it names.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function describe(Application|Permit|Business|null $about): array
+    {
+        return match (true) {
+            $about instanceof Application => [
+                $about->tracking_id,
+                $about->loadMissing('business')->business?->name,
+            ],
+            $about instanceof Permit => [
+                $about->permit_number,
+                $about->loadMissing('business')->business?->name,
+            ],
+            $about instanceof Business => [$about->ban ?: null, $about->name],
+            default => [null, null],
+        };
     }
 
     public function applicationStatus(Application $app, ApplicationStatus $to, ?string $note): void
@@ -69,6 +179,7 @@ class NotificationService
             'Application update',
             "{$app->tracking_id} is now “{$to->label()}”.".($note ? " $note" : ''),
             "/applications/{$app->id}",
+            $app,
         );
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is now {$to->label()}.");
     }
@@ -87,6 +198,7 @@ class NotificationService
             "{$app->tracking_id} is approved. Every office has cleared it, so nothing more is "
                 .'needed from you. Your permit has been issued and is waiting under Permits.',
             '/permits',
+            $app,
         );
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} is approved. Your permit is ready under Permits.");
     }
@@ -105,6 +217,8 @@ class NotificationService
             "{$app->tracking_id} was rejected.".($reason ? " Reason: {$reason}" : '')
                 .' You can message the office about it, or file a new application once the issue is settled.',
             "/applications/{$app->id}",
+            $app,
+            disapproval: true,
         );
         $this->fanOut($app->applicant, "BizTrack: {$app->tracking_id} was rejected. Open BizTrack for the reason.");
     }
@@ -121,6 +235,7 @@ class NotificationService
             'Permit issued',
             "Your permit(s) for {$app->tracking_id} are ready to download.",
             '/permits',
+            $app,
         );
         $this->fanOut($app->applicant, "BizTrack: permit(s) for {$app->tracking_id} issued.");
     }
@@ -139,6 +254,7 @@ class NotificationService
             // applicant did. Hard-coding the citizen path sent every officer
             // reply-notification to a screen their token does not reach.
             $this->filingLink($recipient, $app),
+            $app,
         );
         $this->fanOut($recipient, "BizTrack: new message on {$app->tracking_id}.");
     }
@@ -153,6 +269,7 @@ class NotificationService
             'Additional requirement requested',
             "An officer requested: {$request->title} on {$app->tracking_id}.",
             "/applications/{$app->id}",
+            $app,
         );
         $this->fanOut($recipient, "BizTrack: new requirement requested on {$app->tracking_id}.");
     }
@@ -171,6 +288,7 @@ class NotificationService
             // question everywhere — instead of by a literal this method happened
             // to get right and newMessage() happened to get wrong.
             $this->filingLink($recipient, $app),
+            $app,
         );
         $this->fanOut($recipient, "BizTrack: requirement response on {$app->tracking_id}.");
     }
@@ -184,6 +302,7 @@ class NotificationService
             'Requirement '.$request->status->label(),
             "Your response to “{$request->title}” on {$app->tracking_id} was {$request->status->label()}.",
             "/applications/{$app->id}",
+            $app,
         );
         $this->fanOut($recipient, "BizTrack: requirement on {$app->tracking_id} {$request->status->label()}.");
     }
@@ -208,6 +327,7 @@ class NotificationService
              * fee had been adjusted yet, so no row existed to fail the test.
              */
             "/applications/{$app->id}/pay",
+            $app,
         );
         $this->fanOut($app->applicant, "BizTrack: fee for {$app->tracking_id} adjusted.");
     }
@@ -243,6 +363,7 @@ class NotificationService
                 ."permit before the expiration date to avoid penalties. Permit {$permit->permit_number} "
                 ."expires on {$expiresOn}.",
             '/permits',
+            $permit,
         );
         $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} expires in ".($daysLeft ?? $threshold).' day(s).');
     }
@@ -259,6 +380,7 @@ class NotificationService
             'Permit expired',
             "Permit {$permit->permit_number} has expired. Please file a renewal.",
             '/permits',
+            $permit,
         );
         $this->fanOut($owner, "BizTrack: permit {$permit->permit_number} has expired.");
     }
@@ -267,7 +389,7 @@ class NotificationService
      * A renewal follow-up an OFFICER asked for, from the Renewal Risk screen.
      *
      * Same path as every notification above — push() into the owner's in-app
-     * list, then fanOut() to the log mailer and the SMS log — because the
+     * list and e-mail, then fanOut() to the SMS log — because the
      * applicant should not be able to tell "the system chased me" from "a
      * person chased me" by which channels answered. What differs is only the
      * words, and the words differ for two reasons:
@@ -307,7 +429,7 @@ class NotificationService
             : "An officer at the BPLO is reminding you that permit {$permit->permit_number} expires on "
                 ."{$expiresOn}. Please renew before that date to avoid penalties.";
 
-        $this->push($owner, 'expiry', $title, $body, '/permits');
+        $this->push($owner, 'expiry', $title, $body, '/permits', $permit);
 
         $this->fanOut(
             $owner,
@@ -327,6 +449,7 @@ class NotificationService
             'Renewal due',
             "Permit {$permit->permit_number} lapsed recently. Renew now to avoid penalties.",
             '/permits',
+            $permit,
         );
         $this->fanOut($owner, "BizTrack: renewal due for permit {$permit->permit_number}.");
     }
@@ -388,18 +511,19 @@ class NotificationService
          * these two statuses, so following the link lands on an explanation
          * rather than somewhere the reader has to go looking.
          */
-        $this->push($business->owner, 'account_status', $title, $body, '/dashboard');
+        $this->push($business->owner, 'account_status', $title, $body, '/dashboard', $business);
         $this->fanOut($business->owner, "BizTrack: {$business->name} is now {$label}. {$reason}");
     }
 
-    // --- Channel fan-out (mail log + sms log) --------------------------------
+    // --- Channel fan-out (sms log) -------------------------------------------
+    /*
+     * SMS only. The `Mail::raw` that used to open this method is gone: e-mail
+     * now goes from push() to owners alone, queued, with the notice's own title
+     * and a link (see the class note). Leaving it here as well would have sent
+     * every owner two e-mails per event, one of them a bare line with no link.
+     */
     private function fanOut(User $user, string $message): void
     {
-        // Mail via the log mailer (renders into laravel.log).
-        Mail::raw($message, function ($m) use ($user) {
-            $m->to($user->email)->subject('BizTrack notification');
-        });
-
         if ($user->mobile_number) {
             $this->sms->send($user->mobile_number, $message);
         }

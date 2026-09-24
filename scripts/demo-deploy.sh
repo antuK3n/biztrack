@@ -175,6 +175,13 @@ pkill -f "cloudflared tunnel --url http://127.0.0.1:$OLD_WEB" 2>/dev/null || tru
 pkill -f "cloudflared tunnel --url http://localhost:$OLD_WEB" 2>/dev/null || true
 lsof -ti tcp:$OLD_WEB tcp:$OLD_API 2>/dev/null | xargs kill -9 2>/dev/null || true
 
+# The queue worker moves to the new code last, with the API it serves. Both
+# slots share one database, so one worker drains both; SIGTERM lets the job in
+# hand finish before it exits. Without this, owner e-mails (queued) would be
+# sent by the old slot's code, or by nothing. See docs/email-setup.md.
+pkill -TERM -f 'queue:work --name=biztrack-demo' 2>/dev/null || true
+( cd "$DEMO/api" && DB_DATABASE="$DB" APP_DEBUG=false nohup php artisan queue:work --name=biztrack-demo --sleep=3 >"$LOGS/queue.log" 2>&1 & )
+
 echo "  Retired slot $OLD_SLOT (web $OLD_WEB, api $OLD_API)."
 echo "  Serving:  $DEMO (branch demo, built bundle — your edits cannot reach it)"
 echo "  Logs:     $LOGS"
