@@ -179,7 +179,7 @@ async function pinAtMapCentre(page: Page) {
     .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
   const current = await barangay.inputValue()
   await barangay.selectOption(current === values[0] ? values[1] : values[0])
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 
   await map.click()
 
@@ -187,14 +187,14 @@ async function pinAtMapCentre(page: Page) {
   // really fell in — which is the read this is after. Waiting on the pair
   // rather than on one of them keeps the branch below from racing React.
   const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
-  await expect(refusal.or(page.getByText(/pinned at/i)).first()).toBeVisible()
+  await expect(refusal.or(page.getByText(/pin placed/i)).first()).toBeVisible()
   if (await refusal.isVisible()) {
     const named = (await refusal.innerText()).match(/pin is in (.+?), but you selected/i)
     expect(named).not.toBeNull()
     await barangay.selectOption({ label: named![1].trim() })
     await map.click()
   }
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
 }
 
 /**

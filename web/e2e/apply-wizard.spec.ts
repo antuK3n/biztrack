@@ -779,7 +779,7 @@ test('a pin outside Malabon is refused, and says only what was checked', async (
   await expect(refusal).toBeVisible()
   // Never claim a check that was not made.
   await expect(refusal).not.toContainText(/water|river|sea|zoning verdict/i)
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 })
 
 test('a neighbouring city inside the old bounding box is refused', async ({ page }) => {
@@ -849,10 +849,16 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
   await expect(page.getByText(/choose your line of business above/i)).toBeVisible()
   await expect(page.getByLabel(/not yet clickable/i)).toBeVisible()
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 
-  // And the barangay is NOT what holds it. The old sentence must not reappear.
-  await expect(page.getByText(/choose your barangay first/i)).toBeHidden()
+  /*
+   * And the barangay is NOT what holds it: the lock's own sentence (the scrim,
+   * role="status") must not ask for one. Scoped to the scrim, because "Choose
+   * your barangay first" is back as ADVICE in the amber note above the map
+   * (client's lead, 24 September 2026) — advice about order, not a lock, which
+   * is what the rest of this test proves by dropping a pin with none chosen.
+   */
+  await expect(page.getByRole('status').filter({ hasText: /choose your barangay/i })).toHaveCount(0)
 
   // Choose the trade. Same click below, different outcome — which is what
   // proves the lock was the cause and not some unrelated dead click.
@@ -870,11 +876,11 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
    */
   await map.scrollIntoViewIfNeeded()
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
-  const coords = (await page.getByText(/pinned at/i).innerText()).match(
-    /(-?[\d.]+),\s*(-?[\d.]+)/,
-  )
-  expect(coords).not.toBeNull()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+  // The coordinates are on the pin line's data attributes, not on screen:
+  // an applicant has no use for them (client's lead, 24 September 2026).
+  const coords = await pinCoords(page)
+  expect(coords.latitude).not.toBeNull()
 
   /*
    * Now name the barangay that pin is already sitting in. It must survive, and
@@ -882,7 +888,8 @@ test('the map is locked until a line of business is chosen, then takes a pin bef
    * applicant answered consistently and has nothing to redo.
    */
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
-  await expect(page.getByText(/pinned at/i)).toContainText(coords![0])
+  await expect(pinStatus(page)).toHaveAttribute('data-latitude', coords.latitude!)
+  await expect(pinStatus(page)).toHaveAttribute('data-longitude', coords.longitude!)
   await expect(page.getByRole('alert').filter({ hasText: /but you selected/i })).toBeHidden()
 })
 
@@ -904,11 +911,11 @@ test('changing the barangay clears the pin, so nothing is left pinned outside it
   const barangay = page.getByLabel(/barangay name/i)
   await barangay.selectOption({ label: 'Longos' })
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
-  const coords = (await page.getByText(/pinned at/i).innerText()).match(
-    /(-?[\d.]+),\s*(-?[\d.]+)/,
-  )
-  expect(coords).not.toBeNull()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+  // The coordinates are on the pin line's data attributes, not on screen:
+  // an applicant has no use for them (client's lead, 24 September 2026).
+  const coords = await pinCoords(page)
+  expect(coords.latitude).not.toBeNull()
 
   /*
    * Re-picking the barangay ALREADY chosen is not a change and must not cost a
@@ -918,21 +925,25 @@ test('changing the barangay clears the pin, so nothing is left pinned outside it
    * first time somebody so much as opened the dropdown.
    */
   await barangay.selectOption({ label: 'Longos' })
-  await expect(page.getByText(/pinned at/i)).toContainText(coords![0])
+  await expect(pinStatus(page)).toHaveAttribute('data-latitude', coords.latitude!)
+  await expect(pinStatus(page)).toHaveAttribute('data-longitude', coords.longitude!)
 
   // A real change takes the pin, with no error and no argument — this is not a
   // refusal, it is the question being asked again.
   await barangay.selectOption({ label: 'Tugatog' })
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
   await expect(page.getByText(/required: click the map/i)).toBeVisible()
   await expect(page.getByRole('alert').filter({ hasText: /but you selected/i })).toBeHidden()
 
   /*
    * And the map is still open, because a barangay is still chosen. Losing the
    * pin must not also cost the applicant the ability to place another one — the
-   * point is to make them re-place it, not to lock them out.
+   * point is to make them re-place it, not to lock them out. Checked on the
+   * map itself, not on a sentence: the amber note now advises choosing the
+   * barangay first, and advice is not a lock.
    */
-  await expect(page.getByText(/choose your barangay first/i)).toBeHidden()
+  await expect(page.getByLabel(/not yet clickable/i)).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: /choose your barangay/i })).toHaveCount(0)
 })
 
 test('a pin that contradicts the chosen barangay is refused, and names both', async ({ page }) => {
@@ -963,7 +974,7 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await expect(refusal).toContainText(/Longos/)
   await expect(refusal).toContainText(/Tugatog/)
   // And no pin was stored to be argued with later.
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 
   /*
    * The step will not let go either. Asserted as "Next is unavailable and the
@@ -985,7 +996,7 @@ test('a pin that contradicts the chosen barangay is refused, and names both', as
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await expect(refusal).toBeHidden()
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
   await expect(next).toBeEnabled()
   await next.click()
   await expect(page.getByText(/part 3 of/i).first()).toBeVisible({ timeout: 20_000 })
@@ -1032,13 +1043,13 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
   await map.scrollIntoViewIfNeeded()
 
   // Nothing is pinned until the address says something worth looking up.
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 
   await page.getByLabel(/^street/i).fill('Rizal Street')
 
   // The debounce is 800ms; the assertion's own timeout covers it rather than a
   // hard wait, so a slower machine does not make this flake.
-  await expect(page.getByText(/pinned at/i)).toBeVisible({ timeout: 10_000 })
+  await expect(page.getByText(/pin placed/i)).toBeVisible({ timeout: 10_000 })
   await expect(page.getByText(/placed from your address/i)).toBeVisible()
 
   /*
@@ -1047,7 +1058,7 @@ test('the address suggests a pin, and placing one by hand overrules it', async (
    * calling it "placed from your address" would be describing the wrong thing.
    */
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
   await expect(page.getByText(/placed from your address/i)).toBeHidden()
 })
 
@@ -1082,7 +1093,7 @@ test('the address lookup asks OSM for the street alone, and once per street', as
 
   // Naming the barangay re-checks the same answer; it does not ask again.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
   await page.waitForTimeout(1500)
   expect(queries).toHaveLength(1)
 })
@@ -1109,7 +1120,7 @@ test('a street the map cannot find starts a hollow pin at the barangay centre, w
   const colour = await caption.evaluate((el) => getComputedStyle(el).color)
   expect(colour).not.toBe('rgb(189, 0, 0)')
 
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
   await expect(page.getByText(/still needed on this part/i)).toContainText(/a pin on the map/i)
 
   // Dampalit is 3.8 km north of where the map opens; the start pin is brought
@@ -1132,7 +1143,7 @@ test('a street the map cannot find starts a hollow pin at the barangay centre, w
 
   // Choosing it is an answer, and only then is there a pin.
   await start.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
   await expect(caption).toBeHidden()
   await expect(page.getByText(/still needed on this part/i)).not.toContainText(/a pin on the map/i)
 })
@@ -1160,7 +1171,108 @@ test('an answer that is not a road is not used as a pin', async ({ page }) => {
   await expect(page.getByText(/we could not find your street on the map/i)).toBeVisible({
     timeout: 10_000,
   })
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
+})
+
+test('the zoning step says to choose the barangay first, before the map', async ({ page }) => {
+  /*
+   * The pin is checked against the chosen barangay (onPick refuses a pin
+   * outside it; a new barangay removes a pin that contradicts it), so the
+   * order is said before the map is touched. In the amber note, not red:
+   * nothing is wrong yet.
+   */
+  await goToZoningStep(page)
+  const note = page.locator('#pin-accuracy-note')
+  await expect(note).toContainText(/choose your barangay first/i)
+  await expect(note).toContainText(/your pin has to be inside it/i)
+  const colour = await note.evaluate((el) => getComputedStyle(el).color)
+  expect(colour).not.toBe('rgb(189, 0, 0)')
+  // Read before the map: the note sits above it in the page.
+  const noteBox = await note.boundingBox()
+  const mapBox = await page.locator('.leaflet-container').boundingBox()
+  expect(noteBox!.y).toBeLessThan(mapBox!.y)
+})
+
+/**
+ * Nominatim's reverse endpoint, stubbed with a queue of answers in order.
+ * Registered after the suite's blanket abort, so it wins for /reverse only;
+ * address search stays aborted.
+ */
+async function stubReverse(page: Page, answers: { road?: string; house_number?: string }[]) {
+  const served: string[] = []
+  await page.route('**://nominatim.openstreetmap.org/reverse**', (route) => {
+    const address = answers[Math.min(served.length, answers.length - 1)]
+    served.push(route.request().url())
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        display_name: 'somewhere in Malabon',
+        address: { ...address, city: 'Malabon', suburb: 'Longos', postcode: '1472' },
+      }),
+    })
+  })
+  return served
+}
+
+test('placing the pin fills the street from the map, and says so until it is edited', async ({
+  page,
+}) => {
+  const served = await stubReverse(page, [{ road: 'Governor Pascual Avenue' }])
+  await goToZoningStep(page)
+  const street = page.getByLabel(/^street/i)
+  const house = page.getByLabel(/house \/ bldg\. no\./i)
+  const barangay = page.getByLabel(/barangay name/i)
+  await expect(street).toHaveValue('')
+
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+  await map.click()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+
+  // The road name alone: never the barangay, city or postcode that came with it.
+  await expect(street).toHaveValue('Governor Pascual Avenue', { timeout: 10_000 })
+  expect(served).toHaveLength(1)
+  // OSM sent no house number, so the box stays empty rather than guessed.
+  await expect(house).toHaveValue('')
+  // The barangay is the applicant's to choose; the pin does not choose it.
+  await expect(barangay).toHaveValue('')
+
+  const note = page.getByTestId('address-autofill-note')
+  await expect(note).toHaveText(/filled in from your pin\. check it and fix anything/i)
+
+  // Still an ordinary field: the applicant corrects it, and the note goes.
+  await street.fill('Gov. Pascual Ave.')
+  await expect(street).toHaveValue('Gov. Pascual Ave.')
+  await expect(note).toBeHidden()
+})
+
+test('a street the applicant typed is not overwritten when the pin moves', async ({ page }) => {
+  const served = await stubReverse(page, [
+    { road: 'Governor Pascual Avenue' },
+    { road: 'Leoncio Street', house_number: '7' },
+  ])
+  await goToZoningStep(page)
+  const street = page.getByLabel(/^street/i)
+  const house = page.getByLabel(/house \/ bldg\. no\./i)
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  await map.click()
+  await expect(street).toHaveValue('Governor Pascual Avenue', { timeout: 10_000 })
+
+  // The applicant knows better, and says so.
+  await street.fill('Tinajeros Street')
+
+  // A second pin, a little way off: a new point, so a new lookup.
+  const box = (await map.boundingBox())!
+  await map.click({ position: { x: box.width / 2 + 12, y: box.height / 2 + 12 } })
+
+  // The empty house box takes the new answer, which proves it arrived...
+  await expect(house).toHaveValue('7', { timeout: 10_000 })
+  expect(served).toHaveLength(2)
+  // ...and the typed street is left exactly as typed.
+  await expect(street).toHaveValue('Tinajeros Street')
 })
 
 test('the map offers satellite imagery as well as streets', async ({ page }) => {
@@ -1195,6 +1307,112 @@ test('the map offers satellite imagery as well as streets', async ({ page }) => 
   await expect(page.getByText(/esri/i).first()).toBeVisible()
 })
 
+test('the chosen barangay’s zones are a layer named in plain words, with a folded key, and a click on one still drops the pin', async ({
+  page,
+}) => {
+  /*
+   * The zones are traced from CPDO's raster sheet (scripts/trace-zoning-
+   * sheets.py) and drawn as a layer. Four rules, each of which has been or
+   * could be broken quietly:
+   *
+   * 1. "Zoning" is an overlay in Leaflet's own layers control, on by default,
+   *    and switching it off takes the key with it. The old checkbox + strength
+   *    slider under the map is gone.
+   * 2. The key starts folded at every width, and opened it names every zone in
+   *    plain words — what the zone is for, never the sheet's code — not colour
+   *    alone. No "traced" or "approximate" caveat: the public does not care
+   *    how the layer was made (client's lead, 24 September 2026).
+   * 3. A zone names itself in the same plain words on hover, and nothing
+   *    anywhere names the applicant's lot. The step's one caution — the zoning
+   *    office checks the exact spot — is said once, under the ordinance note.
+   * 4. The zones are interactive (for the tooltip) yet a click on one still
+   *    drops the pin: Leaflet bubbles path clicks to the map. If someone sets
+   *    bubblingMouseEvents: false, zoned ground stops taking pins, and this
+   *    goes red.
+   */
+  /*
+   * Longos, because a new filing's map opens on City Hall, which is in it: the
+   * zones are on screen without panning.
+   */
+  await goToZoningStep(page)
+  const layer = page.waitForResponse((r) => r.url().endsWith('/zoning/longos.geojson') && r.ok())
+  await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
+  await layer
+  const map = page.locator('.leaflet-container')
+  await map.scrollIntoViewIfNeeded()
+
+  const zonesDrawn = map.locator('.leaflet-biztrack-zoning-pane path')
+  await expect(zonesDrawn.first()).toBeAttached()
+  await expect(page.getByText(/zoning map colours/i)).toHaveCount(0)
+  await expect(page.getByRole('slider')).toHaveCount(0)
+
+  // 2. The key: folded, then in plain words.
+  const keyToggle = page.getByRole('button', { name: /^zones$/i })
+  await expect(keyToggle).toHaveAttribute('aria-expanded', 'false')
+  const key = page.getByRole('list', { name: /zones drawn on the map/i })
+  await expect(key).toBeHidden()
+  await keyToggle.click()
+  await expect(keyToggle).toHaveAttribute('aria-expanded', 'true')
+  /*
+   * CBD, Institutional and the R-2 pair the sheet cannot separate, by what
+   * they are for. The pair gets one name that is true of all of it.
+   */
+  for (const zone of ['Main business district', 'Government, schools and churches', 'Homes and apartments, some small shops']) {
+    await expect(key.getByRole('listitem').filter({ hasText: new RegExp(`^${zone}$`) })).toBeVisible()
+  }
+  // No sheet code reaches the applicant, and no word about how the layer was made.
+  await expect(key).not.toContainText(/\b(R-[123]|C-[123]|I-[12]|CBD|CMP)\b/)
+  // Scoped to the map and its key (the key sits beside the Leaflet container).
+  await expect(map.locator('xpath=..').getByText(/traced|approximate/i)).toHaveCount(0)
+  await keyToggle.click()
+  await expect(keyToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(key).toBeHidden()
+
+  // 3. The tooltip names the zone in the same plain words; nothing names the lot.
+  await zonesDrawn.first().dispatchEvent('mouseover')
+  const tooltip = page.locator('.leaflet-tooltip')
+  await expect(tooltip).toHaveText(/^[A-Z][a-z]/)
+  await expect(tooltip).not.toHaveText(/\b(R-[123]|C-[123]|I-[12]|CBD|CMP)\b|approximate/)
+  await expect(page.getByText(/your (lot|site|location) is/i)).toHaveCount(0)
+
+  // 4. A click on zoned ground drops the pin. Found by asking the page which
+  // point in the map is covered by a zone, rather than guessing coordinates.
+  const point = await map.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    for (let y = r.top + 60; y < r.bottom - 40; y += 12) {
+      for (let x = r.left + 60; x < r.right - 60; x += 12) {
+        const hit = document.elementFromPoint(x, y)
+        if (hit?.closest('.leaflet-biztrack-zoning-pane')) return { x, y }
+      }
+    }
+    return null
+  })
+  expect(point).not.toBeNull()
+  await page.mouse.click(point!.x, point!.y)
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
+
+  /*
+   * The caution, said once for the whole step: the zoning office (spelled out,
+   * with the acronym once) checks the exact spot. It sits as the last line of
+   * the ordinance note, which is the one sentence on the step that says what is
+   * allowed; nowhere else repeats it.
+   */
+  const caution = page.getByText(/the city’s zoning office \(cpdo\) checks your exact spot/i)
+  await expect(caution).toHaveCount(1, { timeout: 15_000 })
+  await expect(page.getByText(/final determination|cpdo confirms|original sheet/i)).toHaveCount(0)
+
+  // 1. The overlay in the layers control, on by default; off takes the key too.
+  await page.locator('.leaflet-control-layers').hover()
+  const toggle = page.getByRole('checkbox', { name: /^\s*zoning\s*$/i })
+  await expect(toggle).toBeChecked()
+  await toggle.uncheck()
+  await expect(zonesDrawn).toHaveCount(0)
+  await expect(keyToggle).toBeHidden()
+  await toggle.check()
+  await expect(zonesDrawn.first()).toBeAttached()
+  await expect(keyToggle).toBeVisible()
+})
+
 test('the city border and the barangay the applicant chose are drawn on the map', async ({
   page,
 }) => {
@@ -1223,14 +1441,15 @@ test('the city border and the barangay the applicant chose are drawn on the map'
   await expect(filled).toHaveCount(1)
 })
 
-test('the barangay’s zoning map shows what the map draws, and never a verdict', async ({
+test('the barangay’s zoning card lists the zones in plain words, links the City’s map, and never gives a verdict', async ({
   page,
 }) => {
   /*
-   * CPDO's 21 sheets are raster images with no geometry behind them, so this
-   * card is allowed to show a picture and list what is drawn on it — and
-   * nothing narrower. The negative assertions are the point of the test: the
-   * moment somebody derives "your lot is C-2" from a pixel, this goes red.
+   * The zones are drawn on the map now, traced and approximate, so this card
+   * lists what the barangay's sheet contains and links the original — and
+   * says nothing narrower. The negative assertions are the point of the test:
+   * the moment somebody derives "your lot is C-2" from the tracing, this goes
+   * red.
    */
   await page.getByRole('checkbox').first().check()
   await page.getByRole('button', { name: /next/i }).click()
@@ -1238,26 +1457,25 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
 
   // Nothing to show before a barangay is chosen — twenty-one maps and no
   // selection is a gallery, not an answer.
-  const card = page.getByRole('region', { name: /zoning map for barangay/i })
+  const card = page.getByRole('region', { name: /^zones in /i })
   await expect(card).toBeHidden()
 
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Dampalit' })
   await expect(card).toBeVisible()
 
-  // The right sheet for the barangay picked, loaded rather than 404ing.
-  const img = card.getByRole('img')
-  await expect(img).toHaveAttribute('src', '/zoning-maps/dampalit.png')
   /*
-   * Polled, because `src` being right and the picture being THERE are two
-   * different moments. Sampling naturalWidth the instant after the attribute
-   * assertion read 0 whenever Dampalit's sheet was cold — it is a real PNG over
-   * the network, and whether it had arrived depended on which barangay the
-   * previous test happened to warm. The assertion is unchanged; only the
-   * waiting is. A 404 or a broken file still fails, on the timeout.
+   * The right sheet for the barangay picked, as a link to the original rather
+   * than a picture: the map beside the card draws the zones, and the sheet
+   * shown a second time here was too small to read. Fetched, so a link to a
+   * 404 fails rather than passing on its href alone.
    */
-  await expect
-    .poll(async () => img.evaluate((el: HTMLImageElement) => el.naturalWidth), { timeout: 15_000 })
-    .toBeGreaterThan(0)
+  const sheetLink = card.getByRole('link', { name: /see the city’s official zoning map/i })
+  await expect(sheetLink).toHaveAttribute('href', '/zoning-maps/dampalit.png')
+  await expect(sheetLink).toHaveAttribute('target', '_blank')
+  const sheet = await page.request.get('/zoning-maps/dampalit.png')
+  expect(sheet.ok()).toBe(true)
+  expect(sheet.headers()['content-type']).toContain('image/png')
+  await expect(card.getByRole('img')).toHaveCount(0)
 
   /*
    * Read off Dampalit's own sheet: the fishpond belt is what the barangay is,
@@ -1278,11 +1496,17 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
    * times is what made this read as a document rather than a form field. The
    * names still distinguish the two lists, which is all these selectors need.
    */
-  const zoneList = card.getByRole('list', { name: /classifications? on this map/i })
-  const overlayList = card.getByRole('list', { name: /overlays? over this barangay/i })
+  /*
+   * Renamed with the plain-language pass (client's lead, 24 September 2026):
+   * the zones are "Zones in <barangay>", the overlays "Areas with extra rules",
+   * and every name says what the zone is for rather than the sheet's code.
+   */
+  const zoneList = card.getByRole('list', { name: /^zones in dampalit$/i })
+  const overlayList = card.getByRole('list', { name: /areas with extra rules/i })
 
-  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeVisible()
-  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Mangrove' })).toBeVisible()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: /^Fishponds$/ })).toBeVisible()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: /^Mangroves$/ })).toBeVisible()
+  await expect(zoneList).not.toContainText(/\b(R-[123]|C-[123]|I-[12]|CBD|CMP)\b/)
 
   /*
    * Dampalit is the one barangay carrying two overlays — Flood, which the
@@ -1290,33 +1514,32 @@ test('the barangay’s zoning map shows what the map draws, and never a verdict'
    * where a merged list would be visible.
    */
   await expect(overlayList.getByRole('listitem')).toHaveCount(2)
-  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
-  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Eco-Tourism Overlay Zone' })).toBeVisible()
+  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Flood-prone areas$/ })).toBeVisible()
+  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Eco-tourism fishponds$/ })).toBeVisible()
   // Heritage is not designated over Dampalit, so it must not appear on it.
   await expect(overlayList.getByRole('listitem').filter({ hasText: 'Heritage' })).toBeHidden()
   // And no overlay leaks into the classification list, which is the whole point
   // of their being separate rows in a separate table.
-  await expect(zoneList.getByRole('listitem').filter({ hasText: /overlay/i })).toBeHidden()
+  await expect(zoneList.getByRole('listitem').filter({ hasText: /flood|eco-tourism|heritage|overlay/i })).toBeHidden()
 
   // Switching barangay switches the sheet — the card answers the picker.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Acacia' })
-  await expect(img).toHaveAttribute('src', '/zoning-maps/acacia.png')
-  await expect(zoneList.getByRole('listitem').filter({ hasText: 'Fishpond' })).toBeHidden()
+  await expect(sheetLink).toHaveAttribute('href', '/zoning-maps/acacia.png')
+  const acaciaZones = card.getByRole('list', { name: /^zones in acacia$/i })
+  await expect(acaciaZones.getByRole('listitem').filter({ hasText: /^Fishponds$/ })).toBeHidden()
   // Acacia carries Flood alone — the overlay block answers the picker too.
   await expect(overlayList.getByRole('listitem')).toHaveCount(1)
-  await expect(overlayList.getByRole('listitem').filter({ hasText: 'Flood Overlay Zone' })).toBeVisible()
+  await expect(overlayList.getByRole('listitem').filter({ hasText: /^Flood-prone areas$/ })).toBeVisible()
 
   /*
-   * CPDO decides, and the card still says so.
-   *
-   * The sentence was cut down — it ran to three lines naming the office in full
-   * and spelling out "the classifications and overlays that apply to your exact
-   * location when it reviews your zoning clearance". What is asserted is the
-   * part that has to survive any rewording: that CPDO is named as the decider.
-   * Matching the old wording verbatim made this a test of the copy rather than
-   * of the promise.
+   * Who decides is said once for the step, as the last line of the ordinance
+   * note under the map (asserted in the zoning-layer test above), and so NOT
+   * here. It used to be on this card as well — "CPDO confirms what applies to
+   * your exact location" — which, with the map key's "approximate" line and
+   * the note's own, made three (client's lead, 24 September 2026). The card
+   * lists the zones and stops.
    */
-  await expect(card).toContainText(/cpdo confirms what applies to your exact location/i)
+  await expect(card).not.toContainText(/cpdo|zoning office|approximate|traced/i)
 
   // And it never claims to have decided anything itself. The overlays bring one
   // more thing it must not say: Flood is a designation over an area, so any
@@ -1358,6 +1581,26 @@ async function answerIdentityDialog(page: Page, type: 'renewal' | 'amendment') {
 
   await modal.getByRole('button', { name: /continue/i }).click()
   await expect(modal).toBeHidden({ timeout: 20_000 })
+}
+
+/**
+ * The line under the map that says a pin is down ("Pin placed …").
+ *
+ * It printed the coordinates until the client's lead asked what the public
+ * would make of "14.675351, 120.945833" (24 September 2026). They now ride on
+ * data attributes, which is how these tests tell a pin that survived from one
+ * that moved without putting numbers back on screen.
+ */
+function pinStatus(page: Page) {
+  return page.getByTestId('pin-status')
+}
+
+async function pinCoords(page: Page): Promise<{ latitude: string | null; longitude: string | null }> {
+  const line = pinStatus(page)
+  return {
+    latitude: await line.getAttribute('data-latitude'),
+    longitude: await line.getAttribute('data-longitude'),
+  }
 }
 
 /**
@@ -1455,7 +1698,7 @@ async function pinAtMapCentre(page: Page) {
     .evaluateAll((options) => options.map((o) => (o as HTMLOptionElement).value))
   const current = await barangay.inputValue()
   await barangay.selectOption(current === values[0] ? values[1] : values[0])
-  await expect(page.getByText(/pinned at/i)).toBeHidden()
+  await expect(page.getByText(/pin placed/i)).toBeHidden()
 
   await map.click()
 
@@ -1465,14 +1708,14 @@ async function pinAtMapCentre(page: Page) {
    * pair rather than on one of them keeps the branch below from racing React.
    */
   const refusal = page.getByRole('alert').filter({ hasText: /but you selected/i })
-  await expect(refusal.or(page.getByText(/pinned at/i)).first()).toBeVisible()
+  await expect(refusal.or(page.getByText(/pin placed/i)).first()).toBeVisible()
   if (await refusal.isVisible()) {
     const named = (await refusal.innerText()).match(/pin is in (.+?), but you selected/i)
     expect(named).not.toBeNull()
     await barangay.selectOption({ label: named![1].trim() })
     await map.click()
   }
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
 }
 
 /**
@@ -1681,9 +1924,15 @@ test('the pin is ringed at the radius the figures were measured over', async ({ 
   /*
    * Said in words as well as drawn, so the ring means something with colour off
    * and to a screen reader, which cannot see an SVG path at all — and stated as
-   * the API's own number, so caption and circle can never disagree.
+   * the API's own number, so caption and circle can never disagree. It is said
+   * beside the figures the ring counts, in the insights card, since the line
+   * under the map stopped printing coordinates (client's lead, 24 September
+   * 2026) — and those coordinates must not come back on screen.
    */
-  await expect(page.getByText(new RegExp(`circle is the ${radiusM} m the figures below count`, 'i'))).toBeVisible()
+  await expect(
+    insightsPanel(page).getByText(new RegExp(`within ${radiusM} m of your pin, the ring on the map`, 'i')),
+  ).toBeVisible()
+  await expect(page.getByText(/\b1[45]\.\d{4,},\s*12[01]\.\d{4,}/)).toHaveCount(0)
 
   /*
    * The ring is scenery, and this is checked BEFORE zooming so the offset below
@@ -1697,10 +1946,10 @@ test('the pin is ringed at the radius the figures were measured over', async ({ 
    * a double-click, which Leaflet would answer by zooming instead of pinning.
    */
   await expect(ring).not.toHaveClass(/leaflet-interactive/)
-  const pinnedBefore = await page.getByText(/pinned at/i).innerText()
+  const pinnedBefore = JSON.stringify(await pinCoords(page))
   await map.click({ position: { x: box.width / 2 + 20, y: box.height / 2 } })
   await expect
-    .poll(async () => page.getByText(/pinned at/i).innerText(), { timeout: 10_000 })
+    .poll(async () => JSON.stringify(await pinCoords(page)), { timeout: 10_000 })
     .not.toBe(pinnedBefore)
 
   /*
@@ -1830,7 +2079,7 @@ test('a failed insights lookup never blocks the filing', async ({ page }) => {
   // of the map falls, and it is what the address below is filed under.
   await page.getByLabel(/barangay name/i).selectOption({ label: 'Longos' })
   await map.click()
-  await expect(page.getByText(/pinned at/i)).toBeVisible()
+  await expect(page.getByText(/pin placed/i)).toBeVisible()
 
   // It says so plainly rather than showing a broken table or nothing at all.
   const panel = insightsPanel(page)

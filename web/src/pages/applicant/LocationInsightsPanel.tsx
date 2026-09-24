@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { api } from '../../lib/api'
 import { Skeleton } from '../../components/ui/primitives'
 import { useAsync } from '../../lib/useAsync'
+import { plainZoneName } from '../../lib/zoningNames'
 
 /*
  * Business Location Insights (docs/r-integration-spec.md §5) — the panel under
@@ -336,7 +337,12 @@ function Unavailable({ children }: { children: string }) {
  */
 const SIMILAR_UNAVAILABLE: Record<'line_not_chosen' | 'line_unclassified', string> = {
   line_not_chosen: 'choose your line of business first',
-  line_unclassified: 'your line is not in the PSIC list',
+  /*
+   * It read "your line is not in the PSIC list": true, but it names the
+   * classification rather than what the applicant did, which was choose
+   * "Other (not listed)". Said in their terms, it explains itself.
+   */
+  line_unclassified: 'you chose “Other”, so there is nothing to compare',
 }
 
 function similarUnavailableReason(reason: 'line_not_chosen' | 'line_unclassified' | null): string {
@@ -416,12 +422,19 @@ export function LocationInsightsPanel({
       {!loading && error === null && insights !== null && (
         <>
           {/*
-           * The radius, said once for both rows. It is interpolated from the
+           * The radius, said once for both rows, and what the ring on the map
+           * is. The ring used to be explained under the map, in a line that
+           * also printed the pin's coordinates ("Pinned at 14.67…, 120.94… ·
+           * the ring is the 500 m counted below"); coordinates mean nothing to
+           * an applicant, and the ring only matters to the figures it counts,
+           * so its meaning moved here, beside them. Interpolated from the
            * response, never typed: MapPicker draws its ring from the same
            * `radius_m`, and a hard-coded 500 here could disagree with the
            * circle drawn over the applicant's own street.
            */}
-          <p className="mt-1 text-sm text-ink-secondary">Within {radius} of your pin</p>
+          <p className="mt-1 text-sm text-ink-secondary">
+            Within {radius} of your pin, the ring on the map
+          </p>
           <table className="mt-1 w-full border-collapse text-sm">
             <caption className="sr-only">
               Registered businesses near the location you pinned, within {radius}
@@ -475,16 +488,17 @@ export function LocationInsightsPanel({
            * CONGRATULATIONS, where anything on screen reads as the verdict.
            *
            * That dialog is gone (23 September 2026). The zoning answer is now
-           * ZoningConformanceNote beside this panel, which words itself as a
-           * lookup and names CPDO as the decider, and BarangayZoningMap says
-           * "CPDO confirms what applies to your exact location". So the step
-           * still names who decides, twice, and the sentence stays out.
+           * ZoningConformanceNote beside this panel, which says what the
+           * zoning rules list and that the zoning office checks the exact
+           * spot and makes the final call — the step's one caution, said once
+           * (client's lead, 24 September 2026). So the step still names who
+           * decides, and the sentence stays out.
            *
            * It has to come back if EITHER:
            *   - this panel is rendered on any surface that announces a
            *     conformity outcome without saying CPDO decides; or
-           *   - the step stops naming CPDO as the office that determines the
-           *     clearance (both lines above removed).
+           *   - the step stops naming CPDO as the office that decides (the
+           *     last line of ZoningConformanceNote removed).
            */}
         </>
       )}
@@ -508,8 +522,12 @@ export function LocationInsightsPanel({
  * conditions in different zones, and conditionality buried in "provided that"
  * prose — and Annex A makes the enumeration explicitly open, so absence from
  * the list is not prohibition. Every word below is chosen so that a reader who
- * takes it at face value is not misled: the ordinance *lists*, or it does not,
- * and CPDO decides either way.
+ * takes it at face value is not misled: a type of business is "allowed in"
+ * a named zone (the ordinance's own heading for these lists) or it is "not on
+ * the list", which is said not to be a refusal, and the last line says the
+ * zoning office checks the exact spot and decides either way. On screen it is
+ * in plain words — no "ordinance", no "use", no zone codes (client's lead,
+ * 24 September 2026).
  *
  * `matched_use` is quoted rather than summarised on purpose. The match is a
  * text heuristic and it can be wrong — a dairy MANUFACTURER can match a clause
@@ -536,6 +554,12 @@ export function ZoningConformanceNote({
   const listed = zoning.verdict === 'listed'
   const matched = zoning.zones.find((z) => z.listed)
   const where = barangayName ?? 'this barangay'
+  /*
+   * Zone names are the plain ones (lib/zoningNames.ts), never the codes: this
+   * note said "R-2 Max — …" to business owners who do not read "R-2".
+   * Deduplicated because the plain table can give two codes one name.
+   */
+  const zoneNames = [...new Set(zoning.zones.map((z) => plainZoneName(z.code, z.name)))]
 
   return (
     <section
@@ -549,37 +573,65 @@ export function ZoningConformanceNote({
         listed ? 'border-royal/30 bg-royal/5' : 'border-s-yellow bg-s-yellow/10'
       }`}
     >
+      {/*
+        * Plain, and still only what the rules say.
+        *
+        * It read "The zoning ordinance lists this use for Bayan-bayanan." over
+        * "R-2 Max — “Retail Shops like: Sari-sari store”". Three things in that
+        * an applicant cannot read: "ordinance", "use", and the code. Now it
+        * names the zone the rule is in, in words, and says "allowed", which is
+        * the ordinance's own heading for these lists ("Allowed uses",
+        * Art. V §2). It is a statement about the zone, not about the pin —
+        * whether their exact spot is in that zone is the last line's point.
+        */}
       <p className="text-sm font-semibold text-ink">
         {listed
-          ? `The zoning ordinance lists this use for ${where}.`
-          : `This use is not on the ordinance’s list for ${where}.`}
+          ? matched
+            ? `Your type of business is allowed in ${where}’s “${plainZoneName(matched.code, matched.name)}” zone.`
+            : `Your type of business is allowed in ${where}.`
+          : `Your type of business is not on the zoning rules’ list for ${where}.`}
       </p>
 
       {listed && matched?.matched_use && (
         /*
-         * The clause, cut to its first breath. The ordinance writes its uses as
-         * single sentences that run for a paragraph — R-1's home-occupation
-         * entry is 600 characters of provisos — and quoted whole it was the
-         * largest block on the step, which buried the figures above it and the
-         * address fields beside it. `title` keeps the full text one hover away
-         * for anyone who wants to read the provisos, and the clause is still
-         * verbatim up to the cut, so it cannot mislead by paraphrase.
+         * The clause that matched, quoted, because the match is a text
+         * heuristic and can be wrong — a dairy MANUFACTURER can match a clause
+         * about dairy SHOPS — and the applicant, who knows their own trade, is
+         * the one who can see that. Cut to its first breath (see `firstClause`)
+         * and stripped of the list heading it sits under ("Retail Shops like:"),
+         * which is the ordinance's filing, not the activity. `title` keeps the
+         * full text one hover away.
          */
         <p className="mt-1.5 text-sm text-ink-secondary" title={matched.matched_use}>
-          <span className="font-semibold">{matched.name}</span> — “{firstClause(matched.matched_use)}”
+          The rules list: “{firstClause(matched.matched_use)}”
         </p>
       )}
 
-      {!listed && zoning.zones.length > 0 && (
+      {!listed && zoneNames.length > 0 && (
+        /*
+         * Not alarming, because it is not a refusal: Annex A leaves the lists
+         * open, so absence from one is not prohibition. The zones are named so
+         * the applicant can see what the barangay is for.
+         */
         <p className="mt-1.5 text-sm text-ink-secondary">
-          {where} is zoned {zoning.zones.map((z) => z.name).join(', ')}. A use not on the list is
-          not automatically refused.
+          {where} has these zones: {zoneNames.join('; ')}. A business not on the list can still
+          be approved.
         </p>
       )}
 
-      {/* The one line that keeps a lookup from reading as a clearance. Do not trim it. */}
+      {/*
+        * The step's one caution. It keeps this note from reading as a
+        * clearance, and it is the only place on the step that says it: the map
+        * key's "Traced from CPDO's sheet, so approximate." and the barangay
+        * card's "CPDO confirms what applies to your exact location" went so it
+        * is said once (client's lead, 24 September 2026). Here, because this is
+        * the one sentence on the step that says what is allowed. "CPDO" is
+        * spelled out as the City's zoning office because the public does not
+        * know the acronym, and kept in brackets so they can match it on the
+        * clearance later. Do not trim it; if it moves, move it whole.
+        */}
       <p className="mt-2 text-sm text-ink-muted">
-        The Zoning Office (CPDO) makes the final determination on your locational clearance.
+        The City&rsquo;s zoning office (CPDO) checks your exact spot and makes the final call.
       </p>
     </section>
   )
@@ -596,8 +648,16 @@ export function ZoningConformanceNote({
  * to a word boundary so the quote never ends mid-word.
  */
 function firstClause(use: string): string {
-  const head = use.split(/,?\s*provided\s+that\b|;/i)[0]?.trim() ?? use
-  if (head.length <= 150) return head === use ? head : `${head}…`
+  /*
+   * The extraction files each use under the list heading it was printed in,
+   * "Retail Shops like: Sari-sari store", "Personal Service Shops: Gym". The
+   * heading is the ordinance's grouping, not the activity, so it is dropped —
+   * only when it is a short heading ending in a colon, never from the middle
+   * of a clause.
+   */
+  const bare = use.replace(/^[A-Za-z/ ]{3,50}?(?:\s+like)?:\s+/, '')
+  const head = bare.split(/,?\s*provided\s+that\b|;/i)[0]?.trim() ?? bare
+  if (head.length <= 150) return head === bare ? head : `${head}…`
   const cut = head.slice(0, 150)
   return `${cut.slice(0, cut.lastIndexOf(' '))}…`
 }
