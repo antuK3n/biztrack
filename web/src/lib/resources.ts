@@ -1098,6 +1098,21 @@ export interface PermitFilters extends PageParams {
   sort?: PermitSort
   dir?: 'asc' | 'desc'
   /**
+   * Certificates lapsing inside this many days, counted from today.
+   *
+   * A window in DAYS rather than a date, because that is how the question is
+   * asked at a counter — "this month", "the next 90 days" — and a stored date
+   * would mean something different every midnight. The server also excludes
+   * anything already expired or superseded: a certificate that lapsed last
+   * month has expired, and one that was replaced early is not the one in
+   * force, so neither is work waiting on a renewal.
+   */
+  expiring_within?: number
+  /** Issued on or after this date (inclusive). */
+  issued_from?: string
+  /** Issued on or before this date — the whole of that day, inclusive. */
+  issued_to?: string
+  /**
    * Ask for the register row rather than the contracted payload.
    *
    * Off everywhere but the administrator's table. It adds the BAN, the

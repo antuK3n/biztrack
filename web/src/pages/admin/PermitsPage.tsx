@@ -1,15 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import { permits } from '../../lib/resources'
 import { toApiError } from '../../lib/api'
-import { businessName } from '../../lib/format'
+import { businessName, formatDate } from '../../lib/format'
 import { useAsync } from '../../lib/useAsync'
 import type { Permit, PermitRegisterRow } from '../../lib/types'
 import type { PermitSort } from '../../lib/resources'
 import { EmptyState, ErrorState, SkeletonList } from '../../components/ui/primitives'
-import { FilterPills, PageTitle, ProtoCard, StatusChip } from '../../components/ui/Proto'
+import { PageTitle, ProtoCard, SortFilter, StatusChip } from '../../components/ui/Proto'
 import type { ChipTone } from '../../components/ui/Proto'
 import { FileTextIcon } from '../../components/icons'
-import { OFFICES, columnsFor, officeOf, type OfficeCode, type PermitColumn } from './permitColumns'
+import { useAuth } from '../../stores/auth'
+import {
+  OFFICES,
+  columnsFor,
+  officeOf,
+  permitCodeForDepartment,
+  type OfficeCode,
+  type PermitColumn,
+} from './permitColumns'
 
 /*
  * Permits — every certificate the City has issued, as one long table.
@@ -21,7 +29,15 @@ import { OFFICES, columnsFor, officeOf, type OfficeCode, type PermitColumn } fro
  * The client read that table and asked for the opposite, in plain terms:
  * "ilagay lahat sa isang mahabang table pahaba left to right ... lahat ng info
  * about sa permit na kailangan sa kada office pati mga finill outan kada
- * permit ... mauuna ang BAN". This is that table.
+ * permit". This is that table.
+ *
+ * The leading column took two goes. "Mauuna ang BAN" put the business account
+ * number first; the clarification named the value rather than the word —
+ * "BIZ-2026-0000x tracking id sa pag aapply at pagbayad na ang application,
+ * the next permit no. sa permit ng office na inapplyan nya" — and that is the
+ * tracking ID, not the BAN. The filing leads, the office's own certificate
+ * follows it, and the rest of the record follows both. See the identifier
+ * block in `permitColumns.ts`.
  *
  * ── Both halves of the ask, and why they are not in conflict ───────────────
  *
@@ -114,6 +130,60 @@ const STATUS_TONES: Record<string, ChipTone> = {
   revoked: 'tint-red',
 }
 
+/**
+ * "Which of mine lapse soon" — the operational question this table could not
+ * answer.
+ *
+ * Status says what a certificate IS; this says what is about to happen to it,
+ * and the two do not overlap: everything here is Active, and everything here
+ * will be Expired if nobody acts. Offered to every office, because it is the
+ * question an office asks of its own certificates rather than one only the
+ * register-wide readers have.
+ *
+ * The windows are the ones a counter actually uses. 180 and 365 are not here:
+ * at that range it selects most of the register and reads as a filter that did
+ * nothing.
+ */
+type ExpiryWindow = '' | '30' | '60' | '90'
+
+const EXPIRY_FILTERS: { value: ExpiryWindow; label: string }[] = [
+  { value: '', label: 'Any' },
+  { value: '30', label: 'Within 30 days' },
+  { value: '60', label: 'Within 60 days' },
+  { value: '90', label: 'Within 90 days' },
+]
+
+/**
+ * The orderings the Sort menu offers, as ORDERINGS rather than as a column and
+ * a direction to combine.
+ *
+ * Nine sortable columns times two directions is eighteen entries, and a reader
+ * picking "Valid until, ascending" has to work out for themselves that this
+ * means "expiring soonest". A sort menu should name the answer, so these do —
+ * and the ten below are the ten an office actually asks for, not the Cartesian
+ * product.
+ *
+ * The column headers still sort, and keep taking any of the nine either way.
+ * This is the discoverable half: a header is only found by a reader who
+ * already suspects it is pressable.
+ *
+ * The first entry is the DEFAULT, which is also what the endpoint answers when
+ * no sort is named — so "Newest issued" is a true description of an
+ * unsorted request rather than a selection the page has to make on arrival.
+ */
+const SORT_OPTIONS: { value: string; label: string; key: PermitSort; dir: 'asc' | 'desc' }[] = [
+  { value: 'issued_at:desc', label: 'Newest issued', key: 'issued_at', dir: 'desc' },
+  { value: 'issued_at:asc', label: 'Oldest issued', key: 'issued_at', dir: 'asc' },
+  { value: 'valid_until:asc', label: 'Expiring soonest', key: 'valid_until', dir: 'asc' },
+  { value: 'valid_until:desc', label: 'Expiring latest', key: 'valid_until', dir: 'desc' },
+  { value: 'tracking_id:asc', label: 'Tracking ID (A–Z)', key: 'tracking_id', dir: 'asc' },
+  { value: 'permit_number:asc', label: 'Permit no. (A–Z)', key: 'permit_number', dir: 'asc' },
+  { value: 'ban:asc', label: 'BAN (A–Z)', key: 'ban', dir: 'asc' },
+  { value: 'business:asc', label: 'Business (A–Z)', key: 'business', dir: 'asc' },
+  { value: 'permit_type:asc', label: 'Certificate (A–Z)', key: 'permit_type', dir: 'asc' },
+  { value: 'status:asc', label: 'Status (A–Z)', key: 'status', dir: 'asc' },
+]
+
 interface Sort {
   key: PermitSort
   dir: 'asc' | 'desc'
@@ -136,12 +206,52 @@ function cellFor(row: PermitRegisterRow, column: PermitColumn): string {
 }
 
 export function PermitsPage() {
+  /*
+   * ── Who is reading, and how many offices they can see ────────────────────
+   *
+   * `application.view_any_office` is the permission that makes a reader
+   * office-blind: BPLO, which issues the Mayor's Permit and coordinates every
+   * other office's clearance, and the super admin, who audits. Everybody else
+   * is scoped by `PermitController::scopeToReader` to the certificates their
+   * own office issues — a CENRO session asking for FSICs gets an empty table,
+   * not the fire office's rows.
+   *
+   * So the Office picker was a control with exactly one answer for five of the
+   * six offices, and four fifths of the table was columns their sheets never
+   * fill. The client: "yung pilian ng offices kasi kung anong permit lang sa
+   * kanila yung lang dapat, bplo lang dapat may ganyan."
+   *
+   * The picker is therefore a BPLO-and-admin control, and a single-office
+   * reader gets their own office's columns without being asked. This is a
+   * screen decision only — the server already refuses the rows either way, and
+   * hiding a control that cannot work is not what keeps the boundary.
+   */
+  const permissions = useAuth((s) => s.user?.permissions)
+  const department = useAuth((s) => s.user?.department?.code)
+
+  const readsEveryOffice = permissions?.includes('application.view_any_office') ?? false
+  const ownOffice = permitCodeForDepartment(department)
+
+  /*
+   * A reader who sees one office is locked to it. `null` falls back to the
+   * whole table, which is the safe direction: an account this map does not
+   * recognise keeps the picker rather than being shown an empty screen.
+   */
+  const locked: OfficeCode | null = readsEveryOffice ? null : ownOffice
+
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
-  const [office, setOffice] = useState<OfficeCode | ''>('')
+  const [expiring, setExpiring] = useState<ExpiryWindow>('')
+  const [issuedFrom, setIssuedFrom] = useState('')
+  const [issuedTo, setIssuedTo] = useState('')
+  const [chosen, setChosen] = useState<OfficeCode | ''>('')
   const [sort, setSort] = useState<Sort | null>(null)
   const [page, setPage] = useState(1)
+
+  // What the table is actually showing: the reader's own office when they have
+  // one, otherwise whatever the picker says.
+  const office: OfficeCode | '' = locked ?? chosen
 
   /*
    * Which row's certificate is being fetched, and what went wrong if it did.
@@ -169,12 +279,15 @@ export function PermitsPage() {
         q: query || undefined,
         status: status || undefined,
         permit_type: office || undefined,
+        expiring_within: expiring ? Number(expiring) : undefined,
+        issued_from: issuedFrom || undefined,
+        issued_to: issuedTo || undefined,
         sort: sort?.key,
         dir: sort?.dir,
         page,
         per_page: PAGE_SIZE,
       }),
-    [query, status, office, sort?.key, sort?.dir, page],
+    [query, status, office, expiring, issuedFrom, issuedTo, sort?.key, sort?.dir, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -196,7 +309,7 @@ export function PermitsPage() {
   }
 
   function selectOffice(next: OfficeCode | '') {
-    setOffice(next)
+    setChosen(next)
     setPage(1)
     /*
      * A sort on a column that is about to disappear would keep ordering the
@@ -204,6 +317,63 @@ export function PermitsPage() {
      * vanish and none of them is sortable, so the sort always survives — the
      * page reset is the whole of what changing office costs.
      */
+  }
+
+  function selectExpiring(next: ExpiryWindow) {
+    setExpiring(next)
+    setPage(1)
+  }
+
+  /*
+   * How many things are narrowing the table.
+   *
+   * It colours the Filter button and it names the count in the empty state:
+   * with four controls folded into one panel, "No permits" would otherwise
+   * read as a fact about the register rather than about what is set inside a
+   * menu the reader has closed.
+   */
+  const narrowed = [
+    status !== '',
+    expiring !== '',
+    issuedFrom !== '',
+    issuedTo !== '',
+    query !== '',
+    locked === null && chosen !== '',
+  ].filter(Boolean).length
+
+  /*
+   * What the Sort menu shows as chosen.
+   *
+   * Derived from the sort STATE rather than held beside it, so the menu and
+   * the column headers can never disagree — press a header and the menu
+   * follows, pick from the menu and the header's arrow moves. Two sources of
+   * truth for one ordering is how a screen ends up claiming to be sorted one
+   * way while the rows are in another.
+   *
+   * `null` means no sort was asked for, which the endpoint answers as newest
+   * issued first — the menu's first entry, and a true description rather than
+   * a selection the page had to invent on arrival.
+   */
+  const sortOptions = useMemo(
+    () => (locked === null ? SORT_OPTIONS : SORT_OPTIONS.filter((o) => o.key !== 'ban')),
+    [locked],
+  )
+
+  const sortValue = sort
+    ? (SORT_OPTIONS.find((o) => o.key === sort.key && o.dir === sort.dir)?.value ?? '')
+    : SORT_OPTIONS[0].value
+
+  function selectSort(value: string) {
+    const picked = SORT_OPTIONS.find((o) => o.value === value)
+    if (!picked) return
+    /*
+     * The default ordering is expressed as NO sort rather than as
+     * `issued_at desc`, so the request the page sends for it is the request
+     * the endpoint has always answered — one fewer way for the first page to
+     * differ from what the totals are counted over.
+     */
+    setSort(value === SORT_OPTIONS[0].value ? null : { key: picked.key, dir: picked.dir })
+    setPage(1)
   }
 
   function toggleSort(key: PermitSort) {
@@ -246,7 +416,11 @@ export function PermitsPage() {
     }
   }
 
-  const columns = useMemo(() => columnsFor(office), [office])
+  /*
+   * The BAN goes with the office picker: both belong to a reader who has more
+   * than one office in front of them. `locked === null` is that reader.
+   */
+  const columns = useMemo(() => columnsFor(office, locked === null), [office, locked])
   const rows = data?.data ?? []
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
@@ -278,6 +452,67 @@ export function PermitsPage() {
               placeholder="Permit no., BAN, business, owner or tracking ID…"
               className="w-80 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
+            {/*
+              Sort and Filter, as the two menus the rest of the app already
+              carries (Proto's SortFilter, p14). They were five controls laid
+              out across the header — status pills, an office select, expiry
+              pills and two date inputs — which is a filter bar rather than a
+              header, and it pushed the table itself below the fold on a
+              laptop.
+
+              Everything that narrowed the table still narrows it; it narrows
+              it from inside the Filter panel. The office select appears there
+              only for a reader who can see more than one office, which is the
+              same rule that governed it in the row.
+            */}
+            <SortFilter
+              sort={{
+                value: sortValue,
+                /*
+                 * Never an ordering by a column the reader cannot see. The BAN
+                 * is off an office's table, so "BAN (A–Z)" would silently
+                 * reorder the rows by something invisible — which reads as the
+                 * sort having done nothing.
+                 */
+                options: sortOptions.map(({ value, label }) => ({ value, label })),
+                onChange: selectSort,
+              }}
+              filter={{
+                value: status,
+                options: STATUS_FILTERS.map(({ value, label }) => ({ value, label })),
+                onChange: (v: string) => selectStatus(v as StatusFilter),
+              }}
+              filterFields={[
+                {
+                  label: 'Expiring',
+                  value: expiring,
+                  options: EXPIRY_FILTERS.map(({ value, label }) => ({ value, label })),
+                  onChange: (v: string) => selectExpiring(v as ExpiryWindow),
+                },
+                ...(locked === null
+                  ? [
+                      {
+                        label: 'Office',
+                        value: chosen,
+                        options: [
+                          { value: '', label: 'All offices — every column' },
+                          ...OFFICES.map((o) => ({ value: o.code, label: `${o.office} — ${o.name}` })),
+                        ],
+                        onChange: (v: string) => selectOffice(v as OfficeCode | ''),
+                      },
+                    ]
+                  : []),
+              ]}
+              dateRange={{
+                from: issuedFrom,
+                to: issuedTo,
+                onChange: (from: string, to: string) => {
+                  setIssuedFrom(from)
+                  setIssuedTo(to)
+                  setPage(1)
+                },
+              }}
+            />
             <button
               type="button"
               onClick={reload}
@@ -297,38 +532,6 @@ export function PermitsPage() {
         Permits
       </PageTitle>
 
-      <div className="mb-5 flex flex-wrap items-end gap-x-6 gap-y-3">
-        <div>
-          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-            Status
-          </span>
-          <FilterPills options={STATUS_FILTERS} value={status} onChange={selectStatus} />
-        </div>
-
-        {/*
-          The office, as a select rather than pills. Six offices plus "All" is
-          more than a pill row holds without wrapping onto a second line, and
-          it is a real <label for> because unlike the search box there is
-          nothing about a closed select that says what it narrows.
-        */}
-        <label className="block">
-          <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-            Office
-          </span>
-          <select
-            value={office}
-            onChange={(e) => selectOffice(e.target.value as OfficeCode | '')}
-            className="rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-royal"
-          >
-            <option value="">All offices — every column</option>
-            {OFFICES.map((o) => (
-              <option key={o.code} value={o.code}>
-                {o.office} — {o.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
 
       {/*
         The failure of one row's View, said once above the table rather than
@@ -350,11 +553,35 @@ export function PermitsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={FileTextIcon}
-          title={query ? 'No permits match your search' : `No ${filterLabel.toLowerCase()} permits`}
+          /*
+           * The status word only belongs in the title when a status was
+           * CHOSEN. It read "No all permits" whenever anything else emptied
+           * the table, because the neutral status is labelled "All" and the
+           * title interpolated it regardless — a sentence that is not English
+           * and, worse, names the one control that was not responsible.
+           */
+          title={
+            query
+              ? 'No permits match your search'
+              : status
+                ? `No ${filterLabel.toLowerCase()} permits`
+                : narrowed > 0
+                  ? 'No permits match these filters'
+                  : 'No permits yet'
+          }
           description={
             query
               ? 'Search matches the permit number, the BAN, the business name, the owner, the tracking ID and the permit type. Try another spelling.'
-              : 'Permits appear here as offices approve filings and issue certificates.'
+              : narrowed > 0
+                ? /*
+                   * Four controls live inside a panel the reader has closed,
+                   * so an empty table would otherwise read as a fact about the
+                   * register. The count says how many are set and where they
+                   * are, which is the whole of what a reader needs to undo
+                   * them.
+                   */
+                  `${narrowed} filter${narrowed === 1 ? ' is' : 's are'} narrowing this. Open Filter above to change ${narrowed === 1 ? 'it' : 'them'}.`
+                : 'Permits appear here as offices approve filings and issue certificates.'
           }
         />
       ) : (
@@ -452,7 +679,9 @@ export function PermitsPage() {
                           className={[
                             'whitespace-nowrap px-4 py-3.5',
                             column.tnum ? 'tnum' : '',
-                            column.key === 'ban' ? 'font-bold text-ink' : 'text-ink-secondary',
+                            // The lead identifier carries the row, so it is
+                            // the one drawn in full ink.
+                            column.key === 'tracking_id' ? 'font-bold text-ink' : 'text-ink-secondary',
                           ]
                             .filter(Boolean)
                             .join(' ')}
@@ -620,6 +849,9 @@ export function PermitsPage() {
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
                 {office !== '' && ` issued by ${officeOf(office)}`}
+                {expiring && ` expiring within ${expiring} days`}
+                {issuedFrom && ` issued from ${formatDate(issuedFrom)}`}
+                {issuedTo && ` issued up to ${formatDate(issuedTo)}`}
                 {query && ' matching your search'}
               </p>
               <p className="mt-1 text-xs text-ink-muted">
@@ -635,6 +867,8 @@ export function PermitsPage() {
                   : 'Ordered by issue date, newest first.'}
                 {office === '' &&
                   ' Every office’s form is shown; pick an office above to see only its own columns.'}
+                {locked !== null &&
+                  ` These are ${officeOf(locked)}’s certificates — the ones filed with this office.`}
               </p>
             </div>
             <div className="flex items-center gap-1.5">
