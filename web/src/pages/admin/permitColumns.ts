@@ -184,20 +184,6 @@ export const SHARED_COLUMNS: PermitColumn[] = [
      */
     value: (r) => r.permit_number,
   },
-  {
-    key: 'ban',
-    label: 'BAN',
-    sort: 'ban',
-    tnum: true,
-    /*
-     * The BUSINESS account number — `BP-YYYY-NNNN`. One per business for its
-     * whole life, where a tracking ID is minted per filing and a permit number
-     * per certificate, so it is what groups every filing a shop has ever made.
-     * Third rather than first: it is how a register is browsed, not how a
-     * particular permit is looked up.
-     */
-    value: (r) => r.ban,
-  },
 
   /* -- Which certificate, and whose ------------------------------------- */
   { key: 'permit_type', label: 'Permit / Certificate', sort: 'permit_type', value: (r) => r.permit_type?.name ?? null },
@@ -425,29 +411,29 @@ export const OFFICE_COLUMNS: Record<OfficeCode, PermitColumn[]> = {
  * anong office ito"). Both readings are in the ask and neither is a
  * compromise: the wide table is the register, the narrow one is the office.
  *
- * ── `withBan` ─────────────────────────────────────────────────────────────
+ * ── The BAN is not a column here ──────────────────────────────────────────
  *
- * The BAN is dropped for a reader who sees one office [client, 24 September
- * 2026: "paki remove muna ang BAN sa permits page ng mga offices"].
+ * It was, briefly, then only for the readers who see every office, and now not
+ * at all [client, 24 September 2026: "on all offices remove BAN column"].
  *
- * It is the number that groups every certificate a business has ever held,
- * across offices and across years, which is a register-wide question: BPLO and
- * the super admin read six offices at once and the BAN is what ties their rows
- * together. A clearance office reads only its own certificates, reaches them
- * by certificate number or by business name, and never has six offices on
- * screen to tie together — so for them it was a column that answered a
- * question they were not asking.
+ * It names the BUSINESS, and a row on this table names a CERTIFICATE. Every
+ * question a reader brings to it arrives as one of the two identifiers that do
+ * — a tracking ID over the phone, a permit number off the paper — and the
+ * business is already named in words beside them.
+ *
+ * It is still SEARCHABLE: `q` matches the BAN on the server, so an owner
+ * quoting theirs is found. The search field's label says so. A value the box
+ * matches but the table cannot show is the right way round; the reverse — a
+ * column nobody looks up — is what this removes.
  */
-export function columnsFor(office: OfficeCode | '', withBan = true): PermitColumn[] {
-  const shared = withBan ? SHARED_COLUMNS : SHARED_COLUMNS.filter((c) => c.key !== 'ban')
-
+export function columnsFor(office: OfficeCode | ''): PermitColumn[] {
   if (office !== '') {
-    return [...shared, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
+    return [...SHARED_COLUMNS, ...OFFICE_COLUMNS[office].map((c) => ({ ...c, office }))]
   }
 
   const sheets = OFFICES.flatMap(({ code }) =>
     OFFICE_COLUMNS[code].map((c) => ({ ...c, office: code })),
   )
 
-  return [...shared, ...sheets]
+  return [...SHARED_COLUMNS, ...sheets]
 }

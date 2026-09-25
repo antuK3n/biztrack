@@ -266,6 +266,42 @@ test.describe('the permit register table', () => {
 
     await page.goto('/staff/admin/permits')
     await expect(page.getByRole('heading', { name: 'Permits', level: 1 })).toBeVisible()
+
+    /*
+     * Widen to every office before each test in this block.
+     *
+     * These tests are about the REGISTER — three rows from three offices, all
+     * five sheets side by side — and this session is BPLO's, which now opens
+     * on its own office. That default is deliberate and has its own test
+     * below; here it is a starting condition to undo, exactly as a reader
+     * would.
+     */
+    await openFilter(page)
+    await filterField(page, 'Office').selectOption('')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
+  })
+
+  test('BPLO opens on its own office, and can widen to the register', async ({ page }) => {
+    /*
+     * Client, 24 September 2026: "bplo admin office, make the office permit
+     * default sa bplo, but still sa filter ganon pa rin meron all offices, at
+     * yung 6 other offices and their permits."
+     *
+     * Asserted on the FIRST request rather than on what is on screen after
+     * the beforeEach has widened it: the point is that BPLO never sees the
+     * whole register unless it asks, and a page that fetched everything and
+     * then narrowed in the browser would look identical here while costing
+     * the request this avoids.
+     */
+    expect(asked[0], 'BPLO did not open on its own office').toContain('permit_type=BUSINESS')
+
+    // And the picker still offers every office, including "All".
+    await openFilter(page)
+    const office = filterField(page, 'Office')
+    await expect(office.locator('option')).toHaveCount(OFFICE_COUNT + 1)
+    await expect(office).toHaveValue('')
+    await page.keyboard.press('Escape')
   })
 
   test('the table leads with the tracking ID, then the office’s own permit no.', async ({ page }) => {
@@ -287,7 +323,6 @@ test.describe('the permit register table', () => {
     const order = [
       'Tracking ID',
       'Permit No.',
-      'BAN',
       'Permit / Certificate',
       'Office',
       'Business',
@@ -318,15 +353,21 @@ test.describe('the permit register table', () => {
     const first = rows.first()
     await expect(first.locator('td').first()).toHaveText('BIZ-2026-00473')
     await expect(first).toContainText('MCB-2026-000001')
-    await expect(first).toContainText('BP-2026-0001')
+    /*
+     * And NOT the BAN. It names the business, and a row here names a
+     * certificate; the business is already on the row in words. It stays
+     * searchable — see the search test — which is the right way round: a value
+     * the box matches but the table does not show, rather than a column nobody
+     * looks up.
+     */
+    await expect(first).not.toContainText('BP-2026-0001')
     await expect(first).toContainText('Nena Makiling')
     await expect(first).toContainText('Longos')
     await expect(first).toContainText('Liza Reyes')
     // Never colour alone: the state is a word in the row, not just a tint.
     await expect(first).toContainText('Active')
 
-    // The removed business says so rather than blanking or throwing, and its
-    // missing BAN prints as a dash rather than an empty cell.
+    // The removed business says so rather than blanking or throwing.
     const orphan = rows.filter({ hasText: 'MCZ-2026-000014' })
     await expect(orphan).toContainText('Business removed from register')
 
@@ -498,24 +539,38 @@ test.describe('the permit register table', () => {
     await expect(page.locator('tbody tr')).toHaveCount(PERMITS.length)
   })
 
-  test('expiring-soon and the issue-date range narrow on the server', async ({ page }) => {
+  test('the issue-date range narrows on the server', async ({ page }) => {
     /*
-     * The two filters an office asks for that Status cannot answer: what is
-     * about to lapse, and what was issued in a given month. Both are the
-     * server's — a browser filtering the rows in hand would find nothing past
-     * the first page of a register that holds thousands.
+     * The filter an office asks for that Status cannot answer: what was issued
+     * in a given month. It is the server's — a browser filtering the rows in
+     * hand would find nothing past the first page of a register that holds
+     * thousands.
      */
     await openFilter(page)
 
-    await filterField(page, 'Expiring').selectOption('90')
-    await expect.poll(() => asked.at(-1)).toContain('expiring_within=90')
-
-    await filterField(page, 'Expiring').selectOption('')
     await page.locator('.shadow-overlay input[type=date]').first().fill('2026-01-01')
     await expect.poll(() => asked.at(-1)).toContain('issued_from=2026-01-01')
 
     await page.locator('.shadow-overlay input[type=date]').last().fill('2026-12-31')
     await expect.poll(() => asked.at(-1)).toContain('issued_to=2026-12-31')
+  })
+
+  test('the expiry window is not offered as a filter', async ({ page }) => {
+    /*
+     * Removed on the client's instruction [24 September 2026: "sa filter yung
+     * 'Expiring Any'"]. `expiring_within` remains on the endpoint, documented
+     * and tested — deleting a working server filter because one screen stopped
+     * sending it would throw away the work rather than the control — so this
+     * asserts the SCREEN, and the API test beside it asserts the endpoint.
+     */
+    await openFilter(page)
+    await expect(filterField(page, 'Expiring')).toHaveCount(0)
+    await expect.poll(() => asked.at(-1)).not.toContain('expiring_within')
+
+    // The orderings that answer the same question are not filters, and stay.
+    await page.keyboard.press('Escape')
+    await openSort(page)
+    await expect(page.getByRole('option', { name: 'Expiring soonest' })).toBeVisible()
   })
 
   test('the sort menu names orderings, not columns and directions', async ({ page }) => {
@@ -547,14 +602,16 @@ test.describe('the permit register table', () => {
      * header moves the menu's tick and picking from the menu moves the
      * header's arrow.
      */
-    await page.getByRole('button', { name: /^BAN/ }).click()
-    await expect(page.locator('th', { has: page.getByRole('button', { name: /^BAN/ }) })).toHaveAttribute(
-      'aria-sort',
-      'ascending',
-    )
+    await page.getByRole('button', { name: /^Business/ }).click()
+    await expect(
+      page.locator('th', { has: page.getByRole('button', { name: /^Business/ }) }),
+    ).toHaveAttribute('aria-sort', 'ascending')
 
     await openSort(page)
-    await expect(page.getByRole('option', { name: 'BAN (A–Z)' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('option', { name: 'Business (A–Z)' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
   })
 
   test('columns sort on the server, across the whole register', async ({ page }) => {
@@ -565,11 +622,11 @@ test.describe('the permit register table', () => {
      * assertion is that the page ASKS — a sort the browser performed would
      * order these three rows identically and prove nothing.
      */
-    const heading = page.getByRole('button', { name: /^BAN/ })
+    const heading = page.getByRole('button', { name: /^Business/ })
 
     await heading.click()
     await expect(page.locator('th', { has: heading })).toHaveAttribute('aria-sort', 'ascending')
-    await expect.poll(() => asked.at(-1)).toContain('sort=ban')
+    await expect.poll(() => asked.at(-1)).toContain('sort=business')
     await expect.poll(() => asked.at(-1)).toContain('dir=asc')
 
     await heading.click()
@@ -578,7 +635,7 @@ test.describe('the permit register table', () => {
 
     // The footer names the sort's reach, and the reach is now the register.
     await expect(
-      page.getByText('Sorted by BAN, descending, across the whole register.'),
+      page.getByText('Sorted by Business, descending, across the whole register.'),
     ).toBeVisible()
 
     // A third press puts the register back in the order its totals are counted in.
@@ -729,8 +786,8 @@ test.describe('the office picker, and whose columns each reader gets', () => {
          */
         await openFilter(page)
         await expect(filterField(page, 'Office')).toHaveCount(0)
-        // The filters this office DOES get are still there.
-        await expect(filterField(page, 'Expiring')).toBeVisible()
+        // The narrowing this office DOES get is still there.
+        await expect(page.locator('.shadow-overlay input[type=date]')).toHaveCount(2)
         await page.keyboard.press('Escape')
 
         // Its own sheet is there…
@@ -743,7 +800,7 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         await expect(page.getByText(`These are ${office}’s certificates`)).toBeVisible()
       })
 
-      test(`${office} is not shown the BAN, here or in the sort menu`, async ({ page }) => {
+      test(`${office} is shown no BAN column and no expiry filter`, async ({ page }) => {
         /*
          * Client, 24 September 2026: "paki remove muna ang BAN sa permits page
          * ng mga offices."
@@ -767,6 +824,11 @@ test.describe('the office picker, and whose columns each reader gets', () => {
         await expect(page.getByRole('option', { name: /^BAN/ })).toHaveCount(0)
         // The orderings that DO name a visible column are still there.
         await expect(page.getByRole('option', { name: 'Expiring soonest' })).toBeVisible()
+        await page.keyboard.press('Escape')
+
+        await openFilter(page)
+        await expect(filterField(page, 'Expiring')).toHaveCount(0)
+        await page.keyboard.press('Escape')
       })
 
       test(`${office} sees only certificates its own office issued`, async ({ page }) => {
@@ -820,14 +882,17 @@ test.describe('the office picker, and whose columns each reader gets', () => {
       const picker = filterField(page, 'Office')
       await expect(picker).toBeVisible()
       await expect(picker.locator('option')).toHaveCount(OFFICE_COUNT + 1) // six offices + "All"
+      // It opens on BPLO's own office; widen it, which is the whole point of
+      // the control being here.
+      await expect(picker).toHaveValue('BUSINESS')
+      await picker.selectOption('')
       await page.keyboard.press('Escape')
 
       /*
-       * And it keeps the BAN, which the five clearance offices lose. BPLO
-       * reads six offices at once, and the BAN is what ties one business's
-       * rows together across them.
+       * The BAN is off every reader's table now, BPLO's included — it names
+       * the business and a row here names a certificate. It stays searchable.
        */
-      await expect(page.getByRole('columnheader', { name: /^BAN/ })).toBeVisible()
+      await expect(page.getByRole('columnheader', { name: /^BAN/ })).toHaveCount(0)
 
       // With nothing picked it carries every office's sheet.
       await expect(page.getByRole('columnheader', { name: /Sanitary Classification/i })).toBeVisible()
@@ -906,8 +971,23 @@ test.describe('BPLO reads the whole register', () => {
 
   test('BPLO sees more than one certificate type', async ({ page }) => {
     await page.goto('/staff/admin/permits')
+    await expect(page.locator('thead th').first()).toBeVisible({ timeout: 30_000 })
+
+    /*
+     * Widen first. BPLO opens on its own office — one certificate type by
+     * construction — and the claim being tested is that the office boundary
+     * does not narrow it further than it chooses to be narrowed.
+     */
+    await page.getByRole('button', { name: /^Filter/ }).click()
+    await page
+      .locator('.shadow-overlay label')
+      .filter({ hasText: 'Office' })
+      .locator('select')
+      .selectOption('')
+    await page.keyboard.press('Escape')
+
     const rows = page.locator('tbody tr')
-    await expect(rows.first()).toBeVisible({ timeout: 15_000 })
+    await expect(rows.first()).toBeVisible({ timeout: 30_000 })
     const types = new Set(await columnValues(page, /PERMIT \/ CERTIFICATE/))
     expect(types.size, `BPLO's first page held one type only: ${[...types].join(', ')}`).toBeGreaterThan(1)
   })

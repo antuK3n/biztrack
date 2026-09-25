@@ -130,28 +130,22 @@ const STATUS_TONES: Record<string, ChipTone> = {
   revoked: 'tint-red',
 }
 
-/**
- * "Which of mine lapse soon" — the operational question this table could not
- * answer.
+/*
+ * ── The Expiring window is not on this screen ─────────────────────────────
  *
- * Status says what a certificate IS; this says what is about to happen to it,
- * and the two do not overlap: everything here is Active, and everything here
- * will be Expired if nobody acts. Offered to every office, because it is the
- * question an office asks of its own certificates rather than one only the
- * register-wide readers have.
+ * It was a filter here — Any / within 30 / 60 / 90 days — and the client took
+ * it off [24 September 2026: "sa filter yung 'Expiring Any'"].
  *
- * The windows are the ones a counter actually uses. 180 and 365 are not here:
- * at that range it selects most of the register and reads as a filter that did
- * nothing.
+ * `expiring_within` remains on the endpoint, documented and covered by tests:
+ * it is a real capability, the Renewal Risk screen asks the same question of
+ * the same data, and deleting a tested server filter because one page stopped
+ * sending it would be throwing away the work rather than the control. Nothing
+ * here sends it.
+ *
+ * The two orderings that answer the same question from the Sort menu —
+ * "Expiring soonest" and "Expiring latest" — stay. They narrow nothing, so
+ * they are not the control that was removed.
  */
-type ExpiryWindow = '' | '30' | '60' | '90'
-
-const EXPIRY_FILTERS: { value: ExpiryWindow; label: string }[] = [
-  { value: '', label: 'Any' },
-  { value: '30', label: 'Within 30 days' },
-  { value: '60', label: 'Within 60 days' },
-  { value: '90', label: 'Within 90 days' },
-]
 
 /**
  * The orderings the Sort menu offers, as ORDERINGS rather than as a column and
@@ -178,7 +172,6 @@ const SORT_OPTIONS: { value: string; label: string; key: PermitSort; dir: 'asc' 
   { value: 'valid_until:desc', label: 'Expiring latest', key: 'valid_until', dir: 'desc' },
   { value: 'tracking_id:asc', label: 'Tracking ID (A–Z)', key: 'tracking_id', dir: 'asc' },
   { value: 'permit_number:asc', label: 'Permit no. (A–Z)', key: 'permit_number', dir: 'asc' },
-  { value: 'ban:asc', label: 'BAN (A–Z)', key: 'ban', dir: 'asc' },
   { value: 'business:asc', label: 'Business (A–Z)', key: 'business', dir: 'asc' },
   { value: 'permit_type:asc', label: 'Certificate (A–Z)', key: 'permit_type', dir: 'asc' },
   { value: 'status:asc', label: 'Status (A–Z)', key: 'status', dir: 'asc' },
@@ -242,10 +235,30 @@ export function PermitsPage() {
   const [search, setSearch] = useState('')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('')
-  const [expiring, setExpiring] = useState<ExpiryWindow>('')
   const [issuedFrom, setIssuedFrom] = useState('')
   const [issuedTo, setIssuedTo] = useState('')
-  const [chosen, setChosen] = useState<OfficeCode | ''>('')
+  /*
+   * ── Where the picker starts ──────────────────────────────────────────────
+   *
+   * On the reader's OWN office when they have one, on every office when they
+   * do not [client, 24 September 2026: "bplo admin office, make the office
+   * permit default sa bplo, but still sa filter ganon pa rin meron all
+   * offices, at yung 6 other offices and their permits"].
+   *
+   * That is one rule and it lands correctly on both readers who get a picker:
+   *
+   *   BPLO         belongs to BPLO, so it opens on the Mayor's Permit — the
+   *                certificate it issues, and the work in front of it — and
+   *                widens to the whole register whenever it wants.
+   *   super admin  belongs to no office, so it opens on all six. There is no
+   *                "own office" to open on, and defaulting it to BPLO's would
+   *                be an auditor arriving pre-filtered to one office's work.
+   *
+   * Written as a `useState` initialiser rather than an effect: an effect would
+   * render the unfiltered table first and then narrow it, which is a visible
+   * flash of the whole register and a wasted request.
+   */
+  const [chosen, setChosen] = useState<OfficeCode | ''>(() => ownOffice ?? '')
   const [sort, setSort] = useState<Sort | null>(null)
   const [page, setPage] = useState(1)
 
@@ -279,7 +292,6 @@ export function PermitsPage() {
         q: query || undefined,
         status: status || undefined,
         permit_type: office || undefined,
-        expiring_within: expiring ? Number(expiring) : undefined,
         issued_from: issuedFrom || undefined,
         issued_to: issuedTo || undefined,
         sort: sort?.key,
@@ -287,7 +299,7 @@ export function PermitsPage() {
         page,
         per_page: PAGE_SIZE,
       }),
-    [query, status, office, expiring, issuedFrom, issuedTo, sort?.key, sort?.dir, page],
+    [query, status, office, issuedFrom, issuedTo, sort?.key, sort?.dir, page],
   )
 
   // Let the admin finish typing before asking the server.
@@ -319,11 +331,6 @@ export function PermitsPage() {
      */
   }
 
-  function selectExpiring(next: ExpiryWindow) {
-    setExpiring(next)
-    setPage(1)
-  }
-
   /*
    * How many things are narrowing the table.
    *
@@ -334,7 +341,6 @@ export function PermitsPage() {
    */
   const narrowed = [
     status !== '',
-    expiring !== '',
     issuedFrom !== '',
     issuedTo !== '',
     query !== '',
@@ -354,11 +360,6 @@ export function PermitsPage() {
    * issued first — the menu's first entry, and a true description rather than
    * a selection the page had to invent on arrival.
    */
-  const sortOptions = useMemo(
-    () => (locked === null ? SORT_OPTIONS : SORT_OPTIONS.filter((o) => o.key !== 'ban')),
-    [locked],
-  )
-
   const sortValue = sort
     ? (SORT_OPTIONS.find((o) => o.key === sort.key && o.dir === sort.dir)?.value ?? '')
     : SORT_OPTIONS[0].value
@@ -416,11 +417,7 @@ export function PermitsPage() {
     }
   }
 
-  /*
-   * The BAN goes with the office picker: both belong to a reader who has more
-   * than one office in front of them. `locked === null` is that reader.
-   */
-  const columns = useMemo(() => columnsFor(office, locked === null), [office, locked])
+  const columns = useMemo(() => columnsFor(office), [office])
   const rows = data?.data ?? []
   const total = data?.meta.total ?? 0
   const lastPage = data?.meta.last_page ?? 1
@@ -468,13 +465,7 @@ export function PermitsPage() {
             <SortFilter
               sort={{
                 value: sortValue,
-                /*
-                 * Never an ordering by a column the reader cannot see. The BAN
-                 * is off an office's table, so "BAN (A–Z)" would silently
-                 * reorder the rows by something invisible — which reads as the
-                 * sort having done nothing.
-                 */
-                options: sortOptions.map(({ value, label }) => ({ value, label })),
+                options: SORT_OPTIONS.map(({ value, label }) => ({ value, label })),
                 onChange: selectSort,
               }}
               filter={{
@@ -483,12 +474,6 @@ export function PermitsPage() {
                 onChange: (v: string) => selectStatus(v as StatusFilter),
               }}
               filterFields={[
-                {
-                  label: 'Expiring',
-                  value: expiring,
-                  options: EXPIRY_FILTERS.map(({ value, label }) => ({ value, label })),
-                  onChange: (v: string) => selectExpiring(v as ExpiryWindow),
-                },
                 ...(locked === null
                   ? [
                       {
@@ -849,7 +834,6 @@ export function PermitsPage() {
                 Showing {rows.length.toLocaleString()} of {total.toLocaleString()}{' '}
                 {status ? `${filterLabel.toLowerCase()} permits` : 'issued permits'}
                 {office !== '' && ` issued by ${officeOf(office)}`}
-                {expiring && ` expiring within ${expiring} days`}
                 {issuedFrom && ` issued from ${formatDate(issuedFrom)}`}
                 {issuedTo && ` issued up to ${formatDate(issuedTo)}`}
                 {query && ' matching your search'}

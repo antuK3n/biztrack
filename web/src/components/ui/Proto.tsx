@@ -445,6 +445,28 @@ function SortFilterMenuPanel({
   dateRange?: SortFilterDateRange
   onClose: () => void
 }) {
+  /*
+   * Escape closes it.
+   *
+   * It did not, and the way out was the full-screen `fixed inset-0` button
+   * below — a MOUSE affordance. A keyboard reader who opened this menu had no
+   * way to dismiss it, and anything they tried to click next had their click
+   * swallowed by that overlay instead. A browser test found it by failing to
+   * press the Filter button after opening Sort; the overlay was intercepting
+   * the pointer, which is the same trap stated in mouse terms.
+   *
+   * On `document`, not on the panel: focus may legitimately be inside a
+   * <select> or a date input in here, and a handler bound to the panel would
+   * miss the key once the browser's own picker has it.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose])
+
   return (
     <>
       <button
