@@ -824,7 +824,26 @@ function matchesSearch(item: QueueItem, needle: string): boolean {
   return `${item.trackingId} ${item.nameIsFallback ? '' : item.name}`.toLowerCase().includes(needle)
 }
 
-const CARD = 'flex items-stretch overflow-hidden rounded-lg bg-white shadow-card'
+/*
+ * The card, as a COLUMN rather than a horizontal band.
+ *
+ * It was one full-width rectangle per row: the details on the left and a 9rem
+ * status stripe down the right. The client asked for three to a row [24
+ * September 2026: "make it 3 boxes kada row not 1 long rectangle"], and at a
+ * third of the width that stripe would have taken a third of the card for one
+ * word while the business name — the thing the eye actually looks for —
+ * truncated beside it.
+ *
+ * So the status moves to a bar across the top, where it costs a line of height
+ * instead of a third of the width, and is the first thing read rather than the
+ * last. It keeps its tone AND its wording, so it is still never colour alone.
+ *
+ * `h-full` because the three cards in a row are grid items: without it each is
+ * only as tall as its own content and a row of three reads as three different
+ * shapes. `flex-col` makes the holder footer sit at the bottom of every card
+ * whatever the body above it holds.
+ */
+const CARD = 'flex h-full flex-col overflow-hidden rounded-lg bg-white shadow-card'
 
 function QueueRow({
   item,
@@ -879,8 +898,27 @@ function QueueRow({
 
   const body = (
     <>
-      <div className="min-w-0 flex-1 px-6 py-4">
-        <p className="truncate text-[17px] font-bold text-ink">{item.name}</p>
+      {/*
+        Layout only. The colour — background, text AND border — comes from
+        TONE_CLASSES, so no text colour can live in this string: two
+        same-specificity Tailwind utilities are resolved by stylesheet order
+        rather than by where they sit here, and the two would have fought
+        unpredictably instead of the later one winning.
+
+        A bar across the top, not a stripe down the side. See `CARD` for why.
+      */}
+      <span
+        className={`block border-b px-5 py-2 text-center text-sm font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
+      >
+        {badge.label}
+      </span>
+      <div className="min-w-0 flex-1 px-5 py-4">
+        {/*
+          `break-words`, not `truncate`. In a third-width card a truncated
+          business name loses the part that distinguishes two branches of the
+          same shop, and the card is tall enough to wrap.
+        */}
+        <p className="break-words text-[17px] font-bold leading-snug text-ink">{item.name}</p>
         {/*
           * The tracking ID, on the row, in its own right.
           *
@@ -981,23 +1019,17 @@ function QueueRow({
         *
         * Which status, and why it differs by seat, is set out at `badge`.
         */}
-      {/*
-        Layout only. The colour — background, text AND border — comes from
-        TONE_CLASSES, so no text colour can live in this string: two
-        same-specificity Tailwind utilities are resolved by stylesheet order
-        rather than by where they sit here, and the two would have fought
-        unpredictably instead of the later one winning.
-      */}
-      <span
-        className={`flex w-36 shrink-0 items-center justify-center self-stretch border-l px-3 text-center text-sm font-bold leading-tight ${TONE_CLASSES[badge.tone]}`}
-      >
-        {badge.label}
-      </span>
     </>
   )
 
   return (
-    <li>
+    /*
+     * `flex-col` on the item itself, because the card and the holder footer
+     * below it are two siblings that together fill one grid cell — without it
+     * the footer would sit wherever the card's own height left it and three
+     * cards in a row would end with their footers at three different heights.
+     */
+    <li className="flex flex-col">
       {item.href ? (
         <Link to={item.href} className={`${CARD} transition-shadow hover:shadow-raised`}>
           {body}
@@ -1875,7 +1907,16 @@ export function QueuePage() {
         </>
       ) : (
         <>
-          <ul className="space-y-4">
+          {/*
+            Three to a row, as the client asked. Two at tablet width and one on
+            a phone: three cards across a 375px screen would be 100px each,
+            which is narrower than the tracking ID they carry.
+
+            `items-stretch` (the grid default, named here because it is
+            load-bearing) is what makes the cards in a row equal height; the
+            card's own `h-full` is the other half of that.
+          */}
+          <ul className="grid grid-cols-1 items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visible.map((item) => (
               <QueueRow
                 key={item.key}
