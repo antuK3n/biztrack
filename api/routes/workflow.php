@@ -378,48 +378,17 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
-        Route::get('analytics/business-growth', [AnalyticsController::class, 'businessGrowth']);
-        Route::get('analytics/business-growth/report', [AnalyticsController::class, 'businessGrowthReport']);
         /*
-         * Renewal Risk reads every business's permits, filings, findings and
-         * payments to rank them, so it belongs on the same permission as the
-         * rest — a barangay-level watchlist of who is about to fall out of
-         * compliance is not an ordinary office reviewer's business.
+         * Business Growth Analysis and Renewal Risk Prediction lived here, with
+         * their PDF reports, the fitted renewal model and the per-permit
+         * follow-up button. All six routes went with the two screens
+         * (checklist 2026-09-27, "Manage Approved Permits", item 6). What was
+         * worth keeping moved onto the dashboard payload — permits approaching
+         * expiry and new-versus-closed businesses per month — so it is served
+         * by `analytics/dashboard` above. To bring a screen back, restore its
+         * route, controller method, AnalyticsDatasets entry and Support class
+         * from git history together; none of them works alone.
          */
-        Route::get('analytics/renewal-risk', [AnalyticsController::class, 'renewalRisk']);
-        Route::get('analytics/renewal-risk/report', [AnalyticsController::class, 'renewalRiskReport']);
-        /*
-         * The fitted model shown beside that watchlist. Same permission and the
-         * same reader, deliberately: it is the same screen, and a reader trusted
-         * with the rule score is the reader who needs to see how far the fitted
-         * figure beside it can be trusted.
-         */
-        Route::get('analytics/renewal-model', [AnalyticsController::class, 'renewalModel']);
-        /*
-         * The Send Reminder / Immediate Follow-up button on that screen. The
-         * only route in this file that sends a message to a citizen on an
-         * officer's say-so, which is why three things are true of it:
-         *
-         *  - **It sits on `analytics.view`, not on a notification permission.**
-         *    The authority being exercised is "I have read the watchlist and
-         *    this business needs chasing", and the watchlist is what
-         *    analytics.view opens. Nobody who cannot see the row should be able
-         *    to act on it — and the super admin, which no longer holds this
-         *    permission, must not acquire it here by the back door.
-         *  - **Keyed on the permit, not the business.** A business commonly
-         *    holds three permits expiring on three dates and the watchlist has
-         *    a row per permit; the message quotes a permit number and an expiry
-         *    date, so a business-keyed route would have to guess which row the
-         *    officer was looking at.
-         *  - **Throttled.** Not for load — one send is one notification row —
-         *    but because the far end is a real person's phone. Twenty a minute
-         *    is more follow-ups than an office makes in an hour and still stops
-         *    a stuck key becoming a hundred messages. The per-permit-per-day
-         *    ledger guard in the controller is the real protection against a
-         *    double send; this is the blunt outer one.
-         */
-        Route::post('analytics/renewal-risk/{permit}/remind', [AnalyticsController::class, 'remindRenewal'])
-            ->middleware('throttle:20,1');
 
         /*
          * Manual refresh, for when waiting for the nightly run will not do — a

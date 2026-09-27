@@ -168,7 +168,7 @@ test('a business owner is turned away from the staff portal', async ({ page }) =
 })
 
 test('an unauthenticated visitor cannot reach an analytics screen', async ({ page }) => {
-  await page.goto('/staff/analytics/renewal-risk')
+  await page.goto('/staff/analytics')
   /*
    * It must not render the register to a stranger — and it must turn them out
    * at the STAFF door, not the citizen one. The two sites hold separate
@@ -275,7 +275,7 @@ test('signing out of one portal leaves the other signed in', async ({ browser })
 test('the API refuses an analytics request with no token', async ({ page }) => {
   await page.goto('/login')
   const status = await page.evaluate(async () => {
-    const res = await fetch('/api/v1/analytics/renewal-risk', {
+    const res = await fetch('/api/v1/analytics/dashboard', {
       headers: { Accept: 'application/json' },
     })
     return res.status

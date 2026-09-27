@@ -8,6 +8,7 @@ use App\Enums\InspectionResult;
 use App\Enums\InspectionStatus;
 use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
+use App\Models\Business;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
@@ -54,9 +55,7 @@ use Illuminate\Support\Facades\DB;
  *    returned + rejected, never by the grand total. Cancelled filings are neither
  *    a decision nor pending and are counted in their own bucket, surfaced only
  *    when non-zero.
- *  - **Active business** holds a permit valid today — the same definition
- *    BusinessGrowthAnalytics uses for its Active row, so the two screens cannot
- *    disagree about how many businesses are active.
+ *  - **Active business** holds a permit valid today.
  *  - **Inspection type comes from the inspecting department**, because
  *    `inspections.inspection_type` is null on every seeded row. City Health reads
  *    as Sanitary, Fire Protection as Fire Safety, and so on. The department is
@@ -209,6 +208,7 @@ final class DashboardAnalytics
             'inspections' => self::inspectionFacts($windowStart, $now),
             'officer_activity' => self::officerActivityFacts($windowStart, $now),
             'map' => self::mapFacts($today),
+            'business_movement' => self::movementFacts($windowStart, $now),
         ];
     }
 
@@ -259,6 +259,9 @@ final class DashboardAnalytics
             'inspections' => self::computeInspections($dataset['inspections']),
             'officer_activity' => self::computeOfficerActivity($dataset['officer_activity']),
             'map' => self::computeMap($dataset['map']),
+            // Absent from snapshots stored before the panel moved here; an empty
+            // series renders as "nothing on record" until the next refresh.
+            'business_movement' => self::computeMovement($dataset['business_movement'] ?? []),
         ];
     }
 
@@ -1179,6 +1182,71 @@ final class DashboardAnalytics
         ];
     }
 
+    /* ── facts: new and closed businesses ──────────────────────────────── */
+
+    /**
+     * Registrations and closures per month across the trailing window.
+     *
+     * Moved here from Business Growth Analysis when that screen was removed
+     * (checklist 2026-09-27, item 6). It drew closures alone; registrations now
+     * sit beside them because a closure count means little without what came in.
+     *
+     * Two things close a business and they are dated by different columns: a
+     * soft delete by `deleted_at`, a blacklisting by `status_changed_at`. The two
+     * sets cannot overlap — trashed rows are matched with onlyTrashed, the
+     * blacklisted with the default scope — so a business struck off and later
+     * removed closed once. A blacklisting with no recorded date cannot be put in
+     * a month and is left out. Suspension is temporary and is not a closure.
+     *
+     * Registrations count every business created in the window, including ones
+     * since removed: it registered in that month whatever happened after.
+     *
+     * @return list<array{month: string, registered: int, closed: int}>
+     */
+    private static function movementFacts(CarbonImmutable $windowStart, CarbonImmutable $now): array
+    {
+        $buckets = [];
+        $cursor = $windowStart->startOfMonth();
+        while ($cursor->lessThanOrEqualTo($now)) {
+            $buckets[$cursor->format('Y-m')] = ['month' => $cursor->format('Y-m'), 'registered' => 0, 'closed' => 0];
+            $cursor = $cursor->addMonth();
+        }
+
+        $registered = DB::table('businesses')
+            ->where('created_at', '>=', $windowStart)
+            ->where('created_at', '<=', $now)
+            ->pluck('created_at');
+
+        $removed = DB::table('businesses')
+            ->whereNotNull('deleted_at')
+            ->where('deleted_at', '>=', $windowStart)
+            ->where('deleted_at', '<=', $now)
+            ->pluck('deleted_at');
+
+        $blacklisted = DB::table('businesses')
+            ->whereNull('deleted_at')
+            ->where('status', Business::STATUS_BLACKLISTED)
+            ->whereNotNull('status_changed_at')
+            ->where('status_changed_at', '>=', $windowStart)
+            ->where('status_changed_at', '<=', $now)
+            ->pluck('status_changed_at');
+
+        foreach ($registered as $at) {
+            $month = CarbonImmutable::parse($at)->format('Y-m');
+            if (isset($buckets[$month])) {
+                $buckets[$month]['registered']++;
+            }
+        }
+        foreach ($removed->concat($blacklisted) as $at) {
+            $month = CarbonImmutable::parse($at)->format('Y-m');
+            if (isset($buckets[$month])) {
+                $buckets[$month]['closed']++;
+            }
+        }
+
+        return array_values($buckets);
+    }
+
     /* ── facts: GIS ────────────────────────────────────────────────────── */
 
     /**
@@ -1601,6 +1669,29 @@ final class DashboardAnalytics
         }
 
         return ['columns' => $columns, 'rows' => $rows];
+    }
+
+    /**
+     * @param  list<array{month: string, registered: int, closed: int}>  $facts
+     * @return array{rows: list<array{month: string, registered: int, closed: int, net: int}>, registered: int, closed: int}
+     */
+    private static function computeMovement(array $facts): array
+    {
+        $rows = [];
+        $registered = 0;
+        $closed = 0;
+        foreach ($facts as $fact) {
+            $registered += (int) $fact['registered'];
+            $closed += (int) $fact['closed'];
+            $rows[] = [
+                'month' => (string) $fact['month'],
+                'registered' => (int) $fact['registered'],
+                'closed' => (int) $fact['closed'],
+                'net' => (int) $fact['registered'] - (int) $fact['closed'],
+            ];
+        }
+
+        return ['rows' => $rows, 'registered' => $registered, 'closed' => $closed];
     }
 
     /**
