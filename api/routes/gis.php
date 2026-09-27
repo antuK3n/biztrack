@@ -12,10 +12,11 @@ use Illuminate\Support\Facades\Route;
  * the screen and the route it depends on move together and neither is found by
  * accident while reading something else.
  *
- * Under the `admin` prefix and on `user.manage` because the map reads the whole
- * city at once. See the class comment on BusinessMapController for why
- * `permit.view_all` — which is the permission whose NAME fits — is the wrong
- * gate: every office holds it, and this is a super-admin console.
+ * Under the `admin` prefix and on `application.view_any_office` — BPLO and the
+ * super admin — because the map reads the whole city at once (checklist item
+ * 16 put it on BPLO's Permits page; it was `user.manage` until then). See the
+ * class comment on BusinessMapController for why `permit.view_all`, which every
+ * office holds, is still the wrong gate.
  */
-Route::middleware(['auth:sanctum', 'permission:user.manage'])
+Route::middleware(['auth:sanctum', 'permission:application.view_any_office'])
     ->get('admin/business-map', [BusinessMapController::class, 'index']);
