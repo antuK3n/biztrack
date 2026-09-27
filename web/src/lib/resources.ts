@@ -1444,7 +1444,12 @@ export interface AdminUserFilters extends PageParams {
 
 export interface AdminBusinessFilters extends PageParams {
   q?: string
-  status?: BusinessStatus
+  /**
+   * One status, or `retired` — the businesses removed from the register,
+   * which the roster otherwise leaves out (checklist item 21). Retired is not
+   * a status a business can be set to; it is a filter only.
+   */
+  status?: BusinessStatus | 'retired'
 }
 
 /** Which audit rows to read. All optional; omitting every one reads the trail. */

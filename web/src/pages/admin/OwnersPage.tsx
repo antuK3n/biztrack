@@ -414,8 +414,14 @@ function FeesModal({ row, onClose }: { row: AdminBusiness; onClose: () => void }
 /** Rows per request. The roster is 705 businesses and grows with the city. */
 const PAGE_SIZE = 25
 
-/** The roster filter: every status, or exactly one. */
-type StatusFilter = 'all' | BusinessStatus
+/**
+ * The roster filter: every status, exactly one, or the retired businesses.
+ *
+ * Retired — removed from the register — is last and on its own because it is
+ * not a status: "All" means every business still on the register, and a
+ * retired one is listed only when asked for (checklist item 21).
+ */
+type StatusFilter = 'all' | BusinessStatus | 'retired'
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -423,6 +429,7 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'flagged', label: 'Flagged' },
   { value: 'suspended', label: 'Suspended' },
   { value: 'blacklisted', label: 'Blacklisted' },
+  { value: 'retired', label: 'Retired' },
 ]
 
 export function OwnersPage() {
@@ -527,11 +534,19 @@ export function OwnersPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           icon={BuildingIcon}
-          title={search ? 'No businesses match your search' : 'No registered businesses yet'}
+          title={
+            search
+              ? 'No businesses match your search'
+              : status === 'retired'
+                ? 'No retired businesses'
+                : 'No registered businesses yet'
+          }
           description={
             search
               ? 'Try another business or owner name.'
-              : 'Businesses appear here as owners register and apply for permits.'
+              : status === 'retired'
+                ? 'A business is listed here once it has been removed from the register.'
+                : 'Businesses appear here as owners register and apply for permits.'
           }
         />
       ) : (
@@ -561,7 +576,10 @@ export function OwnersPage() {
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const meta = STATUS_META[row.status] ?? { label: row.status_label, tone: 'tint-gray' as ChipTone }
+                  const retired = Boolean(row.retired_at)
+                  const meta = retired
+                    ? { label: 'Retired', tone: 'tint-gray' as ChipTone }
+                    : (STATUS_META[row.status] ?? { label: row.status_label, tone: 'tint-gray' as ChipTone })
                   return (
                     <tr key={row.id} className="border-t border-line">
                       <td className="px-5 py-3.5">
@@ -637,6 +655,17 @@ export function OwnersPage() {
                         )}
                       </td>
                       <td className="px-5 py-3.5">
+                        {retired ? (
+                          /*
+                            No buttons on a retired row. Every action here binds
+                            the business, and binding skips removed rows, so
+                            each would answer 404 — a control that can only
+                            fail. Said in words instead of left blank.
+                          */
+                          <span className="text-xs text-ink-muted">
+                            Removed from the register on {formatDate(row.retired_at ?? null)}
+                          </span>
+                        ) : (
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
@@ -663,6 +692,7 @@ export function OwnersPage() {
                             View Status History
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   )
