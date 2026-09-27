@@ -2,7 +2,8 @@ import { expect, test } from '@playwright/test'
 import { sessionFor } from './helpers'
 
 /*
- * The receipt on Payment History, read rather than downloaded.
+ * The receipt on Payment History (a tab on Profile since 2026-09-27), read
+ * rather than downloaded.
  *
  * Checklist: "view payment history ... having the receipt viewable". Most of
  * this screen already existed — the list, the filters, the receipt PDF itself —
@@ -24,8 +25,28 @@ import { sessionFor } from './helpers'
 test.describe('payment receipts', () => {
   test.use({ storageState: sessionFor('owner') })
 
-  test('a receipt opens for reading, and can still be saved', async ({ page, context }) => {
+  test('payment history is a tab on Profile, and the old address still lands on it', async ({ page }) => {
+    /*
+     * Checklist 2026-09-27, View Payment History 1: moved off the rail and onto
+     * the owner's Profile. The old route redirects rather than 404ing, because
+     * bookmarks and earlier notification links still point at it.
+     */
     await page.goto('/payments')
+    await expect(page).toHaveURL(/\/profile\?tab=payments$/)
+    await expect(page.getByRole('tab', { name: 'Payment history' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tabpanel')).toBeVisible()
+
+    // Gone from the rail (desktop) and the tab bar (mobile) alike.
+    await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: /payment history/i })).toHaveCount(0)
+
+    // And the other tab is the account record the page always showed.
+    await page.getByRole('tab', { name: 'Account' }).click()
+    await expect(page).toHaveURL(/\/profile$/)
+    await expect(page.getByRole('heading', { name: 'Account details' })).toBeVisible()
+  })
+
+  test('a receipt opens for reading, and can still be saved', async ({ page, context }) => {
+    await page.goto('/profile?tab=payments')
 
     /*
      * A row has to exist before anything here means something. Asserted rather
