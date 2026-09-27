@@ -324,6 +324,14 @@ Saturdays and Sundays and nothing else, because we have no holiday calendar.
 Around a long weekend it therefore counts more working days than really
 elapsed, which makes the office look slower than it was.
 
+The same list now also decides the "City offices are closed now" notice
+(checklist 2026-09-27). `api/config/office_hours.php` has a `holidays` list,
+left empty, so on a holiday the notice wrongly says nothing. We did not type
+the list in from memory: several dates move every year.
+
+**What we assumed meanwhile.** Weekends only. Once BPLO confirms the year's
+proclaimed dates, they go into that list and nothing else changes.
+
 ## A12. May the Revenue Code section numbers be shown to applicants?
 
 Item 18 of the testing checklist said "revenue code sections must not be
@@ -955,6 +963,26 @@ PDF. Without an owner it is an orphan.
 original" by the office; the permit is signed by the configured office
 signatory (B6); the repository is handed over as a clone with the team named
 as maintainers during the pilot.
+
+## B27. When e-mail is switched on, may sign-in depend on it?
+
+Once a real mailer is configured, every sign-in (owners, officers, the super
+admin) asks for a six-digit code sent by e-mail after the password, and an owner
+cannot file until they have confirmed their address with a code. Is MISD
+content for sign-in to depend on the mail relay, and should the super admin
+have a second way in for when it is down?
+
+**Why it matters.** If the relay fails (wrong key, Brevo's 300-a-day free
+limit spent), no code can be sent and **nobody can sign in**, including the
+administrator who would fix it. The page says the code could not be sent; it
+does not fall back to the password alone, because that fallback would be the
+way around the second step.
+
+**What we assumed meanwhile.** E-mail is off (`MAIL_MAILER=log`), so sign-in is
+the password alone and filing is not gated, exactly as before. Turning the
+mailer on turns all of it on (`App\Support\EmailSwitch`). The way back from a
+relay outage is to set `MAIL_MAILER=log` again. There is no "trust this device
+for 30 days" option yet; every sign-in asks for a code.
 
 ---
 
