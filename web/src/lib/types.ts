@@ -993,6 +993,12 @@ export interface PermitRegisterRow extends Permit {
   revoked_at: string | null
   revoked_reason: string | null
   /**
+   * The business was removed from the register — "retired" on the screen
+   * (checklist item 21). The register loads retired businesses, so `business`
+   * is present on these rows and this is what marks them.
+   */
+  business_retired: boolean
+  /**
    * The office's own form for this permit, saved answers and derived ones
    * together.
    *
@@ -3210,16 +3216,29 @@ export interface ClearanceMeta {
 
 /* ── Public verify ────────────────────────────────────────────────────── */
 
+/**
+ * What `/verify/{permit_number}` answers — the public page a permit's QR opens.
+ *
+ * The business details are the certificate's face as it was SIGNED, so they
+ * match the paper the scanner is holding. Every one of them can be null: a
+ * certificate issued before the snapshot existed, or a business removed from
+ * the register, has gaps, and the page prints a dash rather than inventing.
+ * No owner name, and no revocation reason — see VerifyController.
+ */
 export interface VerifyResult {
   permit_number: string
+  /** active | expired | suspended | revoked | superseded — expired also when an active permit's term has passed. */
   status: string
   status_label: string
   valid_from: string | null
   valid_until: string | null
-  permit_type: { name: string }
+  /** The date a revoked permit was revoked; null otherwise. */
+  revoked_at: string | null
+  permit_type: { name: string } | null
   business: {
-    name: string
-    address: { barangay: { name: string }; city: string | null }
+    name: string | null
+    trade_name: string | null
+    address: { line: string | null; barangay: { name: string } | null; city: string | null }
   }
   is_valid: boolean
 }
