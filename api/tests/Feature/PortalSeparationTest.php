@@ -97,15 +97,28 @@ it('counts a wrong-door attempt at the citizen door against the account, as a wr
     expect(User::where('email', 'bplo@biztrack.local')->firstOrFail()->failed_login_attempts)->toBe(1);
 });
 
-it('turns a business owner away from the staff sign-in', function () {
-    $this->postJson('/api/v1/auth/login', [
+/*
+ * Rewritten 2026-09-27 [checklist, Login 3]. These three used to expect 409
+ * "This account cannot sign in here." for an owner at an LGU door. That answer
+ * told whoever was at /staff/login that an owner's password was RIGHT, without
+ * the owner's lockout ever moving. The rule now is the citizen door's rule in
+ * reverse: an owner credential at an LGU door is answered as a wrong password.
+ */
+it('answers a business owner at the staff sign-in exactly as it answers a wrong password', function () {
+    $wrongDoor = $this->postJson('/api/v1/auth/login', [
         'email' => 'owner@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'staff',
-    ])
-        ->assertStatus(409)
-        ->assertJsonMissingPath('portal')
-        ->assertJsonPath('message', 'This account cannot sign in here.');
+    ])->assertStatus(422)->assertJsonMissingPath('portal');
+
+    $wrongPassword = $this->postJson('/api/v1/auth/login', [
+        'email' => 'owner@biztrack.local',
+        'password' => 'not-the-password',
+        'portal' => 'staff',
+    ])->assertStatus(422);
+
+    expect($wrongDoor->json('message'))->toBe($wrongPassword->json('message'));
+    expect(User::where('email', 'owner@biztrack.local')->firstOrFail()->failed_login_attempts)->toBe(2);
 });
 
 /*
@@ -140,12 +153,12 @@ it('turns an officer away from the admin sign-in', function () {
     ])->assertStatus(409);
 });
 
-it('turns a business owner away from the admin sign-in', function () {
+it('answers a business owner at the admin sign-in exactly as it answers a wrong password', function () {
     $this->postJson('/api/v1/auth/login', [
         'email' => 'owner@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'admin',
-    ])->assertStatus(409);
+    ])->assertStatus(422)->assertJsonPath('message', 'Invalid credentials.');
 });
 
 it('records the admin portal in the token name', function () {
@@ -164,20 +177,21 @@ it('records the admin portal in the token name', function () {
 
 it('answers both LGU doors with the same sentence', function () {
     // A different message per direction is a readable signal about an account
-    // the caller has not authenticated as.
-    $ownerOnStaff = $this->postJson('/api/v1/auth/login', [
-        'email' => 'owner@biztrack.local',
+    // the caller has not authenticated as. Between the two LGU doors the 409
+    // stands — see AuthController::login.
+    $adminOnStaff = $this->postJson('/api/v1/auth/login', [
+        'email' => 'admin@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'staff',
     ])->assertStatus(409)->json('message');
 
-    $ownerOnAdmin = $this->postJson('/api/v1/auth/login', [
-        'email' => 'owner@biztrack.local',
+    $officerOnAdmin = $this->postJson('/api/v1/auth/login', [
+        'email' => 'bplo@biztrack.local',
         'password' => 'biztrack1',
         'portal' => 'admin',
     ])->assertStatus(409)->json('message');
 
-    expect($ownerOnAdmin)->toBe($ownerOnStaff);
+    expect($officerOnAdmin)->toBe($adminOnStaff);
 });
 
 it('defaults to the public portal when none is given', function () {
