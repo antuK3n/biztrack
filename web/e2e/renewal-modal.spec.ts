@@ -229,7 +229,7 @@ async function completeZoningStep(page: Page) {
     await page.getByRole('radiogroup', { name: /line of business/i }).getByRole('radio').first().click()
   }
 
-  const products = page.getByLabel(/products \/ services/i)
+  const products = page.getByRole('textbox', { name: /products \/ services/i })
   for (let i = 0; i < (await products.count()); i += 1) {
     const box = products.nth(i)
     if ((await box.inputValue()).trim() === '') await box.fill('milk tea, fried snacks')
