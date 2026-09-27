@@ -240,12 +240,35 @@ it('answers the whole history of one business, not the newest page of everything
         ->getJson("/api/v1/admin/audit-logs?auditable_type=Business&auditable_id={$businessId}&action=status")
         ->assertOk()->json('data'));
 
-    expect($history)->toHaveCount(3)
+    /*
+     * FOUR, not three — and the fourth is the point.
+     *
+     * Both businesses belong to `owner@biztrack.local`, and blacklisting is a
+     * finding against the PERSON: it bars every business they hold. So the
+     * blacklisting of the other one reached this one too, and the trail says
+     * so against this business rather than only against the row that was
+     * clicked. An audit trail that recorded the decision and not its fallout
+     * is one nobody could reconstruct the register from.
+     */
+    expect($history)->toHaveCount(4)
         ->and($history->pluck('changes.to')->sort()->values()->all())
-        ->toBe(['active', 'flagged', 'suspended'])
-        // Strictly this business. The other one's blacklisting is newer and
-        // would have been the first thing an unfiltered scan returned.
+        ->toBe(['active', 'blacklisted', 'flagged', 'suspended'])
+        // Strictly this business. The other one's own blacklisting row is
+        // newer and would have been the first thing an unfiltered scan
+        // returned.
         ->and($history->pluck('auditable_id')->unique()->all())->toBe([$businessId]);
+
+    /*
+     * And the cascaded row is marked as a consequence, not as a decision
+     * somebody made about this business. Nobody clicked it: the reason names
+     * the finding it followed from, and the entry carries the business that
+     * caused it.
+     */
+    $cascaded = $history->firstWhere('changes.to', 'blacklisted');
+
+    expect($cascaded['changes']['reason'])->toStartWith('Owner blacklisted:')
+        ->and($cascaded['changes']['reason'])->toContain('A different business entirely.')
+        ->and($cascaded['changes']['cascaded_from_business_id'])->toBe($otherId);
 });
 
 it('does not let the type filter reach outside the model namespace', function () {

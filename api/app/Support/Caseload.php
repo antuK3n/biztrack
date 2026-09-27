@@ -41,7 +41,7 @@ use Illuminate\Database\Eloquent\Builder;
 class Caseload
 {
     /** Inspection states that are finished and therefore not part of a caseload. */
-    private const CLOSED_INSPECTIONS = [InspectionStatus::Completed, InspectionStatus::Cancelled];
+    public const CLOSED_INSPECTIONS = [InspectionStatus::Completed, InspectionStatus::Cancelled];
 
     /**
      * Reviews this officer still holds.
@@ -72,7 +72,7 @@ class Caseload
     {
         return ApplicationAssignment::query()
             ->where('officer_user_id', $officer->id)
-            ->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses()));
+            ->tap(fn ($q) => self::scopeOpen($q));
     }
 
     /**
@@ -84,12 +84,32 @@ class Caseload
      *
      * @return array<int, string>
      */
-    private static function decidedStatuses(): array
+    public static function decidedStatuses(): array
     {
         return array_values(array_map(
             fn (ApplicationStatus $s) => $s->value,
             array_filter(ApplicationStatus::cases(), fn (ApplicationStatus $s) => $s->isTerminal()),
         ));
+    }
+
+    /**
+     * Narrow a query of ASSIGNMENTS to the ones still open.
+     *
+     * The same condition `reviews()` applies, lifted out so the officer
+     * directory can count without loading. That list is paginated, so calling
+     * `reviews()` per row would be a query per officer; `withCount` needs the
+     * constraint as a closure instead.
+     *
+     * Shared rather than copied, because the count and the caseload screen
+     * MUST agree. A directory saying "holding 3" beside a page listing 2 is
+     * the kind of disagreement nobody reports as a bug — they just stop
+     * trusting both numbers.
+     *
+     * @param  Builder<ApplicationAssignment>  $query
+     */
+    public static function scopeOpen($query): void
+    {
+        $query->whereHas('application', fn ($a) => $a->whereNotIn('status', self::decidedStatuses()));
     }
 
     /** Site visits this officer still holds. */
@@ -150,7 +170,7 @@ class Caseload
         return $query
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id',
+                'application:id,tracking_id,business_id,status',
                 'application.business:id,name',
                 'application.permitTypes:id,code,name,issuing_department_id',
             ])
@@ -178,6 +198,18 @@ class Caseload
                     $a->application?->permitTypes?->firstWhere('issuing_department_id', $a->department_id)
                 )->name,
                 'status_label' => $a->status?->label(),
+                /*
+                 * Where the FILING has got to — and the reason this row is on
+                 * an officer's desk at all.
+                 *
+                 * Without it the caseload screen showed only `status_label`,
+                 * the office's own review step, and a reader saw "Completed"
+                 * on a row they were being asked to reassign. The client put
+                 * it plainly: *"bat yung dalawa need pa ireassign kahit
+                 * completed na?"* Both were true — the step was finished and
+                 * the filing was not — and only one of them was on screen.
+                 */
+                'application_status_label' => $a->application?->status?->label(),
                 'at' => optional($a->assigned_at)->toISOString(),
             ])
             ->values()
@@ -240,7 +272,7 @@ class Caseload
         $inspections = self::inspections($officer)
             ->with([
                 'department:id,code,name',
-                'application:id,tracking_id,business_id',
+                'application:id,tracking_id,business_id,status',
                 'application.business:id,name',
             ])
             ->get()
@@ -254,6 +286,9 @@ class Caseload
                 // A site visit is about the premises rather than one permit.
                 'permit' => null,
                 'status_label' => $i->status?->label(),
+                // The same fact for a site visit, so both lists carry it and
+                // the column never has to explain a gap.
+                'application_status_label' => $i->application?->status?->label(),
                 'at' => optional($i->scheduled_at)->toISOString(),
             ]);
 

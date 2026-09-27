@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { admin, reference } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
@@ -6,13 +7,10 @@ import { toApiError } from '../../lib/api'
 import { formatDateTime } from '../../lib/format'
 import { useAuth } from '../../stores/auth'
 import type {
-  AdminCaseload,
   AdminRole,
-  CaseloadCase,
   AdminUser,
   AdminUserPayload,
   AuditLog,
-  CaseloadMovePayload,
   Department,
   ReleasedCaseload,
 } from '../../lib/types'
@@ -27,6 +25,15 @@ import {
   useDialogKeyboard,
 } from '../../components/ui/Proto'
 import { UsersIcon } from '../../components/icons'
+import {
+  FieldError,
+  MobileField,
+  PasswordField,
+  RolePicker,
+  mobileLooksRight,
+  normaliseMobile,
+  passwordMeetsRules,
+} from './officerFields'
 
 /*
  * Officer Assignment (PDF p93–98) — the super admin's Manage Officer-in-Charge
@@ -99,10 +106,6 @@ function firstError(errors: Record<string, string[]>, ...keys: string[]): string
     if (errors[key]?.[0]) return errors[key][0]
   }
   return undefined
-}
-
-function FieldError({ message }: { message?: string }) {
-  return message ? <p className="mt-1 text-xs font-medium text-s-red">{message}</p> : null
 }
 
 /** Royal-header overlay with a single full-width Close footer (Details p95). */
@@ -255,455 +258,26 @@ function DetailsModal({ user, onClose }: { user: AdminUser; onClose: () => void 
   )
 }
 
-/* ── Reassign (p96) — the real thing ──────────────────────────────────── */
-
-const SCOPES: { value: CaseloadMovePayload['scope']; label: string }[] = [
-  { value: 'all', label: 'Everything they are holding' },
-  { value: 'reviews', label: 'Application reviews only' },
-  { value: 'inspections', label: 'Scheduled inspections only' },
-]
-
-/** The number of cases a given scope would actually move. */
-function scopeCount(caseload: AdminCaseload, scope: CaseloadMovePayload['scope']): number {
-  if (scope === 'reviews') return caseload.open_reviews
-  if (scope === 'inspections') return caseload.open_inspections
-  return caseload.total
-}
-
-function ReassignModal({
-  user,
-  onClose,
-  onDone,
-}: {
-  user: AdminUser
-  onClose: () => void
-  onDone: (message: string) => void
-}) {
-  const { data: caseload, loading, error } = useAsync(() => admin.caseload(user.id), [user.id])
-  const [scope, setScope] = useState<CaseloadMovePayload['scope']>('all')
-  // '' means "release to the office queue" — a real choice, not a missing one.
-  const [target, setTarget] = useState('')
-  const [reason, setReason] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-
-  const finished = caseload?.finished_reviews ?? 0
-  /*
-   * The cases this officer is holding, which is what Scope now IS.
-   *
-   * `?? []` rather than a guard: a payload from before this shipped carries no
-   * list, and the dialog then falls back to the scope categories it has always
-   * had instead of rendering an empty chooser.
-   */
-  const held = caseload?.cases ?? []
-  /*
-   * Did the SERVER send a list? An empty array means "holding nothing"; a
-   * missing key means a payload from before the list existed, and the two ask
-   * for different screens — see the Scope block below.
-   */
-  const hasList = Array.isArray(caseload?.cases)
-  const key = (c: CaseloadCase) => `${c.kind}:${c.id}`
-
-  /*
-   * Everything ticked to begin with.
-   *
-   * The common act is still "this officer has gone, move their work", and that
-   * should not cost a dozen clicks. Picking a subset is the deliberate act, so
-   * it is the one that takes effort. `null` means "not touched yet", which is
-   * what lets the default follow a list that arrives after the first render.
-   */
-  const [picked, setPicked] = useState<Set<string> | null>(null)
-  const chosen = picked ?? new Set(held.map(key))
-  const moving = held.length > 0 ? chosen.size : caseload ? scopeCount(caseload, scope) : 0
-
-  function toggle(c: CaseloadCase) {
-    const next = new Set(chosen)
-    if (next.has(key(c))) next.delete(key(c))
-    else next.add(key(c))
-    setPicked(next)
-  }
-
-  /*
-   * ── The other direction ──────────────────────────────────────────────────
-   *
-   * The dialog could only move work AWAY from this officer. The office's
-   * unheld filings are listed here too, so a case nobody has picked up can be
-   * handed to the officer whose row the admin opened.
-   *
-   * Its own selection, its own button. They are opposite acts — one empties a
-   * desk, the other fills it — and a single confirm would have to send two
-   * different destinations in one request with no rule saying which wins.
-   *
-   * Nothing ticked to begin with, the mirror of the list above: taking work on
-   * is always a deliberate choice about a particular case, never a sweep.
-   */
-  const free = caseload?.unassigned ?? []
-  const [taking, setTaking] = useState<Set<string>>(new Set())
-  const [takeBusy, setTakeBusy] = useState(false)
-
-  function toggleTake(c: CaseloadCase) {
-    const next = new Set(taking)
-    if (next.has(key(c))) next.delete(key(c))
-    else next.add(key(c))
-    setTaking(next)
-  }
-
-  async function take() {
-    if (taking.size === 0 || takeBusy) return
-    setTakeBusy(true)
-    setFormError(null)
-    try {
-      const result = await admin.takeCases(user.id, {
-        cases: free
-          .filter((c) => taking.has(key(c)))
-          .map((c) => ({ kind: 'review' as const, id: c.id })),
-        reason: reason.trim() || 'Taken from the office queue.',
-      })
-      onDone(
-        `${result.total} ${result.total === 1 ? 'filing is' : 'filings are'} now with ${result.to.name}.`,
-      )
-    } catch (err) {
-      setFormError(toApiError(err).message)
-    } finally {
-      setTakeBusy(false)
-    }
-  }
-
-  async function confirm() {
-    setBusy(true)
-    setFormError(null)
-    try {
-      const result = await admin.reassignCaseload(user.id, {
-        to_user_id: target ? Number(target) : null,
-        /*
-         * The picked rows when there is a list to pick from; the category
-         * otherwise. Never both — the API requires exactly one, and sending a
-         * scope beside a list would leave two answers to "what moves" in one
-         * request with no rule saying which wins.
-         */
-        ...(held.length > 0
-          ? { cases: held.filter((c) => chosen.has(key(c))).map((c) => ({ kind: c.kind, id: c.id })) }
-          : { scope }),
-        reason: reason.trim(),
-      })
-      const where = result.to ? `to ${result.to.name}` : 'to the office queue'
-      onDone(
-        result.total === 0
-          ? `${fullName(user)} had nothing open to move.`
-          : `Moved ${result.total} ${result.total === 1 ? 'case' : 'cases'} ${where}.`,
-      )
-    } catch (err) {
-      setFormError(toApiError(err).message)
-      setBusy(false)
-    }
-  }
-
-  if (loading) {
-    return (
-      <ProtoModal title="Reassign" onCancel={onClose} cancelLabel="Cancel">
-        <p className="py-6 text-center text-sm text-ink-muted">Checking what this officer is holding…</p>
-      </ProtoModal>
-    )
-  }
-
-  if (error || !caseload) {
-    return (
-      <ProtoModal title="Reassign" onCancel={onClose} cancelLabel="Close">
-        <p className="py-4 text-sm text-s-red">{toApiError(error).message}</p>
-      </ProtoModal>
-    )
-  }
-
-  return (
-    <ProtoModal
-      title="Reassign"
-      cancelLabel="Cancel"
-      confirmLabel={target ? 'Move caseload' : 'Release to office'}
-      onCancel={onClose}
-      onConfirm={confirm}
-      /*
-       * Nothing to move is a real state and the button says so rather than
-       * pretending. It used to be pressable: the endpoint answered 200 with
-       * `{"total": 0}` and the screen printed a tick, so an admin typed a
-       * reason, confirmed, and was told a move had happened that had not.
-       * The server refuses it now; this stops the reader getting that far.
-       */
-      confirmDisabled={busy || !reason.trim() || moving === 0}
-    >
-      <div className="mb-5 border-b border-line pb-3">
-        <p className="text-sm font-bold text-ink">{fullName(user)}</p>
-        <p className="text-xs text-ink-muted">
-          {caseload.department ? caseload.department.name : 'No office'}
-        </p>
-      </div>
-
-      {/*
-        What is actually on the table, before anything is confirmed. The mock
-        version asked for a scope and a target without ever saying how much work
-        was involved, so "Confirm" was a decision made blind.
-      */}
-      <dl className="mb-4 grid grid-cols-3 gap-3 rounded-lg bg-canvas px-4 py-3">
-        <div>
-          <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Open reviews</dt>
-          <dd className="tnum text-base font-bold text-ink">{caseload.open_reviews}</dd>
-        </div>
-        <div>
-          <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Inspections</dt>
-          <dd className="tnum text-base font-bold text-ink">{caseload.open_inspections}</dd>
-        </div>
-        <div>
-          <dt className="text-[10px] font-semibold uppercase tracking-wide text-ink-muted">Will move</dt>
-          <dd className="tnum text-base font-bold text-royal">{moving}</dd>
-        </div>
-      </dl>
-
-      {/*
-        * Why this dialog and the Officer in Charge register can disagree.
-        *
-        * That screen lists every assignment an officer's NAME is on, finished
-        * ones included, because it is the record of who did the work. This one
-        * counts only what is still open, because that is all a move can touch.
-        * An admin reading "officer in charge of two filings" over there and
-        * "holding nothing" here is reading two true sentences, and was left to
-        * work out why on their own.
-        */}
-      {finished > 0 && (
-        <p className="mb-4 rounded-lg bg-canvas px-4 py-3 text-xs text-ink-secondary">
-          Also named on <span className="font-bold text-ink">{finished}</span> finished review
-          {finished === 1 ? '' : 's'}. Those stay — a completed review keeps the name of the officer
-          who made it, which is why the Officer in Charge page can show more than this dialog moves.
-        </p>
-      )}
-
-      {formError && (
-        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
-          {formError}
-        </p>
-      )}
-
-      {/* The three fields, in the order the client names them: Scope, Reassign
-          to, Reason. */}
-      <div className="space-y-4">
-      {/*
-        * Scope IS the list of permits this officer is holding.
-        *
-        * It was three categories — everything, reviews only, inspections only
-        * — and no category can express the ordinary act: one filing going to a
-        * colleague because it is stuck, while the rest of the caseload stays
-        * where it is. The categories also said nothing about WHICH filings
-        * were about to change hands, so Confirm was a decision made blind.
-        *
-        * The rows carry what the rest of this feature carries: business,
-        * business number, office, permit. Everything is ticked to begin with,
-        * because "this officer has gone, move their work" is still the common
-        * case and should not cost a dozen clicks.
-        */}
-      <div>
-        {/*
-          * ── An empty desk shows the sentence, not an empty chooser ─────────
-          *
-          * When the server says this officer holds nothing, the Scope control
-          * is a dropdown whose only option reads "Everything they are holding
-          * (0)" — a chooser with nothing to choose, over a sentence that
-          * already says so. The sentence is the whole answer; the control was
-          * furniture.
-          *
-          * `hasList` is the distinction that makes this safe. An EMPTY `cases`
-          * array is the server saying "nothing"; an ABSENT one is a payload
-          * from before this shipped, and there the category dropdown is still
-          * the only way an admin can move anything at all.
-          */}
-        {(hasList ? held.length > 0 : true) && (
-          <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-            <FieldLabel required>Scope — the permits {fullName(user)} is holding</FieldLabel>
-            {held.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setPicked(chosen.size === held.length ? new Set() : new Set(held.map(key)))}
-                className="text-xs font-semibold text-royal hover:underline"
-              >
-                {chosen.size === held.length ? 'Clear all' : 'Select all'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {hasList && held.length === 0 ? null : held.length === 0 ? (
-          <select
-            className={inputCls}
-            value={scope}
-            onChange={(e) => setScope(e.target.value as CaseloadMovePayload['scope'] & string)}
-          >
-            {SCOPES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label} ({caseload ? scopeCount(caseload, s.value) : 0})
-              </option>
-            ))}
-          </select>
-        ) : (
-          <ul className="max-h-60 overflow-y-auto rounded-lg border border-line">
-            {held.map((c) => (
-              <li key={key(c)} className="border-b border-line last:border-b-0">
-                <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 hover:bg-canvas">
-                  <input
-                    type="checkbox"
-                    className="mt-1 h-4 w-4 shrink-0 accent-royal"
-                    checked={chosen.has(key(c))}
-                    onChange={() => toggle(c)}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                      <span className="text-sm font-semibold text-ink">
-                        {/* The tracking ID when the business is gone: a filing
-                            outlives its business, and a blank name reads as
-                            broken rather than as history. */}
-                        {c.business ?? c.tracking_id ?? 'Business removed from the register'}
-                      </span>
-                      <span className="tnum text-xs text-ink-muted">{c.tracking_id ?? '—'}</span>
-                    </span>
-                    <span className="mt-0.5 block text-xs text-ink-secondary">
-                      {c.office?.name ?? 'No office'}
-                      {c.permit && <span> · {c.permit}</span>}
-                      {c.kind === 'inspection' && <span> · site visit</span>}
-                      {c.status_label && <span className="text-ink-muted"> · {c.status_label}</span>}
-                    </span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        {/*
-          * Nothing chosen is a real state, said here rather than after the
-          * button is pressed. The Reason box is required, so without this the
-          * reader types a sentence first and only then finds out there is
-          * nothing to move — and the server refuses it anyway.
-          *
-          * Lost once already: the rewrite that turned Scope into this chooser
-          * removed the warning along with the block it lived in, and the dialog
-          * showed "Will move 0" with no explanation. A browser test caught it.
-          */}
-        {moving === 0 && (
-          <p className="mt-2 rounded-lg bg-s-orange-tint px-4 py-3 text-sm font-medium text-s-orange-ink">
-            {caseload.total === 0
-              ? `${fullName(user)} is not holding any open work, so there is nothing to move.`
-              : 'Nothing falls under the scope chosen above. Tick at least one permit.'}
-          </p>
-        )}
-
-        {/*
-          * The list is capped server-side while the count is exact, so when the
-          * two disagree the screen says which number is real — and says that
-          * only the listed ones can be picked.
-          */}
-        {caseload.total > held.length && held.length > 0 && (
-          <p className="mt-1.5 text-xs text-ink-muted">
-            Showing the {held.length} oldest of {caseload.total}. Move these, or use Deactivate to
-            release the whole caseload.
-          </p>
-        )}
-      </div>
-
-        <label className="block">
-          <FieldLabel required>Reassign to</FieldLabel>
-          <select className={inputCls} value={target} onChange={(e) => setTarget(e.target.value)}>
-            {/*
-              Releasing is the DEFAULT, not the fallback. Every office in the
-              register is one officer deep, so most of the time there is nobody
-              to name — and putting a case back in the office pool is the state
-              it starts in, visible to whoever the office next staffs.
-            */}
-            <option value="">Leave unassigned — back to the office queue</option>
-            {caseload.candidates.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} · holding {c.open_total}
-              </option>
-            ))}
-          </select>
-          {caseload.candidates.length === 0 && (
-            <p className="mt-1 text-xs text-ink-muted">
-              {caseload.department
-                ? `No other active officer in ${caseload.department.code}, so this caseload can only go back to the office queue.`
-                : 'This account belongs to no office, so there is nobody to hand work to.'}
-            </p>
-          )}
-        </label>
-
-        {/*
-          * ── Work nobody holds ────────────────────────────────────────────
-          *
-          * The other direction, in the same dialog and with its own button:
-          * one section empties this officer's desk, the other fills it. A
-          * single confirm would have to send two destinations in one request.
-          *
-          * Nothing ticked to begin with — the mirror of Scope above. Handing a
-          * case to somebody is always a decision about that case; moving a
-          * departing officer's whole load is the sweep.
-          */}
-        {free.length > 0 && (
-          <div>
-            <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-              <FieldLabel>Unassigned in {caseload.department?.code ?? 'this office'}</FieldLabel>
-              <span className="text-xs text-ink-muted">Tick to hand to {fullName(user)}</span>
-            </div>
-
-            <ul className="max-h-48 overflow-y-auto rounded-lg border border-line">
-              {free.map((c) => (
-                <li key={key(c)} className="border-b border-line last:border-b-0">
-                  <label className="flex cursor-pointer items-start gap-3 px-3.5 py-2.5 hover:bg-canvas">
-                    <input
-                      type="checkbox"
-                      className="mt-1 h-4 w-4 shrink-0 accent-royal"
-                      checked={taking.has(key(c))}
-                      onChange={() => toggleTake(c)}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                        <span className="text-sm font-semibold text-ink">
-                          {c.business ?? c.tracking_id ?? 'Business removed from the register'}
-                        </span>
-                        <span className="tnum text-xs text-ink-muted">{c.tracking_id ?? '—'}</span>
-                      </span>
-                      <span className="mt-0.5 block text-xs text-ink-secondary">
-                        {c.permit ?? 'No permit named'}
-                        {c.status_label && <span className="text-ink-muted"> · {c.status_label}</span>}
-                      </span>
-                    </span>
-                  </label>
-                </li>
-              ))}
-            </ul>
-
-            <button
-              type="button"
-              onClick={() => void take()}
-              aria-disabled={taking.size === 0 || takeBusy || undefined}
-              className="mt-2 rounded-full bg-royal px-4 py-1.5 text-xs font-semibold text-white hover:bg-royal-hover aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-            >
-              {takeBusy
-                ? 'Assigning…'
-                : `Assign ${taking.size || ''} to ${fullName(user)}`.replace('  ', ' ')}
-            </button>
-          </div>
-        )}
-
-        <label className="block">
-          <FieldLabel required>Reason</FieldLabel>
-          <textarea
-            className={`${inputCls} min-h-24`}
-            placeholder="e.g. Officer on extended leave; load balancing"
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-          />
-          <p className="mt-1 text-xs text-ink-muted">
-            Recorded in the audit trail against every case that moves, and sent to whoever receives them.
-          </p>
-        </label>
-      </div>
-    </ProtoModal>
-  )
-}
+/*
+ * ── Reassign moved to a page of its own ──────────────────────────────────
+ *
+ * A ~300-line dialog stood here. It held two opposite acts — empty this desk,
+ * fill this desk — each with its own list, selection and button, plus a
+ * target, a reason, and a count that had to explain why it disagreed with the
+ * Officer in Charge register.
+ *
+ * That is a screen's worth of decision inside a box that darkens the thing it
+ * is deciding about. The client asked for it to become a page in the Officer
+ * in Charge format, scoped to the officer whose row was clicked [27 September
+ * 2026]; it lives in `OfficerCaseloadPage`, and the row above links to it.
+ *
+ * `SCOPES` and `scopeCount` went with it. The category chooser — everything /
+ * reviews only / inspections only — was already dead on this screen: Scope had
+ * become the list of permits the officer is actually holding, and the
+ * categories only still rendered for a payload old enough to carry no list.
+ * The page selects rows, and `scope` remains on the API for Deactivate, which
+ * releases a whole caseload without naming forty ids.
+ */
 
 /* ── Editing (p97) ────────────────────────────────────────────────────── */
 
@@ -716,12 +290,6 @@ function ReassignModal({
  */
 function isSuperAdmin(user: AdminUser, roles: AdminRole[]): boolean {
   return user.roles.some((name) => roles.find((r) => r.name === name)?.wants_department === false)
-}
-
-/** Whether this set of roles is the departmentless super admin. */
-function wantsOffice(roleNames: string[], roles: AdminRole[]): boolean {
-  if (roleNames.length === 0) return true
-  return roleNames.every((name) => roles.find((r) => r.name === name)?.wants_department !== false)
 }
 
 function EditModal({
@@ -743,14 +311,74 @@ function EditModal({
     email: user.email,
     mobile_number: user.mobile_number ?? '',
     role: user.roles[0] ?? '',
-    department_id: user.department ? String(user.department.id) : '',
+    /*
+     * A job title typed in because the office has no role by that name.
+     *
+     * Kept apart from `role` rather than folded into it, and that separation
+     * is the safety of the whole feature: `role` names a role that EXISTS,
+     * `newRole` one the server is being asked to create. One field would have
+     * made "give them the sanitary role" and "invent a role called sanitary"
+     * the same request, told apart only by whether a lookup happened to miss.
+     */
+    newRole: '',
+    // 'none' for an account that works across every office; see below.
+    department_id: user.department ? String(user.department.id) : 'none',
   })
+
+  /*
+   * -- Issuing a new password --------------------------------------------
+   *
+   * There was no way to do this from anywhere in the app. An officer who
+   * forgot theirs had to be deactivated and recreated under a second account,
+   * which loses the name on every filing they had already handled
+   * [client, 27 September 2026: *"make it add changing password"*].
+   *
+   * Behind a toggle rather than as a seventh field, because almost every edit
+   * is a typo in a surname, and a password box sitting open on a form about
+   * something else is an invitation to type in it by accident. Closing the
+   * toggle clears it, so a half-typed password cannot be saved by a reader who
+   * changed their mind.
+   */
+  const [issuing, setIssuing] = useState(false)
+  const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [formError, setFormError] = useState<string | null>(null)
 
-  const needsOffice = wantsOffice(form.role ? [form.role] : [], roles)
-  const officeChanged = form.department_id !== (user.department ? String(user.department.id) : '')
+  /*
+   * -- The office is asked first, and it decides the roles -----------------
+   *
+   * It used to run the other way: pick a role, and the Office field appeared
+   * or greyed itself out according to what you picked. That put the reader on
+   * a question whose options had not been settled yet, and on the edit form it
+   * meant the Office select could disable itself under the cursor.
+   *
+   * The office is the fact an administrator actually knows when they sit down
+   * ("Liza is moving to Fire"), so the form asks that, and then offers the
+   * roles that can hold it [client, 27 September 2026: *"unahin muna ang kung
+   * anong office then doon pipili ng role"*].
+   *
+   * `'none'` is a real choice and not the empty one: an account attached to no
+   * office is the super admin, and saying so in the list is how the reader
+   * learns the two facts go together. `''` is still "not answered".
+   */
+  const officeChosen = form.department_id !== ''
+  const worksEverywhere = form.department_id === 'none'
+  const needsOffice = !worksEverywhere
+
+  /*
+   * Only the roles the chosen office can hold. The super admin belongs to no
+   * office and every other role must have one - the API refuses the other
+   * combinations (`assertOfficeMatchesRole`), so offering them here would be
+   * offering a choice the save will reject.
+   */
+  const rolesForOffice = useMemo(
+    () => roles.filter((r) => r.wants_department === !worksEverywhere),
+    [roles, worksEverywhere],
+  )
+
+  const officeChanged =
+    (worksEverywhere ? '' : form.department_id) !== (user.department ? String(user.department.id) : '')
   /*
    * Only send `roles` when the admin actually moved this select.
    *
@@ -768,6 +396,9 @@ function EditModal({
    */
   const initialRole = user.roles[0] ?? ''
   const roleChanged = Boolean(form.role) && form.role !== initialRole
+  // A typed title is always a change: whatever the account holds now, it is
+  // not a role that did not exist a moment ago.
+  const roleTyped = form.newRole.trim() !== ''
   /*
    * The super-admin row. Its role is fixed both ways — the seat is a singleton
    * and it cannot be vacated, because `user.manage` lives on no other role and
@@ -778,6 +409,86 @@ function EditModal({
   // for the super admin — hence the explicit "found it, and it wants no office".
   const isOnlySuperAdmin = currentRole ? !currentRole.wants_department : false
 
+  /*
+   * -- What is about to change, in the reader's words ----------------------
+   *
+   * Saving used to write straight from the form. The form is six controls on
+   * one screen and this is somebody's account - their email is how they are
+   * reached, their role is what they may do, their office is which work
+   * reaches them at all - so the last press deserves to show its work
+   * [client, 27 September 2026: "sa lahat ng major decision ... dapat modal
+   * na confirmation"].
+   *
+   * Built from FORM AGAINST RECORD, field by field, so the list is the
+   * payload: anything the request will change appears here and nothing else
+   * does. A dialog that summarised the act in prose could drift from what is
+   * sent; this cannot.
+   */
+  const changes = useMemo(() => {
+    const list: { field: string; from: string; to: string }[] = []
+    const text = (field: string, from: string, to: string) => {
+      if (from.trim() !== to.trim()) {
+        list.push({ field, from: from.trim() || 'Not set', to: to.trim() || 'Not set' })
+      }
+    }
+    text('Surname', user.last_name, form.last_name)
+    text('Given name', user.first_name, form.first_name)
+    text('Email', user.email, form.email)
+    text('Mobile', user.mobile_number ?? '', form.mobile_number)
+    if (roleChanged || roleTyped) {
+      list.push({
+        field: 'Role',
+        from: roles.find((r) => r.name === initialRole)?.label ?? initialRole ?? 'None',
+        // A typed title is marked as new HERE rather than left to look like
+        // any other role: the reader is confirming that a role will be
+        // created, which is a different act from moving somebody onto one.
+        to: roleTyped
+          ? `${form.newRole.trim()} — new role`
+          : (roles.find((r) => r.name === form.role)?.label ?? form.role),
+      })
+    }
+    if (officeChanged) {
+      list.push({
+        field: 'Office',
+        from: user.department?.name ?? 'Works across every office',
+        to: worksEverywhere
+          ? 'Works across every office'
+          : (departments.find((d) => String(d.id) === form.department_id)?.name ?? 'Not set'),
+      })
+    }
+    if (issuing && password) {
+      /*
+        Named, never shown. The review list exists so the reader can check
+        what they are about to do, and "a new one" is the whole of what they
+        need to check here - printing the password into a list that stays on
+        screen while they read the rest of it is not.
+      */
+      list.push({ field: 'Password', from: 'Their current one', to: 'A new one' })
+    }
+    return list
+  }, [
+    user,
+    form,
+    roleChanged,
+    roleTyped,
+    officeChanged,
+    worksEverywhere,
+    roles,
+    departments,
+    initialRole,
+    issuing,
+    password,
+  ])
+
+  /*
+   * One dialog, two views, rather than a second dialog on top of this one.
+   * Stacked overlays mean two focus traps and an Escape key whose meaning
+   * depends on which one you believe is in front; a reader who wants to change
+   * something presses Back and is on the field, with everything they typed
+   * still there.
+   */
+  const [review, setReview] = useState(false)
+
   async function save() {
     setBusy(true)
     setFormError(null)
@@ -787,12 +498,18 @@ function EditModal({
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         email: form.email.trim(),
-        mobile_number: form.mobile_number.trim(),
+        mobile_number: normaliseMobile(form.mobile_number),
+        // Only when one was actually typed. An empty string here is what used
+        // to reach the column as null - see the note in UserController@update.
+        ...(issuing && password ? { password } : {}),
         roles: roleChanged ? [form.role] : undefined,
+        // The server turns this into a real role and then handles it exactly
+        // like a chosen one — see UserController::roleFromTypedTitle.
+        ...(roleTyped ? { new_role: form.newRole.trim() } : {}),
         // Null clears it, which is what the super admin needs and what "No
         // office" silently failed to do before: the payload simply omitted the
         // key, so the modal closed reporting success with the office unchanged.
-        department_id: needsOffice ? Number(form.department_id) : null,
+        department_id: worksEverywhere ? null : Number(form.department_id),
       } as Partial<AdminUserPayload>)
       onSaved(
         updated,
@@ -802,32 +519,126 @@ function EditModal({
       )
     } catch (err) {
       const apiError = toApiError(err)
-      if (apiError.status === 422) setErrors(apiError.errors)
-      else setFormError(apiError.message)
+      if (apiError.status === 422) {
+        /*
+         * Back to the form. A 422 is the server pointing at a field, and its
+         * message renders under that field - leaving the reader on the review
+         * list would show them a red line with no field in sight.
+         */
+        setErrors(apiError.errors)
+        setReview(false)
+      } else setFormError(apiError.message)
       setBusy(false)
     }
   }
 
+  /*
+   * Everything the form itself can tell is wrong, named one at a time so the
+   * line under the button says what to do rather than that something is amiss.
+   * The server still decides; this only saves a round trip.
+   */
+  const blocker: string | null = !officeChosen
+    ? 'Choose an office first — it decides which roles are available.'
+    : !form.role && !roleTyped
+      ? 'Choose the role this account signs in with, or type the office’s own job title.'
+      : form.mobile_number.trim() !== '' && !mobileLooksRight(form.mobile_number)
+        ? 'The mobile number needs to be 11 digits starting 09.'
+        : issuing && !passwordMeetsRules(password)
+          ? 'The new password does not meet all four requirements yet.'
+          : null
+
+  const incomplete = blocker !== null
+
   return (
     <ProtoModal
-      title="Editing"
-      cancelLabel="Cancel"
-      confirmLabel="Save changes"
-      onCancel={onClose}
-      onConfirm={save}
-      confirmDisabled={busy || !form.role || (needsOffice && !form.department_id)}
+      title={review ? 'Save these changes?' : 'Editing'}
+      cancelLabel={review ? 'Back' : 'Cancel'}
+      confirmLabel={review ? (busy ? 'Saving…' : 'Save changes') : 'Review changes'}
+      onCancel={review ? () => setReview(false) : onClose}
+      onConfirm={review ? save : () => setReview(true)}
+      confirmDisabled={busy || incomplete || changes.length === 0}
+      /*
+       * Reachable and pressable while it waits, pointing at the sentence that
+       * says what for - see the note on confirmDescribedBy in Proto.tsx.
+       */
+      confirmDescribedBy={
+        !review && (incomplete || changes.length === 0) ? 'edit-nothing-to-save' : undefined
+      }
     >
       <div className="mb-5 flex items-center gap-3 border-b border-line pb-4">
         <Avatar user={user} size="lg" />
         <div className="min-w-0">
-          <p className="text-sm font-bold text-ink">Edit officer</p>
+          <p className="text-sm font-bold text-ink">{review ? fullName(user) : 'Edit officer'}</p>
           <p className="truncate text-xs text-ink-muted">{user.email}</p>
         </div>
       </div>
 
-      {formError && <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{formError}</p>}
+      {review && (
+        <div className="space-y-4">
+          <p className="text-sm text-ink">
+            {changes.length === 1 ? 'One field' : `${changes.length} fields`} will change on this
+            account.
+          </p>
 
-      <div className="space-y-4">
+          {/*
+            Old beside new, not just new.
+
+            "Email: liza.reyes@malabon.gov.ph" tells a reader nothing about
+            whether they fixed the typo or introduced one. The pair does.
+          */}
+          <dl className="divide-y divide-line rounded-lg border border-line">
+            {changes.map((c) => (
+              <div key={c.field} className="grid grid-cols-3 gap-3 px-4 py-3">
+                <dt className="text-xs font-semibold text-ink-muted">{c.field}</dt>
+                <dd className="col-span-2 text-sm text-ink">
+                  <span className="text-ink-muted line-through">{c.from}</span>
+                  <span className="mx-2 text-ink-muted">→</span>
+                  <span className="font-semibold">{c.to}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {issuing && password && (
+            <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
+              <span className="font-bold">{fullName(user)} will be signed out everywhere</span> and
+              will need the new password to get back in. Give it to them yourself — it is stored
+              scrambled, so nobody can read it back afterwards.
+            </p>
+          )}
+
+          {officeChanged && needsOffice && (
+            /*
+              The one change with a consequence beyond this record, said BEFORE
+              it happens. It was only ever reported afterwards, in the toast.
+            */
+            <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
+              Moving office also hands any open cases back to{' '}
+              {user.department?.code ?? 'their old office'} as unassigned. The cases stay where they
+              are; only this officer&apos;s name comes off them.
+            </p>
+          )}
+
+          {formError && (
+            <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+              {formError}
+            </p>
+          )}
+        </div>
+      )}
+
+      {!review && formError && (
+        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+          {formError}
+        </p>
+      )}
+
+      {/*
+        HIDDEN, not unmounted. The fields keep their values and the browser
+        keeps its undo history, so Back really is back rather than a fresh
+        form that happens to look the same.
+      */}
+      <div className={review ? 'hidden' : 'space-y-4'} aria-hidden={review || undefined}>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block">
             <FieldLabel required>Surname</FieldLabel>
@@ -859,82 +670,165 @@ function EditModal({
             />
             <FieldError message={firstError(errors, 'email')} />
           </label>
-          <label className="block">
-            <FieldLabel required>Mobile number</FieldLabel>
-            <input
-              className={inputCls}
-              inputMode="numeric"
-              value={form.mobile_number}
-              onChange={(e) => setForm((f) => ({ ...f, mobile_number: e.target.value }))}
-            />
-            <FieldError message={firstError(errors, 'mobile_number')} />
-          </label>
+          <MobileField
+            value={form.mobile_number}
+            onChange={(v) => setForm((f) => ({ ...f, mobile_number: v }))}
+            error={firstError(errors, 'mobile_number')}
+          />
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <FieldLabel required>Role</FieldLabel>
-            {/*
-              Editable here for the first time. The role decides which queue an
-              officer sees, and it could only ever be set at creation — so the
-              only way to correct one was to deactivate the account and make a
-              second one.
-            */}
-            <select
-              className={inputCls}
-              value={form.role}
-              disabled={isOnlySuperAdmin}
-              onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
-            >
-              {roles.map((r) => (
+        {/*
+          Office, then role. The office narrows the list the role is chosen
+          from, so it is asked first and gets its own row - side by side, the
+          second field would look answerable before the first one had been.
+        */}
+        <label className="block">
+          <FieldLabel required>Office</FieldLabel>
+          <select
+            className={inputCls}
+            value={form.department_id}
+            disabled={isOnlySuperAdmin}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                department_id: e.target.value,
                 /*
-                 * The role this account already holds is never disabled, even
-                 * when it is the taken super-admin seat — it is taken BY this
-                 * account, and greying out its own current value would read as
-                 * a fault on the row you are editing.
-                 */
-                <option key={r.name} value={r.name} disabled={!r.available && r.name !== initialRole}>
-                  {r.label}
-                  {!r.available && r.name !== initialRole && ' — already assigned'}
-                </option>
-              ))}
-            </select>
-            {isOnlySuperAdmin && (
-              <p className="mt-1 text-xs text-ink-muted">
-                The super admin is a single account and the only one that can create office
-                accounts, so its role cannot be changed away.
-              </p>
-            )}
-            {user.roles.length > 1 && (
-              <p className="mt-1 text-xs text-amber-800">
-                This account holds {user.roles.length} roles ({user.roles.join(', ')}). Changing this
-                select replaces all of them with the one chosen.
-              </p>
-            )}
-            <FieldError message={firstError(errors, 'roles', 'roles.0', 'role')} />
+                  A role belonging to the office they just left cannot survive
+                  the move, so it is cleared rather than left to be refused on
+                  save. The current role stays if it still fits.
+                */
+                role: roles.find((r) => r.name === f.role)?.wants_department === (e.target.value !== 'none')
+                  ? f.role
+                  : '',
+                /*
+                  And a typed title always goes. It was written FOR the office
+                  that was showing — carrying "Sanitary Inspector II" over to
+                  the fire station would create it there, silently, because
+                  nothing on screen says which office a typed role belongs to
+                  except the one selected above it.
+                */
+                newRole: '',
+              }))
+            }
+          >
+            {/*
+              Nothing is not the same as nothing yet. The offices arrive in
+              their own request, and "Choose an office…" above an empty list
+              is an instruction the reader cannot follow - worse, the next
+              option down is "No office", so a reader obeying the prompt picks
+              the super-admin answer by elimination.
+            */}
+            <option value="">
+              {departments.length === 0 ? 'Loading offices…' : 'Choose an office…'}
+            </option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code} — {d.name}
+              </option>
+            ))}
+            <option value="none">No office — works across every one (super admin)</option>
+          </select>
+          <FieldError message={firstError(errors, 'department_id')} />
+          {isOnlySuperAdmin && (
+            <p className="mt-1 text-xs text-ink-muted">
+              The super admin is a single account and the only one that can create office accounts,
+              so it cannot be moved into an office.
+            </p>
+          )}
+        </label>
+
+        {/*
+          Editable here for the first time. The role decides which queue an
+          officer sees, and it could only ever be set at creation - so the only
+          way to correct one was to deactivate the account and make a second.
+        */}
+        <RolePicker
+          roles={rolesForOffice}
+          // So the office's own roles come first. Ordering, not filtering —
+          // see the note in RolePicker.
+          officeId={worksEverywhere ? undefined : form.department_id}
+          value={form.role}
+          typed={form.newRole}
+          currentRole={initialRole}
+          onChange={(name, typedTitle) =>
+            setForm((f) => ({ ...f, role: name, newRole: typedTitle }))
+          }
+          /*
+            Never on the super-admin path. `admin` holds `user.manage` — the
+            power to mint accounts — so a typed name that reached a
+            departmentless role would be privilege escalation by spelling. The
+            server refuses it too; this keeps the offer off a screen where it
+            could not be honoured.
+          */
+          allowTyped={needsOffice}
+          disabled={isOnlySuperAdmin || !officeChosen}
+          disabledReason={
+            isOnlySuperAdmin
+              ? 'The super admin holds the only role that answers for every office, so its role cannot be changed away.'
+              : 'Choose an office above first — it decides which roles are available.'
+          }
+          error={firstError(errors, 'new_role', 'roles', 'roles.0', 'role')}
+        />
+        {user.roles.length > 1 && (
+          <p className="text-xs text-amber-800">
+            This account holds {user.roles.length} roles ({user.roles.join(', ')}). Choosing one here
+            replaces all of them with it.
+          </p>
+        )}
+
+        {/*
+          -- The password, behind a door ------------------------------------
+
+          An officer who forgets theirs had no way back: there is no reset on
+          the staff portal, so the account was deactivated and a second one
+          made, which takes their name off every filing they had handled.
+
+          Shut by default and cleared when it shuts, because almost every edit
+          on this form is a typo in a surname and a password box standing open
+          on that form is somewhere to type by accident.
+        */}
+        <div className="rounded-lg border border-line px-4 py-3">
+          <label className="flex cursor-pointer items-start gap-2.5">
+            <input
+              type="checkbox"
+              checked={issuing}
+              onChange={(e) => {
+                setIssuing(e.target.checked)
+                if (!e.target.checked) setPassword('')
+              }}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+            />
+            <span className="text-sm font-semibold text-ink">
+              Give this account a new password
+              <span className="ml-2 font-normal text-ink-muted">
+                for somebody who is locked out
+              </span>
+            </span>
           </label>
-          <label className="block">
-            <FieldLabel required={needsOffice}>Office</FieldLabel>
-            <select
-              className={inputCls}
-              value={needsOffice ? form.department_id : ''}
-              disabled={!needsOffice}
-              onChange={(e) => setForm((f) => ({ ...f, department_id: e.target.value }))}
-            >
-              <option value="">{needsOffice ? 'Select an office…' : 'Works across every office'}</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} — {d.name}
-                </option>
-              ))}
-            </select>
-            <FieldError message={firstError(errors, 'department_id')} />
-          </label>
+
+          {issuing && (
+            <div className="mt-4">
+              <PasswordField
+                label="New password"
+                required
+                value={password}
+                onChange={setPassword}
+                error={firstError(errors, 'password')}
+                hint="You will have to pass it to them yourself, and they should change it. It is stored scrambled, so nobody — including you — can read it back afterwards."
+              />
+            </div>
+          )}
         </div>
 
         {officeChanged && needsOffice && (
           <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
             Moving office hands any open cases back to the office they belong to. The cases stay
             where they are; only this officer&apos;s name comes off them.
+          </p>
+        )}
+
+        {(incomplete || changes.length === 0) && (
+          <p id="edit-nothing-to-save" className="text-xs text-ink-muted">
+            {blocker ?? 'Nothing has changed yet, so there is nothing to save.'}
           </p>
         )}
       </div>
@@ -954,6 +848,15 @@ interface CreateFormState {
   mobile_number: string
   password: string
   role: string
+  /**
+   * A job title typed in because the office has no role by that name.
+   *
+   * Apart from `role` on purpose: that one names a role that EXISTS, this one
+   * a role the server is being asked to create. Folding them together would
+   * make "give them the sanitary role" and "invent a role called sanitary"
+   * the same request, told apart only by whether a lookup happened to miss.
+   */
+  new_role: string
   department_id: string
 }
 
@@ -967,6 +870,7 @@ const EMPTY_FORM: CreateFormState = {
   mobile_number: '',
   password: '',
   role: '',
+  new_role: '',
   department_id: '',
 }
 
@@ -990,8 +894,59 @@ function CreateOfficerModal({
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
-  const needsOffice = wantsOffice(form.role ? [form.role] : [], roles)
+  /*
+   * Office first, then role - the same order as the edit form, and for the
+   * same reason: the office settles which roles are possible, so asking for
+   * the role first is asking a question whose options are not decided yet.
+   * See the longer note in EditModal.
+   */
+  const worksEverywhere = form.department_id === 'none'
+  const needsOffice = !worksEverywhere
+  const officeChosen = form.department_id !== ''
+  const rolesForOffice = roles.filter((r) => r.wants_department === !worksEverywhere)
   const selectedRole = roles.find((r) => r.name === form.role)
+
+  /*
+   * -- Reviewing the account before it exists ------------------------------
+   *
+   * Creating one grants a stranger a way into the system with a role attached,
+   * and two of the fields decide how much: the role is what they may do, the
+   * office is whose work they will see. A long form makes those easy to lose
+   * among the name fields, so they are read back on their own before the
+   * account is made.
+   *
+   * It is also the last moment the password is visible. After this it exists
+   * only wherever the administrator wrote it down, and there is no screen in
+   * the app that will show it to them again.
+   */
+  const [review, setReview] = useState(false)
+
+  const missing = [
+    !form.first_name.trim() && 'given name',
+    !form.last_name.trim() && 'surname',
+    !form.gender && 'sex',
+    !form.email.trim() && 'email',
+    !form.mobile_number.trim() && 'mobile number',
+    !form.password && 'password',
+    !officeChosen && 'office',
+    // A typed title counts: the reader has answered the question, and the
+    // answer is a role that does not exist yet.
+    !form.role && !form.new_role.trim() && 'role',
+  ].filter(Boolean) as string[]
+
+  /*
+   * Present but not acceptable, which is a different sentence from absent.
+   * "Still needed: password" is wrong advice for somebody who has typed one
+   * and just needs a symbol in it.
+   */
+  const wrong: string | null =
+    form.mobile_number.trim() !== '' && !mobileLooksRight(form.mobile_number)
+      ? 'The mobile number needs to be 11 digits starting 09.'
+      : form.password !== '' && !passwordMeetsRules(form.password)
+        ? 'The password does not meet all four requirements yet.'
+        : null
+
+  const notReady = missing.length > 0 || wrong !== null
 
   async function handleSubmit() {
     setSubmitting(true)
@@ -1003,14 +958,21 @@ function CreateOfficerModal({
       last_name: form.last_name.trim(),
       gender: (form.gender || 'M') as 'M' | 'F',
       email: form.email.trim(),
-      mobile_number: form.mobile_number.trim(),
+      mobile_number: normaliseMobile(form.mobile_number),
       password: form.password,
       // `roles`, plural — the shape the endpoint has always validated. This
       // used to send `role` and 422 every single time.
       roles: form.role ? [form.role] : [],
+      /*
+       * Only when nothing was picked. The server reads `new_role` only in
+       * that case too, but sending both would leave the question of which one
+       * wins to be settled on the far end — and the answer would differ
+       * between the two endpoints the moment one of them changed.
+       */
+      ...(!form.role && form.new_role.trim() ? { new_role: form.new_role.trim() } : {}),
       ...(form.middle_name.trim() ? { middle_name: form.middle_name.trim() } : {}),
       ...(form.suffix.trim() ? { suffix: form.suffix.trim() } : {}),
-      ...(needsOffice && form.department_id ? { department_id: Number(form.department_id) } : {}),
+      ...(needsOffice && officeChosen ? { department_id: Number(form.department_id) } : {}),
     }
 
     try {
@@ -1018,29 +980,94 @@ function CreateOfficerModal({
       onCreated(`${payload.first_name} ${payload.last_name}`.trim())
     } catch (err) {
       const apiError = toApiError(err)
-      if (apiError.status === 422) setErrors(apiError.errors)
-      else setFormError(apiError.message)
+      if (apiError.status === 422) {
+        // Back to the fields the messages belong under. See EditModal.
+        setErrors(apiError.errors)
+        setReview(false)
+      } else setFormError(apiError.message)
       setSubmitting(false)
     }
   }
 
   return (
     <ProtoModal
-      title="Add Officer"
+      title={review ? 'Create this account?' : 'Add Officer'}
       wide
-      cancelLabel="Cancel"
-      confirmLabel="Create account"
-      onCancel={onClose}
-      onConfirm={handleSubmit}
-      confirmDisabled={submitting}
+      cancelLabel={review ? 'Back' : 'Cancel'}
+      confirmLabel={review ? (submitting ? 'Creating…' : 'Create account') : 'Review account'}
+      onCancel={review ? () => setReview(false) : onClose}
+      onConfirm={review ? handleSubmit : () => setReview(true)}
+      confirmDisabled={submitting || (!review && notReady)}
+      confirmDescribedBy={!review && notReady ? 'create-missing' : undefined}
     >
       <p className="mb-5 border-b border-line pb-3 text-sm text-ink-secondary">
-        Give an LGU staff member access with a role and office.
+        {review
+          ? 'Check the role and office. They decide what this person may do and whose work reaches them.'
+          : 'Give an LGU staff member access with a role and office.'}
       </p>
-      {formError && (
-        <p className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">{formError}</p>
+
+      {review && (
+        <div className="space-y-4">
+          <dl className="divide-y divide-line rounded-lg border border-line">
+            {[
+              {
+                label: 'Name',
+                value: [form.first_name, form.middle_name, form.last_name, form.suffix]
+                  .map((part) => part.trim())
+                  .filter(Boolean)
+                  .join(' '),
+              },
+              { label: 'Email', value: form.email.trim() },
+              { label: 'Mobile', value: form.mobile_number.trim() || 'Not set' },
+              {
+                label: 'Role',
+                // Marked as new, because creating a role is a second act the
+                // reader is confirming — not a detail of creating an account.
+                value: form.new_role.trim()
+                  ? `${form.new_role.trim()} — new role for this office`
+                  : (selectedRole?.label ?? form.role),
+              },
+              {
+                label: 'Office',
+                value: worksEverywhere
+                  ? 'Works across every office'
+                  : (departments.find((d) => String(d.id) === form.department_id)?.name ?? 'Not set'),
+              },
+            ].map((row) => (
+              <div key={row.label} className="grid grid-cols-3 gap-3 px-4 py-3">
+                <dt className="text-xs font-semibold text-ink-muted">{row.label}</dt>
+                <dd className="col-span-2 text-sm font-semibold text-ink">{row.value}</dd>
+              </div>
+            ))}
+          </dl>
+
+          {/*
+            The password, shown once more.
+
+            It is stored hashed, so this is genuinely the last time anybody can
+            read it. Saying so here is the difference between an administrator
+            copying it now and ringing back tomorrow to ask for it.
+          */}
+          <p className="rounded-lg bg-s-yellow-tint px-3.5 py-3 text-xs leading-relaxed text-amber-800">
+            Give them this password yourself: <span className="font-bold">{form.password}</span>. It
+            is stored scrambled, so this is the last time it can be read. They sign in at{' '}
+            <span className="font-semibold">/staff/login</span> and should change it.
+          </p>
+
+          {formError && (
+            <p role="alert" className="rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+              {formError}
+            </p>
+          )}
+        </div>
       )}
-      <div className="space-y-4">
+
+      {!review && formError && (
+        <p role="alert" className="mb-4 rounded-lg bg-s-red-tint px-4 py-3 text-sm font-medium text-s-red">
+          {formError}
+        </p>
+      )}
+      <div className={review ? 'hidden' : 'space-y-4'} aria-hidden={review || undefined}>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block">
             <FieldLabel required>Given name</FieldLabel>
@@ -1077,83 +1104,108 @@ function CreateOfficerModal({
           </label>
           {/* Required by the API. It was marked optional here, so the first
               attempt always failed on a field the form said was not needed. */}
-          <label className="block">
-            <FieldLabel required>Mobile number</FieldLabel>
-            <input
-              className={inputCls}
-              inputMode="numeric"
-              placeholder="09171234567"
-              value={form.mobile_number}
-              onChange={(e) => set('mobile_number', e.target.value)}
-            />
-            <FieldError message={firstError(errors, 'mobile_number')} />
-          </label>
+          <MobileField
+            value={form.mobile_number}
+            onChange={(v) => set('mobile_number', v)}
+            error={firstError(errors, 'mobile_number')}
+          />
         </div>
         <label className="block">
           <FieldLabel required>Email address</FieldLabel>
           <input type="email" className={inputCls} value={form.email} onChange={(e) => set('email', e.target.value)} />
           <FieldError message={firstError(errors, 'email')} />
         </label>
+        {/*
+          The rules on screen before they are broken, rather than a sentence
+          saying "at least 8 characters" beside a field the server holds to
+          four separate clauses. See PasswordField.
+        */}
+        <PasswordField
+          label="Temporary password"
+          required
+          value={form.password}
+          onChange={(v) => set('password', v)}
+          error={firstError(errors, 'password')}
+          hint="You hand this to them; they should change it after their first sign-in."
+        />
+        {/*
+          Office, then role — the office narrows the list the role comes from,
+          so it is asked first and on its own row. Same shape as the edit form,
+          deliberately: these two dialogs ask the same questions and ought to
+          ask them the same way.
+        */}
         <label className="block">
-          <FieldLabel required>Temporary password</FieldLabel>
-          <input
-            type="password"
-            autoComplete="new-password"
+          <FieldLabel required>Office</FieldLabel>
+          <select
             className={inputCls}
-            value={form.password}
-            onChange={(e) => set('password', e.target.value)}
-          />
-          <p className="mt-1 text-xs text-ink-muted">
-            At least 8 characters. The officer can change this after their first sign-in.
-          </p>
-          <FieldError message={firstError(errors, 'password')} />
+            value={form.department_id}
+            onChange={(e) => {
+              set('department_id', e.target.value)
+              // A role that belonged to the other kind of account cannot
+              // survive the change, so it is cleared rather than refused later.
+              if (roles.find((r) => r.name === form.role)?.wants_department !== (e.target.value !== 'none')) {
+                set('role', '')
+              }
+              // A typed title always goes — it was written for the office that
+              // was showing. See the same note on the edit form.
+              set('new_role', '')
+            }}
+          >
+            {/*
+              Nothing is not the same as nothing yet. The offices arrive in
+              their own request, and "Choose an office…" above an empty list
+              is an instruction the reader cannot follow - worse, the next
+              option down is "No office", so a reader obeying the prompt picks
+              the super-admin answer by elimination.
+            */}
+            <option value="">
+              {departments.length === 0 ? 'Loading offices…' : 'Choose an office…'}
+            </option>
+            {departments.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.code} — {d.name}
+              </option>
+            ))}
+            {/*
+              "No office" as a blank is gone. An officer without one signs in
+              to an empty queue — the review queue scopes by department — and
+              the API refuses it. The one account that legitimately has none is
+              the super admin, and this names it rather than leaving it to be
+              discovered by picking a role.
+            */}
+            <option value="none">No office — works across every one (super admin)</option>
+          </select>
+          <FieldError message={firstError(errors, 'department_id')} />
         </label>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <FieldLabel required>Role</FieldLabel>
-            <select className={inputCls} value={form.role} onChange={(e) => set('role', e.target.value)}>
-              <option value="">Select a role</option>
-              {roles.map((r) => (
-                /*
-                 * The super admin seat is disabled once it is taken, rather
-                 * than offered and refused on submit. Office roles are never
-                 * disabled — an office is meant to have as many accounts as it
-                 * needs, and only this one role is a singleton.
-                 */
-                <option key={r.name} value={r.name} disabled={!r.available}>
-                  {r.label}
-                  {!r.available && ' — already assigned'}
-                </option>
-              ))}
-            </select>
-            {selectedRole?.description && (
-              <p className="mt-1 text-xs text-ink-muted">{selectedRole.description}</p>
-            )}
-            <FieldError message={firstError(errors, 'roles', 'roles.0', 'role')} />
-          </label>
-          <label className="block">
-            <FieldLabel required={needsOffice}>Office</FieldLabel>
-            <select
-              className={inputCls}
-              value={needsOffice ? form.department_id : ''}
-              disabled={!needsOffice}
-              onChange={(e) => set('department_id', e.target.value)}
-            >
-              {/*
-                "No office" is gone. An officer without one signs in to an empty
-                queue — the review queue scopes by department and shows a
-                departmentless non-admin nothing — and the API refuses it now.
-              */}
-              <option value="">{needsOffice ? 'Select an office…' : 'Works across every office'}</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.code} — {d.name}
-                </option>
-              ))}
-            </select>
-            <FieldError message={firstError(errors, 'department_id')} />
-          </label>
-        </div>
+
+        <RolePicker
+          roles={rolesForOffice}
+          officeId={worksEverywhere ? undefined : form.department_id}
+          value={form.role}
+          typed={form.new_role}
+          onChange={(name, typedTitle) => {
+            set('role', name)
+            set('new_role', typedTitle)
+          }}
+          // See the note on the edit form's picker: never on the super-admin
+          // path, where a typed name would be escalation by spelling.
+          allowTyped={needsOffice}
+          disabled={!officeChosen}
+          disabledReason="Choose an office above first — it decides which roles are available."
+          error={firstError(errors, 'new_role', 'roles', 'roles.0', 'role')}
+        />
+
+        {notReady && (
+          /*
+            Named, not counted. "6 fields required" sends a reader back up the
+            form hunting; a list tells them where to look (WCAG 3.3.1/3.3.3).
+            And a field that is filled in wrongly gets its own sentence, since
+            "still needed" is the wrong instruction for it.
+          */
+          <p id="create-missing" className="text-xs text-ink-muted">
+            {wrong ?? `Still needed before this can be reviewed: ${missing.join(', ')}.`}
+          </p>
+        )}
       </div>
     </ProtoModal>
   )
@@ -1179,22 +1231,57 @@ function DeactivateModal({
     [user.id, user.is_active],
   )
 
+  /*
+   * Confirm is held while the caseload is still being counted.
+   *
+   * The amber line below is the whole reason this dialog is worth showing for
+   * a deactivation - "4 open cases will be handed back to BPLO" is the fact
+   * that changes the answer. It arrives a moment after the dialog opens, and
+   * until it does the button was pressable, so a quick hand could decide
+   * before reading the thing it was meant to read. `confirmDescribedBy` points
+   * at the reason it is waiting, because a button that is merely grey explains
+   * nothing (WCAG 3.3.1).
+   */
+  const counting = user.is_active && loading
+
   return (
     <ProtoModal
-      title="WARNING"
+      /*
+       * The title NAMES the act. It read "WARNING" - shouted, and describing a
+       * feeling rather than an event, on a reactivation that warns of nothing.
+       * The person's name belongs here too: this dialog is reached from a row
+       * in a directory of forty, and the one thing worth double-checking is
+       * that it is the row you meant.
+       */
+      title={user.is_active ? `Deactivate ${fullName(user)}?` : `Reactivate ${fullName(user)}?`}
       tone={user.is_active ? 'red' : 'blue'}
       cancelLabel="Cancel"
-      confirmLabel="Yes"
+      /*
+       * "Yes" answers a question nobody re-reads at the moment of pressing.
+       * The verb is the label, so the last thing seen before committing is
+       * what will happen.
+       */
+      confirmLabel={user.is_active ? 'Deactivate account' : 'Reactivate account'}
       onCancel={onCancel}
       onConfirm={onConfirm}
-      confirmDisabled={busy}
+      confirmDisabled={busy || counting}
+      confirmDescribedBy={counting ? 'deactivate-counting' : undefined}
     >
-      <p className="py-3 text-center text-base">
-        {user.is_active ? 'Deactivate' : 'Reactivate'} {fullName(user)}?
-      </p>
-      {user.is_active && (
-        <p className="pb-3 text-center text-sm text-ink-secondary">
-          They will be signed out and will not be able to sign in again.
+      {user.is_active ? (
+        <p className="pb-4 text-sm text-ink-secondary">
+          They will be signed out straight away and will not be able to sign in again. Their name
+          stays on everything they have already done.
+        </p>
+      ) : (
+        <p className="pb-4 text-sm text-ink-secondary">
+          They will be able to sign in again at once. Nothing is handed back to them automatically -
+          any work they were carrying was released when the account was deactivated.
+        </p>
+      )}
+
+      {counting && (
+        <p id="deactivate-counting" className="pb-3 text-sm text-ink-muted">
+          Checking what they are carrying…
         </p>
       )}
       {/*
@@ -1216,10 +1303,58 @@ function DeactivateModal({
   )
 }
 
+/**
+ * What one officer is carrying, as the directory cell prints it.
+ *
+ * ── "Nothing", not a dash ─────────────────────────────────────────────────
+ *
+ * A dash means "no value"; this has a value and it is zero. An officer with a
+ * clear desk is a fact an administrator is looking FOR — it is who the next
+ * case goes to — so the cell says it rather than leaving absence to be read as
+ * ignorance.
+ *
+ * The dash is gone, and not by defaulting the missing case to "Nothing" —
+ * that would have printed a zero the server never sent. Creating, editing and
+ * activating an officer each answer with the changed user and the page puts
+ * that answer back into the row, and none of those three counted the
+ * caseload; the key was absent, so a row reading "2 filings" turned into "—"
+ * the moment it was edited [client, 27 September 2026: *"bat may ganyan pa sa
+ * holding, kung wala, it should be automatic na Nothing"*]. All four
+ * endpoints count it now (`UserController::withCaseload`), so there is no
+ * longer a payload this cell has to apologise for.
+ *
+ * ── The number is not a link ──────────────────────────────────────────────
+ *
+ * Reassign, two cells along, already opens that officer's caseload. Two
+ * controls to one destination in one row is two things to explain. This is
+ * here to say WHICH row to press, not to be pressed.
+ */
+function holding(user: AdminUser) {
+  const inspections = user.open_inspections ?? 0
+  const total = (user.open_reviews ?? 0) + inspections
+
+  if (total === 0) return <span className="text-sm text-ink-muted">Nothing</span>
+
+  return (
+    <span className="text-sm font-semibold text-ink">
+      <span className="tnum">{total}</span>{' '}
+      <span className="font-normal text-ink-muted">
+        {total === 1 ? 'filing' : 'filings'}
+        {/*
+          Site visits named separately when there are any. They move by a
+          different act on the caseload screen, so an administrator planning a
+          reassignment needs to know the load is not all paperwork.
+        */}
+        {inspections > 0 && ` · ${inspections} site visit${inspections === 1 ? '' : 's'}`}
+      </span>
+    </span>
+  )
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────── */
 
 type ModalState =
-  | { kind: 'details' | 'reassign' | 'edit' | 'deactivate'; user: AdminUser }
+  | { kind: 'details' | 'edit' | 'deactivate'; user: AdminUser }
   | { kind: 'create' }
   | null
 
@@ -1329,6 +1464,48 @@ export function UsersPage() {
               aria-label="Search officers"
               className="w-52 rounded-lg border border-input-border bg-input px-3.5 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
             />
+            {/*
+              The way to the whole picture.
+              
+              This directory lists OFFICERS; the Officer in Charge register
+              lists ASSIGNMENTS, every office at once, with the holder on each
+              row — "Showing 34 of 34". They answer two halves of one question
+              and there was no door between them in this direction: the
+              register's holder names already link INTO an officer's caseload,
+              and a reader starting here had nowhere to go but row by row.
+              
+              A link, not a button, so it can be middle-clicked and is
+              announced as a link. Relative, so it lands on whichever portal
+              this page is being read on.
+              
+              Gated on the same permission the register itself is
+              (`oic.assign`): offering a door a reader would be refused at is
+              worse than not offering one.
+            */}
+            {canReassign && (
+              <Link
+                /*
+                  Lands on the register UNFILTERED, because that is what the
+                  label promises. Its count line carries the chain from the
+                  register's own total down to the figure the Holding column
+                  adds up to, and a "Still open" filter sits beside it — so a
+                  reader who wants only the open work is one control away,
+                  with the context that makes the smaller number mean
+                  something.
+                  
+                  Linking straight to `?state=open` was the other option and it
+                  is worse twice over: a button reading "View all assignments"
+                  that shows four of thirty-four is a button that lies, and the
+                  second door it needed kept landing in the table header, where
+                  navigation does not belong.
+                */
+                to="../oic"
+                relative="path"
+                className="rounded-full border border-line bg-white px-5 py-2 text-sm font-semibold text-ink-secondary hover:bg-canvas"
+              >
+                View all assignments
+              </Link>
+            )}
             <button
               type="button"
               onClick={() => setModal({ kind: 'create' })}
@@ -1453,6 +1630,31 @@ export function UsersPage() {
                   <th className="px-5 py-3">Officer</th>
                   <th className="px-5 py-3">Role</th>
                   <th className="px-5 py-3">Office</th>
+                  {/*
+                    What each officer is carrying, so the directory answers
+                    "who has work" without the reader opening every row in turn
+                    [client, 27 September 2026: "need mo pa pindutin isa isa
+                    kung ano laman na permit na hawak nila"].
+
+                    Beside Office rather than at the end: it is a fact ABOUT
+                    the officer, and Actions is where the row stops describing
+                    and starts offering.
+                  */}
+                  {/*
+                    Just the word.
+                    
+                    A link to the register's matching view lived in here — first
+                    beside the heading, where "Holding open work" read as one
+                    four-word column name, then stacked under it, where the
+                    two-line cell made every other heading in the row sit
+                    unevenly against it. Both were attempts to put navigation
+                    inside a column header, which is not what a column header
+                    is for.
+                    
+                    It moved to the page header, beside "View all assignments",
+                    where the rest of this screen's navigation already is.
+                  */}
+                  <th className="px-5 py-3">Holding</th>
                   <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3">Actions</th>
                 </tr>
@@ -1476,6 +1678,7 @@ export function UsersPage() {
                     {/* The thing this screen is named after, and it was not shown. */}
                     <td className="px-5 py-3.5 text-ink-secondary">{roleLabel(user, roleList)}</td>
                     <td className="px-5 py-3.5 text-ink-secondary">{user.department?.code ?? '—'}</td>
+                    <td className="px-5 py-3.5">{holding(user)}</td>
                     <td className="px-5 py-3.5">
                       <StatusChip tone={user.is_active ? 'tint-green' : 'tint-gray'}>
                         {user.is_active ? 'Active' : 'Inactive'}
@@ -1501,16 +1704,33 @@ export function UsersPage() {
                           * departmentless role is ever added.
                           */}
                         {canReassign && user.department && (
-                          <button
-                            type="button"
-                            onClick={() => setModal({ kind: 'reassign', user })}
+                          <Link
+                            /*
+                              A LINK to a page, not a button that opens a
+                              dialog [client, 27 September 2026]. The caseload
+                              screen is the Officer in Charge format scoped to
+                              one officer; see OfficerCaseloadPage for why the
+                              dialog outgrew itself.
+
+                              Relative, so the same row works on both the staff
+                              and the admin portal without this page knowing
+                              which one it is on — and a real <Link> rather
+                              than an anchor because this is a route WITHIN one
+                              portal, unlike the cross-portal links elsewhere
+                              in the app which must remount.
+                            */
+                            to={`${user.id}/reassign`}
+                            // Named by the officer, because twenty rows of
+                            // "Reassign" are twenty identical stops for a
+                            // screen reader (AGENTS.md §6.2).
+                            aria-label={`Reassign ${fullName(user)}’s caseload`}
                             // Transparent border, not no border: the outlined
                             // buttons beside it carry a 1px one, so without this
                             // the filled button stands 2px shorter than its row.
                             className="rounded-full border border-transparent bg-royal-deep px-4 py-1.5 text-xs font-semibold text-white hover:brightness-110"
                           >
                             Reassign
-                          </button>
+                          </Link>
                         )}
                         <button
                           type="button"
@@ -1588,17 +1808,6 @@ export function UsersPage() {
       )}
 
       {modal?.kind === 'details' && <DetailsModal user={modal.user} onClose={() => setModal(null)} />}
-      {modal?.kind === 'reassign' && (
-        <ReassignModal
-          user={modal.user}
-          onClose={() => setModal(null)}
-          onDone={(text) => {
-            setModal(null)
-            setBanner({ tone: 'ok', text })
-            reload()
-          }}
-        />
-      )}
       {modal?.kind === 'edit' && (
         <EditModal
           user={modal.user}

@@ -2,7 +2,6 @@ import type { ComponentType, SVGProps } from 'react'
 import {
   AuditIcon,
   ChartIcon,
-  ClipboardIcon,
   DraftsIcon,
   FileTextIcon,
   FolderIcon,
@@ -143,7 +142,25 @@ const NAV_ITEMS: NavItem[] = [
     },
   },
   { label: 'Officer Assignment', icon: UsersIcon, to: '/admin/users', permission: 'user.manage' },
-  { label: 'Officer in Charge', icon: ClipboardIcon, to: '/admin/oic', permission: 'oic.assign' },
+  /*
+   * ── Officer in Charge is not on the rail ─────────────────────────────────
+   *
+   * The PAGE is still there, at `/admin/oic`, and is still the register of who
+   * holds what across all six offices — the one screen that answers "I have a
+   * tracking ID and I do not know whose desk it is on".
+   *
+   * It came off the rail on 27 September 2026, once Officer Assignment could
+   * reach it: that screen now carries a "View all assignments" link, and its
+   * Holding column says which officers have work before a reader goes
+   * anywhere. Two rail entries for one subject asked the reader to decide,
+   * before they had looked at either, whether their question was about an
+   * OFFICER or an ASSIGNMENT — which is a distinction the screens make much
+   * better than a sidebar can.
+   *
+   * So the rail names the people, and the register is one click inside it.
+   * `oic.assign` still guards the route and every control that reaches it; the
+   * only thing removed is the second front door.
+   */
   { label: 'Owner Status', icon: ShieldCheckIcon, to: '/admin/owners', permission: 'owner.manage_status' },
   /*
    * Records is the SUPER ADMIN's console, and `user.manage` is what says so.
