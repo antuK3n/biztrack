@@ -145,4 +145,37 @@ return [
         'required_at_login' => (bool) env('AUTH_REQUIRE_VERIFIED_EMAIL', false),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Six-digit e-mail codes [checklist 2026-09-27, Register 1 and Login 5]
+    |--------------------------------------------------------------------------
+    |
+    | Used only while App\Support\EmailSwitch::on() — a real mailer is
+    | configured. With MAIL_MAILER=log none of this runs and sign-in and filing
+    | work exactly as they did before.
+    |
+    | `login_expire`: the sign-in code, ten minutes. Long enough to open a mail
+    | app on a phone, short enough that a code read over someone's shoulder is
+    | stale by the time it matters.
+    |
+    | `verify_expire`: the address-confirmation code, thirty minutes. Nobody is
+    | waiting at a locked door for this one, and a new owner may register on a
+    | laptop and open their mail later on a phone.
+    |
+    | `max_attempts`: wrong guesses before the code is dead. Five, the same as
+    | the password lockout, and never reset by a resend — 5 guesses in a
+    | million per sign-in.
+    |
+    | `resend_after` (seconds) and `max_sends`: the resend button's ration. One
+    | a minute, five per code, so the button cannot be used to fill somebody's
+    | inbox from a City Hall address.
+    */
+    'email_codes' => [
+        'login_expire' => 10,
+        'verify_expire' => 30,
+        'max_attempts' => 5,
+        'resend_after' => 60,
+        'max_sends' => 5,
+    ],
+
 ];

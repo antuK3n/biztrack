@@ -106,7 +106,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('permission:application.create')->group(function () {
         Route::post('applications', [ApplicationController::class, 'store']);
         Route::put('applications/{application}', [ApplicationController::class, 'update']);
-        Route::post('applications/{application}/submit', [ApplicationController::class, 'submit']);
+        // Filing waits for a confirmed address, while mail is on [Register 1].
+        Route::post('applications/{application}/submit', [ApplicationController::class, 'submit'])
+            ->middleware('email.confirmed');
         Route::post('applications/{application}/resubmit', [ApplicationController::class, 'resubmit']);
         Route::post('applications/{application}/cancel', [ApplicationController::class, 'cancel']);
         /*

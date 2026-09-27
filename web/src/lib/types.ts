@@ -22,6 +22,13 @@ export interface User {
   has_photo: boolean
   is_active: boolean
   email_verified_at: string | null
+  /*
+   * True only while the API has a real mailer AND this is an owner whose
+   * address is unconfirmed: filing is refused until they type the code
+   * [checklist 2026-09-27, Register 1]. Optional because the admin user lists
+   * share this type and never carry it.
+   */
+  email_verification_required?: boolean
   roles: string[]
   permissions: string[]
 }
@@ -31,6 +38,12 @@ export interface ApiError {
   status: number
   message: string
   errors: Record<string, string[]>
+  /**
+   * A machine-readable cause on the few refusals a page must act on rather
+   * than print: `code_expired` (sign-in code dead, go back to the password)
+   * and `email_unconfirmed` (filing refused until the address is confirmed).
+   */
+  reason?: string
 }
 
 export interface RegisterPayload {

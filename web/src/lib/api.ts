@@ -202,6 +202,7 @@ export function toApiError(error: unknown): ApiError {
       status,
       message: data?.message ?? 'Something went wrong on our end. Please try again.',
       errors: data?.errors ?? {},
+      ...(typeof data?.reason === 'string' ? { reason: data.reason } : {}),
     }
   }
   return {
