@@ -84,7 +84,18 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Payment History', icon: HistoryIcon, to: '/payments', permission: 'payment.make', mobile: true },
   // Officer / staff — these resolve under /staff, because only a staff session
   // holds the permissions that reveal them.
-  { label: 'Track', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
+  /*
+   * "Track" until 27 September 2026, which was the OWNER's word for the
+   * owner's job — watching a filing move. Staff do not track filings, they
+   * act on them, and one word for two jobs made the staff rail read like a
+   * copy of the applicant's. Client: *"Track page seems to be a wrong name
+   * for this page of the admin side ... Please do so for ALL ADMINS having
+   * this page."* One entry covers all of them: every office reaches this
+   * page through `application.review`.
+   *
+   * The owner's entry above keeps "Track", which is right for what they do.
+   */
+  { label: 'Manage Applications', icon: InboxIcon, to: '/queue', permission: 'application.review', mobile: true },
   /*
    * There is no Inspections entry any more, and its absence is the feature.
    *
@@ -100,7 +111,31 @@ const NAV_ITEMS: NavItem[] = [
    * takes nothing off their rail that Track above does not already reach. BPLO
    * and the super admin never had it.
    */
-  { label: 'Other Requirements', icon: FolderIcon, to: '/requests', permission: 'request.create' },
+  /*
+   * ── The applicant could not reach their own requirements ─────────────────
+   *
+   * Gated on `request.create` alone, which is an OFFICE's permission: a
+   * Business Owner holds `request.respond` and not `request.create`
+   * (RbacSeeder). So the one person a requirement is addressed TO had no link
+   * to the page holding it — the route resolved and the reply endpoint
+   * accepted them, but nothing in the rail pointed there.
+   *
+   * Invisible until 27 September 2026, when BPLO's approval started raising a
+   * requirement on its own for a blank TIN. Before that every requirement was
+   * typed by an officer and reached the applicant as a notification they could
+   * click, so the missing rail entry only cost them a second visit; a
+   * requirement raised automatically had no such moment and simply waited.
+   *
+   * `anyPermission` rather than swapping the permission: both sides need this
+   * page and they hold different halves of it — the office raises, the owner
+   * answers.
+   */
+  {
+    label: 'Other Requirements',
+    icon: FolderIcon,
+    to: '/requests',
+    anyPermission: ['request.create', 'request.respond'],
+  },
   // Admin
   /*
    * One rail entry, two different audiences behind it.

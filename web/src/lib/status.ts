@@ -162,7 +162,7 @@ const APPLICATION_STATUS: Record<ApplicationStatus, StatusMeta> = {
    * refuse a permit here and suspend the certificate. Exactly one badge on
    * this rail is green now, and it is the one that means finished.
    */
-  awaiting_other_permits: { label: 'Permit Released', tone: 'verify', icon: CheckCircleIcon },
+  awaiting_other_permits: { label: 'Approved', tone: 'verify', icon: CheckCircleIcon },
   for_final_approval: { label: 'For Final Approval', tone: 'verify', icon: ClockIcon },
   /*
    * "Completed" — MIRROR OF `ApplicationStatus::Approved->label()`, which
@@ -554,9 +554,13 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
    * steps earlier. A guide is the one place a wrong sentence is worst: it is
    * read by people checking whether the thing they expected has happened.
    */
-  awaiting_other_permits:
-    'Your Mayor’s Permit is released. Apply for your other permits — each is approved on its own, '
-    +'and a rejected one suspends your Mayor’s Permit until it is settled.',
+  /*
+   * The suspension clause moved out of this line on 26 September 2026 — it is
+   * the Suspended row under "If something interrupts it", which is where a
+   * thing that might go wrong belongs. Printed here it made the sentence
+   * announcing GOOD news the longest on the panel.
+   */
+  awaiting_other_permits: 'Your Mayor’s Permit is released. Apply for your other permits.',
   /*
    * No longer on a new application's path — see STATUS_FLOW. The line has to
    * describe the cases that still reach it without naming the machinery, since
@@ -591,9 +595,14 @@ export const STATUS_GUIDE: Record<ApplicationStatus, string> = {
    *    now predicts the one thing the owner is about to watch happen,
    *    instead of leaving them to find a note at the foot of an empty list.
    */
-  approved:
-    'All your other permits are approved, so none of them can suspend your Mayor’s Permit any '
-    +'more. This application moves to your Profile.',
+  /*
+   * The "so none of them can suspend it any more" half came off on
+   * 26 September 2026. It is the most carefully argued sentence on this panel
+   * — see the note above — and it answers a question by raising one: an
+   * applicant reading that their permit can no longer be suspended has just
+   * learned that it could be, at the moment everything went right.
+   */
+  approved: 'Every permit is approved. This application moves to your Profile.',
   /*
    * Never reached by an application, and so not drawn in the guide — see
    * GUIDE_OMITTED. Kept because this table is exhaustive over the union, and
@@ -743,7 +752,20 @@ const OMITTED_BY_TYPE: Record<'new' | 'renewal' | 'amendment', ApplicationStatus
    * ever see it — this only keeps it out of the list of things to expect.
    */
   new: ['draft', 'for_final_approval'],
-  renewal: ['draft'],
+  /*
+   * `awaiting_other_permits` never happens on a renewal — `onPaymentCompleted`
+   * sends one to ForFinalApproval, because its certificates are copies BPLO
+   * reads rather than permits to be gathered.
+   *
+   * Omitted rather than left out, which is the whole reason this table exists:
+   * the detours are derived as "everything not on the rail", so a status that
+   * merely never occurs reappears under "If something interrupts it". It did —
+   * the client's screenshot of 26 September 2026 shows "Approved" filed beside
+   * Returned and Rejected on the renewal tab, described as something that
+   * might interrupt the filing. Same fault the note above records for For
+   * Final Approval, caught the same way.
+   */
+  renewal: ['draft', 'awaiting_other_permits'],
 }
 
 /** The rail for one kind of filing, or null where there is nothing to draw yet. */
@@ -795,10 +817,10 @@ export function statusDetoursFor(flow: GuideFlow): ApplicationStatus[] {
  * part of this a first-time applicant cannot work out for themselves.
  */
 export const DRAFT_LEAD =
-  'Until you press Submit, your form is a Draft — saved to your account, but not yet with the BPLO.'
+  'Your form stays a Draft until you submit it.'
 
 export const RENEWAL_LEAD =
-  'Your business permit renewal. The other permits are separate filings — renewing this does not renew them, and they do not hold it up.'
+  'Renews your business permit only. The other permits are separate filings.'
 
 /**
  * The other-permit renewal, as its own process.
@@ -839,7 +861,7 @@ export const OTHER_PERMIT_GUIDE: Record<'draft' | 'for_approval' | 'approved', s
 
 /** Any time of year, and the case where no renewal is needed at all. */
 export const OTHER_PERMIT_NOTE =
-  'Any time of year, not just January. Still valid? Do nothing — BizTrack uses the copy already on file.'
+  'Any time of year. If yours is still valid, do nothing.'
 
 /**
  * What an amendment covers.
@@ -852,7 +874,15 @@ export const OTHER_PERMIT_NOTE =
  * saying nothing.
  */
 export const AMENDMENT_NOTE =
-  'Four things, as on the paper form: your line of business, floor area, employees and vehicles; your address; your owner; your trade name. Nothing to pay now — the fee joins your next January renewal. Moving to another barangay re-applies for your Zoning Clearance, and a change of owner is finished by BPLO at the window once they have seen the Deed of Transfer.'
+  /*
+   * Shortened on 26 September 2026. The two clauses dropped — that moving
+   * barangay re-applies for Zoning, and that a change of owner is finished at
+   * the BPLO window — are both still true and both still happen. Neither is
+   * something the applicant can act on while reading a status guide, and the
+   * wizard tells them at the point each one applies, which is where a
+   * consequence belongs.
+   */
+  'Change your line of business, address, owner or trade name. Nothing to pay now — the fee joins your next January renewal.'
 
 /**
  * In the union, deliberately not in the guide.

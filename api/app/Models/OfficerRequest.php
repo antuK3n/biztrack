@@ -12,6 +12,9 @@ class OfficerRequest extends Model
     protected $fillable = [
         'application_id', 'requested_by_user_id', 'department_id', 'title',
         'description', 'request_type', 'status', 'due_date',
+        // Set only on a requirement a RULE raised, never by an officer's
+        // composer — see the migration that added it.
+        'system_key',
         // The note written when the requirement is RAISED, and the office's
         // optional reference file (a blank form, a template). Both are separate
         // from `remarks`/`file_path`, which travel the other way — see the

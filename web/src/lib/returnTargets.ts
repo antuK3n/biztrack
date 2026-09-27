@@ -39,6 +39,18 @@
  * numbering has changed twice this month.
  */
 
+/**
+ * How much of the form a target covers, which decides where the applicant
+ * fixes it.
+ *
+ * `scalar` — one box. Drawn inline on the status page, under the remark
+ *   that asked for it, with a Resubmit button. No wizard.
+ * `section` — a repeating table, a checklist or a cluster of boxes that is
+ *   only nameable as a whole. Opens the wizard at that step, with every
+ *   other step locked.
+ */
+export type ReturnTargetKind = 'scalar' | 'section'
+
 /** One field an officer may send a filing back about. */
 export type ReturnTarget = {
   /** The stored code. Namespaced `form:` — see the note above. */
@@ -47,6 +59,31 @@ export type ReturnTarget = {
   label: string
   /** The wizard section it belongs to, used to group the picker. */
   group: string
+  /** One box, or a whole step. See ReturnTargetKind. */
+  kind: ReturnTargetKind
+  /**
+   * The wizard step that owns this target, for `section` targets only.
+   *
+   * A returned filing opens on these steps and no others, which is how
+   * "comply to those selected fields only" is enforced for the targets too
+   * big to draw inline. The names are `BasePhase` values from ApplyWizard.
+   */
+  phase?: string
+  /*
+   * There is no `field` here, and there was until 27 September 2026.
+   *
+   * It named the column a correction writes, and NOTHING READ IT: the
+   * correction form posts its answers keyed by CODE and the API resolves
+   * the column, which is the right way round — a request body must not
+   * choose a column. So this was a second copy of a mapping the browser
+   * never used, and the parity test was faithfully comparing it against
+   * the first copy while eight entries in BOTH named columns that do not
+   * exist. Agreeing is not the same as being right.
+   *
+   * The columns live in App\Support\ReturnTargets, where the write
+   * happens, and are checked against the real schema by
+   * ReturnTargetSchemaTest.
+   */
 }
 
 const A = 'A · Business Information'
@@ -62,45 +99,45 @@ const D = 'Documents & Declarations'
  * are the section names the wizard's own step bar uses.
  */
 export const MAIN_FORM_RETURN_TARGETS: ReturnTarget[] = [
-  { value: 'form:registration_type', label: '1. Form of Organization', group: A },
-  { value: 'form:registration_number', label: '2. Registration Number', group: A },
-  { value: 'form:tin', label: '3. Tax Identification Number (TIN)', group: A },
-  { value: 'form:name', label: '4. Business Name', group: A },
-  { value: 'form:trade_name', label: '5. Trade Name / Franchise', group: A },
-  { value: 'form:telephone', label: '6. Telephone (Landline)', group: A },
-  { value: 'form:mobile_number', label: '7. Mobile Number', group: A },
-  { value: 'form:email', label: '8. E-mail Address', group: A },
-  { value: 'form:website', label: '9. Website Address', group: A },
+  { value: 'form:registration_type', label: '1. Form of Organization', group: A, kind: 'section', phase: 'business' },
+  { value: 'form:registration_number', label: '2. Registration Number', group: A, kind: 'scalar' },
+  { value: 'form:tin', label: '3. Tax Identification Number (TIN)', group: A, kind: 'scalar' },
+  { value: 'form:name', label: '4. Business Name', group: A, kind: 'scalar' },
+  { value: 'form:trade_name', label: '5. Trade Name / Franchise', group: A, kind: 'scalar' },
+  { value: 'form:telephone', label: '6. Telephone (Landline)', group: A, kind: 'scalar' },
+  { value: 'form:mobile_number', label: '7. Mobile Number', group: A, kind: 'scalar' },
+  { value: 'form:email', label: '8. E-mail Address', group: A, kind: 'scalar' },
+  { value: 'form:website', label: '9. Website Address', group: A, kind: 'scalar' },
   /*
    * One entry for items 10 to 13, because they are one answer in four boxes and
    * an officer who wants a corrected name means the name, not the middle
    * initial. Gender is separate because it is a separate question with a
    * separate way of being wrong.
    */
-  { value: 'form:owner_name', label: '10–13. Owner / Representative', group: A },
-  { value: 'form:owner_gender', label: '14. Gender', group: A },
-  { value: 'form:president_officer_name', label: '15. Name of President / OIC', group: A },
-  { value: 'form:citizenship', label: '16. Citizenship (of President/OIC)', group: A },
-  { value: 'form:capital_participation', label: '17. Capital Participation', group: A },
+  { value: 'form:owner_name', label: '10–13. Owner / Representative', group: A, kind: 'section', phase: 'business' },
+  { value: 'form:owner_gender', label: '14. Gender', group: A, kind: 'section', phase: 'business' },
+  { value: 'form:president_officer_name', label: '15. Name of President / OIC', group: A, kind: 'scalar' },
+  { value: 'form:citizenship', label: '16. Citizenship (of President/OIC)', group: A, kind: 'scalar' },
+  { value: 'form:capital_participation', label: '17. Capital Participation', group: A, kind: 'scalar' },
 
-  { value: 'form:floor_area_sqm', label: '1. Business Area (sq. m.)', group: B },
-  { value: 'form:employees', label: '2. Total No. of Employees', group: B },
-  { value: 'form:employees_in_lgu', label: '3. Employees Residing within Malabon', group: B },
-  { value: 'form:delivery_units', label: '4. No. of Delivery Units', group: B },
-  { value: 'form:economic_organization', label: '5. Economic Organization', group: B },
-  { value: 'form:capital_investment', label: '6. Capital Investment', group: B },
-  { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity', group: B },
-  { value: 'form:is_rented', label: '8. Do you pay rent for the premises', group: B },
+  { value: 'form:floor_area_sqm', label: '1. Business Area (sq. m.)', group: B, kind: 'scalar' },
+  { value: 'form:employees', label: '2. Total No. of Employees', group: B, kind: 'section', phase: 'operation' },
+  { value: 'form:employees_in_lgu', label: '3. Employees Residing within Malabon', group: B, kind: 'scalar' },
+  { value: 'form:delivery_units', label: '4. No. of Delivery Units', group: B, kind: 'scalar' },
+  { value: 'form:economic_organization', label: '5. Economic Organization', group: B, kind: 'section', phase: 'operation' },
+  { value: 'form:capital_investment', label: '6. Capital Investment', group: B, kind: 'scalar' },
+  { value: 'form:has_tax_incentives', label: '7. Tax incentives from a Government Entity', group: B, kind: 'section', phase: 'operation' },
+  { value: 'form:is_rented', label: '8. Do you pay rent for the premises', group: B, kind: 'section', phase: 'address' },
 
-  { value: 'form:address', label: 'Business address', group: L },
-  { value: 'form:barangay', label: 'Barangay', group: L },
-  { value: 'form:map_pin', label: 'Pin on the map', group: L },
-  { value: 'form:lines', label: 'Line of business / Products / Services', group: L },
-  { value: 'form:lessor', label: 'Lessor details', group: L },
-  { value: 'form:emergency_contact', label: 'Emergency contact', group: L },
+  { value: 'form:address', label: 'Business address', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:barangay', label: 'Barangay', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:map_pin', label: 'Pin on the map', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:lines', label: 'Line of business / Products / Services', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:lessor', label: 'Lessor details', group: L, kind: 'section', phase: 'address' },
+  { value: 'form:emergency_contact', label: 'Emergency contact', group: L, kind: 'section', phase: 'address' },
 
-  { value: 'form:documents', label: 'Uploaded documents', group: D },
-  { value: 'form:fee_profile', label: 'Tax classification answers', group: D },
+  { value: 'form:documents', label: 'Uploaded documents', group: D, kind: 'section', phase: 'documents' },
+  { value: 'form:fee_profile', label: 'Tax classification answers', group: D, kind: 'section', phase: 'operation' },
 ]
 
 const BY_VALUE = new Map(MAIN_FORM_RETURN_TARGETS.map((t) => [t.value, t]))
@@ -119,4 +156,62 @@ export function mainFormTargetLabel(code: string | null | undefined): string | n
   if (!code) return null
 
   return BY_VALUE.get(code)?.label ?? null
+}
+
+/**
+ * The whole target for a stored pointer, or null when it is not one of ours.
+ *
+ * `mainFormTargetLabel` answers "what do I call this" and is what the
+ * read-only screens want. This answers "what do I draw for this", which the
+ * correction form needs: its `kind` decides inline box versus wizard step,
+ * and its `field` names the column to write.
+ */
+export function mainFormTarget(code: string | null | undefined): ReturnTarget | null {
+  if (!code) return null
+
+  return BY_VALUE.get(code) ?? null
+}
+
+/**
+ * Read the stored pointer column, which may now name SEVERAL fields.
+ *
+ * One return used to mean one field. Client, 27 September 2026: *"the admin
+ * can choose which field is wrong ... comply to those SELECTED FIELDS
+ * only"* — plural, and a single code cannot say that.
+ *
+ * Comma-separated in the existing column rather than a new table. Every
+ * value is a short code the system owns, there is no ordering or history to
+ * keep per field, and a row already in the database is a valid list of one —
+ * so nothing has to be migrated and every old return keeps working.
+ */
+/**
+ * The raw codes in a stored pointer, whatever namespace they belong to.
+ *
+ * `mainFormTargets` below resolves against the wizard's own fields and
+ * DROPS everything else, which is right for the applicant's status page and
+ * wrong for any other reader: the same column also carries document type
+ * codes, office-form answer keys and permit codes. An office sheet asking
+ * "was this row named" needs the split without the filter.
+ */
+export function targetCodes(stored: string | null | undefined): string[] {
+  if (!stored) return []
+
+  return stored
+    .split(',')
+    .map((one) => one.trim())
+    .filter((one) => one !== '')
+}
+
+/** Did this return name that code? Replaces `stored === code`, which a list breaks. */
+export function targetsInclude(stored: string | null | undefined, code: string): boolean {
+  return targetCodes(stored).includes(code)
+}
+
+export function mainFormTargets(code: string | null | undefined): ReturnTarget[] {
+  if (!code) return []
+
+  return code
+    .split(',')
+    .map((one) => BY_VALUE.get(one.trim()))
+    .filter((t): t is ReturnTarget => t !== undefined)
 }

@@ -519,6 +519,34 @@ export interface ApplicationPermitType {
    */
   returned_at: string | null
   decided_at: string | null
+  /**
+   * Every status this permit has held, oldest first.
+   *
+   * Client, 26 September 2026: *"a tracking history PER PERMIT, which
+   * contains date and time on when a permit changed status."*
+   *
+   * `note` follows the same rule as `remarks` above — null when the reader
+   * may not see it, so never render "no note" off a null. `to_status` and
+   * the timestamp are shared with every office on the filing, because
+   * BPLO's final approval is gated on all five and an office cannot tell
+   * whether the filing is moving without them.
+   *
+   * Empty on a permit nobody has touched, which is a real answer and not a
+   * loading state: five of the six start that way.
+   */
+  history: PermitStatusChange[]
+}
+
+/** One recorded change to one permit's status. */
+export interface PermitStatusChange {
+  /** Null on the first entry — the permit had no status before it. */
+  from_status: string | null
+  to_status: string
+  /** Null when nothing was written, OR when it is not this reader's to see. */
+  note: string | null
+  /** Null for a move the system made with no officer behind it. */
+  changed_by: string | null
+  created_at: string
 }
 
 export interface ApplicationListItem {
@@ -1099,8 +1127,47 @@ export interface Ra11032Standing {
   tiers: Ra11032Tier[]
 }
 
+/**
+ * One field the applicant put right after BPLO returned the filing.
+ *
+ * Both halves, captured at the write — see the API migration for why the
+ * "before" cannot be derived afterwards. The officer's sheet reads these to
+ * check the fields it asked about instead of re-reading the whole form.
+ *
+ * `target` is a `form:` code, resolved through `mainFormTargetLabel`. A code
+ * this build does not know resolves to null and is skipped rather than
+ * printed raw.
+ */
+export interface ApplicationCorrection {
+  target: string
+  old_value: string | null
+  new_value: string | null
+  at: string | null
+}
+
 export interface Application extends ApplicationListItem {
   applicant: { id: number; name: string }
+  /**
+   * What was corrected after a return, oldest first.
+   *
+   * Optional for the reason every other late addition here is: a payload
+   * from before this shipped carries no key at all, and `?? []` reads the
+   * same as a filing that was never returned — which is the truth for all
+   * but a handful of them.
+   */
+  corrections?: ApplicationCorrection[]
+  /**
+   * BPLO's remark for each returned field, keyed by its `form:` code.
+   *
+   * A map because every reader wants it BY FIELD — the applicant drawing a
+   * box, the officer reading back what they asked — and a list would make
+   * each of them build the same index.
+   *
+   * Optional: a payload from before this shipped has no key, and a filing
+   * returned with plain prose has no per-field notes either. Both read the
+   * same through `?? {}`, which is correct — neither has a note to show.
+   */
+  return_notes?: Record<string, string>
   /**
    * Other Requirements still open on this filing — anything not Fulfilled.
    *

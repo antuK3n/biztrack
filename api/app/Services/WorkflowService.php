@@ -12,10 +12,11 @@ use App\Enums\OfficerRequestStatus;
 use App\Enums\PermitStatus;
 use App\Exceptions\IllegalTransitionException;
 use App\Models\Application;
-use App\Models\Business;
 use App\Models\ApplicationAssignment;
 use App\Models\ApplicationPermitType;
+use App\Models\ApplicationReturnNote;
 use App\Models\ApplicationStatusHistory;
+use App\Models\Business;
 use App\Models\FeeAssessment;
 use App\Models\Inspection;
 use App\Models\OfficerRequest;
@@ -120,12 +121,13 @@ class WorkflowService
      * meanings, and a single polymorphic writer would have to branch on all
      * three anyway while making both harder to read.
      *
-     * No history TABLE for the pivot. `application_status_history` is keyed to
-     * the application and the audit log already records every move with the
-     * permit type on it, so a second history table would be a third place to
-     * keep in step for a timeline nothing renders yet. If the applicant ever
-     * needs a per-permit timeline, that is the moment to add one — not now,
-     * on the guess that they might.
+     * No history TABLE for the pivot, and there still is not one. The client
+     * asked for a per-permit timeline on 26 September 2026 — the moment this
+     * note reserved — and it is served by a `permit_type_id` COLUMN on
+     * `application_status_history` rather than by the second table this
+     * paragraph warned about. One table, two timelines, told apart by that
+     * column; the audit log stays the system of record and the history rows
+     * are what the applicant reads.
      */
     public function transitionClearance(
         ApplicationPermitType $row,
@@ -145,6 +147,25 @@ class WorkflowService
         }
 
         $row->update(['status' => $to]);
+        /*
+         * The permit's own history, since 26 September 2026 — the moment the
+         * note below said to wait for. Written beside the filing's rows in
+         * `application_status_history` and told apart by `permit_type_id`.
+         *
+         * `department_id` is the office that ISSUES this permit, not the one
+         * that happens to be acting: a CENRO certificate returned by BPLO at
+         * final approval is still CENRO's row, and a timeline that said BPLO
+         * would have the applicant chasing the wrong counter.
+         */
+        ApplicationStatusHistory::create([
+            'application_id' => $row->application_id,
+            'permit_type_id' => $row->permit_type_id,
+            'from_status' => $from?->value,
+            'to_status' => $to->value,
+            'changed_by_user_id' => Auth::id(),
+            'department_id' => $row->permitType?->issuing_department_id,
+            'note' => $note,
+        ]);
         Audit::log('clearance.status_changed', $row, [
             'application_id' => $row->application_id,
             'permit_type_id' => $row->permit_type_id,
@@ -757,7 +778,17 @@ class WorkflowService
             ]);
         }
 
-        $this->requireProcessingCategory($app);
+        /*
+         * The processing-category gate stood here until 27 September 2026.
+         *
+         * It refused to approve a filing nobody had classified, because
+         * `Ra11032::tierFor()` was our guess and RA 11032 leaves the
+         * classification to the LGU. Malabon has published theirs — new and
+         * renewal business permits are Simple — so the tier is now read from
+         * the charter and can never be unknown. There is nothing left to
+         * confirm, and a gate on a question with one answer is a step that
+         * only ever costs an officer a click.
+         */
 
         DB::transaction(function () use ($app, $remarks) {
             $this->completeAssignment($app, $this->bploDepartmentId(), $remarks);
@@ -772,7 +803,87 @@ class WorkflowService
                 ApplicationStatus::PendingPayment,
                 'BPLO approved the application form. The Tax Order of Payment is ready.',
             );
+
+            $this->raiseTinRequirement($app);
         });
+    }
+
+    /** The system's key for the automatic "you left your TIN blank" requirement. */
+    public const TIN_REQUIREMENT_KEY = 'business.tin';
+
+    /**
+     * Ask for the TIN the applicant did not give, without holding anything up.
+     *
+     * Raised inside the approval transaction, so a filing cannot reach
+     * Pending Payment carrying a blank TIN and no requirement to fix it —
+     * the two facts are written together or not at all.
+     *
+     * `requested_by_user_id` is null on purpose. The column is nullable and
+     * this requirement has no author: attributing it to whichever officer
+     * pressed Approve would put a person's name on a sentence they did not
+     * write and a judgement they did not make. The DEPARTMENT is BPLO's,
+     * because BPLO is the office that must close it.
+     */
+    private function raiseTinRequirement(Application $app): void
+    {
+        $business = $app->business;
+        if ($business === null || trim((string) $business->tin) !== '') {
+            return;
+        }
+
+        /*
+         * Never twice. A renewal is a fresh filing and gets its own, but one
+         * filing returned and re-approved must not stack a second copy of
+         * the same question on the applicant.
+         */
+        $exists = OfficerRequest::where('application_id', $app->id)
+            ->where('system_key', self::TIN_REQUIREMENT_KEY)
+            ->exists();
+        if ($exists) {
+            return;
+        }
+
+        $req = OfficerRequest::create([
+            'application_id' => $app->id,
+            'requested_by_user_id' => null,
+            'department_id' => $this->bploDepartmentId(),
+            'title' => 'Tax Identification Number (TIN)',
+            'description' =>
+                'You left the Tax Identification Number (TIN) blank on your application form. '
+                .'Type it in your reply below — there is no document to attach. '
+                .'It is the TIN of the owner or the registered entity, as printed on your BIR papers, '
+                .'like 123-456-789-000.',
+            'request_type' => 'message',
+            'system_key' => self::TIN_REQUIREMENT_KEY,
+            'status' => OfficerRequestStatus::Pending,
+        ]);
+
+        Audit::log('request.raised_by_system', $req, [
+            'application_id' => $app->id,
+            'business_id' => $business->id,
+            'system_key' => self::TIN_REQUIREMENT_KEY,
+        ]);
+
+        /*
+         * ── And the applicant is actually told ───────────────────────────
+         *
+         * Added 27 September 2026, the same day the requirement itself was,
+         * after the client asked where "Other Requirements" lives. It was
+         * raised, stored and tested end to end — and notified nobody, so it
+         * sat in the table waiting for someone who had no way to know it was
+         * there. `OfficerRequestController::store` sends this for a
+         * hand-written requirement; a system-raised one owes the applicant
+         * exactly the same word.
+         *
+         * The wording is the officer-raised one's, unchanged. "An officer
+         * requested" is true enough — BPLO's approval is what raised it and
+         * BPLO is the office that will close it — and a second near-identical
+         * sentence for the system's own case would be two spellings of one
+         * event in the applicant's notification list.
+         */
+        if ($app->applicant) {
+            $this->notify->requestCreated($req->load('application'), $app->applicant);
+        }
     }
 
     /** BPLO returns the main form for revision. for_approval → returned. */
@@ -781,9 +892,21 @@ class WorkflowService
      *   code the system owns. Null is a perfectly good return — the prose is
      *   never parsed to derive one, the same rule `returnClearance` follows.
      */
-    public function returnMainForm(Application $app, string $remarks, ?string $target = null): void
-    {
-        DB::transaction(function () use ($app, $remarks, $target) {
+    /**
+     * @param  array<string, string>  $notes  One remark per returned field,
+     *   keyed by the same `form:` code as $target. Client, 27 September
+     *   2026: *"Allow to put 1 comment/remark per field selected, not just 1
+     *   remark for all fields."* Empty is still valid — a return that names
+     *   no fields carries prose alone, as every return did before the
+     *   picker existed.
+     */
+    public function returnMainForm(
+        Application $app,
+        string $remarks,
+        ?string $target = null,
+        array $notes = [],
+    ): void {
+        DB::transaction(function () use ($app, $remarks, $target, $notes) {
             /*
              * REPLACED on every return, including with null — `returnClearance`
              * says why at length: a stale pointer from a previous round flags a
@@ -797,6 +920,26 @@ class WorkflowService
                     'remarks' => $remarks,
                     'remarks_target' => $target,
                 ]);
+
+            /*
+             * The notes are replaced as a SET, on the pointer's own reasoning
+             * one comment up: a note left over from a previous round sits
+             * under a field this round is not about and tells the applicant
+             * to fix something nobody asked about.
+             */
+            ApplicationReturnNote::where('application_id', $app->id)->delete();
+            foreach ($notes as $code => $note) {
+                $text = trim((string) $note);
+                if ($text === '') {
+                    continue;
+                }
+                ApplicationReturnNote::create([
+                    'application_id' => $app->id,
+                    'target' => $code,
+                    'note' => $text,
+                ]);
+            }
+
             $this->transition($app, ApplicationStatus::Returned, $remarks);
         });
     }
@@ -817,6 +960,41 @@ class WorkflowService
     {
         $app->update(['rejection_reason' => $reason, 'decided_at' => now()]);
         $this->transition($app, ApplicationStatus::Rejected, $reason);
+
+        /*
+         * ── The certificate goes with the filing ─────────────────────────
+         *
+         * This method wrote to the application row and nothing else, which
+         * was right while the permit was minted at the very end. Since the
+         * release moved to payment on 24 September 2026 it was not: BPLO
+         * could reject a paid filing and leave the Business Permit Active and
+         * still answering yes on the public /verify page, so the applicant
+         * kept trading on a certificate attached to a refused application.
+         *
+         * Suspended rather than revoked — see the note above the method.
+         *
+         * Only an ACTIVE one, the same rule `suspendOutcomePermit` follows: an
+         * expired or superseded certificate is not something anyone can trade
+         * on, and overwriting its status would lose how its term actually
+         * ended.
+         */
+        $permit = $this->outcomePermitFor($app);
+        if ($permit !== null && $permit->status === PermitStatus::Active) {
+            $permit->update(['status' => PermitStatus::Suspended]);
+
+            /*
+             * Its own audit action, not `permit.suspended`. That one records
+             * WHICH office refused WHICH clearance, and nothing was refused
+             * here — BPLO ended the filing. Reusing it would put a cause in
+             * the trail that did not happen.
+             */
+            Audit::log('permit.suspended_on_rejection', $permit, [
+                'application_id' => $app->id,
+                'business_id' => $app->business_id,
+                'reason' => $reason,
+            ]);
+        }
+
         $this->notify->applicationRejected($app, $reason);
     }
 
@@ -2355,7 +2533,17 @@ class WorkflowService
      */
     public function approveOverall(Application $app, ?string $remarks = null): void
     {
-        $this->requireProcessingCategory($app);
+        /*
+         * The processing-category gate stood here until 27 September 2026.
+         *
+         * It refused to approve a filing nobody had classified, because
+         * `Ra11032::tierFor()` was our guess and RA 11032 leaves the
+         * classification to the LGU. Malabon has published theirs — new and
+         * renewal business permits are Simple — so the tier is now read from
+         * the charter and can never be unknown. There is nothing left to
+         * confirm, and a gate on a question with one answer is a step that
+         * only ever costs an officer a click.
+         */
 
         $app->load('permitTypes');
         $outstanding = $this->outstandingClearances($app);
@@ -2565,7 +2753,17 @@ class WorkflowService
             ]);
         }
 
-        $this->requireProcessingCategory($app);
+        /*
+         * The processing-category gate stood here until 27 September 2026.
+         *
+         * It refused to approve a filing nobody had classified, because
+         * `Ra11032::tierFor()` was our guess and RA 11032 leaves the
+         * classification to the LGU. Malabon has published theirs — new and
+         * renewal business permits are Simple — so the tier is now read from
+         * the charter and can never be unknown. There is nothing left to
+         * confirm, and a gate on a question with one answer is a step that
+         * only ever costs an officer a click.
+         */
 
         /*
          * ── A move waits for CPDO ────────────────────────────────────────────
@@ -3064,10 +3262,17 @@ class WorkflowService
         $this->rejectClearance($row, $reason, $remedy);
     }
     /** An office returned its queue item. BPLO returns the form; an OP returns its permit. */
+    /**
+     * @param  array<string, string>  $notes  One remark per returned field —
+     *   only meaningful on the BPLO main-form branch below, which is the only
+     *   return that names wizard fields. Passed straight through rather than
+     *   inspected here: `returnMainForm` owns what a note means.
+     */
     public function returnAssignment(
         ApplicationAssignment $assignment,
         string $remarks,
         ?string $target = null,
+        array $notes = [],
     ): void {
         $app = $assignment->application;
         // The BPLO branch below looks a permit up by code on this collection;
@@ -3131,7 +3336,7 @@ class WorkflowService
              * way. `OfficeFormController::ownerMayEdit` only reopens the office
              * form, never sections A–E, so that office has to ask BPLO.
              */
-            $this->returnMainForm($app, $remarks, $target);
+            $this->returnMainForm($app, $remarks, $target, $notes);
 
             return;
         }
@@ -3546,7 +3751,15 @@ class WorkflowService
             ->first();
     }
 
-    private function bploDepartmentId(): ?int
+    /**
+     * The office that issues the Business Permit.
+     *
+     * Public since 27 September 2026: the corrections route has to find BPLO's
+     * own assignment to read which fields it ticked when it returned the
+     * filing, and re-deriving that from `PermitType::OUTCOME_CODE` in a
+     * controller would be a second copy of the one fact this answers.
+     */
+    public function bploDepartmentId(): ?int
     {
         return PermitType::where('code', PermitType::OUTCOME_CODE)->value('issuing_department_id');
     }

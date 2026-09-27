@@ -605,12 +605,32 @@ class AssignmentController extends Controller
              * nothing, which is the same outcome as sending none, so there is
              * nothing here worth a 422.
              */
-            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:120'],
+            /*
+             * Several codes, comma-separated, since 27 September 2026 —
+             * the client ruled that a return names the FIELDS the applicant
+             * must correct. 600 rather than 120: a code averages 25
+             * characters and the old cap silently cut a five-field return in
+             * half at the database.
+             */
+            'remarks_target' => ['sometimes', 'nullable', 'string', 'max:600'],
+            /*
+             * One remark per returned field, keyed by the same code as
+             * `remarks_target`. Not validated against a list, for the reason
+             * the pointer above is not: a key matching nothing addresses
+             * nothing, which is the same outcome as omitting it.
+             */
+            'remarks_notes' => ['sometimes', 'array'],
+            'remarks_notes.*' => ['nullable', 'string', 'max:1000'],
         ], [
             'remarks.required' => 'Explain what the applicant needs to fix.',
         ]);
 
-        $this->workflow->returnAssignment($assignment, $data['remarks'], $data['remarks_target'] ?? null);
+        $this->workflow->returnAssignment(
+            $assignment,
+            $data['remarks'],
+            $data['remarks_target'] ?? null,
+            $data['remarks_notes'] ?? [],
+        );
         $this->recordHolder($request, $assignment);
 
         return response()->json([

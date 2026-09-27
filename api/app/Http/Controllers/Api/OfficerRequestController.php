@@ -13,6 +13,7 @@ use App\Services\NotificationService;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -548,7 +549,35 @@ class OfficerRequestController extends Controller
 
         $outcome = OfficerRequestStatus::from($data['outcome']);
 
-        DB::transaction(function () use ($officerRequest, $request, $data, $outcome) {
+        /*
+         * ── A system requirement whose answer has somewhere to go ────────
+         *
+         * Checked BEFORE the transaction opens, so a reply that is not a TIN
+         * refuses the acceptance without having written anything — the same
+         * rule the workflow guards follow. See App\Support\Tin.
+         */
+        $tinToStore = null;
+        if (
+            $outcome === OfficerRequestStatus::Fulfilled
+            && $officerRequest->system_key === WorkflowService::TIN_REQUIREMENT_KEY
+        ) {
+            $reply = (string) ($officerRequest->responses()->latest('id')->first()?->body ?? '');
+            $tinToStore = Tin::normalize($reply);
+
+            if (! Tin::isValid($tinToStore)) {
+                throw ValidationException::withMessages([
+                    'outcome' => [
+                        $reply === ''
+                            ? 'There is nothing to accept yet — the applicant has not replied with a TIN.'
+                            : 'That reply is not a TIN, so it cannot be recorded against the business. '
+                              .'A TIN is 9 digits, plus a branch code if there is one, like 123-456-789-000. '
+                              .'Send it back with Needs Resubmission instead.',
+                    ],
+                ]);
+            }
+        }
+
+        DB::transaction(function () use ($officerRequest, $request, $data, $outcome, $tinToStore) {
             $officerRequest->update([
                 'status' => $outcome,
                 'reviewed_by_user_id' => $request->user()->id,
@@ -580,6 +609,23 @@ class OfficerRequestController extends Controller
                 'reviewed_at' => now(),
                 'reviewed_by_user_id' => $request->user()->id,
             ]);
+
+            /*
+             * The answer goes where the question came from. Inside the same
+             * transaction as the closure above, so the requirement cannot be
+             * marked satisfied while the column it was asked for stays blank.
+             */
+            if ($tinToStore !== null) {
+                $business = $officerRequest->application->business;
+                $business?->update(['tin' => $tinToStore]);
+
+                if ($business !== null) {
+                    Audit::log('business.tin_recorded', $business, [
+                        'application_id' => $officerRequest->application_id,
+                        'officer_request_id' => $officerRequest->id,
+                    ]);
+                }
+            }
         });
 
         Audit::log('request.closed', $officerRequest, [

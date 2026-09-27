@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
+import { mainFormTargets } from '../../lib/returnTargets'
 import { PsicPicker, type PsicPickerHandle } from '../../components/PsicPicker'
 import {
   OFFICE_FORM_CODES,
@@ -435,6 +436,32 @@ const OTHER_DOC_CODE = 'OTHER'
  * always leaves the work saved.
  */
 const AUTOSAVE_DELAY_MS = 1200
+
+/*
+ * Where step 1 lives until the API will accept it.
+ *
+ * Per tab, and gone when the tab is. The reasoning for sessionStorage over
+ * localStorage is on the effects that use this, and it is about a shared
+ * terminal at City Hall rather than about storage.
+ */
+const DRAFT_BACKUP_KEY = 'biztrack:apply:pre-draft'
+/*
+ * Bumped whenever `FormState` or `FeeProfileDraft` changes shape. A backup
+ * from an older build would restore fields that have moved or gone, which is
+ * a worse outcome than starting blank — so a mismatch is discarded in
+ * silence.
+ */
+const DRAFT_BACKUP_VERSION = 1
+
+type DraftBackup = {
+  v: number
+  at: string
+  applicationType: ApplicationType
+  title: string
+  form: FormState
+  feeDraft: FeeProfileDraft
+  consent: boolean
+}
 
 /*
  * The Mayor's / Business Permit is the OUTCOME of the application, not a
@@ -2846,6 +2873,53 @@ export function ApplyWizard() {
   const [dirty, setDirty] = useState(false)
   const [autosaveNonce, setAutosaveNonce] = useState(0)
   const savedSnapshotRef = useRef<string | null>(null)
+
+  /*
+   * ── The pre-draft backup ──────────────────────────────────────────
+   *
+   * Everything typed before a server draft can legally exist. See the
+   * note on `canCreateDraft`: until street, barangay and a line of
+   * business are answered on step 2, the API will not take the business,
+   * so step 1 lives nowhere else.
+   *
+   * Per tab and gone with it. Every read and write is wrapped, because
+   * sessionStorage THROWS rather than returning null in a locked-down
+   * browser, and a form that will not open is a worse failure than a
+   * form that does not remember.
+   */
+  const backupRestoredRef = useRef(false)
+  const [recovered, setRecovered] = useState(false)
+  /*
+   * Has the restore below had its turn AND landed?
+   *
+   * State rather than a ref, and that is the whole point of it. Effects run in
+   * declaration order within one commit, so a ref set by the restore effect is
+   * already true when the backup effect runs in that same commit — with the
+   * form still EMPTY, because the restore's setState has not rendered yet.
+   * Gating on state defers the first write to the commit AFTER the restored
+   * answers are actually in the form.
+   */
+  const [restoreSettled, setRestoreSettled] = useState(false)
+
+  function readBackup(): DraftBackup | null {
+    try {
+      const raw = sessionStorage.getItem(DRAFT_BACKUP_KEY)
+      if (!raw) return null
+      const parsed = JSON.parse(raw) as DraftBackup
+      // A backup written by an older build describes a different form.
+      return parsed.v === DRAFT_BACKUP_VERSION ? parsed : null
+    } catch {
+      return null
+    }
+  }
+
+  function clearBackup(): void {
+    try {
+      sessionStorage.removeItem(DRAFT_BACKUP_KEY)
+    } catch {
+      /* Nothing to do, and nothing worth telling the applicant. */
+    }
+  }
   const inFlightRef = useRef(false)
 
   // Renewal/amendment prefill (v2): reuse an existing business + link prior permit.
@@ -2943,6 +3017,14 @@ export function ApplyWizard() {
   // Persisted draft ids (business + application) once the draft exists.
   const [businessId, setBusinessId] = useState<number | null>(null)
   const [applicationId, setApplicationId] = useState<number | null>(null)
+  /**
+   * The wizard steps a returned filing is allowed to show.
+   *
+   * Empty for every filing that was not returned about a section, which is
+   * almost all of them — and empty therefore means "no restriction", not
+   * "no steps". See the `sequence` memo.
+   */
+  const [returnedPhases, setReturnedPhases] = useState<string[]>([])
   /**
    * The filing's own date, for FO-003's "Date of Application" line.
    *
@@ -4096,6 +4178,23 @@ export function ApplyWizard() {
   )
 
   const sequence: Phase[] = useMemo(() => {
+    /*
+     * ── A returned filing shows only what it was returned about ───────
+     *
+     * Before every other branch, because it outranks all of them: a
+     * renewal or an amendment sent back about its documents is still a
+     * filing whose applicant was asked for one thing.
+     *
+     * Review is appended so the filing can be sent; Privacy is not, since
+     * the consent is already on the record and asking again would imply it
+     * had lapsed.
+     */
+    if (returnedPhases.length > 0) {
+      const ordered = BASE_PHASES.filter((p) => returnedPhases.includes(p))
+
+      return [...ordered, 'review'] as Phase[]
+    }
+
     if (applicationType === 'amendment') {
       if (!amendMovesPremises) return AMENDMENT_PHASES
 
@@ -4117,7 +4216,7 @@ export function ApplyWizard() {
     if (renewsBusinessPermit) return RENEWAL_PHASES
 
     return BASE_PHASES
-  }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit])
+  }, [applicationType, amendMovesPremises, officeSteps, renewsBusinessPermit, returnedPhases])
 
   const totalParts = sequence.length
   const stepIndex = Math.min(step, sequence.length - 1)
@@ -4318,13 +4417,26 @@ export function ApplyWizard() {
            *
            * Every other blank is a question the applicant chose to skip and an
            * em dash is the whole story. This blank has a consequence attached
-           * to it — an Other Requirement that holds the filing — and the
-           * Confirm step is the last place it can be mentioned before that
-           * becomes news rather than a choice.
+           * to it, and the Confirm step is the last place it can be mentioned
+           * before that becomes news rather than a choice.
+           *
+           * ── It used to name the wrong consequence ────────────────────────
+           *
+           * "an officer will ask for it under Other Requirements", from
+           * 24 September 2026 until the client questioned it on the 27th.
+           * Nothing in the system does that — there is no TIN document type
+           * and no code that creates one — and it framed a FIELD as an
+           * attachment, so an applicant who skipped item 3 was told to expect
+           * a document request while an applicant who filled it in was asked
+           * for nothing. Same requirement, two different kinds.
+           *
+           * What actually happens is a targeted return: `form:tin` is a
+           * return target, so BPLO sends the form back pointed at item 3 and
+           * the applicant fills the box in. Described here in those terms.
            */
           value:
             form.tin.trim() ||
-            'Not given — an officer will ask for it under Other Requirements.',
+            'Not given — you will be asked for it once BPLO approves this form.',
         },
         { label: '4. Business Name', value: form.name },
         { label: '5. Trade Name / Franchise', value: form.trade_name },
@@ -5106,7 +5218,17 @@ export function ApplyWizard() {
               missing.push('Name of President / OIC')
             }
             if (!form.citizenship.trim()) missing.push('Citizenship of the President / OIC')
-            if (!form.capital_participation_filipino.trim()) {
+            /*
+             * Not for a sole proprietor: item 17 is derived from item 16 and
+             * read-only, so a blank here means item 16 is blank — already
+             * reported on the line above. Listing both would name two things
+             * to go and fix when there is one, and point at a box that does
+             * not take typing.
+             */
+            if (
+              form.registration_type !== 'sole_proprietorship'
+              && !form.capital_participation_filipino.trim()
+            ) {
               missing.push('Capital Participation (Filipino)')
             }
           }
@@ -5750,6 +5872,66 @@ export function ApplyWizard() {
     // avoid a redundant write; depending on it would not change the outcome.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oicIsProprietor, proprietorFullName])
+
+  /**
+   * Item 16 answered as Other, while the box for WHICH is still empty.
+   *
+   * The select has no value of its own — `form.citizenship` holds the
+   * nationality and the mode is read back off it, so a reopened draft lands
+   * on the right option without a second field to keep in step. That works
+   * for every state but one: the instant Other is chosen the nationality is
+   * cleared so it can be typed, and a blank string is indistinguishable from
+   * nothing chosen. This remembers that one transition and nothing else.
+   */
+  const [citizenshipOther, setCitizenshipOther] = useState(false)
+
+  /** Which option item 16's select is sitting on. */
+  const citizenshipMode: '' | 'filipino' | 'other' =
+    form.citizenship.trim() === '' && !citizenshipOther
+      ? ''
+      : !citizenshipOther && form.citizenship.trim().toLowerCase() === 'filipino'
+        ? 'filipino'
+        : 'other'
+
+  /**
+   * Item 17 for a sole proprietor, which is item 16 restated as a number.
+   *
+   * One owner, no separate juridical personality, so the capital is theirs
+   * and the Filipino share can only be all of it or none of it. See the
+   * reasoning on the select below.
+   *
+   * Blank until item 16 is actually answered — including while Other is
+   * chosen and the nationality box is still empty. Writing 0 there would
+   * show a foreign-owned figure to somebody who has not yet said they are
+   * foreign, and 0 is a real answer, not a placeholder.
+   */
+  const derivedFilipinoShare =
+    citizenshipMode === 'filipino'
+      ? '100'
+      : citizenshipMode === 'other' && form.citizenship.trim() !== ''
+        ? '0'
+        : ''
+
+  useEffect(() => {
+    if (!oicIsProprietor) return
+    if (form.capital_participation_filipino === derivedFilipinoShare) return
+
+    /*
+     * Mirrored rather than seeded, on item 15's reasoning exactly: the box
+     * is read-only for a sole proprietor, so there is nothing of the
+     * applicant's to overwrite, and a figure left standing after they
+     * changed item 16 would be one the form invented and nobody could
+     * delete.
+     *
+     * Not for a corporation, partnership or cooperative — their capital is
+     * pooled and the share is a real number the applicant knows and we do
+     * not. That is where the 60/40 rules actually bite.
+     */
+    update('capital_participation_filipino', derivedFilipinoShare)
+    // `update` is stable; the current value is read only to skip a
+    // redundant write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [oicIsProprietor, derivedFilipinoShare])
 
   /**
    * Item 94 — choosing a structure, and what that does to the number already
@@ -7075,6 +7257,97 @@ export function ApplyWizard() {
     hydrateFailed,
   ])
 
+  /*
+   * ── Give back what was typed before the draft could exist ─────────
+   *
+   * Once, on a fresh `new` filing that has nothing in it yet. Not for a
+   * reopened draft — that one has a server copy, which outranks this —
+   * and not while the hydration of one is still running.
+   */
+  useEffect(() => {
+    if (backupRestoredRef.current) return
+    if (draftIdParam || applicationId || hydrating || applicationType !== 'new') return
+    backupRestoredRef.current = true
+
+    const backup = readBackup()
+    if (backup && backup.applicationType === 'new') {
+      setTitle(backup.title)
+      setForm(backup.form)
+      setFeeDraft(backup.feeDraft)
+      setConsent(backup.consent)
+      setRecovered(true)
+    }
+
+    /*
+     * Set whether or not anything came back, and batched with the writes
+     * above so both land in the same commit. This is the signal the backup
+     * effect waits for — until it flips, that effect must not write, because
+     * the form it would be reading is the empty one this commit still shows.
+     */
+    setRestoreSettled(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftIdParam, applicationId, hydrating, applicationType])
+
+  /*
+   * Written on every edit while the server still has nothing, and dropped
+   * the moment it has something — from then on the draft row is the copy
+   * that matters, and a stale duplicate in the tab could only ever be
+   * restored OVER newer work.
+   */
+  useEffect(() => {
+    if (applicationType !== 'new' || hydrating || hydrateFailed) return
+    if (applicationId) {
+      clearBackup()
+      return
+    }
+    /*
+     * Never before the restore above has landed.
+     *
+     * Effects run in declaration order, so on the very first commit this one
+     * fires with the form still EMPTY — after the restore has READ the backup
+     * but before its state update has rendered. Writing then would put that
+     * empty form straight over the backup, and although the next render puts
+     * the restored answers back, a tab killed inside that window loses the
+     * very thing this exists to keep.
+     *
+     * `restoreSettled` and not `backupRestoredRef` for exactly this: the ref
+     * is already true by the time this runs in that first commit.
+     */
+    if (!restoreSettled) return
+    try {
+      sessionStorage.setItem(
+        DRAFT_BACKUP_KEY,
+        JSON.stringify({
+          v: DRAFT_BACKUP_VERSION,
+          at: new Date().toISOString(),
+          applicationType,
+          title,
+          form,
+          feeDraft,
+          consent,
+        } satisfies DraftBackup),
+      )
+    } catch {
+      /*
+       * Private mode, a full quota, or storage switched off. The form
+       * keeps working exactly as it did before this existed; there is
+       * nothing to warn about that the "Not saved yet" indicator is not
+       * already saying.
+       */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshot, applicationId, applicationType, hydrating, hydrateFailed, restoreSettled])
+
+  /** "Start blank" on the recovery notice: throw the restored answers away. */
+  function discardRecovery(): void {
+    clearBackup()
+    setTitle('')
+    setForm(EMPTY)
+    setFeeDraft(EMPTY_FEE_PROFILE)
+    setConsent(false)
+    setRecovered(false)
+  }
+
   /* Closing the tab mid-form should not silently take the answers with it. */
   useEffect(() => {
     if (!dirty) return
@@ -7387,6 +7660,30 @@ export function ApplyWizard() {
         setApplicationType(app.application_type)
         setApplicationId(app.id)
         setFiledAt(app.submitted_at ?? app.created_at)
+        /*
+         * Which sections BPLO ticked when it returned this filing, if it
+         * did. Read once at hydration rather than kept live: the applicant
+         * is mid-correction from here on, and a list that changed under
+         * them would move the steps out from under the one they are on.
+         *
+         * Only while RETURNED. The pointer survives resubmission so the
+         * officer can still see what the last round was about, and
+         * restricting a filing that is back with BPLO would lock an
+         * applicant out of a form nobody has asked them to change.
+         */
+        setReturnedPhases(
+          app.status === 'returned'
+            ? Array.from(
+                new Set(
+                  app.assignments
+                    .flatMap((a) => mainFormTargets(a.remarks_target))
+                    .filter((t) => t.kind === 'section')
+                    .map((t) => t.phase)
+                    .filter((p): p is string => p !== undefined),
+                ),
+              )
+            : [],
+        )
         setTitle(app.title ?? '')
         // A draft that arrives already named was named by somebody. Treat that
         // as the applicant's own words and stop generating over it, even if the
@@ -7880,6 +8177,29 @@ export function ApplyWizard() {
           Clear All
         </button>
       </div>
+
+      {/*
+        Shown only when a recovery actually happened, and only until they
+        act on it. It says what was recovered and what had NOT happened —
+        "nothing had reached the server" is the part that explains why the
+        filing is not in their drafts list, which is where somebody who
+        lost work goes looking first.
+      */}
+      {recovered && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3">
+          <p className="text-sm font-medium text-royal">
+            Recovered the answers you had typed in this tab. They had not reached the server
+            yet, so this filing is not in your drafts list.
+          </p>
+          <button
+            type="button"
+            onClick={discardRecovery}
+            className="shrink-0 text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+          >
+            Start blank
+          </button>
+        </div>
+      )}
 
       {/* ── Full section map: every step this application requires ─────── */}
       <ol className="mb-8 flex flex-wrap gap-2" aria-label="Application sections">
@@ -9103,28 +9423,26 @@ export function ApplyWizard() {
                   errorId="tin-error"
                 />
                 {/*
-                  What skipping it costs, said once and only when it applies.
+                  The note that used to float here is gone — 27 September 2026.
 
-                  Client: *"put a message or something somewhere that not
-                  submitting a TIN here will be asked for the Other
-                  Requirements."* A modal was offered; this is not one. A
-                  dialog would interrupt every applicant who tabs past the
-                  field on their way to the next question, to tell them about a
-                  consequence they can undo by typing twelve digits — and this
-                  form has spent the week having descriptions taken OUT of it.
+                  It said the same two things the label and the Confirm step now
+                  say between them, and it said them from a bubble anchored
+                  `bottom-full`, which put it over item 1. Client: *"this
+                  message should only appear once Next is clicked for it not to
+                  block the other fields."*
 
-                  So it appears where the error used to, on the same trigger:
-                  the applicant has left the question and left it empty. It is
-                  silent for anybody who fills it in, and the Confirm step says
-                  the same thing again for anybody who never reached the field
-                  at all.
+                  Waiting for Next would not have fixed it. The overlap is the
+                  same whenever it draws, and an applicant with no TIN never
+                  clears the condition, so the bubble would simply have arrived
+                  later and then stayed — in the instant the red ones appear,
+                  reporting that a valid choice was validly taken.
+
+                  The fact that it is optional is on the label, where it is read
+                  BEFORE the boxes and where every other question on this step
+                  states the same thing. The consequence is on Confirm, which
+                  prints it in place of the em dash on the last screen before
+                  the filing goes in. See TinInput's legend.
                 */}
-                {!fieldErrors.tin && touched.tin && !form.tin.trim() && (
-                  <FieldError tone="note">
-                    Optional. Leave it blank and an officer will ask for it under Other
-                    Requirements, which holds the filing until you answer.
-                  </FieldError>
-                )}
                 {/*
                   Off the page, still announced. The shape is visible in the
                   four boxes themselves, but "leave the last box empty if you
@@ -9537,34 +9855,124 @@ export function ApplyWizard() {
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
                           16. Citizenship (of President/OIC)
                         </FieldLabel>
+                        {/*
+                          A choice, not a sentence. It was free text, which put
+                          "Filipino", "filipino" and "Pilipino" into the city's
+                          business register as three different answers to one
+                          question — and the register is the only reason this
+                          field is asked, since nothing in BizTrack reads it to
+                          decide anything.
+
+                          It also makes item 17 computable for a sole
+                          proprietor, which is what the client asked about on
+                          27 September 2026.
+
+                          Two options and not a country list. The paper asks
+                          citizenship because the register counts Filipino and
+                          non-Filipino ownership; which foreign nationality is
+                          the applicant's to write, and a dropdown of two
+                          hundred would be a worse way to say "Chinese" than a
+                          box.
+                        */}
+                        <select
+                          value={citizenshipMode}
+                          onChange={(e) => {
+                            const mode = e.target.value
+                            setCitizenshipOther(mode === 'other')
+                            // Filipino writes itself; the other two clear the
+                            // box so nothing typed under one option is
+                            // submitted under another.
+                            update('citizenship', mode === 'filipino' ? 'Filipino' : '')
+                          }}
+                          className={inputCls}
+                        >
+                          <option value="">Select</option>
+                          <option value="filipino">Filipino</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </label>
+                      {/*
+                        Only for the rare filing, so only the rare filing pays
+                        the extra line in a row the client packed deliberately.
+                      */}
+                      {citizenshipMode === 'other' && (
                         <input
                           value={form.citizenship}
                           onChange={(e) => update('citizenship', e.target.value)}
+                          placeholder="Which nationality"
                           maxLength={100}
-                          className={inputCls}
+                          aria-label="Citizenship of the President or Officer in Charge"
+                          className={`${inputCls} mt-2`}
                         />
-                      </label>
+                      )}
                     </div>
                     <div className="relative grow basis-[11rem]">
                       <label className="block">
                         <FieldLabel required={hasPresidentOrOfficer(form.registration_type)}>
                           17. Capital Participation (% Filipino)
                         </FieldLabel>
+                        {/*
+                          Locked for a sole proprietor, the way item 15 is, and
+                          for the same reason: it is not a second question, it
+                          is item 16 restated. Typed for every other structure,
+                          where the share is pooled and genuinely varies.
+
+                          `readOnly`, never `disabled` — a disabled control is
+                          skipped by the tab order and its value is dropped from
+                          a form submission (AGENTS 6.2). The grey is the same
+                          one item 15 uses, because read-only has no appearance
+                          of its own and without it the box looks editable and
+                          refuses to be edited.
+                        */}
                         <input
                           inputMode="decimal"
                           value={form.capital_participation_filipino}
                           onChange={(e) => update('capital_participation_filipino', e.target.value)}
                           onBlur={() => touch('capital_participation_filipino')}
-                          placeholder="e.g. 100"
-                          className={`${inputCls} tnum`}
-                          aria-invalid={Boolean(fieldErrors.capital_participation_filipino)}
+                          /*
+                           * A locked box with nothing in it and a red asterisk
+                           * beside it reads as broken — reported on
+                           * 27 September 2026 from the one state where it
+                           * happens: Other chosen in item 16, nationality not
+                           * yet typed, so there is nothing to derive from yet.
+                           * The placeholder says where the figure comes from
+                           * instead of leaving the applicant to guess why the
+                           * box refuses them.
+                           */
+                          placeholder={oicIsProprietor ? 'Follows item 16' : 'e.g. 100'}
+                          readOnly={oicIsProprietor}
+                          aria-readonly={oicIsProprietor || undefined}
                           aria-describedby={
                             fieldErrors.capital_participation_filipino
                               ? 'capital-participation-error'
+                              : oicIsProprietor
+                                ? 'capital-participation-derived'
+                                : undefined
+                          }
+                          title={
+                            oicIsProprietor
+                              ? 'A sole proprietor owns all of the capital, so this follows item 16.'
                               : undefined
                           }
+                          className={`${inputCls} tnum ${
+                            oicIsProprietor ? 'cursor-not-allowed bg-line/60 text-ink-secondary' : ''
+                          }`}
+                          aria-invalid={Boolean(fieldErrors.capital_participation_filipino)}
                         />
                       </label>
+                      {/*
+                        Why the box will not take a keystroke, for the reader who
+                        cannot see that it is grey. `sr-only` on item 15's
+                        reasoning: a sighted applicant has the grey box, the
+                        figure already in it and the title on hover, and this
+                        form has spent the week having explanations taken out.
+                      */}
+                      {oicIsProprietor && (
+                        <p id="capital-participation-derived" className="sr-only">
+                          A sole proprietor owns all of the capital, so this is 100 percent when
+                          item 16 is Filipino and 0 percent otherwise. It cannot be edited here.
+                        </p>
+                      )}
                       {fieldErrors.capital_participation_filipino && (
                         <FieldError id="capital-participation-error">
                           {fieldErrors.capital_participation_filipino}
@@ -10258,6 +10666,22 @@ export function ApplyWizard() {
               <p className="mt-1 text-xs text-ink-muted">
                 Attach any other supporting documents. You can add more than one file.
               </p>
+              {/*
+                No TIN notice here — 27 September 2026.
+
+                One stood here for part of a day, saying an officer would ask
+                for the TIN under Other Requirements. Both halves were wrong.
+                Nothing in the system puts a TIN here: there is no TIN document
+                type, and no code that would make one. And a TIN is a FIELD, so
+                a blank one is not a missing attachment — asking for it in the
+                document bin would make the requirement change KIND depending on
+                whether it was answered, which is the inconsistency the client
+                named.
+
+                A blank TIN is chased by returning the form pointed at item 3
+                (`form:tin` in returnTargets.ts), which reopens that box for the
+                applicant to fill in. The Confirm step says so.
+              */}
               {otherDocs.length > 0 && (
                 <ul className="mt-3 space-y-2">
                   {otherDocs.map((f) => (
@@ -10408,7 +10832,12 @@ export function ApplyWizard() {
            * be freely given and informed *before* collection, so it is the
            * first thing on the form and nothing is asked until it is given.
            */}
-          <p className="max-w-2xl text-justify text-sm leading-relaxed text-ink-secondary">
+          {/*
+            Full width and justified, not capped at `2xl`. The card is already
+            narrower than the page, so a reading-width cap inside it measured
+            the text twice and left a third of the step empty.
+          */}
+          <p className="text-justify text-sm leading-relaxed text-ink-secondary">
             I have read and understood the Data Privacy Policy and hereby give my consent to the
             City Government of Malabon, and any person acting on its behalf, to collect, store,
             record, process and update my personal data as part of its database and to share said
@@ -10416,7 +10845,8 @@ export function ApplyWizard() {
             government units, pursuant to the Data Privacy Act of 2012 (RA 10173).
           </p>
 
-          <label className="mt-4 flex max-w-2xl cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3.5 text-sm font-semibold text-royal">
+          {/* A control, so it meets the edges of the surface it sits on. */}
+          <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-royal-tint px-4 py-3.5 text-sm font-semibold text-royal">
             <input
               type="checkbox"
               checked={consent}
@@ -10428,11 +10858,6 @@ export function ApplyWizard() {
               <span className="text-s-red"> *</span>
             </span>
           </label>
-
-          <p className="mt-3 max-w-2xl text-xs text-ink-muted">
-            You can withdraw this consent by contacting the BPLO, though doing so means the office
-            can no longer process an application in your name.
-          </p>
         </div>
       )}
 

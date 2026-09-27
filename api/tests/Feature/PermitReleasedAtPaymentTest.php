@@ -83,6 +83,40 @@ function paidNewFiling(): Application
 }
 
 /**
+ * A filing stopped where BPLO is still reading it: submitted, nothing paid,
+ * nothing issued.
+ *
+ * `paidNewFiling` above is driven all the way to a released certificate, which
+ * is what most of this file is about. This is the other half of the rejection
+ * pair — the state the feature was written for, where refusing the filing takes
+ * nothing away from the applicant.
+ */
+function filingAtForApproval(): Application
+{
+    $owner = authAs('owner@biztrack.local');
+
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => 'Nothing Released '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'tin' => '123-456-789-000',
+        'address' => ['line1' => '7 Suspension Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 500000]],
+    ])->assertCreated()->json('data.id');
+
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+
+    return Application::findOrFail($appId)->fresh();
+}
+
+/**
  * The Business Permit this filing released, freshly read.
  *
  * Not `outcomePermit` — RenewalOutcomesTest already declares one, and Pest
@@ -194,6 +228,52 @@ it('releases the business permit as soon as the money lands', function () {
 
     // And the filing is still open, because the other five are still running.
     expect($app->fresh()->status)->toBe(ApplicationStatus::AwaitingOtherPermits);
+});
+
+/*
+ * ── Rejecting a filing whose permit is out ───────────────────────────────
+ *
+ * `rejectApplication` only ever wrote to the application row, which was
+ * correct while the permit was minted at the very end. Since the release moved
+ * to payment it was not: BPLO could reject a paid filing and leave the
+ * certificate Active and still answering yes on the public /verify page.
+ *
+ * The first fix REFUSED the rejection, and the suite rejected the fix —
+ * twelve tests reject paid filings, because ending a filing after payment is
+ * an ordinary BPLO act and the "a decided filing takes no more site visits"
+ * rules are defined against it. So the rejection stands and takes the
+ * certificate with it.
+ *
+ * Asserted on the PERMIT as well as the status, because the status alone
+ * passed the whole time the defect existed.
+ */
+it('suspends the released Business Permit when the filing is rejected', function () {
+    $app = paidNewFiling();
+    $permit = businessPermitOf($app);
+    expect($permit->status)->toBe(PermitStatus::Active);
+
+    $this->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Filed in error.'])
+        ->assertOk();
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Rejected)
+        ->and($permit->fresh()->status)->toBe(PermitStatus::Suspended);
+});
+
+/*
+ * And a filing that released nothing is rejected without inventing a permit
+ * to suspend — the ordinary case, and the one that would break loudly if the
+ * lookup above stopped tolerating a null.
+ */
+it('rejects a filing that has released nothing, and touches no permit', function () {
+    $app = filingAtForApproval();
+
+    $this->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/reject", ['reason' => 'Trade is prohibited at this address.'])
+        ->assertOk();
+
+    expect($app->fresh()->status)->toBe(ApplicationStatus::Rejected)
+        ->and(businessPermitOf($app->fresh()))->toBeNull();
 });
 
 it('does not close the filing just because the permit is out', function () {

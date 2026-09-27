@@ -9,14 +9,18 @@ use App\Http\Resources\ApplicationListResource;
 use App\Http\Resources\ApplicationResource;
 use App\Http\Resources\StatusHistoryResource;
 use App\Models\Application;
+use App\Models\ApplicationCorrection;
 use App\Models\ApplicationDocument;
 use App\Models\Business;
 use App\Services\FeeCalculator;
 use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\ReturnTargets;
+use App\Support\Tin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
@@ -30,6 +34,11 @@ class ApplicationController extends Controller
 
     private array $fullEager = [
         'business.address.barangay', 'business.lines.psicCode', 'applicant', 'permitTypes',
+        // What the applicant put right after a return — read by the officer's
+        // sheet, and empty on every filing that was never returned.
+        'corrections',
+        // And what BPLO asked about each of those fields.
+        'returnNotes',
         // What an amendment asks to change; empty on every other filing.
         'requestedChanges',
         /*
@@ -630,6 +639,144 @@ class ApplicationController extends Controller
         ]);
     }
 
+    /**
+     * Correct the fields BPLO returned the filing about, then resubmit.
+     *
+     * @see App\Support\ReturnTargets for which codes this route serves and why
+     *   the section targets ("Line of business", "Uploaded documents") are not
+     *   among them.
+     */
+    public function corrections(Request $request, Application $application): JsonResponse
+    {
+        $this->authorizeOwner($request, $application);
+
+        if ($application->status !== ApplicationStatus::Returned) {
+            throw ValidationException::withMessages([
+                'status' => ['Only a returned application can be corrected.'],
+            ]);
+        }
+
+        /*
+         * The officer's tick, from BPLO's assignment. `returnMainForm` writes
+         * it there and replaces it on every return, so this is always the
+         * CURRENT round's list and never a stale pointer from a previous one.
+         */
+        $assignment = $application->assignments()
+            ->where('department_id', app(WorkflowService::class)->bploDepartmentId())
+            ->first();
+        $open = ReturnTargets::scalars($assignment?->remarks_target);
+
+        if ($open === []) {
+            throw ValidationException::withMessages([
+                'fields' => [
+                    'This filing was not returned about any single field, so there is nothing to '
+                    .'correct here. Open the application to make the changes the remarks ask for.',
+                ],
+            ]);
+        }
+
+        $data = $request->validate([
+            'fields' => ['required', 'array', 'min:1'],
+            'fields.*' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $sent = $data['fields'];
+        $business = $application->business;
+        if ($business === null) {
+            throw ValidationException::withMessages([
+                'fields' => ['This filing has no business record to correct.'],
+            ]);
+        }
+
+        /*
+         * Refused by name. See the note above this method: an ignored field is
+         * an applicant told their correction was saved when it was not.
+         */
+        $notOpen = array_values(array_diff(array_keys($sent), $open));
+        if ($notOpen !== []) {
+            throw ValidationException::withMessages([
+                'fields' => [
+                    'These fields were not part of what BPLO asked you to correct: '
+                    .implode(', ', $notOpen).'.',
+                ],
+            ]);
+        }
+
+        DB::transaction(function () use ($application, $business, $sent) {
+            /*
+             * The three records a scalar correction can land on. Resolved once
+             * rather than per field, so a filing correcting two address fields
+             * saves that row once and cannot half-write it.
+             *
+             * `owner` is the primary BusinessOwner. Nothing currently maps to
+             * it — gender went back to being a section when the enums were
+             * split out — but the relation is resolved here so that adding one
+             * is a line in ReturnTargets rather than a branch in this method.
+             */
+            $records = [
+                'business' => $business,
+                'address' => $business->address,
+                'owner' => $business->owners()->where('is_primary', true)->first(),
+            ];
+
+            foreach ($sent as $code => $value) {
+                $column = ReturnTargets::column($code);
+                $relation = ReturnTargets::relation($code);
+                $record = $records[$relation] ?? null;
+                if ($column === null || $record === null) {
+                    /*
+                     * A field whose record does not exist — a business filed
+                     * before addresses were required, say. Refused rather than
+                     * skipped: silently dropping it would tell the applicant
+                     * their correction was saved when nothing was written.
+                     */
+                    throw ValidationException::withMessages([
+                        'fields' => ["This filing has nowhere to record {$code}."],
+                    ]);
+                }
+
+                $clean = $value === null ? null : trim($value);
+                // The one field with a stored shape of its own. Applied through
+                // the same helper the wizard uses, so both doors agree.
+                if ($code === 'form:tin' && $clean !== null && $clean !== '') {
+                    $clean = Tin::normalize($clean);
+                }
+
+                $before = $record->{$column};
+                $record->{$column} = $clean === '' ? null : $clean;
+
+                /*
+                 * Recorded even when the value did not move. "The applicant
+                 * looked at this and left it as it was" is an answer, and an
+                 * officer who asked about a field needs to see that rather than
+                 * an empty list that reads as "they ignored me".
+                 */
+                ApplicationCorrection::create([
+                    'application_id' => $application->id,
+                    'target' => $code,
+                    'old_value' => $before === null ? null : (string) $before,
+                    'new_value' => $record->{$column} === null ? null : (string) $record->{$column},
+                ]);
+            }
+
+            foreach ($records as $record) {
+                if ($record !== null && $record->isDirty()) {
+                    $record->save();
+                }
+            }
+
+            Audit::log('application.corrected', $application, [
+                'targets' => array_keys($sent),
+            ]);
+
+            app(WorkflowService::class)->resubmit($application->fresh());
+        });
+
+        return response()->json([
+            'data' => new ApplicationResource($application->fresh()->load($this->fullEager)),
+        ]);
+    }
+
     public function cancel(Request $request, Application $application): JsonResponse
     {
         $this->authorizeOwner($request, $application);
@@ -697,6 +844,7 @@ class ApplicationController extends Controller
     {
         $this->authorizeView($request, $application);
 
+        // The filing's own moves; `statusHistory` is scoped to them.
         $rows = $application->statusHistory()->with('changedBy:id,name')->get();
 
         return response()->json([

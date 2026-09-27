@@ -14,7 +14,7 @@ import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { PillButton, ProtoModal, StatusCard } from '../../components/ui/Proto'
 import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
-import { mainFormTargetLabel } from '../../lib/returnTargets'
+import { mainFormTargets } from '../../lib/returnTargets'
 import { applications, officeForms } from '../../lib/resources'
 import { TONE_CLASSES, applicationStatusMeta, otherPermitProgress } from '../../lib/status'
 import type { Application, TimelineEntry } from '../../lib/types'
@@ -375,6 +375,24 @@ export function ApplicationDetailPage() {
     [appId],
   )
   const { data: timeline } = useAsync<TimelineEntry[]>(() => applications.timeline(appId), [appId])
+
+  /*
+   * ── The corrections the applicant is typing ───────────────────────────
+   *
+   * Up here with the other hooks, and NOT beside the card that reads them:
+   * the card is below `if (loading)` and `if (!app) return`, and a hook
+   * after an early return is called on some renders and not others. React
+   * matches hooks by call order, so the three would land on other state's
+   * slots the moment the fetch resolved.
+   *
+   * Seeded blank, NOT with the current value. Prefilling would mean the
+   * commonest action — press the button without touching anything —
+   * silently resubmits the exact value BPLO just rejected. An empty box
+   * asks the question the officer asked.
+   */
+  const [corrections, setCorrections] = useState<Record<string, string>>({})
+  const [savingCorrections, setSavingCorrections] = useState(false)
+  const [correctionError, setCorrectionError] = useState<string | null>(null)
   /*
    * The sheets the applicant handed to the five offices (checklist item 24).
    *
@@ -459,10 +477,63 @@ export function ApplicationDetailPage() {
   /* Shared with the officer's progress rail so the two cannot count differently. */
   const otherPermits = otherPermitProgress(app.permit_types)
 
+  /*
+   * ── The fields BPLO ticked when it returned this filing ──────────────────
+   *
+   * Read off the assignments rather than held in their own key: the pointer
+   * has always lived on `remarks_target`, and one column that every reader
+   * parses the same way is what stops the officer's tick and the applicant's
+   * boxes drifting apart.
+   *
+   * Only while the filing is RETURNED. The pointer survives the resubmission —
+   * `returnMainForm` replaces it rather than clearing it, so the officer can
+   * still see what the last round was about — and drawing correction boxes for
+   * a filing already back with BPLO would invite an edit that cannot be sent.
+   */
+  const returnedFields =
+    status === 'returned'
+      ? app.assignments.flatMap((a) => mainFormTargets(a.remarks_target))
+      : []
+  const returnedScalars = returnedFields.filter((t) => t.kind === 'scalar')
+  const returnedSections = returnedFields.filter((t) => t.kind === 'section')
+
+  async function submitCorrections() {
+    setCorrectionError(null)
+
+    /*
+     * Every ticked field has to carry something. The API would accept a blank
+     * — a cleared trade name is a real correction for some fields — but an
+     * UNTOUCHED box is far more likely to be an oversight than an intention,
+     * and resubmitting on an oversight costs the applicant another round trip.
+     */
+    const missing = returnedScalars.filter((t) => (corrections[t.value] ?? '').trim() === '')
+    if (missing.length > 0) {
+      setCorrectionError(
+        `Answer every field BPLO asked about: ${missing.map((t) => t.label).join(', ')}.`,
+      )
+
+      return
+    }
+
+    setSavingCorrections(true)
+    try {
+      const fields: Record<string, string> = {}
+      for (const t of returnedScalars) fields[t.value] = (corrections[t.value] ?? '').trim()
+      await applications.corrections(app.id, fields)
+      // Correcting resubmits, so the whole page changes state — reload rather
+      // than patching, which would leave the status card stale.
+      reload()
+    } catch (err) {
+      setCorrectionError(toApiError(err).message)
+    } finally {
+      setSavingCorrections(false)
+    }
+  }
+
   /* Remarks rows: rejection reason + any assignment remarks (p54–55). */
-  const remarks: { who: string; text: string; field: string | null }[] = [
+  const remarks: { who: string; text: string; fields: string[] }[] = [
     ...(app.rejection_reason
-      ? [{ who: 'Reason for rejection', text: app.rejection_reason, field: null }]
+      ? [{ who: 'Reason for rejection', text: app.rejection_reason, fields: [] }]
       : []),
     ...app.assignments
       .filter((a) => a.remarks)
@@ -470,15 +541,21 @@ export function ApplicationDetailPage() {
         who: a.officer?.name ?? a.department.name,
         text: a.remarks as string,
         /*
-         * Which field the office named, when it named one.
+         * Which fields the office named, when it named any.
          *
-         * `mainFormTargetLabel` returns null for anything that is not one of the
-         * wizard's own fields — the same column also carries document codes and
-         * permit codes, and printing `CHO_SANITARY_PERMIT` under a heading that
-         * says "Fix" would read as a field name to somebody who has never seen
-         * one.
+         * `mainFormTargets` — plural — because the column has held a
+         * comma-separated list since 27 September 2026. The singular
+         * `mainFormTargetLabel` was left here when the picker became a
+         * checklist and looked the whole joined string up as one key, so a
+         * return naming three fields showed the applicant none of them.
+         *
+         * It still drops anything that is not one of the wizard's own
+         * fields: the same column also carries document codes and permit
+         * codes, and printing `CHO_SANITARY_PERMIT` under a heading that
+         * says "Fix" would read as a field name to somebody who has never
+         * seen one.
          */
-        field: mainFormTargetLabel(a.remarks_target),
+        fields: mainFormTargets(a.remarks_target).map((t) => t.label),
       })),
   ]
 
@@ -967,6 +1044,115 @@ export function ApplicationDetailPage() {
           </section>
         )}
 
+        {/*
+          ── What BPLO asked you to correct ────────────────────────────────
+
+          Above Remarks on purpose. A returned filing is stopped until this is
+          answered, so it is the only thing on the page the applicant has to
+          ACT on; everything below it is history and status. See the note at
+          the head of this patch for why it lives on this page at all.
+        */}
+        {returnedFields.length > 0 && (
+          <section className="mt-8">
+            <div className="border-b border-ink/50 pb-2">
+              <h2 className="text-2xl font-bold text-ink">What you need to correct</h2>
+            </div>
+            <div className="mt-5 rounded-xl bg-white px-6 py-5 shadow-card">
+              <p className="text-sm text-ink-secondary">
+                BPLO returned this application about{' '}
+                {returnedFields.length === 1
+                  ? 'one field'
+                  : `${returnedFields.length} fields`}
+                . Everything else you filed stays as it is.
+              </p>
+
+              {returnedScalars.length > 0 && (
+                <div className="mt-4 space-y-4">
+                  {returnedScalars.map((t) => (
+                    <label key={t.value} className="block">
+                      <span className="block text-[13px] font-semibold text-ink">
+                        {t.label}
+                      </span>
+                      {/*
+                        What BPLO said about THIS field, between its name and
+                        its box.
+
+                        Client, 27 September 2026: *"Allow to put 1
+                        comment/remark per field selected, not just 1 remark
+                        for all fields."* With one remark covering three
+                        fields the applicant had to work out which clause
+                        belonged to which box — the pointer answered "which
+                        field" and the prose put the matching straight back.
+
+                        Absent for a filing returned with plain prose, where
+                        the whole remark is in the Remarks section below.
+                      */}
+                      {(app.return_notes ?? {})[t.value] && (
+                        <span className="mb-1.5 mt-0.5 block text-xs text-ink-secondary">
+                          {(app.return_notes ?? {})[t.value]}
+                        </span>
+                      )}
+                      {!(app.return_notes ?? {})[t.value] && <span className="mb-1.5 block" />}
+                      <input
+                        value={corrections[t.value] ?? ''}
+                        onChange={(e) =>
+                          setCorrections((prev) => ({ ...prev, [t.value]: e.target.value }))
+                        }
+                        maxLength={255}
+                        className="w-full rounded-lg border border-input-border bg-input px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:outline-none focus:ring-2 focus:ring-royal"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {/*
+                The section targets. Named rather than silently dropped: an
+                applicant told to fix three things and shown two boxes would
+                resubmit believing they had finished.
+              */}
+              {returnedSections.length > 0 && (
+                <div className="mt-4 rounded-lg border border-input-border bg-royal-tint px-4 py-3">
+                  <p className="text-xs font-semibold text-royal">
+                    These are whole sections, so they are corrected on the form itself:
+                  </p>
+                  {/* Each with its own remark, the same as the boxes above. */}
+                  <ul className="mt-1.5 space-y-1">
+                    {returnedSections.map((t) => (
+                      <li key={t.value} className="text-xs text-ink-secondary">
+                        <span className="font-semibold text-ink">{t.label}</span>
+                        {(app.return_notes ?? {})[t.value] && (
+                          <> — {(app.return_notes ?? {})[t.value]}</>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link
+                    to={`/apply?draft=${app.id}`}
+                    className="mt-1.5 inline-block text-xs font-semibold text-royal underline underline-offset-2"
+                  >
+                    Open the application form
+                  </Link>
+                </div>
+              )}
+
+              {correctionError && (
+                <p className="mt-3 text-sm font-medium text-s-red">{correctionError}</p>
+              )}
+
+              {returnedScalars.length > 0 && (
+                <button
+                  type="button"
+                  onClick={submitCorrections}
+                  disabled={savingCorrections}
+                  className="mt-5 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover disabled:opacity-60"
+                >
+                  {savingCorrections ? 'Sending…' : 'Submit corrections'}
+                </button>
+              )}
+            </div>
+          </section>
+        )}
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (
           <section className="mt-8">
@@ -999,11 +1185,14 @@ export function ApplicationDetailPage() {
                     Franchise" on the form that reopens. That is the whole point
                     of the pointer: a lookup instead of a hunt.
                   */}
-                  {r.field && (
-                    <span className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink">
-                      Fix: {r.field}
+                  {r.fields.map((label) => (
+                    <span
+                      key={label}
+                      className="rounded-md bg-s-orange-tint px-2.5 py-1 text-xs font-semibold text-ink"
+                    >
+                      Fix: {label}
                     </span>
-                  )}
+                  ))}
                 </li>
               ))}
             </ul>

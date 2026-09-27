@@ -302,6 +302,20 @@ export function TinInput({
       <legend className="mb-1.5 block text-[13px] font-semibold text-ink">
         {number !== undefined && <span className="tnum text-ink-muted">{number}. </span>}
         Tax Identification Number (TIN)
+        {/*
+          Optional is stated, not left as the absence of an asterisk.
+
+          This is the only question on Section A that may be skipped, and
+          until 27 September 2026 it looked exactly like one that may not —
+          `required={false}` drew no glyph and no word, so the label was
+          silent and a floating note under the boxes was carrying the fact.
+          Said here it costs no height and covers nothing.
+        */}
+        {!required && (
+          <span className="ml-1.5 rounded bg-line/70 px-1.5 py-0.5 text-[11px] font-medium text-ink-secondary">
+            Optional
+          </span>
+        )}
         {/* Same treatment as FieldLabel: the glyph is decoration, the word is the signal. */}
         {required && (
           <>
