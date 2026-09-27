@@ -1088,6 +1088,17 @@ export interface PermitFilters extends PageParams {
    */
   permit_type?: string
   /**
+   * Every office BUT this one — "other permits in a separate view" (checklist
+   * item 18). The Permits page sends BUSINESS here for its Other offices view.
+   */
+  exclude_permit_type?: string
+  /**
+   * Businesses removed from the register (checklist item 21). `hide` drops
+   * their certificates, `only` lists nothing else, `include` both. Absent
+   * means no filtering; the register page sends `hide` by default.
+   */
+  retired?: 'hide' | 'include' | 'only'
+  /**
    * The column to order by, from the server's own whitelist.
    *
    * Sorting used to run in the browser over the 25 rows in hand, because
@@ -1220,6 +1231,14 @@ export const permits = {
    */
   liftSuspension: (id: number, reason: string) =>
     unwrap<Permit>(api.post(`/permits/${id}/lift-suspension`, { reason })),
+  /**
+   * Revoke a permit. BPLO and the super admin only (`permit.revoke`), reason
+   * required. The server sets the status, the revocation date and reason,
+   * writes the audit entry and tells the owner; it refuses a certificate that
+   * is already expired, superseded or revoked. Answers with the register row.
+   */
+  revoke: (id: number, reason: string) =>
+    unwrap<PermitRegisterRow>(api.post(`/permits/${id}/revoke`, { reason })),
 }
 
 /* ── Notifications ────────────────────────────────────────────────────── */
