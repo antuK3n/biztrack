@@ -41,7 +41,13 @@ class BusinessStatusController extends Controller
     {
         $request->validate([
             'q' => ['sometimes', 'nullable', 'string', 'max:120'],
-            'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted'],
+            /*
+             * `retired` is not a status a business can be SET to — it lists the
+             * businesses removed from the register (soft-deleted), which the
+             * roster otherwise leaves out (checklist item 21: retired records
+             * hidden by default, shown on request).
+             */
+            'status' => ['sometimes', 'nullable', 'in:active,flagged,suspended,blacklisted,retired'],
             'per_page' => ['sometimes', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -101,7 +107,9 @@ class BusinessStatusController extends Controller
                 ->where('name', 'like', "%{$q}%")
                 ->orWhereHas('owner', fn ($o) => $o->where('name', 'like', "%{$q}%")));
         }
-        if ($status = $request->query('status')) {
+        if ($request->query('status') === 'retired') {
+            $query->onlyTrashed();
+        } elseif ($status = $request->query('status')) {
             $query->where('status', $status);
         }
 
@@ -136,6 +144,14 @@ class BusinessStatusController extends Controller
                 'owner' => $b->owner ? ['id' => $b->owner->id, 'name' => $b->owner->name] : null,
                 'status' => $b->status,
                 'status_label' => self::LABELS[$b->status] ?? ucfirst((string) $b->status),
+                /*
+                 * When the business was removed from the register, or null.
+                 * A retired row cannot be acted on — every action route binds
+                 * the business, and binding skips soft-deleted rows — so the
+                 * screen reads this to draw no buttons rather than buttons
+                 * that answer 404.
+                 */
+                'retired_at' => optional($b->deleted_at)->toISOString(),
                 'created_at' => optional($b->created_at)->toISOString(),
                 /*
                  * Deferred permit fees, as a total AND itemised.

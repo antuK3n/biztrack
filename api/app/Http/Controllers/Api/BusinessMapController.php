@@ -40,19 +40,31 @@ use Illuminate\Http\JsonResponse;
  * (only what the viewport covers), not a page number — a page is an arbitrary
  * slice of the city, a bounding box is a place.
  *
+ * ── A ceiling, not a page ────────────────────────────────────────────────────
+ *
+ * MAX_POINTS caps the response and `meta.truncated` says when it bit, so the
+ * screen can say "the first N" rather than presenting part of the city as all
+ * of it. At 742 businesses it never bites; it exists so that a register grown
+ * past what a browser should hold degrades into a stated shortfall rather than
+ * a multi-megabyte response, until the bounding box above is built.
+ *
  * ── Gate ─────────────────────────────────────────────────────────────────────
  *
- * `user.manage`, held by the super admin alone. `permit.view_all` reads like
- * the better fit and is the wrong one: all seven office roles hold it, so this
- * would put a city-wide plot of every business on six offices' rails when the
- * whole point of `ApplicationVisibility` is that an office sees its own work.
- * This is the same stand-in Records makes (see the comment on its rail entry in
- * `web/src/lib/nav.ts`) — `user.manage` is standing in for a "this is the super
- * admin" check the permission table has no other way to express. An
- * `admin.console` permission, if one is ever added, belongs here too.
+ * `application.view_any_office` — BPLO and the super admin (checklist item 16:
+ * the map is a view on the Permits page for both). It was `user.manage`, the
+ * super admin alone, on the argument that a city-wide plot is a cross-office
+ * read. That argument still holds and is exactly why this permission fits:
+ * `view_any_office` IS the permission that lifts the office boundary, and BPLO
+ * holds it because it coordinates every office's clearance and already reads
+ * the whole register one row at a time. The five clearance offices do not hold
+ * it, so the map stays off their screens — `permit.view_all`, which all seven
+ * roles hold, remains the wrong gate for the reason it always was.
  */
 class BusinessMapController extends Controller
 {
+    /** See "A ceiling, not a page" above. */
+    public const MAX_POINTS = 5000;
+
     /**
      * A business permit is live when BOTH its status and its dates say so.
      *
@@ -142,17 +154,37 @@ class BusinessMapController extends Controller
             $governing = $live ?? $latest;
 
             /*
-             * Three states, not two, because "no permit at all" is a real and
-             * common answer here — 136 of 744 businesses have never held a
-             * Mayor's Permit in this register — and folding it into "expired"
-             * would tell a BPLO clerk that a certificate lapsed when none was
-             * ever issued. They are different jobs: one is a renewal to chase,
-             * the other is a first filing that never completed.
+             * Five states (checklist item 16), and each is a different job for
+             * whoever reads the map:
+             *
+             *   active     trading on a live permit — nothing to do
+             *   expired    its term ran out — a renewal to chase
+             *   suspended  an office refused a clearance — settle or lift it
+             *   revoked    the City took it away — enforcement
+             *   none       never held one — a first filing that never finished
+             *
+             * These were three (active / lapsed / none) while nothing wrote a
+             * revocation and the suspension was new; "lapsed" folded the
+             * three unhappy endings into one word, which stopped being honest
+             * the day a permit could be revoked. "None" stays apart for the
+             * reason it always was: 136 of 744 businesses have never held a
+             * Mayor's Permit, and calling that "expired" would tell a clerk a
+             * certificate ran out when none was ever issued.
+             *
+             * Read off the permit that governs today when there is one, else
+             * the furthest-reaching. A SUSPENDED permit counts as suspended
+             * only while it is inside its term — once the term has passed, it
+             * is expired like any other, and the suspension no longer bears on
+             * anything. A revoked one is revoked whatever its dates say.
              */
             $state = match (true) {
                 $live !== null => 'active',
-                $latest !== null => 'lapsed',
-                default => 'none',
+                $latest === null => 'none',
+                $latest->status === PermitStatus::Revoked => 'revoked',
+                $latest->status === PermitStatus::Suspended
+                    && $latest->valid_until !== null
+                    && $latest->valid_until->greaterThanOrEqualTo($today) => 'suspended',
+                default => 'expired',
             };
 
             $rows[] = [
@@ -168,12 +200,23 @@ class BusinessMapController extends Controller
                  */
                 'barangay' => $address->barangay?->name,
                 'state' => $state,
+                /*
+                 * The permit's id beside its number, so the popup can open the
+                 * certificate itself; the number is what it prints, because a
+                 * number is something a reader can look up.
+                 */
+                'permit_id' => $governing?->id,
                 'permit_number' => $governing?->permit_number,
                 'valid_until' => $governing?->valid_until?->toDateString(),
             ];
         }
 
         $counts = collect($rows)->countBy('state');
+
+        $truncated = count($rows) > self::MAX_POINTS;
+        if ($truncated) {
+            $rows = array_slice($rows, 0, self::MAX_POINTS);
+        }
 
         return response()->json([
             'data' => $rows,
@@ -187,11 +230,17 @@ class BusinessMapController extends Controller
                  */
                 'businesses_total' => $businesses->count(),
                 'unmapped' => $unmapped,
+                // Counted BEFORE the cap, so the legend describes the city
+                // even on the day the markers cannot all be drawn.
                 'counts' => [
                     'active' => $counts->get('active', 0),
-                    'lapsed' => $counts->get('lapsed', 0),
+                    'expired' => $counts->get('expired', 0),
+                    'suspended' => $counts->get('suspended', 0),
+                    'revoked' => $counts->get('revoked', 0),
                     'none' => $counts->get('none', 0),
                 ],
+                'truncated' => $truncated,
+                'max_points' => self::MAX_POINTS,
                 'as_of' => $today->toDateString(),
             ],
         ]);

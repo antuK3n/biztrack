@@ -647,15 +647,25 @@ outside the software. Guessing at them and shipping a Revoke button would put
 an enforcement action behind a control nobody authorised, recorded in a way
 nobody agreed, with an audit trail we invented.
 
-**What we assumed meanwhile.** Nothing — the action is not built and the screen
-says so rather than offering a disabled control. The three statuses the register
-actually holds are the only ones the permit table filters on, so the UI makes no
-claim to a capability the system does not have. When the answers arrive, the
-work is: a `permit.revoke` permission in `RbacSeeder`, a writer that sets the
-status with `revoked_at` / `revoked_reason` and an `Audit` entry naming the
-officer, a `NotificationService` message to the owner, and a `revoked` branch on
-the public verify endpoint. The table's Revoke control is the last and smallest
-part of it.
+**What we assumed meanwhile.** Revoke is now built (checklist item 23, 27
+September 2026), on Ken's answer to question 1 — **BPLO and the super admin**,
+through a `permit.revoke` permission — and on these guesses at the rest, each of
+which changes if the City answers otherwise:
+
+- **Any certificate type** can be revoked by those two roles, not only the
+  Mayor's Permit; whether BFP should revoke its own FSIC, and so on, is open.
+- **Only a permit in force** (Active or Suspended) can be revoked. There is **no
+  un-revoke**: the remedy is a fresh application.
+- **A reason is required.** It is audited, and it is **told to the owner** in
+  the notice (and its e-mail copy). It is **not shown publicly**.
+- **The public verify page says Revoked**, with the date. It shows the business
+  and trade name, address, type and validity, and **not the owner's name**.
+- There is no show-cause, hearing or appeal step in the software (question 2).
+
+The work is: `permit.revoke` in `RbacSeeder` and a migration granting it,
+`WorkflowService::revokePermit` (status, `revoked_at`, `revoked_reason`, an
+`Audit` entry naming the officer), `NotificationService::permitRevoked`, and
+the revoked branch on `/verify`. See `RevokePermitTest`.
 
 **Related.** **A2** asks the same kind of question one step earlier — what
 happens when an office refuses to issue a clearance at all. An answer to one
