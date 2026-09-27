@@ -329,14 +329,7 @@ final class ZoningRequirements
      */
     private static function uploads(Application $application): array
     {
-        return ApplicationDocument::with('documentType:id,code')
-            ->where('application_id', $application->id)
-            ->whereHas('documentType', fn ($q) => $q->where('code', 'like', self::CODE_PREFIX.'%'))
-            ->latest('id')
-            ->get()
-            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
-            ->map(fn ($group) => self::describe($group->first()))
-            ->all();
+        return ChecklistSupport::uploads($application, self::CODE_PREFIX);
     }
 
     /**
@@ -346,41 +339,23 @@ final class ZoningRequirements
      */
     private static function carried(Application $application): array
     {
-        return ApplicationDocument::with('documentType:id,code')
-            ->where('application_id', $application->id)
-            ->whereNull('permit_type_id')
-            ->whereHas('documentType', fn ($q) => $q->whereIn('code', ['DTI_SEC_CDA', 'LAND_TITLE', 'LEASE_CONTRACT', 'LOCATION_SKETCH', 'SPA_AUTHORIZATION']))
-            ->latest('id')
-            ->get()
-            ->groupBy(fn (ApplicationDocument $d) => (string) $d->documentType?->code)
-            ->map(fn ($group) => self::describe($group->first()))
-            ->all();
+        return ChecklistSupport::carried($application);
     }
 
     /** @return array<string, mixed> */
     private static function describe(ApplicationDocument $document): array
     {
-        return [
-            'id' => $document->id,
-            'filename' => $document->original_filename,
-            'size_bytes' => $document->size_bytes,
-            'uploaded_at' => $document->created_at?->toIso8601String(),
-        ];
+        return ChecklistSupport::describe($document);
     }
 
     private static function sheet(Application $application): ?ApplicationOfficeForm
     {
-        return ApplicationOfficeForm::where('application_id', $application->id)
-            ->whereHas('permitType', fn ($q) => $q->where('code', 'ZONING'))
-            ->first();
+        return ChecklistSupport::sheet($application, 'ZONING');
     }
 
     /** Has the applicant handed this sheet in, rather than merely saved it? */
     private static function sheetSubmitted(Application $application): bool
     {
-        return $application->permitTypes()
-            ->where('code', 'ZONING')
-            ->wherePivotNotNull('submitted_at')
-            ->exists();
+        return ChecklistSupport::sheetSubmitted($application, 'ZONING');
     }
 }

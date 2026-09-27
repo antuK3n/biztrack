@@ -540,7 +540,24 @@ function TerminalNode({
  * thing that turns "it is stuck" into something an admin can act on.
  */
 function OfficeProgress({ assignments, ended }: { assignments: Assignment[]; ended: boolean }) {
-  if (assignments.length === 0) return null
+  /*
+   * ── Nothing to show until there is more than one office ─────────────────
+   *
+   * Client, 27 September 2026, looking at a filing at For Approval: *"is this
+   * part still necessary? ... I don't think it displays anything valuable."*
+   *
+   * Right, at that stage. Before payment the only assignment is BPLO's, so
+   * this printed "0 of 1 complete · waiting on BPLO" — on BPLO's own review
+   * sheet, above BPLO's own Approve button. A progress bar with one item is a
+   * restatement of the page it is on.
+   *
+   * It is NOT removed, because the block earns its place the moment the five
+   * clearance offices are assigned: "2 of 6 complete · waiting on CHO, BFP"
+   * is the one thing on the page that says who to chase, and it is what turns
+   * "the filing is stuck" into something an admin can act on. So the rule is
+   * the count, not the feature.
+   */
+  if (assignments.length <= 1) return null
 
   const done = assignments.filter((a) => a.status === 'completed')
   /*

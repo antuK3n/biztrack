@@ -220,7 +220,28 @@ class OfficeFormController extends Controller
     public function declarationTemplate(Request $request, Application $application, string $permitTypeCode): Response
     {
         $this->authorizeView($request, $application);
-        abort_unless($permitTypeCode === 'ZONING', 404, 'That form has no declaration.');
+
+        /*
+         * ── The sheets that hand out a sworn page ────────────────────────
+         *
+         * CPDD's Section X declaration, and BFP's affidavit of undertaking
+         * that nothing substantial about the building has changed. Both are
+         * named on their paper with no prescribed layout printed for them, so
+         * the applicant would otherwise be inventing the wording or paying a
+         * notary to.
+         *
+         * OBO's Certificate of Completion is deliberately NOT here. The
+         * Building Official issues Form B-10, prescribes its layout and wants
+         * its own copy back sealed by the architect — our rendering of it
+         * would look official, would not be, and could be refused at the
+         * counter. The checklist points at the office instead.
+         */
+        $template = match ($permitTypeCode) {
+            'ZONING' => ['pdf.zoning-declaration', 'locational-clearance-declaration'],
+            'FSIC' => ['pdf.fsic-undertaking', 'fsic-affidavit-of-undertaking'],
+            default => null,
+        };
+        abort_if($template === null, 404, 'That form has no declaration.');
 
         $application->loadMissing('business');
 
@@ -233,12 +254,12 @@ class OfficeFormController extends Controller
          * belongs to — see the note in the view for why nothing about the
          * BUSINESS itself is printed on a page that gets sworn to.
          */
-        $pdf = Pdf::loadView('pdf.zoning-declaration', [
+        $pdf = Pdf::loadView($template[0], [
             'tracking_id' => $application->tracking_id ?? '',
             'business_name' => $application->business?->name ?? '',
         ]);
 
-        return PdfFile::render($pdf)->download("locational-clearance-declaration-{$application->tracking_id}.pdf");
+        return PdfFile::render($pdf)->download("{$template[1]}-{$application->tracking_id}.pdf");
     }
 
     /** DELETE — take one checklist file back off. */

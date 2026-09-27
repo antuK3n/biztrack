@@ -888,7 +888,9 @@ export function ClearanceStage({ applicationId, business }: ClearanceStageProps)
       await officeForms.declaration(
         applicationId,
         code,
-        'locational-clearance-declaration.pdf',
+        code === 'FSIC'
+          ? 'fsic-affidavit-of-undertaking.pdf'
+          : 'locational-clearance-declaration.pdf',
       )
     } catch (err) {
       setReqError(toApiError(err).message)

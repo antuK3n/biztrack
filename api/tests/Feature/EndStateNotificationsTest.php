@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
@@ -154,16 +155,22 @@ it('notifies the applicant when the application is approved', function () use ($
      * No duplicate generic "Application update" for the same end state.
      *
      * Matched on the sentence `applicationStatus()` would actually write —
-     * `… is now “Approved”.` — rather than on the word "Approved" anywhere in
-     * the body, which is what this used to do. Each of the five offices now
-     * announces its own permit as approved and issued the moment it passes its
-     * inspection, so a bare `%Approved%` matches a dozen notices that are not
-     * duplicates of anything and are the point of rule 7.
+     * `… is now “<label>”.` — rather than on a word anywhere in the body. A
+     * bare `%Approved%` was tried first and caught a dozen per-permit notices
+     * that are not duplicates of anything and are the point of rule 7.
+     *
+     * The LABEL comes from the enum, and that is the fix of 26 September 2026
+     * rather than a flourish. This had `'%is now “Approved”%'` typed out while
+     * the end state was labelled "Completed", so it matched a sentence nothing
+     * wrote and passed at zero for the wrong reason — until
+     * `AwaitingOtherPermits` was renamed to "Approved" and a different status
+     * started producing it seventeen times. Read from the enum, a rename moves
+     * this assertion instead of emptying it.
      */
     expect(
         AppNotification::where('user_id', $owner->id)
             ->where('type', 'status_change')
-            ->where('body', 'like', '%is now “Approved”%')
+            ->where('body', 'like', '%is now “'.ApplicationStatus::Approved->label().'”%')
             ->count()
     )->toBe(0);
 });

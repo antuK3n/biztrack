@@ -261,9 +261,45 @@ class Application extends Model
         return $this->hasMany(ApplicationDocument::class);
     }
 
+    /**
+     * The FILING's own status changes, oldest first.
+     *
+     * `whereNull('permit_type_id')` since 26 September 2026, when each permit
+     * gained a history of its own in the same table. Without it every reader
+     * of this relation — the applicant's History panel, the officer's review
+     * sheet, the timeline endpoint — would have gained thirty-odd clearance
+     * rows interleaved with its five and captioned in the filing's
+     * vocabulary, so "For Approval" would appear six times meaning a
+     * different permit each time.
+     *
+     * On the relation rather than at each call site, because all four callers
+     * want the same thing and the fifth should not have to know this.
+     * A permit's rows are read separately — see ApplicationResource.
+     */
+    /**
+     * The fields put right after BPLO returned this filing, newest last.
+     *
+     * Oldest first because a filing can be returned more than once and the
+     * officer reads these as a sequence — round one, then round two. The
+     * newest round is the tail, which is where the eye lands on a short
+     * list and what `latest()` would have hidden at the top.
+     */
+    /** What BPLO said about each field it returned this filing about. */
+    public function returnNotes(): HasMany
+    {
+        return $this->hasMany(ApplicationReturnNote::class)->orderBy('id');
+    }
+
+    public function corrections(): HasMany
+    {
+        return $this->hasMany(ApplicationCorrection::class)->orderBy('id');
+    }
+
     public function statusHistory(): HasMany
     {
-        return $this->hasMany(ApplicationStatusHistory::class)->orderBy('created_at');
+        return $this->hasMany(ApplicationStatusHistory::class)
+            ->whereNull('permit_type_id')
+            ->orderBy('created_at');
     }
 
     public function assignments(): HasMany

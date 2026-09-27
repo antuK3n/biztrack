@@ -357,6 +357,19 @@ export const applications = {
   ) => unwrap<Application>(api.put(`/applications/${id}`, body)),
   submit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/submit`)),
   resubmit: (id: number) => unwrap<Application>(api.post(`/applications/${id}/resubmit`)),
+  /**
+   * Answer the fields BPLO ticked, and resubmit in the same act.
+   *
+   * Keyed by `form:` code rather than by column name: the code is what the
+   * officer ticked and what the API validates against, and sending a column
+   * name would be a request body choosing where to write.
+   *
+   * There is no separate resubmit call afterwards — correcting IS
+   * resubmitting, in one transaction, so a correction cannot be saved and
+   * then left sitting unsent.
+   */
+  corrections: (id: number, fields: Record<string, string>) =>
+    unwrap<Application>(api.post(`/applications/${id}/corrections`, { fields })),
   cancel: (id: number) => unwrap<Application>(api.post(`/applications/${id}/cancel`)),
   /**
    * Throw a DRAFT away. Refused (422) on anything already submitted, where
@@ -954,7 +967,17 @@ export const assignments = {
    * the sheet the remarks are about, as a stable code. The prose is never
    * parsed to derive it; see the migration that added `remarks_target`.
    */
-  return: (id: number, remarks: string, target?: string | null) =>
+  return: (
+    id: number,
+    remarks: string,
+    target?: string | null,
+    /**
+     * One remark per returned field, keyed by the same `form:` code as
+     * `target`. Empty for a plain prose return, which is every return that
+     * names no fields.
+     */
+    notes: Record<string, string> = {},
+  ) =>
     unwrap<Assignment>(
       api.post(`/assignments/${id}/return`, {
         remarks,
@@ -962,6 +985,7 @@ export const assignments = {
         // takes it `sometimes`, and an absent key is the same answer with less
         // to read in the request log.
         ...(target ? { remarks_target: target } : {}),
+        ...(Object.keys(notes).length > 0 ? { remarks_notes: notes } : {}),
       }),
     ),
   /**

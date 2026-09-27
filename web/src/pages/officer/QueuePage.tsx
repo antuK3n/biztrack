@@ -23,7 +23,7 @@ import type {
 } from '../../lib/types'
 
 /*
- * Application Verification (PDF p61/p80) — the officer queue restyled to the
+ * Manage Applications (PDF p61/p80) — the officer queue restyled to the
  * prototype: pill filters, white shadow rows with the solid payment chip block.
  */
 
@@ -114,7 +114,18 @@ const TABS: { value: Tab; label: string; officeLabel?: string }[] = [
    */
   { value: 'approval', label: 'For Approval' },
   { value: 'payment', label: 'Pending Payment' },
-  { value: 'gathering', label: 'Awaiting Other Permits' },
+  /*
+   * Read off the status table rather than written here, which is what stops
+   * this tab drifting a fourth time.
+   *
+   * It said "Awaiting Other Permits" until 26 September 2026, on the argument
+   * that the officer's seat sees a wait the applicant does not. That stopped
+   * being true when the permit started being issued at payment: the five
+   * offices working afterwards can suspend it, not grant it, so nothing here
+   * waits for permits. Hardcoding the replacement would have set up the same
+   * drift again, so it does not.
+   */
+  { value: 'gathering', label: applicationStatusMeta('awaiting_other_permits').label },
   { value: 'inspection', label: 'For Inspection' },
   { value: 'final', label: 'For Final Approval' },
 ]
@@ -1666,7 +1677,7 @@ export function QueuePage() {
           </span>
         }
       >
-        Application Verification
+        Manage Applications
       </PageTitle>
 
       {/*

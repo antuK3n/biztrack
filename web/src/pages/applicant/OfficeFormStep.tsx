@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from 'react'
+import { targetsInclude } from '../../lib/returnTargets'
 import { DocumentActions } from '../../components/DocumentActions'
 import { CheckCircleFilledIcon, DownloadIcon, UploadIcon } from '../../components/icons'
 import { FieldError, FieldLabel, OriginalsNotice, inputCls } from '../../components/ui/Proto'
@@ -191,6 +192,77 @@ export const OFFICE_FORM_CODES = [
 export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
 
 /** Kicker + h1 + form-ref for each office form sheet (verbatim from prototype). */
+/**
+ * Keys that are machinery, not answers — never shown to a reader.
+ *
+ * Both say which OTHER sheet owns a question when two papers print it: the
+ * authorised representative (FSIC owns it, CPDD carries it) and the occupancy
+ * type and storey count (OBO owns them, BFP carries them). The applicant never
+ * sees them and the officer should not either — printed in the review grid they
+ * read as a field the applicant answered "OCCUPANCY" to.
+ */
+export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
+  'authorized_representative_source',
+  'occupancy_shared_source',
+]
+
+/**
+ * What each office's paper calls the box behind a form key.
+ *
+ * Keyed `CODE.key`, with a bare `key` as the fallback, because the same key
+ * means different things on different papers — `application_type` is Full or
+ * Partial on OBO's form and New or Renewal on CHO's. Anything absent falls
+ * through to `humanizeKey`, which is fine for a plain two-word field and wrong
+ * for an acronym, which is why the FSEC rows are named here.
+ */
+export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
+  /* Shared across sheets. */
+  application_date: 'Date of Application',
+  authorized_representative: 'Authorized Representative',
+  certified: 'Certification',
+  owner_address: 'Address of Owner',
+
+  /* BFP · BFP-QSF-FSED-002 */
+  'FSIC.certificate_applied_for': 'Certificate Applied For',
+  'FSIC.occupancy_type': 'Type of Occupancy / Business Nature',
+  'FSIC.building_storeys': 'No. of Storeys',
+
+  /* OBO · Unified Application Form */
+  'OCCUPANCY.application_type': 'Application Type (Full / Partial)',
+  'OCCUPANCY.building_permit_no': 'Building Permit No.',
+  'OCCUPANCY.building_permit_date': 'Building Permit — Date Issued',
+  'OCCUPANCY.fsec_no': 'FSEC No.',
+  'OCCUPANCY.fsec_date': 'FSEC — Date Issued',
+  'OCCUPANCY.owner_address': 'Address of Owner / Permittee',
+  'OCCUPANCY.owner_zip': 'ZIP Code',
+  'OCCUPANCY.project_name': 'Name of Project',
+  'OCCUPANCY.occupancy_type': 'Use / Character of Occupancy',
+  'OCCUPANCY.building_storeys': 'No. of Storeys',
+  'OCCUPANCY.building_units': 'No. of Units',
+  'OCCUPANCY.completion_date': 'Date of Completion',
+
+  /* CPDD · MCG-CPDD-FO-003 */
+  'ZONING.application_type': 'Nature of Application',
+  'ZONING.total_floor_area_sqm': 'Floor Area to be Utilized (sq. m.)',
+  'ZONING.building_storeys': 'No. of Storeys of Building',
+  'ZONING.site_is_rented': 'Site is Rented',
+
+  /* CHO */
+  'SANITARY.application_type': 'Nature of Application',
+}
+
+/** The paper's name for one answer, or a humanised key when it has none. */
+export function officeFormFieldLabel(code: string, key: string): string {
+  return (
+    OFFICE_FORM_FIELD_LABELS[`${code}.${key}`] ??
+    OFFICE_FORM_FIELD_LABELS[key] ??
+    key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  )
+}
 export const OFFICE_FORM_META: Record<
   OfficeFormCode,
   { kicker: string; title: string; ref: string }
@@ -336,8 +408,27 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
     if (!has('owner_address')) missing.push('Owner’s Address')
     if (data.certified !== 'yes') missing.push('The certification that the details are correct')
   }
+  if (code === 'FSIC') {
+    /*
+     * The two the BFP header asks and nothing else answers. Occupancy type
+     * and storeys are asked on the OBO sheet when that permit is on the
+     * filing and derived onto this one, so they are checked through the
+     * DERIVED payload rather than the typed one — `has` reads what the sheet
+     * holds, which is the same thing either way.
+     */
+    if (!has('occupancy_type')) missing.push('Type of Occupancy / Business Nature')
+    if (!has('building_storeys')) missing.push('No. of Storeys')
+    if (data.certified !== 'yes') {
+      missing.push('The certification that the details and attachments are correct')
+    }
+  }
   if (code === 'OCCUPANCY') {
     if (!has('application_type')) missing.push('Application Type')
+    if (!has('project_name')) missing.push('Name of Project')
+    if (!has('occupancy_type')) missing.push('Use / Character of Occupancy')
+    if (!has('building_storeys')) missing.push('No. of Storeys')
+    if (!has('building_units')) missing.push('No. of Units')
+    if (!has('completion_date')) missing.push('Date of Completion')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
@@ -518,15 +609,18 @@ function DerivedField({
   label,
   value,
   hint,
+  className,
 }: {
   label: ReactNode
   value: string
   hint?: string
+  /** Sizes the cell inside its section's wrap — see the note on the grids. */
+  className?: string
 }) {
   // The <label> stops at the input: the hint sits outside it so that a long
   // explanatory sentence is not read out as part of the field's name.
   return (
-    <div>
+    <div className={className}>
       <label className="block">
         <FieldLabel>{label}</FieldLabel>
         {/*
@@ -580,20 +674,31 @@ function CarriedOverSection({ business }: { business: CarriedOverBusiness }) {
         From your earlier answers. Change it on Business Information or Location &amp; Zoning and every
         office form follows.
       </p>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <DerivedField label={<>Business Name<FromApplicationTag /></>} value={business.name} />
+      {/*
+        No `FromApplicationTag` on these four. The sentence directly above says
+        exactly what the tag says, and saying it again beside every label put
+        "(from your application)" on screen five times in one block — which is
+        also what made the labels wrap and the rows tall. The tag stays where a
+        carried field sits AMONG asked ones and the reader cannot tell which is
+        which; here they are all carried and the heading says so.
+      */}
+      <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+        <DerivedField className="grow basis-[15rem]" label="Business Name" value={business.name} />
         {business.tradeName !== '' && (
           <DerivedField
-            label={<>Trade Name / Franchise<FromApplicationTag /></>}
+            className="grow basis-[13rem]"
+            label="Trade Name / Franchise"
             value={business.tradeName}
           />
         )}
         <DerivedField
-          label={<>Business Address<FromApplicationTag /></>}
+          className="grow basis-[18rem]"
+          label="Business Address"
           value={business.address}
         />
         <DerivedField
-          label={<>Line of Business<FromApplicationTag /></>}
+          className="grow basis-[18rem]"
+          label="Line of Business"
           value={business.lineOfBusiness}
         />
       </div>
@@ -1166,6 +1271,7 @@ function RequirementsChecklist({
   code,
   rows,
   returnTarget = null,
+  returnNotes = null,
   busy,
   error,
   onChange,
@@ -1173,8 +1279,10 @@ function RequirementsChecklist({
 }: {
   code: OfficeFormCode
   rows: OfficeFormRequirement[]
-  /** The row an office pointed at on a return; see OfficeFormStep. */
+  /** The rows an office pointed at on a return; see OfficeFormStep. */
   returnTarget?: string | null
+  /** What the office said about each named row, keyed by its code. */
+  returnNotes?: Record<string, string> | null
   busy: string | null
   error: string | null
   onChange?: (documentCode: string, file: File | null) => void
@@ -1252,13 +1360,28 @@ function RequirementsChecklist({
              * Matched on `code`, the document type — the same value the office
              * picked from and the same one this row uploads into. Never on the
              * label, which is prose and is translated and reworded.
+             *
+             * `targetsInclude` and not `===`: the column has held a
+             * comma-separated list since the picker became a checklist on
+             * 27 September 2026, and an office ticking two rows produced a
+             * pointer equal to neither of them, so nothing was highlighted.
              */
-            flagged={returnTarget !== null && row.code === returnTarget}
+            flagged={targetsInclude(returnTarget, row.code)}
+            /* What the office said about THIS row, when it said something. */
+            flagNote={returnNotes?.[row.code] ?? null}
             busy={busy === row.code}
             readOnly={ro}
             onChange={onChange}
             onDeclarationTemplate={
-              row.key === 'DECLARATION' ? onDeclarationTemplate : undefined
+              /*
+                The two rows that hand out a sworn page: CPDD's Section X
+                declaration and BFP's affidavit of undertaking. Both are named
+                on their paper with no layout printed for them, so the wording
+                is the thing worth giving.
+              */
+              row.key === 'DECLARATION' || row.key === 'NO_CHANGES_AFFIDAVIT'
+                ? onDeclarationTemplate
+                : undefined
             }
           />
         ))}
@@ -1271,6 +1394,7 @@ function RequirementsChecklist({
 function RequirementRow({
   row,
   flagged = false,
+  flagNote = null,
   busy,
   readOnly,
   onChange,
@@ -1279,6 +1403,14 @@ function RequirementRow({
   row: OfficeFormRequirement
   /** Did the office point at THIS row when it sent the permit back? */
   flagged?: boolean
+  /**
+   * The office's own remark for this row.
+   *
+   * Beside the row it is about rather than in one paragraph above the
+   * sheet — the same reasoning as the wizard's per-field boxes. Null on a
+   * return that named rows without commenting on each.
+   */
+  flagNote?: string | null
   busy: boolean
   readOnly: boolean
   onChange?: (documentCode: string, file: File | null) => void
@@ -1297,6 +1429,9 @@ function RequirementRow({
     >
       {flagged && (
         <p className="mb-1 text-xs font-bold text-ink">This is what the office asked about</p>
+      )}
+      {flagged && flagNote && (
+        <p className="mb-1.5 text-xs text-ink-secondary">{flagNote}</p>
       )}
       <p className="flex items-center gap-2 text-sm font-bold text-ink">
         {row.satisfied ? (
@@ -1866,16 +2001,24 @@ function CecFields({
 function FsicFields({
   data,
   set,
+  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
+  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
+  /*
+   * The Occupancy sheet owns the occupancy type and the storey count when it
+   * is on the filing — one paper asks both, and the client chose shared
+   * answers over a merged sheet. See the note above the component.
+   */
+  const sharedWithObo = get(data, 'occupancy_shared_source') === 'OCCUPANCY'
   return (
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application Details" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           <ControlNoField
             label={
               <>
@@ -1885,7 +2028,23 @@ function FsicFields({
             }
             placeholder="FSIC-________"
           />
-          <label className="block">
+          {/*
+            "NAME OF OWNER" on the BFP form. Carried, not asked: it is the
+            name already given on the business permit application, and the
+            establishment name and exact address beside it come from the same
+            place through CarriedOverSection above.
+          */}
+          <DerivedField
+            className="grow basis-[14rem]"
+            label={
+              <>
+                Name of Owner
+                <FromApplicationTag />
+              </>
+            }
+            value={business.ownerName}
+          />
+          <label className="block grow basis-[14rem]">
             <FieldLabel>Authorized Representative</FieldLabel>
             {/*
              * Item 70 — the placeholder used to carry the rule ("Auto-filled
@@ -1915,7 +2074,88 @@ function FsicFields({
       </section>
 
       <section className="space-y-3">
-        <SectionMarker letter="B" label="Certificate Applied For" />
+        <SectionMarker letter="B" label="The Premises" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          {/*
+            "TYPE OF OCCUPANCY / BUSINESS NATURE". Seeded from the line of
+            business and editable, because BFP's vocabulary is not PSIC's — a
+            restaurant is "Assembly" to a fire officer — and the applicant is
+            the one who knows which.
+          */}
+          {sharedWithObo ? (
+            <DerivedField
+              className="grow basis-[16rem]"
+              label={
+                <>
+                  Type of Occupancy / Business Nature
+                  <span className="font-normal text-ink-muted"> (from your Occupancy form)</span>
+                </>
+              }
+              value={get(data, 'occupancy_type')}
+            />
+          ) : (
+            <label className="block grow basis-[16rem]">
+              <FieldLabel required>Type of Occupancy / Business Nature</FieldLabel>
+              <input
+                value={get(data, 'occupancy_type') || business.lineOfBusiness}
+                onChange={(e) => set('occupancy_type', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. Mercantile, Assembly, Business"
+                className={inputCls}
+              />
+              <CarriedTag field="occupancy_type" />
+            </label>
+          )}
+          {sharedWithObo ? (
+            <DerivedField
+              className="shrink-0"
+              label={
+                <>
+                  No. of Storeys
+                  <span className="font-normal text-ink-muted"> (from Occupancy)</span>
+                </>
+              }
+              value={get(data, 'building_storeys')}
+            />
+          ) : (
+            <label className="block shrink-0">
+              <FieldLabel required>No. of Storeys</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'building_storeys')}
+                onChange={(e) => set('building_storeys', e.target.value)}
+                readOnly={ro}
+                placeholder="e.g. 2"
+                className={`${inputCls} tnum w-[7rem]`}
+              />
+              <CarriedTag field="building_storeys" />
+            </label>
+          )}
+          {/*
+            The three the applicant has already given. Floor area is the same
+            figure the zoning sheet is assessed on — item 1 of Business
+            Operation — so it is carried rather than asked a third time.
+          */}
+          <DerivedField
+            className="shrink-0"
+            label="Total Floor Area (sq. m.)"
+            value={business.businessAreaSqm}
+          />
+          <DerivedField
+            className="grow basis-[12rem]"
+            label="Contact Number"
+            value={business.mobile || business.landline}
+          />
+          <DerivedField
+            className="grow basis-[14rem]"
+            label="E-mail Address"
+            value={business.proprietorEmail}
+          />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="Certificate Applied For" />
         {/*
          * The permits you picked and the application type already decide this,
          * so the BFP sheet carries it without asking the applicant to repeat it.
@@ -1931,6 +2171,38 @@ function FsicFields({
           hint="Set from the permits and application type you chose in step 1. To change it, go back to Permit Selection."
         />
       </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="D" label="Certification" />
+        {/*
+          The sentence above the signature on BFP's form. It gates the submit —
+          see `officeFormMissing` — because a sheet handed in without it is one
+          the office gives back, and being stopped here costs a tick where
+          being stopped there costs a trip.
+        */}
+        <div className="rounded-lg border border-line bg-canvas px-4 py-3">
+          <label className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={get(data, 'certified') === 'yes'}
+              onChange={(e) => set('certified', e.target.checked ? 'yes' : '')}
+              disabled={ro}
+              aria-disabled={ro}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-royal"
+            />
+            <span className="text-sm leading-relaxed text-ink">
+              I hereby certify the correctness of the information provided above and the
+              completeness of the attached documents.
+            </span>
+          </label>
+          <div className="mt-3 sm:w-2/3">
+            <DerivedField
+              label={<>Printed Name of Owner<FromApplicationTag /></>}
+              value={business.ownerName}
+            />
+          </div>
+        </div>
+      </section>
     </div>
   )
 }
@@ -1938,21 +2210,23 @@ function FsicFields({
 function OccupancyFields({
   data,
   set,
+  business,
 }: {
   data: OfficeFormData
   set: (key: string, value: string) => void
+  business: CarriedOverBusiness
 }) {
   const ro = useReadOnly()
   return (
     <div className="space-y-7">
       <section className="space-y-3">
         <SectionMarker letter="A" label="Application & Permit Details" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
           {/*
            * Full vs Partial is how much of the building will be occupied — a
            * real applicant decision, not the new/renewal the system knows.
            */}
-          <div>
+          <div className="shrink-0">
             <FieldLabel required>Application Type</FieldLabel>
             <ChipRow
               options={OCCUPANCY_SCOPES}
@@ -1982,15 +2256,183 @@ function OccupancyFields({
             />
             <CarriedTag field="fsec_no" />
           </div>
+          {/*
+            The paper prints a Date Issued under each of the two numbers, so
+            each sits beside the number it belongs to — see the note on this
+            change for why they are asked here and not on the officer's sheet.
+          */}
+          <label className="block shrink-0">
+            <FieldLabel>Building Permit — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'building_permit_date')}
+              onChange={(e) => set('building_permit_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="building_permit_date" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel>FSEC — Date Issued</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'fsec_date')}
+              onChange={(e) => set('fsec_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="fsec_date" />
+          </label>
         </div>
-        {/*
-         * The dates these documents were issued are recorded by the office that
-         * issued them, during review (ReviewPage "For Office Use Only").
-         */}
-        <p className="text-xs text-ink-muted">
-          The dates these documents were issued are filled in by the reviewing office. Just give the
-          numbers here.
-        </p>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="B" label="Owner / Permittee" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <DerivedField
+            className="grow basis-[14rem]"
+            label={
+              <>
+                Name of Owner / Permittee
+                <FromApplicationTag />
+              </>
+            }
+            value={business.ownerName}
+          />
+          {/*
+            Asked, not carried, and the distinction matters on this one box.
+            The paper wants where the OWNER lives; BizTrack holds where the
+            BUSINESS is, and on a filing whose premises is rented those are
+            different places. Prefilling the business address here would put a
+            wrong answer on a form the Building Official posts to.
+          */}
+          <label className="block grow basis-[18rem]">
+            <FieldLabel>Address of Owner / Permittee</FieldLabel>
+            <input
+              value={get(data, 'owner_address')}
+              onChange={(e) => set('owner_address', e.target.value)}
+              readOnly={ro}
+              placeholder="If not the business address"
+              className={inputCls}
+            />
+            <CarriedTag field="owner_address" />
+          </label>
+          {/* Printed beside the address on the paper; the OBO posts to it. */}
+          <label className="block shrink-0">
+            <FieldLabel>ZIP Code</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'owner_zip')}
+              onChange={(e) => set('owner_zip', e.target.value)}
+              readOnly={ro}
+              placeholder="1470"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="owner_zip" />
+          </label>
+          <DerivedField
+            className="grow basis-[12rem]"
+            label={
+              <>
+                Tel. No.
+                <FromApplicationTag />
+              </>
+            }
+            value={business.mobile || business.landline}
+          />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionMarker letter="C" label="The Project" />
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          {/*
+            Seeded from the business name and editable: a project on the
+            Building Official's books is often named for the structure rather
+            than the trade in it, and only the applicant knows which it is.
+          */}
+          <label className="block grow basis-[14rem]">
+            <FieldLabel required>Name of Project</FieldLabel>
+            <input
+              value={get(data, 'project_name') || business.name}
+              onChange={(e) => set('project_name', e.target.value)}
+              readOnly={ro}
+              className={inputCls}
+            />
+            <CarriedTag field="project_name" />
+          </label>
+          <DerivedField
+            className="grow basis-[18rem]"
+            label={
+              <>
+                Location of Project
+                <FromApplicationTag />
+              </>
+            }
+            value={business.address}
+          />
+          {/*
+            This sheet OWNS the occupancy type and the storey count — BFP's
+            paper prints them too and carries these answers read-only. See the
+            note above the component.
+          */}
+          <label className="block grow basis-[16rem]">
+            <FieldLabel required>Use / Character of Occupancy</FieldLabel>
+            <input
+              value={get(data, 'occupancy_type') || business.lineOfBusiness}
+              onChange={(e) => set('occupancy_type', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. Mercantile, Assembly, Business"
+              className={inputCls}
+            />
+            <CarriedTag field="occupancy_type" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Storeys</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'building_storeys')}
+              onChange={(e) => set('building_storeys', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 2"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="building_storeys" />
+          </label>
+          <label className="block shrink-0">
+            <FieldLabel required>No. of Units</FieldLabel>
+            <input
+              inputMode="numeric"
+              value={get(data, 'building_units')}
+              onChange={(e) => set('building_units', e.target.value)}
+              readOnly={ro}
+              placeholder="e.g. 1"
+              className={`${inputCls} tnum w-[7rem]`}
+            />
+            <CarriedTag field="building_units" />
+          </label>
+          <DerivedField
+            className="shrink-0"
+            label={
+              <>
+                Total Floor Area
+                <FromApplicationTag />
+              </>
+            }
+            value={business.businessAreaSqm}
+          />
+          <label className="block shrink-0">
+            <FieldLabel required>Date of Completion</FieldLabel>
+            <input
+              type="date"
+              value={get(data, 'completion_date')}
+              onChange={(e) => set('completion_date', e.target.value)}
+              readOnly={ro}
+              className={`${inputCls} w-[11rem]`}
+            />
+            <CarriedTag field="completion_date" />
+          </label>
+        </div>
       </section>
     </div>
   )
@@ -2141,8 +2583,8 @@ export function OfficeFormSheet({
         {code === 'ZONING' && <ZoningFields data={data} set={set} business={business} />}
         {code === 'SANITARY' && <SanitaryFields data={data} set={set} />}
         {code === 'CEC' && <CecFields data={data} set={set} business={business} />}
-        {code === 'FSIC' && <FsicFields data={data} set={set} />}
-        {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} />}
+        {code === 'FSIC' && <FsicFields data={data} set={set} business={business} />}
+        {code === 'OCCUPANCY' && <OccupancyFields data={data} set={set} business={business} />}
         {requirements !== undefined && requirements.length > 0 && (
           <RequirementsChecklist
             code={code}
