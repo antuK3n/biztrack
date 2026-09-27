@@ -150,21 +150,34 @@ test('the super admin signs in at their own door and nowhere else', async ({ pag
   expect(statuses.officerAtAdminDoor).toBe(409)
 })
 
-test('a business owner is turned away from the staff portal', async ({ page }) => {
-  await page.goto('/login')
-  const status = await page.evaluate(
-    async ([email, password]) => {
-      const res = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ email, password, portal: 'staff' }),
-      })
-      return res.status
+test('the staff sign-in answers a business owner exactly as it answers a wrong password', async ({ page }) => {
+  /*
+   * Rewritten 2026-09-27 [checklist, Login 3]. This asserted a 409, which is
+   * what the staff door used to answer an owner's RIGHT password — telling
+   * anyone at /staff/login which leaked owner passwords were real. The rule now
+   * mirrors the citizen door's: compared against a wrong password, not pinned
+   * to a literal. `bplo` supplies the wrong-password half: an owner address
+   * would do too, but this keeps the owner's own lockout counter clear for the
+   * specs that sign in as them.
+   */
+  await page.goto('/staff/login')
+  const [ownerHere, wrongPassword] = await page.evaluate(
+    async ([ownerEmail, officerEmail, password]) => {
+      const attempt = async (email: string, pw: string) => {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ email, password: pw, portal: 'staff' }),
+        })
+        return { status: res.status, body: await res.json() }
+      }
+      return [await attempt(ownerEmail, password), await attempt(officerEmail, 'not-the-password')]
     },
-    [ACCOUNTS.owner, DEMO_PASSWORD] as const,
+    [ACCOUNTS.owner, ACCOUNTS.bplo, DEMO_PASSWORD] as const,
   )
 
-  expect(status).toBe(409)
+  expect(ownerHere.status).toBe(wrongPassword.status)
+  expect(ownerHere.body.message).toBe(wrongPassword.body.message)
 })
 
 test('an unauthenticated visitor cannot reach an analytics screen', async ({ page }) => {
