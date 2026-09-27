@@ -6,11 +6,12 @@ namespace App\Support;
  * Generalised linear models, in PHP, because there is no longer a second engine.
  *
  * The fitted half of Renewal Risk used to be computed elsewhere, by a statistics
- * runtime this project shelled out to over HTTP. That runtime has been removed,
- * and with it the argument that the fit could not honestly live here. So it lives
- * here: this class is the arithmetic, RenewalModelAnalytics is the domain reading
- * of it, and the pair together reproduce the coefficient table, the standard
- * errors and the discrimination figures that screen has always shown.
+ * runtime this project shelled out to over HTTP, and then here, read by
+ * RenewalModelAnalytics. That screen and its model were removed (checklist
+ * 2026-09-27, item 6), so nothing in the app calls this class today. It is kept
+ * with its unit tests, as Des is, because it is a general, tested library rather
+ * than part of the removed screen; delete it with RenewalModelGlmTest if nothing
+ * has picked it up by the next clean-up.
  *
  * ── WHY THIS IS SMALL, AND WHY IT IS ALLOWED TO BE ──────────────────────────
  *

@@ -121,88 +121,26 @@ it('precomputes every window Processing Time Monitoring offers', function () {
     );
 });
 
-it('precomputes every period Business Growth Analysis offers', function () {
-    // BusinessGrowthPage.tsx PERIOD_OPTIONS.
-    assertEveryOfferedWindowIsPrecomputed(
-        'business_growth',
-        [['months' => 3], ['months' => 6], ['months' => 12], ['months' => 24], ['months' => 36]],
-        'BusinessGrowthPage PERIOD_OPTIONS',
-    );
-});
-
-it('precomputes every horizon Renewal Risk offers at its default page', function () {
-    /*
-     * RenewalRiskPage.tsx HORIZON_OPTIONS at the default, unfiltered first page.
-     *
-     * This screen is the one that cannot fully follow the rule, and the reason is
-     * architectural rather than an oversight: the snapshot key carries the page
-     * size, the barangay / level / action filters and the offset, so the key
-     * space is the product of five horizons, three page sizes, every barangay,
-     * every risk level, every action and every offset. Precomputing that is not a
-     * longer list, it is a different design.
-     *
-     * So the plain horizon change — the only one of those the window selector
-     * itself drives — is precomputed, and everything else is computed when it is
-     * asked for, in about 90ms. That is why a computed-on-request response can
-     * never reach zero here, and therefore why the screen must not shape it as an
-     * alert. See ComputedAt.tsx.
-     */
-    assertEveryOfferedWindowIsPrecomputed(
-        'renewal_risk',
-        [
-            ['days' => 30, 'limit' => 25],
-            ['days' => 60, 'limit' => 25],
-            ['days' => 90, 'limit' => 25],
-            ['days' => 180, 'limit' => 25],
-            ['days' => 365, 'limit' => 25],
-        ],
-        'RenewalRiskPage HORIZON_OPTIONS',
-    );
-});
-
-it('does not precompute a filtered or resized Renewal Risk request', function () {
-    /*
-     * The other half of the contract, and the reason the notice must stay quiet.
-     * These are correct, permanent, intended on-request computations — not a
-     * backlog the Refresh button can clear — and asserting it here stops someone
-     * "fixing" the gap by adding filter combinations to the config, which is the
-     * different design the note above rules out.
-     */
-    $written = precomputedKeysFor('renewal_risk');
-
-    expect($written)->not->toContain(
-        AnalyticsSnapshot::keyFor('renewal_risk', ['days' => 365, 'limit' => 25, 'barangay_id' => 3]),
-    );
-    expect($written)->not->toContain(
-        AnalyticsSnapshot::keyFor('renewal_risk', ['days' => 365, 'limit' => 100]),
-    );
-});
-
-it('calls a filtered Renewal Risk request unprecomputed rather than pretending it is stale', function () {
+it('calls a request outside the precomputed set unprecomputed rather than pretending it is stale', function () {
     /*
      * The distinction the screen depends on, asserted on the reason the resolver
      * actually emits rather than on the config it comes from.
      *
-     * A filtered request is a correct, permanent, intended on-request
+     * A request outside the precomputed set is a correct, intended on-request
      * computation and renders as the ordinary quiet timestamp;
      * `not_yet_refreshed` means the batch job owes this view a result and the
-     * Refresh button will produce it. Collapsing the two either puts an alert
-     * back on every filter press, or hides the one case a reader can act on.
-     * Both have happened; this is the guard.
+     * Refresh button will produce it. Collapsing the two either puts an alert on
+     * every such request, or hides the one case a reader can act on. Both have
+     * happened; this is the guard. (It was written against Renewal Risk's
+     * filters, which went with that screen.)
      */
     $missReason = new ReflectionMethod(AnalyticsResolver::class, 'missReason');
 
-    // A band filter is the exact case that regressed: a supported option on the
-    // screen's own toolbar, which must not raise a staleness panel.
-    expect($missReason->invoke(null, 'renewal_risk', ['days' => 365, 'limit' => 25, 'band' => 'low']))
+    expect($missReason->invoke(null, 'dashboard', ['months' => 5]))
         ->toBe('window_not_precomputed')
-        ->and($missReason->invoke(null, 'renewal_risk', ['days' => 365, 'limit' => 25, 'barangay_id' => 3]))
-        ->toBe('window_not_precomputed')
-        ->and($missReason->invoke(null, 'renewal_risk', ['days' => 365, 'limit' => 100]))
-        ->toBe('window_not_precomputed')
-        // The horizon on its own, unfiltered: precomputed, so a miss here means
-        // the refresh has not run — which is the actionable case.
-        ->and($missReason->invoke(null, 'renewal_risk', ['days' => 365, 'limit' => 25]))
+        // An offered window: precomputed, so a miss here means the refresh has
+        // not run — which is the actionable case.
+        ->and($missReason->invoke(null, 'dashboard', ['months' => 12]))
         ->toBe('not_yet_refreshed');
 });
 

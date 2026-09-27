@@ -35,8 +35,6 @@ import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
-import { BusinessGrowthPage } from './pages/admin/BusinessGrowthPage'
-import { RenewalRiskPage } from './pages/admin/RenewalRiskPage'
 import { UsersPage } from './pages/admin/UsersPage'
 import { AuditLogsPage } from './pages/admin/AuditLogsPage'
 import { OicPage } from './pages/admin/OicPage'
@@ -114,7 +112,7 @@ function MovedToStaff({ path }: { path: string }) {
  * The analytics shim, which unlike the others has subpaths under it.
  *
  * It used to be a bare `<Navigate to="/staff/analytics">`, so every deep link
- * — /analytics/renewal-risk, /analytics/processing-time — landed on the
+ * — /analytics/processing-time, /analytics/offices — landed on the
  * Overview instead. That is not just a stale-bookmark problem: it is how the
  * tab strip's own broken links stayed invisible, because the tabs pointed here
  * and the redirect quietly answered every one of them with the dashboard.
@@ -477,27 +475,12 @@ export default function App() {
               </RequirePermission>
             }
           />
-          <Route
-            path="/staff/analytics/business-growth"
-            element={
-              <RequirePermission permission="analytics.view">
-                <BusinessGrowthPage />
-              </RequirePermission>
-            }
-          />
           {/*
-            Renewal Risk ranks every business's permits by a weighted rule score,
-            so it sits on `analytics.view` alongside the other two BPLO screens
-            rather than being visible to every office reviewer.
+            /staff/analytics/business-growth and /staff/analytics/renewal-risk
+            were here. Both screens were removed (checklist 2026-09-27, item 6);
+            their useful panels moved onto the dashboard above. An old link to
+            either now reaches the 404, which is the honest answer.
           */}
-          <Route
-            path="/staff/analytics/renewal-risk"
-            element={
-              <RequirePermission permission="analytics.view">
-                <RenewalRiskPage />
-              </RequirePermission>
-            }
-          />
           <Route
             path="/staff/admin/users"
             element={
