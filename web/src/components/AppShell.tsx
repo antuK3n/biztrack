@@ -386,9 +386,11 @@ export function AppShell() {
             The one notice that does sit over every page [Login 6], and it earns
             the place item 99 took from the verification banner: it is true
             (the server's clock, the City's hours), it asks nothing, it closes
-            for the visit, and it disappears on its own at 8 AM.
+            for the visit, and it disappears on its own at 8 AM. The right margin
+            keeps its dismiss button clear of the fixed bell, which sits over
+            this corner on a phone.
           */}
-          <OfficeHoursNotice audience={portal === 'public' ? 'owner' : 'staff'} />
+          <OfficeHoursNotice audience={portal === 'public' ? 'owner' : 'staff'} className="mr-12 lg:mr-10" />
           <Outlet />
         </div>
       </main>
