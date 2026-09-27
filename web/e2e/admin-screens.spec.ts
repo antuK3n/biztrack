@@ -480,6 +480,39 @@ test.describe('Owner Status', () => {
     await expect.poll(() => asked.at(-1)).toContain('q=rxcare')
   })
 
+  test('retired businesses are listed only when asked for, and offer no actions', async ({ page }) => {
+    /*
+     * Checklist item 21. "All" is every business still on the register; a
+     * retired one — removed from it — is listed only under Retired, says so in
+     * words, and carries no buttons, because every action binds a business
+     * the server no longer finds.
+     */
+    expect(asked[0] ?? '').not.toContain('status=')
+
+    await page.route('**/api/v1/admin/businesses?*', async (route) => {
+      const url = new URL(route.request().url())
+      asked.push(url.search)
+      const retired = url.searchParams.get('status') === 'retired'
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(
+          page1(retired ? [{ ...BUSINESSES[0], retired_at: '2026-08-01T00:00:00.000Z' }] : BUSINESSES),
+        ),
+      })
+    })
+
+    await page.getByRole('button', { name: 'Retired', exact: true }).click()
+    await expect.poll(() => asked.at(-1)).toContain('status=retired')
+
+    const row = page.locator('tbody tr')
+    await expect(row).toHaveCount(1)
+    await expect(row).toContainText('Retired')
+    await expect(row).toContainText('Removed from the register on')
+    await expect(row.getByRole('button', { name: 'Change Status' })).toHaveCount(0)
+    await expect(row.getByRole('button', { name: 'Transfer Ownership' })).toHaveCount(0)
+  })
+
   test('a status change must state a reason before it can be confirmed', async ({ page }) => {
     /*
      * The reason is not decoration: it is what the owner is shown and what the
