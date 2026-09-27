@@ -33,6 +33,7 @@ import { PermitDetailPage } from './pages/applicant/PermitDetailPage'
 import { QueuePage } from './pages/officer/QueuePage'
 import { ReviewPage } from './pages/officer/ReviewPage'
 import { AnalyticsPage } from './pages/admin/AnalyticsPage'
+import { ReportsPage } from './pages/admin/ReportsPage'
 import { ProcessingTimePage } from './pages/admin/ProcessingTimePage'
 import { OfficePerformancePage } from './pages/admin/OfficePerformancePage'
 import { UsersPage } from './pages/admin/UsersPage'
@@ -470,6 +471,18 @@ export default function App() {
             }
           />
           {/*
+            Report Generation (checklist 2026-09-27, item 7). Same permission as
+            the dashboard, and the same server-side office boundary.
+          */}
+          <Route
+            path="/staff/analytics/reports"
+            element={
+              <RequirePermission permission="analytics.view">
+                <ReportsPage />
+              </RequirePermission>
+            }
+          />
+          {/*
             /staff/analytics/business-growth and /staff/analytics/renewal-risk
             were here. Both screens were removed (checklist 2026-09-27, item 6);
             their useful panels moved onto the dashboard above. An old link to
@@ -640,6 +653,14 @@ export default function App() {
             element={
               <RequirePermission permission="analytics.view">
                 <AnalyticsPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/analytics/reports"
+            element={
+              <RequirePermission permission="analytics.view">
+                <ReportsPage />
               </RequirePermission>
             }
           />

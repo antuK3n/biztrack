@@ -2,6 +2,9 @@ import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
 import type {
+  LguReport,
+  ReportKey,
+  ReportListItem,
   AnalyticsScope,
   ScopedComputed,
   AdminBusiness,
@@ -1287,6 +1290,26 @@ export const analytics = {
       `/analytics/dashboard/report?months=${months}${office ? `&office=${encodeURIComponent(office)}` : ''}`,
       `analytics-dashboard${office && office !== 'all' ? `-${office.toLowerCase()}` : ''}.pdf`,
     ),
+
+  /*
+   * Report Generation. `office` follows the dashboard's rule: a request, not a
+   * filter — the server answers an office account with its own office and
+   * refuses any other.
+   */
+  reports: async (office?: string): Promise<{ data: ReportListItem[]; scope: AnalyticsScope }> => {
+    const res = await api.get<{ data: ReportListItem[]; scope: AnalyticsScope }>('/analytics/reports', {
+      params: { office },
+    })
+    return res.data
+  },
+  report: (key: ReportKey, from: string, to: string, office?: string) =>
+    unwrap<LguReport>(api.get(`/analytics/reports/${key}`, { params: { from, to, office } })),
+  reportCsv: (key: ReportKey, from: string, to: string, office?: string) => {
+    const query = new URLSearchParams({ from, to })
+    if (office) query.set('office', office)
+    const suffix = office && office !== 'all' ? `-${office.toLowerCase()}` : ''
+    return downloadBlob(`/analytics/reports/${key}/csv?${query.toString()}`, `${key}${suffix}-${from}-to-${to}.csv`)
+  },
 
   /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>

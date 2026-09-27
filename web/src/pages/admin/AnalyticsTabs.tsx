@@ -47,6 +47,12 @@ const TABS = [
    */
   { to: '/analytics', label: 'Analytics Dashboard', end: true, permission: 'analytics.view' },
   /*
+   * Report Generation (checklist 2026-09-27, item 7). Every dashboard reader
+   * gets it, scoped the same way, which also means every office admin now sees
+   * a two-tab strip.
+   */
+  { to: '/analytics/reports', label: 'Reports', end: false, permission: 'analytics.view' },
+  /*
    * The super admin's two screens, in the order the question is asked.
    *
    * Office Performance comes first because it answers "which office" and
