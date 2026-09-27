@@ -14,6 +14,7 @@ use App\Models\ComplianceCheck;
 use App\Models\User;
 use App\Services\WorkflowService;
 use App\Support\Audit;
+use App\Support\Caseload;
 use App\Support\Ra11032;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -731,10 +732,62 @@ class AssignmentController extends Controller
     {
         $this->authorizeOicReassignment($request, $assignment);
 
+        /*
+         * A decided filing has no officer in charge to change.
+         *
+         * Client, 27 September 2026: *"yung finished bawal na mareassign kasi
+         * tapos na na."* They are right, and the screen was the only thing
+         * saying so — this endpoint would happily rewrite the name on a
+         * filing approved months ago, which is not a reassignment but an
+         * edit to the record of who did the work.
+         *
+         * 422 rather than 403: the reader is entitled to act on assignments,
+         * and the conflict is with the STATE of this one. The same reasoning
+         * the claim endpoint uses for its 409.
+         *
+         * `Caseload::decidedStatuses()` rather than a list written here, so
+         * this and every screen that counts open work classify a state the
+         * same way — and a status added later is classified by `isTerminal()`
+         * instead of silently becoming reassignable.
+         */
+        abort_if(
+            in_array(
+                $assignment->application?->status?->value,
+                Caseload::decidedStatuses(),
+                true,
+            ),
+            422,
+            'This filing has been decided, so its officer in charge can no longer be changed. The record of who handled it stays as it is.',
+        );
+
+        /*
+         * `present`, not `required`: null is an answer here and means the
+         * office QUEUE — nobody holds it.
+         *
+         * The Officer in Charge screen could only name a successor, so an
+         * office losing its only officer had no way to release work from
+         * there; the caseload screen could, through `reassign-caseload`, whose
+         * `to_user_id` has always taken null for exactly this. One endpoint
+         * that sets the holder, where "no holder" is a holder you can set.
+         *
+         * `present` rather than `sometimes` so the caller has to SAY null. A
+         * request that simply forgot the field would otherwise release a
+         * filing silently, which is the one mistake this field can make.
+         */
         $data = $request->validate([
-            'officer_user_id' => ['required', 'exists:users,id'],
+            'officer_user_id' => ['present', 'nullable', 'exists:users,id'],
             'reason' => ['nullable', 'string', 'max:1000'],
         ]);
+
+        if ($data['officer_user_id'] === null) {
+            $this->workflow->releaseOfficer($assignment, $data['reason'] ?? null);
+
+            // The same shape the naming branch returns below, so a caller
+            // cannot tell which branch answered except by reading `officer`.
+            return response()->json([
+                'data' => new AssignmentResource($assignment->fresh()->load(['department', 'officer', 'application.business', 'application.permitTypes'])),
+            ]);
+        }
 
         $officer = User::findOrFail($data['officer_user_id']);
         abort_unless(

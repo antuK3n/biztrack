@@ -622,7 +622,6 @@ class AmendableFields
                 self::$pending[$business->id]['line_primary'] = $cast($newValue);
                 break;
 
-
             default:
                 /*
                  * Recorded only — the ownership request and the paper's notes.
@@ -689,7 +688,6 @@ class AmendableFields
             $line = $business->lines()->orderBy('id')->first();
             $line?->update(['psic_code_id' => $staged['line_primary']]);
         }
-
 
     }
 }

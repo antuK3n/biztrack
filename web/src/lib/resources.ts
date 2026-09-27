@@ -2,6 +2,7 @@ import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
 import type {
+  BlacklistedOwner,
   AdminBusiness,
   AdminCaseload,
   AdminRole,
@@ -981,7 +982,19 @@ export const assignments = {
    */
   release: (id: number) => unwrap<Assignment>(api.post(`/assignments/${id}/release`)),
   /** Assign a specific officer to this assignment (permission oic.assign; v2). */
-  assign: (id: number, officer_user_id: number, reason?: string) =>
+  /**
+   * Set who holds this assignment. `null` is the office QUEUE — nobody.
+   *
+   * The endpoint took a required officer until 27 September 2026, so the
+   * Officer in Charge screen could only name a successor and an office losing
+   * its last officer had nowhere to release work from. `null` here is the same
+   * meaning `reassign-caseload` has always given `to_user_id: null`.
+   *
+   * The field is sent either way, never omitted: the server validates it
+   * `present`, because a request that simply forgot it would otherwise release
+   * a filing in silence.
+   */
+  assign: (id: number, officer_user_id: number | null, reason?: string) =>
     unwrap<Assignment>(api.post(`/assignments/${id}/assign`, { officer_user_id, reason })),
   /**
    * Set which RA 11032 tier this filing belongs to (simple / complex /
@@ -1426,6 +1439,36 @@ export interface AdminUserFilters extends PageParams {
 export interface AdminBusinessFilters extends PageParams {
   q?: string
   status?: BusinessStatus
+  /**
+   * The order, from the endpoint's own whitelist — never a raw column.
+   *
+   * `dir` defaults per column on the server: newest-first for the three dates
+   * and the money, A–Z for the two names, because that is the direction each
+   * one is actually asked in.
+   */
+  sort?: 'registered' | 'name' | 'status_changed' | 'owner' | 'fees'
+  dir?: 'asc' | 'desc'
+  /**
+   * Whether the OWNER is barred, as opposed to this shopfront.
+   *
+   * A blacklisting falls on the person and reaches every business they hold,
+   * so this separates the businesses caught by somebody's finding from those
+   * judged on their own conduct.
+   */
+  owner_blacklisted?: boolean
+  /** Deferred permit fees: owing something, or clear. */
+  fees?: 'owing' | 'clear'
+  /** A registration with paperwork behind it, or one with none at all. */
+  filed?: 'yes' | 'never'
+  /**
+   * When the business was registered, inclusive at both ends (`YYYY-MM-DD`).
+   *
+   * Inclusive matters: the server compares by DATE, because
+   * `created_at <= '2026-09-27'` would exclude everything registered on the
+   * 27th — midnight is the earliest moment of that day.
+   */
+  registered_from?: string
+  registered_to?: string
 }
 
 /** Which audit rows to read. All optional; omitting every one reads the trail. */
@@ -1479,27 +1522,31 @@ export const admin = {
   businesses: (filters: AdminBusinessFilters = {}) =>
     unwrap<AdminBusiness[]>(api.get('/admin/businesses', { params: filters })),
   /** Same roster, keeping the page meta. */
+  /**
+   * Who is barred from the register, with every business they hold.
+   *
+   * A separate call from the business roster because it answers a different
+   * question — see BlacklistedOwner in types.ts.
+   */
+  blacklistedOwners: (params: { q?: string; page?: number; per_page?: number } = {}) =>
+    unwrapPaged<BlacklistedOwner>(api.get('/admin/blacklisted-owners', { params })),
+
   businessesPage: (filters: AdminBusinessFilters = {}) =>
     unwrapPaged<AdminBusiness>(api.get('/admin/businesses', { params: filters })),
   /** Change a business's status with a reason (permission owner.manage_status; v2). */
   setBusinessStatus: (id: number, status: BusinessStatus, reason: string) =>
     unwrap<AdminBusiness>(api.post(`/admin/businesses/${id}/status`, { status, reason })),
-  /**
-   * Move a business to another owner account.
+  /*
+   * `transferBusinessOwner` is gone from here.
    *
-   * The half of an approved CHANGE OF OWNERSHIP that a person has to do.
-   * MCG-BPLO-FO-003 section II lets an applicant state the new owner and
-   * attach the Deed of Transfer; the permit prints the ACCOUNT holder's name,
-   * so BPLO names the account here having read the deed.
-   *
-   * By email, because that is the identifier BPLO can get from the new owner.
-   * An unknown address is refused with the next step in the message — the new
-   * owner has to register first, and nobody at the counter can do it for them.
+   * The endpoint stays — POST /admin/businesses/{business}/owner is where an
+   * approved CHANGE OF OWNERSHIP amendment lands, which is a different
+   * screen's job — but the Owner Status page no longer offers it [client,
+   * 27 September 2026: *"sa owner status page, delete transfer ownership"*].
+   * That page is about sanctions, and a control that hands a business to
+   * somebody else sitting beside one that bars its owner is two unrelated
+   * powers on one row.
    */
-  transferBusinessOwner: (id: number, ownerEmail: string, reason: string) =>
-    unwrap<{ id: number; owner_user_id: number; owner_name: string }>(
-      api.post(`/admin/businesses/${id}/owner`, { owner_email: ownerEmail, reason }),
-    ),
   /**
    * The roles an officer account may be given, with the labels the API holds.
    *
@@ -1691,10 +1738,43 @@ export interface OicCandidate {
 export interface OicFilters extends PageParams {
   department_id?: number
   holder?: 'assigned' | 'unassigned'
+  /**
+   * Whether the FILING behind the assignment is still live.
+   *
+   * `open` uses the same rule the officer directory counts by, so the two
+   * screens describe one set. The Officer in Charge screen always sends it:
+   * a decided filing's officer in charge cannot be changed — the endpoint
+   * answers 422 — so listing those rows would offer an action that cannot
+   * work.
+   *
+   * `finished` remains for a caller that wants the record of what was done.
+   * No screen asks it today; Records is where that question belongs.
+   */
+  state?: 'open' | 'finished'
   q?: string
 }
 
 export interface OicPageMeta extends PageMeta {
   /** The offices to filter by, off the register rather than retyped here. */
   departments: { id: number; code: string; name: string }[]
+  /**
+   * How many of the register's assignments are on live filings, and how many
+   * of THOSE have an officer.
+   *
+   * They were the bridge from a total that counted finished work down to the
+   * figure the officer directory's Holding column shows. The Officer in Charge
+   * screen asks only for open work now, so its total already is `open` — but
+   * `open_assigned` still earns its place there, saying how much of the
+   * movable work is actually on somebody's desk rather than waiting.
+   *
+   * `total` counts every assignment a name is on, finished ones included.
+   * `open` are the ones on filings still live, and `open_assigned` of those
+   * have an officer — which is exactly what the directory's Holding column
+   * adds up to.
+   *
+   * Counted over the whole register, ignoring the page and every filter: a
+   * reconciliation that moved with the view would reconcile nothing.
+   */
+  open: number
+  open_assigned: number
 }
