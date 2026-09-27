@@ -12,6 +12,13 @@ use Illuminate\Support\Facades\DB;
 /**
  * The renewal outcome the register never recorded, recovered from permit history.
  *
+ * NOTE (2026-09-27): the Renewal Risk screen, its rule score
+ * (RenewalRiskScoring) and its fitted model (RenewalModelAnalytics) were removed
+ * (checklist "Manage Approved Permits", item 6). The notes below still name them
+ * because they record why this class measures what it does. The class itself is
+ * kept: the renewal chain it reads is a fact about permits, it has its own tests,
+ * and the 2026_08_30 migration relies on the same reading.
+ *
  * RenewalRiskScoring ranks permits by warning signs and says so plainly: it is a
  * weighted rule score, nothing was fitted, and the register holds no column
  * saying whether a business ended up renewing late. That last sentence is true

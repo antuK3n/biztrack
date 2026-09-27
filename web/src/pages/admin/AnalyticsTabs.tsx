@@ -48,34 +48,12 @@ import { useAuth } from '../../stores/auth'
 const TABS = [
   /*
    * "Analytics Dashboard", not "Overview" — the paper's §1 name, and the h1
-   * this tab leads to. It was the last short label on the strip: the other two
-   * became "Renewal Risk Prediction" and "Business Growth Analysis" when the
-   * client asked for the paper's terms, and leaving this one as "Overview"
-   * meant the strip named three screens in two vocabularies, one of which
-   * appears nowhere in the spec.
+   * this tab leads to.
+   *
+   * "Renewal Risk Prediction" and "Business Growth Analysis" followed it here
+   * until both screens were removed (checklist 2026-09-27, item 6).
    */
   { to: '/staff/analytics', label: 'Analytics Dashboard', end: true, permission: 'analytics.view' },
-  {
-    to: '/staff/analytics/renewal-risk',
-    // The paper's §2 name in full, matching the screen's own h1 and the label
-    // AnalyticsDatasets sends back for this dataset.
-    label: 'Renewal Risk Prediction',
-    end: false,
-    permission: 'analytics.view',
-  },
-  /*
-   * Was labelled "Lifecycle" — a shortening of mockup 122's "Business Lifecycle
-   * Monitoring", which won on naming over the paper's §4 because it was newer.
-   * The client asked for the spec's own term back, so the tab now reads
-   * "Business Growth Analysis". The route is unchanged, and the page heading
-   * still renders the dataset's own name; only this label moved.
-   */
-  {
-    to: '/staff/analytics/business-growth',
-    label: 'Business Growth Analysis',
-    end: false,
-    permission: 'analytics.view',
-  },
   /*
    * The super admin's two screens, in the order the question is asked.
    *

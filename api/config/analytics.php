@@ -45,9 +45,10 @@ return [
     | So when a selector gains an option, it gains a line here in the same
     | commit. If precomputing it is not wanted, the option should not be offered.
     |
-    | The one selector that cannot follow the rule is Renewal Risk's — see the
-    | note on that dataset below. It is the reason a computed-on-request notice
-    | can never be driven to zero and therefore must not be shaped like an alert.
+    | Renewal Risk's filters were the one selector that could not follow the
+    | rule; that screen is gone (checklist 2026-09-27, item 6). A computed-on-
+    | request notice can still appear for a request outside these lists and must
+    | still not be shaped like an alert.
     |
     */
 
@@ -85,60 +86,6 @@ return [
             ['weeks' => 104],
         ],
 
-        'business_growth' => [
-            // months — mirrors BusinessGrowthPage PERIOD_OPTIONS.
-            ['months' => 3],
-            ['months' => 6],
-            ['months' => 12],
-            ['months' => 24],
-            ['months' => 36],
-        ],
-
-        /*
-         * days ahead, rows in the watchlist table.
-         *
-         * The horizons mirror RenewalRiskPage HORIZON_OPTIONS. The row count
-         * does not, and cannot: the snapshot key carries the page size, the
-         * barangay / level / action filters and the pagination offset
-         * (AnalyticsController::renewalRisk), so the key space is the product of
-         * five horizons, three page sizes, every barangay, every risk level,
-         * every action and every offset. That is thousands of combinations, each
-         * storing a snapshot of up to ~1MB — precomputing them is not a bigger
-         * list, it is a different architecture.
-         *
-         * So this dataset precomputes the five horizons at the default,
-         * unfiltered first page, and every other combination is computed when it
-         * is asked for. Renewal risk builds in about 90ms, so that is a page load
-         * nobody notices. It is not a degradation and the screens must not
-         * present it as one.
-         */
-        /*
-         * The fitted model. ONE variant, and that is the whole list.
-         *
-         * The horizon selector on the screen changes which permits get an
-         * estimate, not which cycles the model is fitted to — the training set
-         * is the whole of permit history and does not move when a reader picks
-         * 30 days instead of 365. Precomputing five horizons would therefore
-         * refit the same regression five times over the same rows to produce
-         * five identical coefficient tables, at roughly two seconds and 2.4MB of
-         * JSON each.
-         *
-         * So the snapshot is the model at the default horizon, and the screen
-         * reads that snapshot whatever the watchlist beside it is showing. The
-         * estimates it carries cover the full year, which is a superset of every
-         * shorter horizon a reader can choose.
-         */
-        'renewal_model' => [
-            ['days' => 365, 'limit' => 25],
-        ],
-
-        'renewal_risk' => [
-            ['days' => 30, 'limit' => 25],
-            ['days' => 60, 'limit' => 25],
-            ['days' => 90, 'limit' => 25],
-            ['days' => 180, 'limit' => 25],
-            ['days' => 365, 'limit' => 25],
-        ],
     ],
 
     /*
