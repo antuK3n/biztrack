@@ -1565,6 +1565,53 @@ export interface ScopedComputed<T> extends Computed<T> {
   scope: AnalyticsScope
 }
 
+/* ── Reports (checklist 2026-09-27, item 7) ───────────────────────────────
+ *
+ * One shape for all five LGU reports (App\Support\LguReports): sections of
+ * typed columns and raw rows. The screen renders it and the CSV writes it, so
+ * neither knows which report it holds. Values are raw; null is "no figure".
+ */
+export type ReportKey =
+  | 'permits-issued'
+  | 'collections'
+  | 'businesses-by-area'
+  | 'clearances'
+  | 'pending-processing'
+
+export interface ReportListItem {
+  key: ReportKey
+  title: string
+  summary: string
+}
+
+export interface ReportColumn {
+  key: string
+  label: string
+  format: 'text' | 'count' | 'money' | 'decimal' | 'percent'
+}
+
+export type ReportRow = Record<string, string | number | null>
+
+export interface ReportSection {
+  heading: string
+  columns: ReportColumn[]
+  rows: ReportRow[]
+  total: ReportRow | null
+  note: string | null
+}
+
+export interface LguReport {
+  key: ReportKey
+  title: string
+  sections: ReportSection[]
+  period: { from: string; to: string }
+  scope: AnalyticsScope
+  generated_at: string
+  prepared_by: { name: string; position: string }
+  /** From Office Signatories; null when the office has none, or for all offices. */
+  noted_by: { name: string; position: string } | null
+}
+
 /** One dataset variant's outcome from a manual refresh. */
 export interface AnalyticsRefreshRow {
   key: string

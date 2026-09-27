@@ -1,0 +1,674 @@
+<?php
+
+namespace App\Support;
+
+use App\Enums\ApplicationStatus;
+use App\Enums\PaymentStatus;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * The printable reports on the Reports screen (checklist "Manage Approved
+ * Permits – Ken", item 7: "redo Report Generation").
+ *
+ * ── WHAT THEY ARE MODELLED ON ───────────────────────────────────────────────
+ *
+ * Not on the analytics screens. A report here is a document a Philippine LGU
+ * office files or forwards, so each one follows a report that BPLOs and the
+ * offices around them already keep:
+ *
+ *  1. permits-issued      — the monthly report of business permits issued, NEW
+ *                           versus RENEWAL. DTI-DILG-DICT JMC 01-2016 (revised
+ *                           BPLS standards) sets separate targets for new and
+ *                           renewal applications, which is why every BPLO keeps
+ *                           the two apart; LGUs publish their counts the same
+ *                           way ("14,473 renewals and 219 new permits in
+ *                           January").
+ *  2. collections         — an abstract of collections by nature of fee, the
+ *                           shape the Treasurer's report of collections takes
+ *                           (business tax, Mayor's permit fee, regulatory fees,
+ *                           fire code fees, and so on), by office and by month.
+ *  3. businesses-by-area  — the masterlist summary: businesses permitted in the
+ *                           period by barangay and by kind of business (the
+ *                           Revenue Code's retailer / wholesaler / manufacturer
+ *                           / contractor categories).
+ *  4. clearances          — clearances issued per office (sanitary permit, FSIC,
+ *                           locational clearance, occupancy, environmental), the
+ *                           count each regulatory office reports to BPLO and to
+ *                           its own line agency.
+ *  5. pending-processing  — the RA 11032 / ARTA processing-time report: filings
+ *                           decided against their statutory tier limit, and what
+ *                           was still pending at the end of the period, by age.
+ *
+ * Five, deliberately. The checklist asked for four to six, and these are the
+ * ones an office is asked for; anything more is the dashboard's job.
+ *
+ * ── ONE SHAPE FOR ALL FIVE ──────────────────────────────────────────────────
+ *
+ * Every report is a list of sections, each a table: typed columns, rows of raw
+ * values, an optional total row and a note. The screen renders that shape, the
+ * CSV writes it, and neither knows which report it is holding — so the printed
+ * figures and the exported figures cannot come from two different computations.
+ *
+ * Figures are raw numbers; formatting (pesos, thousands separators) is the
+ * reader's business. A dash is sent as null, never as 0 (AGENTS.md §6.4).
+ *
+ * ── OFFICE SCOPE ────────────────────────────────────────────────────────────
+ *
+ * The same boundary as the dashboard, decided the same way: the controller asks
+ * AnalyticsOffice which office the request is answered for and passes the code
+ * in. Nothing here knows who is asking. See AnalyticsOffice for what "an
+ * office's figures" means; the one addition is money, where an office's
+ * collections are the fee lines billed in its name.
+ *
+ * Everything is computed on request. The date range is arbitrary, so there is
+ * no snapshot to serve.
+ */
+final class LguReports
+{
+    /** @var array<string, array{title: string, summary: string}> */
+    public const REPORTS = [
+        'permits-issued' => [
+            'title' => 'Permits Issued — New and Renewal',
+            'summary' => 'Permits released in the period, by month and by permit type, split into new, renewal and amendment.',
+        ],
+        'collections' => [
+            'title' => 'Collections by Nature of Fee',
+            'summary' => 'Fees paid in the period, by office, by nature of collection and by month.',
+        ],
+        'businesses-by-area' => [
+            'title' => 'Businesses Permitted by Barangay and Kind of Business',
+            'summary' => 'Businesses issued a permit in the period, by barangay (new and renewal) and by kind of business.',
+        ],
+        'clearances' => [
+            'title' => 'Clearances Issued per Office',
+            'summary' => 'Each office’s clearances and permits issued in the period, and those it refused.',
+        ],
+        'pending-processing' => [
+            'title' => 'Processing Time and Pending Applications',
+            'summary' => 'Filings decided in the period against their RA 11032 limit, and what was still pending at its end.',
+        ],
+    ];
+
+    /** Nature-of-collection labels for the fee groups the fee engine writes. */
+    private const FEE_GROUPS = [
+        'business_tax' => 'Local business tax',
+        'mayors_permit' => 'Mayor’s permit fees',
+        'regulatory' => 'Regulatory fees',
+        'fire_code' => 'Fire code fees',
+        'zoning' => 'Zoning and locational clearance fees',
+        'admin' => 'Administrative charges (plates, stickers, certifications)',
+        'city_charge' => 'Other city charges',
+        'ctc' => 'Community tax',
+        'exemption_claim' => 'Exemptions claimed',
+    ];
+
+    /** Offices that bill a fee line but are not departments on this register. */
+    private const OTHER_FEE_OFFICES = [
+        'CTO' => 'City Treasurer’s Office',
+        'CMO-MARKET' => 'City Market Office',
+    ];
+
+    private const TYPES = [
+        'new' => 'New',
+        'renewal' => 'Renewal',
+        'amendment' => 'Amendment',
+    ];
+
+    /**
+     * @param  array{code: string, department_id: int, permit_type_ids: list<int>}|null  $scope
+     * @return array{key: string, title: string, sections: list<array<string, mixed>>}
+     */
+    public static function build(string $key, CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $from = $from->startOfDay();
+        $to = $to->endOfDay();
+
+        $sections = match ($key) {
+            'permits-issued' => self::permitsIssued($from, $to, $scope),
+            'collections' => self::collections($from, $to, $scope),
+            'businesses-by-area' => self::businessesByArea($from, $to, $scope),
+            'clearances' => self::clearances($from, $to, $scope),
+            'pending-processing' => self::pendingProcessing($from, $to, $scope),
+            default => throw new \InvalidArgumentException("Unknown report [{$key}]."),
+        };
+
+        return [
+            'key' => $key,
+            'title' => self::REPORTS[$key]['title'],
+            'sections' => $sections,
+        ];
+    }
+
+    /* ── 1. permits issued, new and renewal ──────────────────────────────── */
+
+    /** @return list<array<string, mixed>> */
+    private static function permitsIssued(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $rows = self::issuedBy(DB::table('permits'), $scope)
+            ->join('applications', 'applications.id', '=', 'permits.application_id')
+            ->join('permit_types', 'permit_types.id', '=', 'permits.permit_type_id')
+            ->whereBetween('permits.issued_at', [$from, $to])
+            ->orderBy('permit_types.id')
+            ->get(['permits.issued_at', 'applications.application_type', 'permit_types.name as type_name', 'permit_types.id as type_id']);
+
+        $months = self::months($from, $to);
+        $byMonth = [];
+        foreach ($months as $month => $label) {
+            $byMonth[$month] = ['label' => $label, 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+        }
+        $byType = [];
+
+        foreach ($rows as $row) {
+            $type = self::transaction((string) $row->application_type);
+            $month = CarbonImmutable::parse($row->issued_at)->format('Y-m');
+            if (isset($byMonth[$month])) {
+                $byMonth[$month][$type]++;
+            }
+            $byType[$row->type_id] ??= ['label' => (string) $row->type_name, 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+            $byType[$row->type_id][$type]++;
+        }
+
+        $columns = [
+            ['key' => 'label', 'label' => 'Month', 'format' => 'text'],
+            ['key' => 'new', 'label' => 'New', 'format' => 'count'],
+            ['key' => 'renewal', 'label' => 'Renewal', 'format' => 'count'],
+            ['key' => 'amendment', 'label' => 'Amendment', 'format' => 'count'],
+            ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
+        ];
+
+        return [
+            self::table(
+                'By month',
+                $columns,
+                array_map(self::withTotal(...), array_values($byMonth)),
+                'Permits released in the period, counted by the kind of filing that produced them.',
+            ),
+            self::table(
+                'By permit type',
+                array_replace($columns, [0 => ['key' => 'label', 'label' => 'Permit type', 'format' => 'text']]),
+                array_map(self::withTotal(...), array_values($byType)),
+                'A permit that was later revoked, suspended or replaced by a renewal is still counted: it was issued in the period.',
+            ),
+        ];
+    }
+
+    /* ── 2. collections by nature of fee ─────────────────────────────────── */
+
+    /** @return list<array<string, mixed>> */
+    private static function collections(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $payments = DB::table('payments')
+            ->join('fee_assessments', 'fee_assessments.id', '=', 'payments.fee_assessment_id')
+            ->where('payments.status', PaymentStatus::Completed->value)
+            ->whereBetween('payments.paid_at', [$from, $to])
+            ->orderBy('payments.id')
+            ->get(['payments.id', 'payments.amount', 'payments.paid_at', 'fee_assessments.line_items', 'fee_assessments.total_amount']);
+
+        $offices = self::officeNames();
+        $byOffice = [];
+        $byNature = [];
+        $byMonth = [];
+        foreach (self::months($from, $to) as $month => $label) {
+            $byMonth[$month] = ['label' => $label, 'payments' => 0, 'amount' => 0.0];
+        }
+
+        foreach ($payments as $payment) {
+            $lines = json_decode((string) $payment->line_items, true) ?: [];
+            $assessed = (float) $payment->total_amount;
+            if ($assessed <= 0) {
+                continue;
+            }
+            // A payment is spread over its assessment's fee lines in proportion.
+            $share = (float) $payment->amount / $assessed;
+
+            $touched = false;
+            $paidHere = 0.0;
+            foreach ($lines as $line) {
+                $office = (string) ($line['office'] ?? '');
+                if ($scope !== null && $office !== $scope['code']) {
+                    continue;
+                }
+                $amount = (float) ($line['amount'] ?? 0) * $share;
+                if ($amount == 0.0) {
+                    continue;
+                }
+                $touched = true;
+                $paidHere += $amount;
+
+                $officeLabel = $offices[$office] ?? ($office === '' ? 'Not itemised by office' : $office);
+                $byOffice[$officeLabel] ??= ['label' => $officeLabel, 'payments' => [], 'amount' => 0.0];
+                $byOffice[$officeLabel]['payments'][$payment->id] = true;
+                $byOffice[$officeLabel]['amount'] += $amount;
+
+                $group = (string) ($line['group'] ?? '');
+                $natureLabel = self::FEE_GROUPS[$group] ?? ($group === '' ? 'Permit fees (not itemised)' : $group);
+                $byNature[$natureLabel] ??= ['label' => $natureLabel, 'amount' => 0.0];
+                $byNature[$natureLabel]['amount'] += $amount;
+            }
+
+            $month = CarbonImmutable::parse($payment->paid_at)->format('Y-m');
+            if ($touched && isset($byMonth[$month])) {
+                $byMonth[$month]['payments']++;
+                $byMonth[$month]['amount'] += $paidHere;
+            }
+        }
+
+        $officeRows = array_map(static fn (array $row): array => [
+            'label' => $row['label'],
+            'payments' => count($row['payments']),
+            'amount' => round($row['amount'], 2),
+        ], array_values($byOffice));
+        usort($officeRows, static fn (array $a, array $b): int => $b['amount'] <=> $a['amount']);
+
+        $natureRows = array_map(static fn (array $row): array => [
+            'label' => $row['label'],
+            'amount' => round($row['amount'], 2),
+        ], array_values($byNature));
+        usort($natureRows, static fn (array $a, array $b): int => $b['amount'] <=> $a['amount']);
+
+        $monthRows = array_map(static fn (array $row): array => [
+            'label' => $row['label'],
+            'payments' => $row['payments'],
+            'amount' => round($row['amount'], 2),
+        ], array_values($byMonth));
+
+        $amountTotal = round(array_sum(array_column($monthRows, 'amount')), 2);
+
+        return [
+            self::table('By office', [
+                ['key' => 'label', 'label' => 'Office', 'format' => 'text'],
+                ['key' => 'payments', 'label' => 'Payments', 'format' => 'count'],
+                ['key' => 'amount', 'label' => 'Amount (PHP)', 'format' => 'money'],
+            ], $officeRows, 'An office is credited with the fee lines billed in its name. One payment can carry several offices’ fees, so the payment counts do not add up across offices.', [
+                'label' => 'Total', 'payments' => null, 'amount' => round(array_sum(array_column($officeRows, 'amount')), 2),
+            ]),
+            self::table('By nature of collection', [
+                ['key' => 'label', 'label' => 'Nature of collection', 'format' => 'text'],
+                ['key' => 'amount', 'label' => 'Amount (PHP)', 'format' => 'money'],
+            ], $natureRows, null, [
+                'label' => 'Total', 'amount' => round(array_sum(array_column($natureRows, 'amount')), 2),
+            ]),
+            self::table('By month', [
+                ['key' => 'label', 'label' => 'Month', 'format' => 'text'],
+                ['key' => 'payments', 'label' => 'Payments', 'format' => 'count'],
+                ['key' => 'amount', 'label' => 'Amount (PHP)', 'format' => 'money'],
+            ], $monthRows, 'Dated by when the payment cleared. Where a filing was paid in two instalments, each instalment is spread across its fee lines in proportion. Payments in BizTrack are simulated until a real payment channel is connected.', [
+                'label' => 'Total', 'payments' => array_sum(array_column($monthRows, 'payments')), 'amount' => $amountTotal,
+            ]),
+        ];
+    }
+
+    /* ── 3. businesses by barangay and kind of business ──────────────────── */
+
+    /** @return list<array<string, mixed>> */
+    private static function businessesByArea(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        // Each business once: the kind of its EARLIEST permit in the period.
+        $issued = self::issuedBy(DB::table('permits'), $scope)
+            ->join('applications', 'applications.id', '=', 'permits.application_id')
+            ->whereBetween('permits.issued_at', [$from, $to])
+            ->orderBy('permits.issued_at')
+            ->orderBy('permits.id')
+            ->get(['permits.business_id', 'applications.application_type']);
+
+        $kind = [];
+        foreach ($issued as $row) {
+            $kind[(int) $row->business_id] ??= self::transaction((string) $row->application_type);
+        }
+        $businessIds = array_keys($kind);
+
+        $barangays = [];
+        if ($businessIds !== []) {
+            $located = DB::table('business_addresses')
+                ->leftJoin('barangays', 'barangays.id', '=', 'business_addresses.barangay_id')
+                ->whereIn('business_addresses.business_id', $businessIds)
+                ->where('business_addresses.address_type', 'business_location')
+                ->get(['business_addresses.business_id', 'barangays.name']);
+
+            $placed = [];
+            foreach ($located as $row) {
+                $id = (int) $row->business_id;
+                if (isset($placed[$id])) {
+                    continue;
+                }
+                $placed[$id] = true;
+                $name = $row->name === null ? 'No barangay on record' : (string) $row->name;
+                $barangays[$name] ??= ['label' => $name, 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+                $barangays[$name][$kind[$id]]++;
+            }
+            foreach ($businessIds as $id) {
+                if (! isset($placed[$id])) {
+                    $barangays['No barangay on record'] ??= ['label' => 'No barangay on record', 'new' => 0, 'renewal' => 0, 'amendment' => 0];
+                    $barangays['No barangay on record'][$kind[$id]]++;
+                }
+            }
+        }
+        ksort($barangays);
+
+        $categories = [];
+        if ($businessIds !== []) {
+            $lines = DB::table('business_lines')
+                ->join('psic_codes', 'psic_codes.id', '=', 'business_lines.psic_code_id')
+                ->whereIn('business_lines.business_id', $businessIds)
+                ->get(['business_lines.business_id', 'psic_codes.category']);
+
+            foreach ($lines as $row) {
+                $label = self::categoryLabel($row->category);
+                $categories[$label] ??= ['label' => $label, 'businesses' => []];
+                $categories[$label]['businesses'][(int) $row->business_id] = true;
+            }
+        }
+        $categoryRows = array_map(static fn (array $row): array => [
+            'label' => $row['label'],
+            'businesses' => count($row['businesses']),
+        ], array_values($categories));
+        usort($categoryRows, static fn (array $a, array $b): int => [$b['businesses'], $a['label']] <=> [$a['businesses'], $b['label']]);
+
+        return [
+            self::table('By barangay', [
+                ['key' => 'label', 'label' => 'Barangay', 'format' => 'text'],
+                ['key' => 'new', 'label' => 'New', 'format' => 'count'],
+                ['key' => 'renewal', 'label' => 'Renewal', 'format' => 'count'],
+                ['key' => 'amendment', 'label' => 'Amendment', 'format' => 'count'],
+                ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
+            ], array_map(self::withTotal(...), array_values($barangays)),
+                'Each business is counted once, under its business location, as new or renewal by the first permit it was issued in the period.'),
+            self::table('By kind of business', [
+                ['key' => 'label', 'label' => 'Kind of business', 'format' => 'text'],
+                ['key' => 'businesses', 'label' => 'Businesses', 'format' => 'count'],
+            ], $categoryRows,
+                'Kinds are the Revenue Code’s tax categories on each line of business. A business with lines in two kinds is counted in both, so this column does not add up to the barangay total.',
+                null),
+        ];
+    }
+
+    /* ── 4. clearances issued per office ─────────────────────────────────── */
+
+    /** @return list<array<string, mixed>> */
+    private static function clearances(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        $types = DB::table('permit_types')
+            ->join('departments', 'departments.id', '=', 'permit_types.issuing_department_id')
+            ->when($scope !== null, static fn ($q) => $q->whereIn('permit_types.id', $scope['permit_type_ids']))
+            ->orderBy('permit_types.id')
+            ->get(['permit_types.id', 'permit_types.name', 'departments.code']);
+
+        $rows = [];
+        foreach ($types as $type) {
+            $rows[(int) $type->id] = [
+                'office' => (string) $type->code,
+                'label' => (string) $type->name,
+                'new' => 0, 'renewal' => 0, 'amendment' => 0, 'total' => 0,
+                'refused' => 0,
+            ];
+        }
+
+        $issued = self::issuedBy(DB::table('permits'), $scope)
+            ->join('applications', 'applications.id', '=', 'permits.application_id')
+            ->whereBetween('permits.issued_at', [$from, $to])
+            ->get(['permits.permit_type_id', 'applications.application_type']);
+        foreach ($issued as $row) {
+            $id = (int) $row->permit_type_id;
+            if (isset($rows[$id])) {
+                $rows[$id][self::transaction((string) $row->application_type)]++;
+                $rows[$id]['total']++;
+            }
+        }
+
+        $refused = DB::table('application_permit_types')
+            ->whereNotNull('rejected_at')
+            ->whereBetween('rejected_at', [$from, $to])
+            ->when($scope !== null, static fn ($q) => $q->whereIn('permit_type_id', $scope['permit_type_ids']))
+            ->groupBy('permit_type_id')
+            ->selectRaw('permit_type_id, count(*) as c')
+            ->pluck('c', 'permit_type_id');
+        foreach ($refused as $id => $count) {
+            if (isset($rows[(int) $id])) {
+                $rows[(int) $id]['refused'] = (int) $count;
+            }
+        }
+
+        $rows = array_values($rows);
+        $total = ['office' => 'Total', 'label' => ''];
+        foreach (['new', 'renewal', 'amendment', 'total', 'refused'] as $k) {
+            $total[$k] = array_sum(array_column($rows, $k));
+        }
+
+        return [
+            self::table('Issued and refused, per office', [
+                ['key' => 'office', 'label' => 'Office', 'format' => 'text'],
+                ['key' => 'label', 'label' => 'Clearance or permit', 'format' => 'text'],
+                ['key' => 'new', 'label' => 'New', 'format' => 'count'],
+                ['key' => 'renewal', 'label' => 'Renewal', 'format' => 'count'],
+                ['key' => 'amendment', 'label' => 'Amendment', 'format' => 'count'],
+                ['key' => 'total', 'label' => 'Issued', 'format' => 'count'],
+                ['key' => 'refused', 'label' => 'Refused', 'format' => 'count'],
+            ], $rows,
+                'Issued counts permits released in the period. Refused counts clearances an office refused in the period, whether or not the applicant later filed again.',
+                $total),
+        ];
+    }
+
+    /* ── 5. processing time and pending applications ─────────────────────── */
+
+    /** @return list<array<string, mixed>> */
+    private static function pendingProcessing(CarbonImmutable $from, CarbonImmutable $to, ?array $scope): array
+    {
+        // Decided in the period, against the filing's own RA 11032 tier.
+        $decided = self::routedTo(DB::table('applications'), $scope)
+            ->whereNull('deleted_at')
+            ->whereNotNull('submitted_at')
+            ->whereNotNull('decided_at')
+            ->whereBetween('decided_at', [$from, $to])
+            ->get(['complexity', 'submitted_at', 'decided_at']);
+
+        $tiers = [];
+        foreach (Ra11032::TIERS as $tier => $rule) {
+            $tiers[$tier] = ['label' => $rule['label'].' ('.$rule['statutory_working_days'].' working days)', 'decided' => 0, 'days' => 0, 'within' => 0];
+        }
+        $untiered = 0;
+        foreach ($decided as $row) {
+            $tier = (string) $row->complexity;
+            if (! isset($tiers[$tier])) {
+                $untiered++;
+
+                continue;
+            }
+            $days = self::workingDaysBetween(CarbonImmutable::parse($row->submitted_at), CarbonImmutable::parse($row->decided_at));
+            $tiers[$tier]['decided']++;
+            $tiers[$tier]['days'] += $days;
+            if ($days <= Ra11032::TIERS[$tier]['statutory_working_days']) {
+                $tiers[$tier]['within']++;
+            }
+        }
+        $tierRows = array_map(static fn (array $row): array => [
+            'label' => $row['label'],
+            'decided' => $row['decided'],
+            'mean_days' => $row['decided'] === 0 ? null : round($row['days'] / $row['decided'], 1),
+            'within' => $row['within'],
+            'within_rate' => $row['decided'] === 0 ? null : round($row['within'] / $row['decided'] * 100, 1),
+        ], array_values($tiers));
+
+        // Still pending at the end of the period, aged in working days.
+        $buckets = ['within_3' => 3, 'within_7' => 7, 'within_20' => 20];
+        $pendingRows = [];
+        foreach (self::TYPES as $type => $label) {
+            $pendingRows[$type] = ['label' => $label, 'within_3' => 0, 'within_7' => 0, 'within_20' => 0, 'over_20' => 0];
+        }
+
+        if ($scope !== null) {
+            // An office's pending work is its own review, from when it was routed.
+            $pending = DB::table('application_assignments')
+                ->join('applications', 'applications.id', '=', 'application_assignments.application_id')
+                ->whereNull('applications.deleted_at')
+                ->where('application_assignments.department_id', $scope['department_id'])
+                ->whereNotNull('application_assignments.assigned_at')
+                ->where('application_assignments.assigned_at', '<=', $to)
+                ->where(static fn ($q) => $q->whereNull('application_assignments.completed_at')
+                    ->orWhere('application_assignments.completed_at', '>', $to))
+                ->get(['application_assignments.assigned_at as since', 'applications.application_type']);
+        } else {
+            // Every office: the filing as a whole, from submission to decision.
+            $pending = DB::table('applications')
+                ->whereNull('deleted_at')
+                ->whereNotNull('submitted_at')
+                ->where('submitted_at', '<=', $to)
+                ->whereNotIn('status', [ApplicationStatus::Cancelled->value, ApplicationStatus::Draft->value])
+                ->where(static fn ($q) => $q->whereNull('decided_at')->orWhere('decided_at', '>', $to))
+                ->get(['submitted_at as since', 'application_type']);
+        }
+
+        $asOf = $to->greaterThan(CarbonImmutable::now()) ? CarbonImmutable::now() : $to;
+        foreach ($pending as $row) {
+            $age = self::workingDaysBetween(CarbonImmutable::parse($row->since), $asOf);
+            $bucket = 'over_20';
+            foreach ($buckets as $key => $limit) {
+                if ($age <= $limit) {
+                    $bucket = $key;
+                    break;
+                }
+            }
+            $pendingRows[self::transaction((string) $row->application_type)][$bucket]++;
+        }
+        $pendingRows = array_map(static function (array $row): array {
+            $row['total'] = $row['within_3'] + $row['within_7'] + $row['within_20'] + $row['over_20'];
+
+            return $row;
+        }, array_values($pendingRows));
+        $pendingTotal = ['label' => 'Total'];
+        foreach (['within_3', 'within_7', 'within_20', 'over_20', 'total'] as $k) {
+            $pendingTotal[$k] = array_sum(array_column($pendingRows, $k));
+        }
+
+        $decidedTotal = array_sum(array_column($tierRows, 'decided'));
+        $withinTotal = array_sum(array_column($tierRows, 'within'));
+
+        return [
+            self::table('Decided in the period, against RA 11032', [
+                ['key' => 'label', 'label' => 'Tier (statutory limit)', 'format' => 'text'],
+                ['key' => 'decided', 'label' => 'Decided', 'format' => 'count'],
+                ['key' => 'mean_days', 'label' => 'Average working days', 'format' => 'decimal'],
+                ['key' => 'within', 'label' => 'Within the limit', 'format' => 'count'],
+                ['key' => 'within_rate', 'label' => 'Within the limit (%)', 'format' => 'percent'],
+            ], $tierRows,
+                'Working days from submission to decision, weekends excluded; holidays are not on the register, so figures around them read slightly long.'
+                .($untiered > 0 ? " {$untiered} decided filings have no tier on record and are left out." : ''),
+                [
+                    'label' => 'Total', 'decided' => $decidedTotal, 'mean_days' => null, 'within' => $withinTotal,
+                    'within_rate' => $decidedTotal === 0 ? null : round($withinTotal / $decidedTotal * 100, 1),
+                ]),
+            self::table('Still pending at the end of the period, by age', [
+                ['key' => 'label', 'label' => 'Transaction', 'format' => 'text'],
+                ['key' => 'within_3', 'label' => '3 working days or less', 'format' => 'count'],
+                ['key' => 'within_7', 'label' => '4 to 7', 'format' => 'count'],
+                ['key' => 'within_20', 'label' => '8 to 20', 'format' => 'count'],
+                ['key' => 'over_20', 'label' => 'Over 20', 'format' => 'count'],
+                ['key' => 'total', 'label' => 'Total', 'format' => 'count'],
+            ], $pendingRows,
+                $scope === null
+                    ? 'Filings submitted and not yet decided on the last day of the period, aged from submission.'
+                    : 'This office’s reviews not yet completed on the last day of the period, aged from when the filing was routed to it.',
+                $pendingTotal),
+        ];
+    }
+
+    /* ── helpers ──────────────────────────────────────────────────────────── */
+
+    /**
+     * @param  list<array{key: string, label: string, format: string}>  $columns
+     * @param  list<array<string, mixed>>  $rows
+     * @param  array<string, mixed>|null|false  $total  false: sum every count/money column
+     * @return array<string, mixed>
+     */
+    private static function table(string $heading, array $columns, array $rows, ?string $note, array|null|false $total = false): array
+    {
+        if ($total === false) {
+            $total = [$columns[0]['key'] => 'Total'];
+            foreach ($columns as $column) {
+                if (in_array($column['format'], ['count', 'money'], true)) {
+                    $total[$column['key']] = array_sum(array_map(static fn (array $row) => $row[$column['key']] ?? 0, $rows));
+                }
+            }
+        }
+
+        return [
+            'heading' => $heading,
+            'columns' => array_values($columns),
+            'rows' => array_values($rows),
+            'total' => $total,
+            'note' => $note,
+        ];
+    }
+
+    /** @param  array<string, mixed>  $row */
+    private static function withTotal(array $row): array
+    {
+        $row['total'] = $row['new'] + $row['renewal'] + $row['amendment'];
+
+        return $row;
+    }
+
+    /** Any transaction type the enum grows is read as an amendment rather than dropped. */
+    private static function transaction(string $type): string
+    {
+        return array_key_exists($type, self::TYPES) ? $type : 'amendment';
+    }
+
+    /** @return array<string, string> "2026-09" => "September 2026", every month the range touches */
+    private static function months(CarbonImmutable $from, CarbonImmutable $to): array
+    {
+        $out = [];
+        for ($cursor = $from->startOfMonth(); $cursor->lessThanOrEqualTo($to); $cursor = $cursor->addMonth()) {
+            $out[$cursor->format('Y-m')] = $cursor->format('F Y');
+        }
+
+        return $out;
+    }
+
+    /** @return array<string, string> office code => name, departments plus the fee-only offices */
+    private static function officeNames(): array
+    {
+        $names = DB::table('departments')->pluck('name', 'code')->map(static fn ($n): string => (string) $n)->all();
+
+        return $names + self::OTHER_FEE_OFFICES;
+    }
+
+    private static function categoryLabel(?string $category): string
+    {
+        if ($category === null || trim($category) === '') {
+            return 'Not classified';
+        }
+
+        return ucfirst(str_replace('_', ' ', $category));
+    }
+
+    private static function issuedBy(QueryBuilder $query, ?array $scope): QueryBuilder
+    {
+        return $scope === null ? $query : $query->whereIn('permits.permit_type_id', $scope['permit_type_ids']);
+    }
+
+    private static function routedTo(QueryBuilder $query, ?array $scope): QueryBuilder
+    {
+        return $scope === null ? $query : $query->whereIn('applications.id', DB::table('application_assignments')
+            ->select('application_id')
+            ->where('department_id', $scope['department_id']));
+    }
+
+    /** Whole working days, weekends excluded — the dashboard's count. */
+    private static function workingDaysBetween(CarbonImmutable $from, CarbonImmutable $to): int
+    {
+        $cursor = $from->startOfDay();
+        $end = $to->startOfDay();
+        $days = 0;
+        while ($cursor->lessThan($end)) {
+            $cursor = $cursor->addDay();
+            if (! $cursor->isWeekend()) {
+                $days++;
+            }
+        }
+
+        return $days;
+    }
+}
