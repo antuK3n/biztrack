@@ -1436,6 +1436,12 @@ export interface AuditLogFilters extends PageParams {
   auditable_id?: number
   /** The actor, by user id. */
   user_id?: number
+  /**
+   * Removals only — deletes and retires, which carry a copy of the record.
+   * Sent as 1, not `true`: Axios writes a boolean as the string "true", which
+   * Laravel's `boolean` rule refuses.
+   */
+  removed?: 1
 }
 
 /**

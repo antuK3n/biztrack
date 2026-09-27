@@ -2539,6 +2539,11 @@ export interface AuditLog {
   auditable_type: string
   auditable_id: number
   changes: Record<string, unknown> | null
+  /**
+   * The record as it stood before a delete or retire (Audit Log 1). Null on
+   * every row that removed nothing.
+   */
+  snapshot: Record<string, unknown> | null
   created_at: string
 }
 
