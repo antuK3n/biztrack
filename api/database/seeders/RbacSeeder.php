@@ -98,6 +98,12 @@ class RbacSeeder extends Seeder
                     'fee.adjust', 'permit.view_all', 'permit.issue', 'request.create',
                     'message.participate', 'compliance.view', 'zoning.evaluate',
                     'analytics.view',
+                    /*
+                     * Taking a permit away. BPLO and the super admin only —
+                     * Ken's decision for checklist item 23; see the migration
+                     * that grants it on the live register and question A26.
+                     */
+                    'permit.revoke',
                 ],
             ],
             'sanitary_officer' => [
@@ -188,6 +194,8 @@ class RbacSeeder extends Seeder
                     'application.view_all', 'application.view_any_office',
                     'application.reject',
                     'fee.adjust', 'permit.view_all', 'permit.issue',
+                    // See the note on bplo_staff's grant.
+                    'permit.revoke',
                     'compliance.view',
                     /*
                      * The super admin holds `analytics.processing_time` and NOT
