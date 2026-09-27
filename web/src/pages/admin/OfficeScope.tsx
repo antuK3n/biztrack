@@ -36,14 +36,22 @@ export function OfficeScope({
     )
   }
 
+  /*
+   * The label sits BESIDE the select rather than around it: a wrapping label
+   * folds the chosen option into the control's accessible name ("Office All
+   * offices BPLO — …"), which a screen reader then announces on every visit.
+   *
+   * Capped width: the longest office name would otherwise size the select wider
+   * than a phone, and the dashboard scrolled sideways at 390px because of it.
+   */
   return (
-    <label htmlFor={id} className="flex items-center gap-2 text-[13px] text-ink-secondary">
-      Office
+    <span className="flex min-w-0 items-center gap-2 text-[13px] text-ink-secondary">
+      <label htmlFor={id}>Office</label>
       <select
         id={id}
         value={scope.office ?? ALL_OFFICES}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 rounded-lg border border-line bg-white px-3 text-[14px] font-medium text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
+        className="h-10 w-full min-w-0 max-w-[15rem] rounded-lg border border-line bg-white px-3 text-[14px] font-medium text-ink focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
       >
         <option value={ALL_OFFICES}>All offices</option>
         {scope.offices.map((office) => (
@@ -52,6 +60,6 @@ export function OfficeScope({
           </option>
         ))}
       </select>
-    </label>
+    </span>
   )
 }

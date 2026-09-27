@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\PermitController;
 use App\Http\Controllers\Api\PriorPermitController;
 use App\Http\Controllers\Api\ReferenceController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\VerifyController;
 use Illuminate\Support\Facades\Route;
 
@@ -375,6 +376,17 @@ Route::middleware('auth:sanctum')->group(function () {
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
+        /*
+         * Report Generation (checklist 2026-09-27, item 7): five LGU-format
+         * reports over a chosen period, as JSON for the printable screen and as
+         * CSV. Same permission and the same office boundary as the dashboard —
+         * ReportController asks AnalyticsOffice, as AnalyticsController does.
+         */
+        Route::get('analytics/reports', [ReportController::class, 'index']);
+        Route::get('analytics/reports/{report}', [ReportController::class, 'show'])
+            ->where('report', '[a-z-]+');
+        Route::get('analytics/reports/{report}/csv', [ReportController::class, 'csv'])
+            ->where('report', '[a-z-]+');
         /*
          * Business Growth Analysis and Renewal Risk Prediction lived here, with
          * their PDF reports, the fitted renewal model and the per-permit

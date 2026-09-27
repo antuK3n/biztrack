@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -23,6 +24,7 @@ import {
 import { ShareChart } from '../../components/charts/ShareChart'
 import type { ShareSlice } from '../../components/charts/ShareChart'
 import { StackedBars } from '../../components/charts/StackedBars'
+import { activePortal, portalPath } from '../../lib/api'
 import { analytics } from '../../lib/resources'
 import { useAsync } from '../../lib/useAsync'
 import type {
@@ -36,7 +38,6 @@ import type {
 } from '../../lib/types'
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
-import { GenerateReportButton } from './GenerateReportButton'
 import { OfficeScope } from './OfficeScope'
 
 /*
@@ -763,7 +764,7 @@ function ExpiryPanel({ report }: { report: DashboardReport }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.window} className="border-b border-line/60 last:border-0">
-                <th scope="row" className="px-4 py-2 text-[14px] font-normal text-ink">
+                <th scope="row" className="whitespace-nowrap px-4 py-2 text-[14px] font-normal text-ink">
                   {row.expired ? 'Already expired' : `Within ${row.days} days`}
                 </th>
                 {columns.map((column) => (
@@ -1406,7 +1407,17 @@ export function AnalyticsPage() {
    * office for the super admin). See OfficeScope for why the label is read off
    * the response and not off this state.
    */
-  const [office, setOffice] = useState<string | undefined>(undefined)
+  /*
+   * In the URL, so a reload, a bookmark or the Generate Report link keeps the
+   * office. Still only a request: the server decides (AnalyticsOffice).
+   */
+  const [params, setParams] = useSearchParams()
+  const office = params.get('office') ?? undefined
+  const setOffice = (value: string) => {
+    const next = new URLSearchParams(params)
+    next.set('office', value)
+    setParams(next, { replace: true })
+  }
 
   const {
     data: result,
@@ -1445,11 +1456,20 @@ export function AnalyticsPage() {
                 },
               ]}
             />
-            <GenerateReportButton
-              onGenerate={() =>
-                analytics.dashboardReport(Number(months), scope?.office ?? (scope ? 'all' : undefined))
-              }
-            />
+            {/*
+              "Generate Report" opens Report Generation (checklist 2026-09-27,
+              item 7) for the office on screen, rather than downloading this
+              dashboard as a PDF. The five LGU reports are what an office files;
+              the dashboard PDF is still there, as one option on that screen.
+            */}
+            <Link
+              to={`${portalPath(activePortal(), '/analytics/reports')}${
+                scope?.can_switch ? `?office=${scope.office ?? 'all'}` : ''
+              }`}
+              className="rounded-lg bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+            >
+              Generate Report
+            </Link>
           </span>
         }
       >
@@ -1565,7 +1585,11 @@ export function AnalyticsPage() {
             <CompliancePanel report={data} />
           </section>
 
-          <div className="mt-5 grid gap-x-5 gap-y-5 *:min-w-0 lg:grid-cols-2">
+          {/*
+            Full width, both: the expiry table carries a column per permit type
+            (six on this register) and was unreadable squeezed into half a row.
+          */}
+          <div className="mt-5 grid gap-y-5 *:min-w-0">
             <section>
               <SectionHeading note={asOf} metric="expiry">
                 Permits Approaching Expiry
