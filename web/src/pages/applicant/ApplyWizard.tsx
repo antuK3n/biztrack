@@ -1601,6 +1601,82 @@ function FormSheet({
  * a trade the PSIC list has never heard of are all things a shop owner needs
  * and none of them survive in a <select>.
  */
+/**
+ * One numbered question on the Location & Zoning step (Ken's layout, 27
+ * September 2026: one column, in the order people answer them).
+ *
+ * The number is always shown, done or not, because the map's lock names the
+ * steps by number ("once steps 1 and 2 are answered"). Done is said in words
+ * beside the title, with a tick, and the number's circle fills: the fill
+ * alone would be colour carrying meaning (DESIGN.md, Never Color Alone).
+ *
+ * A list item holding a section: the steps are an ordered list because their
+ * order is the instruction, and each is a labelled region so a screen reader
+ * can jump between them by heading.
+ */
+function LocationStep({
+  n,
+  title,
+  required = false,
+  done,
+  hint,
+  children,
+}: {
+  n: number
+  title: string
+  required?: boolean
+  done: boolean
+  hint?: string
+  children: React.ReactNode
+}) {
+  const headingId = `location-step-${n}`
+  return (
+    <li className="list-none">
+      <section
+        aria-labelledby={headingId}
+        className="rounded-2xl bg-white px-4 py-5 shadow-card sm:px-6"
+        data-testid={`location-step-${n}`}
+      >
+        <div className="mb-4 flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className={`tnum grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold ${
+              done ? 'bg-royal text-white' : 'border-2 border-royal/50 bg-white text-royal'
+            }`}
+          >
+            {n}
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2
+              id={headingId}
+              className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-lg font-bold leading-8 text-ink"
+            >
+              <span className="sr-only">Step {n}: </span>
+              <span>
+                {title}
+                {required && (
+                  <span className="text-s-red" aria-hidden="true">
+                    {' '}
+                    *
+                  </span>
+                )}
+              </span>
+              {done && (
+                <span className="inline-flex items-center gap-1 text-sm font-semibold text-[#12724a]">
+                  <CheckIcon size={16} aria-hidden="true" />
+                  Done
+                </span>
+              )}
+            </h2>
+            {hint && <p className="text-sm text-ink-secondary">{hint}</p>}
+          </div>
+        </div>
+        {children}
+      </section>
+    </li>
+  )
+}
+
 function LinesStep({
   codes,
   lines,
@@ -1698,7 +1774,19 @@ function LinesStep({
       </p>
 
       {lines.length > 0 && (
-        <div className="rounded-lg border border-input-border bg-royal-tint p-3">
+        /*
+         * Zoning 11 (Ken: "the products and services aren't apparent"). The
+         * chosen trade was one small semibold line in a pale box, and
+         * Products / Services under it was a muted 14px label over a thin
+         * white input: easy to read as a caption and walk past, though it is
+         * required and the step will not advance without it.
+         *
+         * So the answer is shown as an answer: a 2px royal border, a tick,
+         * the trade's name at 17px bold. Products / Services gets a label at
+         * the weight of every other question on the step and a full-size
+         * input, so it reads as a question rather than a footnote. Royal, not green: it is a selection, not a verdict.
+         */
+        <div className="rounded-xl border-2 border-royal bg-royal-tint p-4">
           {/*
            * One answer, presented as one answer.
            *
@@ -1716,7 +1804,8 @@ function LinesStep({
            * people, and a step where the only escape is picking something
            * else is a trap.
            */}
-          <p className="text-xs font-bold uppercase tracking-[0.1em] text-ink-secondary">
+          <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] text-royal">
+            <CheckIcon size={14} aria-hidden="true" />
             Your line of business
           </p>
           <div className="mt-2 space-y-3">
@@ -1761,8 +1850,10 @@ function LinesStep({
                         </div>
                       ) : (
                         <div>
-                          <p className="truncate text-sm font-semibold text-ink">{code?.title}</p>
-                          <p className="tnum mt-0.5 text-xs text-ink-secondary">
+                          <p className="text-[17px] font-bold leading-snug text-ink" data-testid="chosen-line">
+                            {code?.title}
+                          </p>
+                          <p className="tnum mt-0.5 text-sm text-ink-secondary">
                             PSIC {code?.code}
                           </p>
                         </div>
@@ -1834,14 +1925,16 @@ function LinesStep({
                    * anybody. A required field with no input is not a tidier
                    * form, it is a wall.
                    *
-                   * Kept deliberately small — one line, under the trade it
-                   * belongs to, no card of its own — which is the "somewhere
-                   * quieter" the removal asked for rather than the full row it
-                   * objected to.
+                   * It was kept deliberately small, one quiet line under the
+                   * trade, as the "somewhere quieter" the removal asked for.
+                   * Too quiet: Ken's Zoning 11 found people not seeing it at
+                   * all, so it now carries a full-weight label and a full-size
+                   * input (see the note on the panel above). Still
+                   * under the trade it belongs to, still no card of its own.
                    */}
-                  <label className="mt-2.5 block">
-                    <span className="text-sm font-medium text-ink-secondary">
-                      Products / Services <span className="text-s-red">*</span>
+                  <label className="mt-4 block">
+                    <span className="mb-1.5 block text-base font-bold text-ink">
+                      Products / Services <span className="text-s-red" aria-hidden="true">*</span>
                     </span>
                     <input
                       type="text"
@@ -1859,7 +1952,7 @@ function LinesStep({
                       // snacks" was an answer, and a sari-sari store owner is not
                       // selling milk tea.
                       placeholder="What customers buy from you, in a few words"
-                      className="mt-1 w-full rounded-lg border border-line-strong px-3 py-2 text-sm text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none"
+                      className="w-full rounded-lg border-2 border-input-border bg-white px-3 py-2.5 text-base text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
                     />
                     {/*
                      * No red line under an empty box.
@@ -3751,6 +3844,46 @@ export function ApplyWizard() {
   const barangayName = selectedBarangay?.name
 
   /*
+   * ── Why the map is not taking a pin yet, or null when it is ──────────────
+   *
+   * The step is one column of numbered questions in the order people answer
+   * them (Ken's layout, checklist 27 September 2026): ① the line of business
+   * and what is sold, ② the barangay, ③ the pin. The map is ③, so it waits
+   * for ① AND ② — both, which is a change.
+   *
+   * It used to wait for the trade alone, and the barangay was deliberately
+   * NOT a gate: the client had asked for pin-then-barangay to work, and the
+   * dropdown's change handler kept a pin that agreed with the barangay named
+   * after it. The checklist's Zoning 7 reverses that — the map zooms to the
+   * chosen barangay when it opens, and changing the barangay clears the pin
+   * outright — and both only make sense if the barangay comes first. A map
+   * that opens on the right barangay also removes most wrong-barangay pins
+   * before they are placed, instead of refusing them after.
+   *
+   * ① counts as done only with Products / Services filled in, because it is
+   * part of ①, required, and the one answer on the step Ken found people
+   * walking past ("the products and services aren't apparent"). A
+   * pre-picker "Other" line with no typed trade holds it too.
+   *
+   * The sentence names exactly what is still missing, in the words of the
+   * steps above, because a map that will not take a click has to say why.
+   */
+  const lineDone =
+    form.lines.length > 0 && form.lines.every((l) => (l.products_services ?? '').trim() !== '')
+  const mapLockReason: string | null = (() => {
+    const noLine = form.lines.length === 0
+    const noProducts = !noLine && !lineDone
+    const noBarangay = !form.barangay_id
+    if (noLine && noBarangay) return 'Choose your line of business and barangay first.'
+    if (noLine) return 'Choose your line of business first.'
+    if (noProducts && noBarangay) return 'Fill in Products / Services and choose your barangay first.'
+    if (noProducts) return 'Fill in Products / Services first.'
+    if (noBarangay) return 'Choose your barangay first.'
+    return null
+  })()
+  const mapLocked = mapLockReason !== null
+
+  /*
    * Item 5's two boxes as the one line a geocoder takes.
    *
    * The API composes `line1` from the same two parts on save — see
@@ -3771,9 +3904,9 @@ export function ApplyWizard() {
    *
    * Three conditions, and each is load-bearing:
    *
-   *  - a trade must be chosen, because that is what unlocks the map. Dropping a
-   *    pin onto a locked map would hand the applicant a marker they cannot move
-   *    and no way to understand why.
+   *  - the map must be unlocked (steps ① and ② answered — see
+   *    `mapLockReason`). Dropping a pin onto a locked map would hand the
+   *    applicant a marker they cannot move and no way to understand why.
    *  - there must be no pin, OR the pin must be one WE suggested. A pin the
    *    applicant placed is an answer; overwriting it because they corrected a
    *    typo would be the form arguing with them.
@@ -3790,7 +3923,7 @@ export function ApplyWizard() {
    * The start pin is not a pin (see `startPoint`); the step still wants one.
    */
   useEffect(() => {
-    if (form.lines.length === 0) return
+    if (mapLocked) return
     if (form.latitude !== null && autoPinned === null) return
     // Nothing looked up yet, so nothing has failed: no start pin either.
     if (streetQuery(streetAddress).length < 4) {
@@ -3837,7 +3970,7 @@ export function ApplyWizard() {
     // `form.latitude` is read but deliberately not depended on: it is what this
     // effect WRITES, and listing it would re-run the lookup on its own result.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streetAddress, form.lines.length, barangayName, autoPinned])
+  }, [streetAddress, mapLocked, barangayName, autoPinned])
 
 
   /*
@@ -8051,82 +8184,154 @@ export function ApplyWizard() {
            */}
 
           {/*
-           * Item 69 — the one and only Line of Business question.
+           * ── One column of numbered steps, in the order people answer them ──
            *
-           * It belongs on this screen because the zoning verdict is about a
-           * trade rather than a coordinate, and because Location Insights
-           * compares the pin against businesses in the same PSIC group. It used
-           * to be a plain dropdown here AND a full picker three sections later,
-           * which asked the same thing twice and made the second ask look like
-           * a different question. The picker is the one that survived: it
-           * searches all 135 trades, takes more than one line, carries the
-           * capital each line needs for the business tax, and has a free-text
-           * escape for a trade the PSIC list has never heard of. None of that
-           * survives in a <select>.
+           * Ken's layout (checklist, 27 September 2026): 1 trade, 2 barangay,
+           * 3 pin, 4 address, 5 emergency contact, top to bottom. It replaced
+           * a two-column grid (map on the left; the address, barangay,
+           * landmark and emergency contact stacked on the right) in which the
+           * barangay sat below the street and the map had to be read before the
+           * question that decides where it may be pinned. Numbered because the
+           * order is the point: the map (3) is locked until 1 and 2 are done,
+           * and a number is how the lock's caption can say "steps 1 and 2".
            *
-           * Full width above the map rather than squeezed into the address
-           * column beside it — the chosen trade needs its title, its PSIC
-           * code and the Change / Clear controls on one row, and the picker's
-           * own search results are the widest thing on the step.
+           * The address comes after the pin because the pin fills the street
+           * in (`fillAddressFromPin`); asking for the street first and then
+           * overwriting it would be the form arguing with the applicant.
            */}
-          <div className="mb-7 rounded-2xl bg-white px-5 py-5 shadow-card sm:px-6">
+          <ol className="space-y-5">
             {/*
-             * Singular, and the helper text says the quantity out loud.
+             * Step 1. Item 69: the one and only Line of Business question, and
+             * Products / Services with it.
              *
-             * It read "Add every line you trade in — each one is assessed
-             * separately", which was true of the multi-select and survived it
-             * by months. The client sent a screenshot: the step still "kinda
-             * say[s] hey you should be able to select more". Copy that
-             * contradicts the control is worse than no copy — the applicant
-             * believes the sentence and blames themselves for the control.
+             * It belongs on this screen because the zoning verdict is about a
+             * trade rather than a coordinate, and because Location Insights
+             * compares the pin against businesses in the same PSIC group. It
+             * used to be a plain dropdown here AND a full picker three sections
+             * later; the picker is the one that survived.
              *
-             * The heading loses its plural too: "Line of Business", not
-             * "Lines". Keep both singular if this is ever reworded.
+             * Singular, and the hint says the quantity out loud. It read "Add
+             * every line you trade in — each one is assessed separately", which
+             * was true of the multi-select and survived it by months. The client
+             * sent a screenshot: the step still "kinda say[s] hey you should be
+             * able to select more". Keep it singular if this is reworded.
              */}
-            <FieldLabel required>Line of Business</FieldLabel>
-            <p className="mb-3 text-sm text-ink-secondary">
-              What this location will be used for. Choose one.
-            </p>
-            <LinesStep
-              codes={psic}
-              lines={form.lines}
-              onChange={(lines) => update('lines', lines)}
-            />
-            {form.lines.length === 0 && (
-              <p className="mt-2.5 text-sm font-medium text-s-red">
-                {/* "at least one" was the multi-select's phrasing and implied a
-                    minimum with no maximum. There is exactly one. */}
-                Required: choose your line of business.
-              </p>
-            )}
-          </div>
+            <LocationStep
+              n={1}
+              title="Line of Business"
+              required
+              done={lineDone}
+              hint="What this location will be used for. Choose one."
+            >
+              <LinesStep
+                codes={psic}
+                lines={form.lines}
+                onChange={(lines) => update('lines', lines)}
+              />
+              {form.lines.length === 0 && (
+                <p className="mt-2.5 text-sm font-medium text-s-red">
+                  {/* "at least one" was the multi-select's phrasing and implied a
+                      minimum with no maximum. There is exactly one. */}
+                  Required: choose your line of business.
+                </p>
+              )}
+            </LocationStep>
 
-          <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr]">
-            {/*
-             * The map column: the picker, then the figures for whatever it is
-             * pointing at. One column, because they are one question — "is this
-             * the right spot?" — and reading the numbers means glancing back up
-             * at the pin they describe. Split across the grid they would be a
-             * map and an unrelated table.
-             *
-             * self-start lives on this wrapper, because a grid item stretches to
-             * its row by default and this column has nothing to stretch with.
-             * Its height is the map (320px) plus a few short captions, while the
-             * address column beside it is 421px, or 719px once "Rented" opens the
-             * lessor block. Stretching handed the column the difference as height
-             * it had no content for, and because the wrapper is transparent — the
-             * white comes from the cards inside it — the page showed through
-             * inside a rounded, shadowed frame. That empty framed panel is what
-             * the client saw under the map. Sizing to content deletes the frame
-             * rather than filling it; growing the map to match instead would make
-             * it lurch 341px taller the moment somebody ticks "Rented".
-             *
-             * The insights card below the map does NOT close that gap on
-             * purpose. It is only there once a pin exists, so relying on it for
-             * height would bring the empty frame straight back on a fresh
-             * filing, which is exactly the state the client was looking at.
-             */}
-            <div className="self-start space-y-6">
+            <LocationStep
+              n={2}
+              title="Barangay"
+              required
+              done={form.barangay_id !== ''}
+            >
+              <div className="relative">
+                <label className="block">
+                  {/* The step's heading names this field on screen; said once. The
+                      full name stays for the "still needed" list and the review. */}
+                  <span className="sr-only">Barangay Name</span>
+                  <select
+                    id="address-barangay"
+                    value={form.barangay_id}
+                    /*
+                     * Marked touched on CHANGE as well as on blur, and the change
+                     * is the one that matters.
+                     *
+                     * Picking from a dropdown is answering the question — there
+                     * is no half-typed state to be patient about, which is the
+                     * only reason the other fields wait for blur. The pin/barangay
+                     * check keys off this flag to tell an answer the applicant
+                     * gave from a value we prefilled for them, so relying on blur
+                     * alone let someone change the barangay to one their pin
+                     * contradicts and walk on, provided they never focused
+                     * anything else before pressing Next.
+                     */
+                    onChange={(e) => {
+                      const next = e.target.value
+                      /*
+                       * ── Zoning 7 — a new barangay clears the pin ─────────────
+                       *
+                       * Unconditionally now. It used to keep a pin that agreed
+                       * with the barangay named after it, because the map took a
+                       * pin before any barangay was chosen and clearing then
+                       * would have punished the applicant for answering in that
+                       * order. That order no longer exists: the map is locked
+                       * until the barangay is chosen (`mapLockReason`) and opens
+                       * zoomed to it, so every pin was placed inside a barangay
+                       * already named. Changing the barangay is answering step 2
+                       * again, and step 3 is answered again after it: the
+                       * checklist's wording, "changing the barangay clears the
+                       * pin".
+                       *
+                       * ── Why this lives in the CHANGE HANDLER, not an effect ──
+                       *
+                       * Because an effect watching `form.barangay_id` cannot tell
+                       * a person from a prefill. A renewal and a reopened draft
+                       * both arrive with a barangay AND coordinates, written in by
+                       * a single `setForm` some time after mount, so to an effect
+                       * that is a change, and it would wipe a pin the applicant
+                       * never placed the instant the form hydrated. That would
+                       * break every renewal, which is a bug this repo has already
+                       * shipped once.
+                       *
+                       * `touched.barangay_id` is set HERE, on change rather than
+                       * on blur, so the mismatch gate can tell an answer the
+                       * applicant gave from a value we handed them (see the long
+                       * note in `missingFor`).
+                       *
+                       * Guarded on the value actually differing, so re-picking the
+                       * barangay already selected is not a change and costs nobody
+                       * their pin: `selectOption` fires change on an unchanged
+                       * value.
+                       */
+                      if (next !== form.barangay_id) {
+                        setForm((f) => ({ ...f, barangay_id: next, latitude: null, longitude: null }))
+                        setAutoPinned(null)
+                        setStartPoint(null)
+                        setPinError(null)
+                      }
+                      touch('barangay_id')
+                    }}
+                    onBlur={() => touch('barangay_id')}
+                    className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.barangay_id)}
+                  >
+                    <option value="">Select your barangay</option>
+                    {barangays.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {fieldErrors.barangay_id && (
+                  <FieldError>
+                    {fieldErrors.barangay_id}
+                  </FieldError>
+                )}
+              </div>
+
+            </LocationStep>
+
+            <LocationStep n={3} title="Pin your business on the map" required done={form.latitude !== null}>
               {/*
                * Why the pin has to be right, said before it is placed (client,
                * 23 September 2026). CPDO inspects the spot the pin names; a
@@ -8137,27 +8342,37 @@ export function ApplyWizard() {
                * (DESIGN.md, Red Means Stop). The bold lead-in carries it in
                * words, so it survives with colour off.
                *
-               * "Choose your barangay first" is back (client's lead, 24
-               * September 2026). 079092f cut the intro line that said the pin
-               * must fall inside the selected barangay, but the rule never
-               * went: onPick refuses a pin outside the chosen barangay, a new
-               * barangay removes a pin that contradicts it, and the step will
-               * not advance on a mismatch (`missingFor`). All of that is
-               * client-side — the API validates only that the coordinates are
-               * numbers. The map DOES take a pin before a barangay is named
-               * (any point in Malabon), so this is advice about order, not a
-               * lock, and the second clause says what happens if the order is
-               * reversed. Merged into this box rather than stacked above it:
-               * one amber note read before the map, not two.
+               * "Choose your barangay first" stays even though the map is now
+               * locked until one is chosen: it is the reason for the lock, said
+               * where the applicant reads before touching the map, and the next
+               * sentence is the rule both the map and the API enforce (Zoning 3).
                */}
               <p
                 id="pin-accuracy-note"
-                className="rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
+                className="mb-4 rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
               >
                 <span className="font-bold">Place the pin exactly on your business.</span> Choose
                 your barangay first. Your pin has to be inside it. A wrong location can get your
                 application disapproved, and any fees you paid will be forfeited.
               </p>
+              {/*
+               * The map with what it answers directly under it, and what the
+               * barangay is zoned for beside it.
+               *
+               * Left: the map, its pin line, then the zoning note (Zoning 8
+               * wants that note where the eye already is after placing the
+               * pin). Right on a wide screen, below on a phone: the "Zones in
+               * <barangay>" card and Location Insights. Both describe the place
+               * the map shows, so they sit beside it rather than further down
+               * among the address fields.
+               *
+               * `self-start` on both columns: a grid item stretches to its row
+               * by default, and a transparent column then showed the page
+               * through a rounded frame with nothing in it, which is the empty
+               * panel the client once saw under the map.
+               */}
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+                <div className="min-w-0 space-y-4 self-start">
               <div className="overflow-hidden rounded-2xl shadow-card [&>div]:!rounded-none [&>div]:!border-0">
                 <MapPicker
                   latitude={form.latitude}
@@ -8174,37 +8389,22 @@ export function ApplyWizard() {
                   // would start the applicant in the wrong place.
                   startAt={startPoint !== null && startPoint.barangay === barangayName ? startPoint : null}
                   /*
-                   * Locked on the LINE OF BUSINESS, and on nothing else.
+                   * Locked until steps 1 and 2 are both answered: the trade
+                   * (with what is sold) and the barangay. See `mapLockReason`
+                   * for why the barangay became a gate again, and for the
+                   * sentence the scrim shows.
                    *
-                   * Checklist items 4 and 8 both ask for a lock and they do not
-                   * mean the same one, which is why this has moved twice. Item 4
-                   * gates the map on the trade; item 8 governs what the barangay
-                   * does to a pin. Hanging the lock on the barangay satisfied 8
-                   * and quietly dropped 4, and the client asked for 4 back.
-                   *
-                   * The trade is the honest gate. It is the first question on the
-                   * step, it sits directly above this map, and the zoning verdict
-                   * is given against a trade rather than a coordinate — so a pin
-                   * placed before it is a location for a business nobody has
-                   * described yet. Location Insights keys off the pin AND the
-                   * chosen PSIC group, so it also has nothing to say until this
-                   * is answered.
-                   *
-                   * The barangay is deliberately NOT a gate any more. The client
-                   * was explicit: let the pin land in either order and settle the
-                   * disagreement when the barangay is named. That is the change
-                   * handler's job, and it clears the pin only when the two
-                   * genuinely contradict.
+                   * History worth keeping: checklist items 4 and 8 asked for
+                   * different locks (the trade; what the barangay does to a
+                   * pin), and hanging the lock on one kept dropping the other.
+                   * Both hold now: the trade and the barangay gate the map, and
+                   * a new barangay clears the pin.
                    *
                    * Both guards in `onPick` survive regardless: a pin outside
-                   * Malabon is refused, and so is one that contradicts a barangay
-                   * already chosen.
+                   * Malabon is refused, and so is one that contradicts the
+                   * barangay chosen. The API refuses it too, since Zoning 3.
                    */
-                  lockedReason={
-                    form.lines.length === 0
-                      ? 'Choose your line of business above, then click the map to drop a pin.'
-                      : null
-                  }
+                  lockedReason={mapLockReason}
                   onPick={(lat, lng) => {
                     /*
                      * Item 86 — a pin outside the city is refused rather than
@@ -8296,7 +8496,7 @@ export function ApplyWizard() {
                       </span>
                     )}
                   </p>
-                ) : form.lines.length > 0 &&
+                ) : !mapLocked &&
                   startPoint !== null &&
                   startPoint.barangay === barangayName ? (
                   /*
@@ -8318,8 +8518,8 @@ export function ApplyWizard() {
                       not taking clicks yet sends them to a control that will not
                       answer. The lock's own sentence says what to do about it;
                       this one says the pin is required either way. */}
-                    {form.lines.length === 0
-                      ? 'Required: a pin. The map takes one once your line of business is chosen.'
+                    {mapLocked
+                      ? 'Required: a pin. The map opens once steps 1 and 2 are answered.'
                       : 'Required: click the map to drop a pin where your business is.'}
                   </p>
                 )}
@@ -8360,7 +8560,7 @@ export function ApplyWizard() {
                         <span className="font-semibold text-ink">Check this location.</span> The
                         saved pin sits in {verdict.actual ?? 'no barangay we can identify'}, but
                         this application says {barangayName}. Click the map to move the pin, or
-                        change the barangay below — whichever is wrong.
+                        change the barangay above — whichever is wrong.
                       </p>
                     )
                   })()}
@@ -8371,49 +8571,50 @@ export function ApplyWizard() {
                  * once, as the last line of the zoning note under the map.
                  */}
               </div>
+                  {/*
+                   * The zoning answer, inline and live (client, 23 September
+                   * 2026: "Zoning must not be a popup"). It reads the ordinance
+                   * lookup that rides on the insights response, so it follows
+                   * the pin, the barangay and the trade as they change. It
+                   * renders nothing while the lookup is undetermined; see
+                   * ZoningConformanceNote.
+                   */}
+                  {livePin !== null && !insights.loading && !insightsStale && (
+                    <ZoningConformanceNote
+                      zoning={insights.data?.zoning ?? null}
+                      barangayName={barangayName ?? null}
+                    />
+                  )}
+                </div>
+                <div className="min-w-0 space-y-4 self-start">
+                  {/*
+                   * The zones on CPDO's sheet for the barangay chosen in step 2,
+                   * in plain names, and a link to the sheet. Gated on a
+                   * selection: twenty-one maps and no barangay chosen is a
+                   * gallery, not an answer. It shows and lists; it does not
+                   * decide.
+                   */}
+                  {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
+                  {/*
+                   * The figures for the pin, the moment there is a pin. Gated on
+                   * `livePin` rather than on the response, so the card appears
+                   * with the pin and shows its own skeleton while the lookup
+                   * runs; `insightsStale` is folded into `loading` for the same
+                   * reason (see where it is computed).
+                   */}
+                  {livePin !== null && (
+                    <LocationInsightsPanel
+                      insights={insights.data}
+                      loading={insights.loading || insightsStale}
+                      error={insights.error}
+                    />
+                  )}
+                </div>
+              </div>
+            </LocationStep>
 
-              {/*
-               * The figures for the pin, the moment there is a pin.
-               *
-               * Gated on `livePin` rather than on the response, so the card
-               * appears with the pin and shows its own skeleton while the lookup
-               * runs. Gating on `insights.data` instead would leave a beat where
-               * the applicant has pinned a spot and nothing acknowledges it, then
-               * a block of numbers drops in and pushes the page around.
-               *
-               * `insightsStale` is folded into `loading` here: while the pin has
-               * moved and the answer has not caught up, this is a lookup in
-               * progress as far as the reader is concerned, whatever the previous
-               * fetch's state says. That is the whole reason the flag exists —
-               * see where it is computed.
-               */}
-              {/*
-               * The zoning answer, inline and live (client, 23 September 2026:
-               * "Zoning must not be a popup").
-               *
-               * It was a CONGRATULATIONS / SORRY dialog that opened on Next and
-               * stood between the applicant and the next step, saying the same
-               * thing whatever the ordinance said. This note reads the
-               * ordinance lookup that already rides on the insights response,
-               * so it follows the pin, the barangay and the trade as they
-               * change, and Next simply moves on. It renders nothing while the
-               * lookup is undetermined — see ZoningConformanceNote.
-               */}
-              {livePin !== null && !insights.loading && !insightsStale && (
-                <ZoningConformanceNote
-                  zoning={insights.data?.zoning ?? null}
-                  barangayName={barangayName ?? null}
-                />
-              )}
-              {livePin !== null && (
-                <LocationInsightsPanel
-                  insights={insights.data}
-                  loading={insights.loading || insightsStale}
-                  error={insights.error}
-                />
-              )}
-            </div>
-            <div className="space-y-3">
+            <LocationStep n={4} title="Address" done={form.street.trim() !== ''}>
+              <div className="space-y-3">
               <div>
                 {/*
                   ── Item 5's two boxes, as the paper prints them ─────────────
@@ -8537,125 +8738,6 @@ export function ApplyWizard() {
                   )}
                 </div>
               </div>
-              <div className="relative">
-                <label className="block">
-                  <FieldLabel required>Barangay Name</FieldLabel>
-                  <select
-                    value={form.barangay_id}
-                    /*
-                     * Marked touched on CHANGE as well as on blur, and the change
-                     * is the one that matters.
-                     *
-                     * Picking from a dropdown is answering the question — there
-                     * is no half-typed state to be patient about, which is the
-                     * only reason the other fields wait for blur. The pin/barangay
-                     * check keys off this flag to tell an answer the applicant
-                     * gave from a value we prefilled for them, so relying on blur
-                     * alone let someone change the barangay to one their pin
-                     * contradicts and walk on, provided they never focused
-                     * anything else before pressing Next.
-                     */
-                    onChange={(e) => {
-                      const next = e.target.value
-                      /*
-                       * ── Item 8 — a new barangay drops a CONTRADICTING pin ───
-                       *
-                       * The client asked for the pin to disappear when the
-                       * barangay changes, "to avoid pinning outside the selected
-                       * barangay". A pin that survives the change is a pin that
-                       * was checked against a question which has since been
-                       * answered differently, and leaving it there is how a
-                       * mismatch gets created after the click handler has stopped
-                       * looking.
-                       *
-                       * So the pin is re-checked against the barangay just named,
-                       * and dropped only if it disagrees. Clearing unconditionally
-                       * — which this did while the map was locked until a barangay
-                       * was chosen — costs the pin of anyone who worked the other
-                       * way round: drop the pin, then name the barangay it is
-                       * already sitting in, and watch it vanish for agreeing.
-                       * That order is now the common one, because the map no
-                       * longer waits for the dropdown.
-                       *
-                       * ── Why this lives in the CHANGE HANDLER, not an effect ──
-                       *
-                       * Because an effect watching `form.barangay_id` cannot tell
-                       * a person from a prefill. A renewal and a reopened draft
-                       * both arrive with a barangay AND coordinates, written in by
-                       * a single `setForm` some time after mount — so to an effect
-                       * that is a change, and it would wipe a pin the applicant
-                       * never placed the instant the form hydrated. That would
-                       * break every renewal, which is a bug this repo has already
-                       * shipped once.
-                       *
-                       * `touched.barangay_id` is the same distinction one step
-                       * removed. It is set HERE, on change rather than on blur,
-                       * precisely so the mismatch gate can tell an answer the
-                       * applicant gave from a value we handed them (see the long
-                       * note in `missingFor`). Keying the clear off that flag from
-                       * an effect would buy nothing: the flag only ever flips in
-                       * this handler, so anything reading it is this handler with
-                       * a render in between — the same decision, made later and
-                       * harder to follow.
-                       *
-                       * Guarded on the value actually differing, so re-picking the
-                       * barangay already selected is not a change and costs nobody
-                       * their pin.
-                       */
-                      if (next !== form.barangay_id) {
-                        const nextName = barangays.find((b) => String(b.id) === next)?.name ?? null
-                        setForm((f) => {
-                          const keepsPin =
-                            f.latitude === null ||
-                            f.longitude === null ||
-                            checkPin(f.latitude, f.longitude, nextName).kind === 'ok'
-                          return keepsPin
-                            ? { ...f, barangay_id: next }
-                            : {
-                                ...f,
-                                barangay_id: next,
-                                latitude: null,
-                                longitude: null,
-                              }
-                        })
-                        setPinError(null)
-                      }
-                      touch('barangay_id')
-                    }}
-                    onBlur={() => touch('barangay_id')}
-                    className={inputCls}
-                    aria-invalid={Boolean(fieldErrors.barangay_id)}
-                  >
-                    <option value="">Select your barangay</option>
-                    {barangays.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {fieldErrors.barangay_id && (
-                  <FieldError>
-                    {fieldErrors.barangay_id}
-                  </FieldError>
-                )}
-              </div>
-
-              {/*
-               * The zones on CPDO's sheet for whichever barangay was just
-               * picked, in plain names, and a link to the sheet.
-               *
-               * Directly under the picker, not beside the map: it answers the
-               * question the applicant has at the moment they choose ("what is
-               * my barangay zoned for?"), and it changes when the answer to
-               * that question changes. Gated on a selection because there is no
-               * sensible default sheet — twenty-one maps and no barangay chosen
-               * is a gallery, not an answer.
-               *
-               * It shows and lists. It does not decide — see the component.
-               */}
-              {selectedBarangay !== null && <BarangayZoningMap barangay={selectedBarangay} />}
-
               <div>
                 <label className="block">
                   <FieldLabel>Locational Group/Landmark</FieldLabel>
@@ -8669,11 +8751,23 @@ export function ApplyWizard() {
                 </label>
               </div>
 
+              </div>
+            </LocationStep>
+
+            <LocationStep
+              n={5}
+              title="In case of emergency"
+              done={
+                form.emergency_contact_name.trim() !== '' &&
+                phoneValid(form.emergency_contact_number)
+              }
+            >
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="relative">
                   <label className="block">
-                    <FieldLabel required>Emergency Contact Person</FieldLabel>
+                    <FieldLabel required>Contact Person</FieldLabel>
                     <input
+                      aria-label="Emergency Contact Person"
                       value={form.emergency_contact_name}
                       onChange={(e) => update('emergency_contact_name', e.target.value)}
                       onBlur={() => touch('emergency_contact_name')}
@@ -8690,9 +8784,10 @@ export function ApplyWizard() {
                 </div>
                 <div className="relative">
                   <label className="block">
-                    <FieldLabel required>Emergency Contact Number</FieldLabel>
+                    <FieldLabel required>Contact Number</FieldLabel>
                     <input
                       inputMode="tel"
+                      aria-label="Emergency Contact Number"
                       value={form.emergency_contact_number}
                       onChange={(e) => update('emergency_contact_number', e.target.value)}
                       onBlur={() => touch('emergency_contact_number')}
@@ -8708,8 +8803,8 @@ export function ApplyWizard() {
                   )}
                 </div>
               </div>
-            </div>
-          </div>
+            </LocationStep>
+          </ol>
         </div>
       </WizardSection>
 
