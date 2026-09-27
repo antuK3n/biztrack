@@ -33,23 +33,25 @@ function refreshAs(string $email): TestResponse
 
 it('refuses the refresh to anyone without analytics.view', function () {
     // Not a read: it recomputes and overwrites every stored figure set, so it
-    // sits on the same permission as the figures it rewrites. BPLO holds that
-    // permission (checklist item 78) and so is not asserted here — the "Refresh
-    // now" button sits on the screens it was given, and a button that 403s would
-    // be worse than no button.
-    refreshAs('sanitary@biztrack.local')->assertForbidden();
+    // sits on the same permission as the figures it rewrites.
     refreshAs('owner@biztrack.local')->assertForbidden();
+});
 
+it('lets every dashboard reader press Refresh now', function () {
     /*
-     * The super admin is refused too, which is the one that needs saying. It
-     * holds `analytics.processing_time` only, and refresh recomputes every
-     * dataset — dashboard, renewal risk and business growth among them. Letting
-     * it through would mean the office that cannot read three of these screens
-     * can still make the app rewrite their snapshots. Processing Time is
-     * refreshed by the nightly run like everything else; nobody loses a figure
-     * over this.
+     * Every office admin and the super admin hold `analytics.view` since the
+     * dashboard became every office's (checklist 2026-09-27, item 1), and the
+     * "Refresh now" button sits on that screen. A button that 403s would be
+     * worse than no button.
+     *
+     * A refresh recomputes every office's snapshot, not only the caller's. That
+     * exposes nothing — the response carries counts of figure sets, never a
+     * figure — and it is throttled on the route. It used to be refused to the
+     * super admin because it rewrote screens that account could not read; there
+     * is no such screen any more.
      */
-    refreshAs('admin@biztrack.local')->assertForbidden();
+    refreshAs('sanitary@biztrack.local')->assertOk()
+        ->assertJsonMissingPath('data.results.0.data');
 });
 
 it('refuses the refresh to a caller with no session', function () {

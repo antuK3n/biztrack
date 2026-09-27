@@ -37,6 +37,7 @@ import type {
 import { AnalyticsTabs } from './AnalyticsTabs'
 import { ComputedAt } from './ComputedAt'
 import { GenerateReportButton } from './GenerateReportButton'
+import { OfficeScope } from './OfficeScope'
 
 /*
  * Analytics Dashboard — docs/r-integration-spec.md §1, mockup 115/116.
@@ -1399,16 +1400,24 @@ function LoadingState() {
 
 export function AnalyticsPage() {
   const [months, setMonths] = useState('12')
+  /*
+   * Undefined until the reader picks one: the first request asks for "my
+   * default" and the server answers with the reader's own office (or every
+   * office for the super admin). See OfficeScope for why the label is read off
+   * the response and not off this state.
+   */
+  const [office, setOffice] = useState<string | undefined>(undefined)
 
   const {
     data: result,
     loading,
     error,
     reload,
-  } = useAsync(() => analytics.dashboard(Number(months)), [months])
+  } = useAsync(() => analytics.dashboard(Number(months), office), [months, office])
 
   const data = result?.data
   const meta = result?.meta
+  const scope = result?.scope
 
   const monthWindow = data
     ? new Date(`${data.month_start}T00:00:00`).toLocaleDateString('en-PH', {
@@ -1423,7 +1432,8 @@ export function AnalyticsPage() {
     <div>
       <PageTitle
         right={
-          <span className="flex items-center gap-3 pb-1">
+          <span className="flex flex-wrap items-center gap-3 pb-1">
+            {scope && <OfficeScope scope={scope} onChange={setOffice} />}
             <FilterMenu
               label="Filter the dashboard"
               fields={[
@@ -1435,7 +1445,11 @@ export function AnalyticsPage() {
                 },
               ]}
             />
-            <GenerateReportButton onGenerate={() => analytics.dashboardReport(Number(months))} />
+            <GenerateReportButton
+              onGenerate={() =>
+                analytics.dashboardReport(Number(months), scope?.office ?? (scope ? 'all' : undefined))
+              }
+            />
           </span>
         }
       >

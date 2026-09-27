@@ -2,6 +2,8 @@ import axios from 'axios'
 import { api } from './api'
 import { formatBytes } from './format'
 import type {
+  AnalyticsScope,
+  ScopedComputed,
   AdminBusiness,
   AdminCaseload,
   AdminRole,
@@ -1267,10 +1269,24 @@ export const analytics = {
    * decision outcomes all describe the same month and have to reconcile, which
    * they cannot be relied on to do if each arrives from a different refresh.
    */
-  dashboard: (months: number) =>
-    unwrapComputed<DashboardReport>(api.get('/analytics/dashboard', { params: { months } })),
-  dashboardReport: (months: number) =>
-    downloadBlob(`/analytics/dashboard/report?months=${months}`, 'analytics-dashboard.pdf'),
+  /*
+   * `office` is a department code, 'all', or undefined for "the server's
+   * default for me" — the reader's own office, or every office for the super
+   * admin. It is a request, not a filter: an office account asking for another
+   * office gets a 403, and the answer's `scope` says whose figures came back.
+   */
+  dashboard: async (months: number, office?: string): Promise<ScopedComputed<DashboardReport>> => {
+    const res = await api.get<{ data: DashboardReport; meta: AnalyticsProvenance; scope: AnalyticsScope }>(
+      '/analytics/dashboard',
+      { params: { months, office } },
+    )
+    return { data: res.data.data, meta: res.data.meta, scope: res.data.scope }
+  },
+  dashboardReport: (months: number, office?: string) =>
+    downloadBlob(
+      `/analytics/dashboard/report?months=${months}${office ? `&office=${encodeURIComponent(office)}` : ''}`,
+      `analytics-dashboard${office && office !== 'all' ? `-${office.toLowerCase()}` : ''}.pdf`,
+    ),
 
   /** Feature 7: per-office control charts over weekly review turnaround. */
   processingTime: (weeks: number) =>

@@ -221,44 +221,6 @@ it('generates a processing time PDF that carries the flagged weeks', function ()
     expect(strlen($response->getContent()))->toBeGreaterThan(2000);
 });
 
-/* ── Analytics Dashboard (spec §1) ─────────────────────────────────────── */
-
-it('serves the analytics dashboard to BPLO and not to the super admin', function () {
-    /*
-     * Spec §1 "Analytics Dashboard (Admin - BPLO)", and checklist item 78 asked
-     * for exactly this screen: "the dashboard should be transferred to BPLO
-     * admin, not super admin." Transferred, not shared — BPLO gets the panels
-     * and the PDF, and the two boundaries below are what make that different
-     * from "opened to everyone above a reviewer".
-     */
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->getJson('/api/v1/analytics/dashboard')
-        ->assertOk();
-
-    test()->withHeaders(authAs('bplo@biztrack.local'))
-        ->get('/api/v1/analytics/dashboard/report')
-        ->assertOk();
-
-    // These panels count every office's filings, decisions, inspections and
-    // permits, and the barangay ranking is a register-wide summary. An ordinary
-    // office reviewer holds application.view_all but not analytics.view; letting
-    // them read this would hand them an aggregate of filings
-    // ApplicationVisibility deliberately keeps out of their queue.
-    //
-    // The super admin is on the same list, for a different reason: it holds
-    // `analytics.processing_time` only, so that the office being measured and
-    // the office measuring it do not read from the same screens.
-    foreach (['admin@biztrack.local', 'sanitary@biztrack.local', 'owner@biztrack.local'] as $email) {
-        test()->withHeaders(authAs($email))
-            ->getJson('/api/v1/analytics/dashboard')
-            ->assertForbidden();
-
-        test()->withHeaders(authAs($email))
-            ->get('/api/v1/analytics/dashboard/report')
-            ->assertForbidden();
-    }
-});
-
 it('refuses the dashboard and its report to a caller with no session', function () {
     // No authAs() anywhere in this test: Sanctum::actingAs would outlive it.
     test()->getJson('/api/v1/analytics/dashboard')->assertUnauthorized();
