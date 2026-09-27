@@ -4,9 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\EmailCode;
 use App\Models\Role;
 use App\Models\User;
 use App\Support\Audit;
+use App\Support\EmailCodes;
+use App\Support\EmailSwitch;
+use App\Support\OfficeHours;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -103,8 +107,22 @@ class AuthController extends Controller
      */
     private function userPayload(User $user): array
     {
-        return (new UserResource($this->withRelations($user)))->resolve()
-            + ['created_at' => optional($user->created_at)->toISOString()];
+        $user = $this->withRelations($user);
+
+        return (new UserResource($user))->resolve()
+            + [
+                'created_at' => optional($user->created_at)->toISOString(),
+                /*
+                 * Whether this account has to confirm its address before it can
+                 * file [checklist 2026-09-27, Register 1]. Worked out here so the
+                 * web app never has to know how mail is configured: false for
+                 * every account while mail is off, false for staff, and false
+                 * once the address is confirmed.
+                 */
+                'email_verification_required' => EmailSwitch::on()
+                    && $user->roles->contains('name', 'business_owner')
+                    && ! $user->hasVerifiedEmail(),
+            ];
     }
 
     private function authPayload(User $user, string $portal = 'public'): JsonResponse
@@ -176,8 +194,19 @@ class AuthController extends Controller
          * verifiable without a single credential. Point MAIL_MAILER at a real
          * transport in the deployed environment and nothing here changes.
          */
+        /*
+         * With a real mailer configured, a six-digit code goes out instead of
+         * the link, and filing waits for it [checklist 2026-09-27, Register 1;
+         * why a code is on EmailCodes]. With mail off (the demo) the link is
+         * written to the log exactly as before, and nothing waits on it.
+         */
         try {
-            $user->sendEmailVerificationNotification();
+            if (EmailSwitch::on()) {
+                [, $code] = EmailCodes::issueVerify($user);
+                EmailCodes::send($user, EmailCode::VERIFY, $code);
+            } else {
+                $user->sendEmailVerificationNotification();
+            }
         } catch (\Throwable $e) {
             Log::error('Verification email failed to send on registration.', [
                 'user_id' => $user->id,
@@ -331,17 +360,27 @@ class AuthController extends Controller
          * the citizen side keeping the staff portal's existence to itself, and
          * it is paid by people who have been given the right address.
          *
-         * The STAFF and ADMIN doors keep the 409. Someone standing at
-         * /staff/login already knows a staff portal exists — the page they are
-         * looking at is one — so there is no secret left for the status to
-         * leak, and an officer who typed the wrong one of the two LGU doors is
-         * owed a refusal they can distinguish from a mistyped password. 409
+         * ── A business owner at an LGU door gets the same [checklist
+         *    2026-09-27, Login 3] ───────────────────────────────────────────
+         *
+         * The LGU doors used to answer 409 to ANY right password from the
+         * wrong door, owners included. That told a stranger at /staff/login
+         * holding a leaked list of owner passwords exactly which ones were
+         * right: a free password-checking service, and the owner's lockout
+         * never moved. So an owner account at /staff/login or /admin/login now
+         * goes through `$refuse` too: 422, the one sentence, a counted attempt.
+         *
+         * Between the two LGU doors the 409 stays. Someone at /staff/login
+         * already knows a staff portal exists — the page they are looking at
+         * is one — so an officer who typed the wrong one of the two LGU doors
+         * is owed a refusal they can tell apart from a mistyped password. 409
          * rather than 422 because the credentials were right and the conflict
          * is with WHERE they were used.
          */
         $user->loadMissing('roles');
-        if ($this->portalFor($user) !== $portal) {
-            if ($portal === 'public') {
+        $belongs = $this->portalFor($user);
+        if ($belongs !== $portal) {
+            if ($portal === 'public' || $belongs === 'public') {
                 return $refuse($user);
             }
 
@@ -379,15 +418,256 @@ class AuthController extends Controller
             ], 403);
         }
 
+        /*
+         * The second step [checklist 2026-09-27, Login 5]: with a real mailer,
+         * a right password earns a code by e-mail, not a session. Everyone —
+         * owners, officers, the super admin. With mail off (the demo) the
+         * password is enough, as it always was.
+         */
+        if (EmailSwitch::on()) {
+            return $this->startSignInCode($user, $portal);
+        }
+
+        return $this->completeSignIn($user, $portal, $key);
+    }
+
+    private function loginKey(string $email, Request $request): string
+    {
+        return 'login:'.Str::lower($email).'|'.$request->ip();
+    }
+
+    /** Everything a finished sign-in does, whichever step finished it. */
+    private function completeSignIn(User $user, string $portal, string $key): JsonResponse
+    {
         RateLimiter::clear($key);
         $user->forceFill([
             'failed_login_attempts' => 0,
             'locked_until' => null,
             'last_login_at' => now(),
         ])->save();
-        Audit::log('user.logged_in', $user);
+        Audit::log('user.logged_in', $user, [], $user->id);
+
+        /*
+         * An LGU sign-in outside office hours is written down [checklist
+         * 2026-09-27, Login 6]. The officer is told so on the page; this is the
+         * row the administrator reads. Owners are not recorded: filing at night
+         * is what an online counter is for, and logging it would be noise.
+         */
+        if ($portal !== 'public' && ! OfficeHours::isOpen()) {
+            Audit::log('user.signed_in_outside_hours', $user, [
+                'portal' => $portal,
+                'local_time' => OfficeHours::now()->format('D, j M Y H:i'),
+            ], $user->id);
+        }
 
         return $this->authPayload($user, $portal);
+    }
+
+    /**
+     * Send the sign-in code and hand the page the handle it needs for step two.
+     *
+     * No token here, and the lockout counters are not reset yet: the password
+     * was right, but the sign-in is not finished until the code is.
+     */
+    private function startSignInCode(User $user, string $portal): JsonResponse
+    {
+        [$row, $code, $challenge] = EmailCodes::issueLogin($user, $portal);
+
+        try {
+            EmailCodes::send($user, EmailCode::LOGIN, $code);
+        } catch (\Throwable $e) {
+            /*
+             * The code did not go, so the sign-in cannot finish, and the page
+             * must say that rather than ask for a code that is not coming. The
+             * row is closed so nothing is left half-open. 503 because this is
+             * the relay's outage, not the reader's mistake. The cost is written
+             * in docs/email-setup.md: while the relay is down, nobody can sign
+             * in.
+             */
+            $row->forceFill(['consumed_at' => now()])->save();
+            Log::error('Sign-in code could not be sent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send your sign-in code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        return response()->json([
+            'data' => [
+                'code_required' => true,
+                'challenge' => $challenge,
+                'email' => EmailCodes::mask($user->email),
+                'expires_in_minutes' => EmailCodes::minutes(EmailCode::LOGIN),
+                'resend_after' => (int) config('auth.email_codes.resend_after', 60),
+            ],
+        ]);
+    }
+
+    /**
+     * Step two of a sign-in: the code from the e-mail [Login 5].
+     *
+     * A wrong code counts against the account exactly as a wrong password
+     * does — same limiter key, same `failed_login_attempts`. Without that,
+     * somebody holding the password could start a fresh challenge every five
+     * guesses and walk the million codes at leisure; with it, five wrong codes
+     * lock the account for fifteen minutes, as five wrong passwords do.
+     */
+    public function verifySignInCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'challenge' => ['required', 'string', 'max:128'],
+            'code' => ['required', 'string', 'max:32'],
+        ]);
+
+        $row = EmailCodes::findChallenge($data['challenge']);
+        $user = $row?->user;
+
+        if (! $row || ! $user || ! $user->is_active) {
+            return $this->deadSignInCode();
+        }
+
+        $key = $this->loginKey($user->email, $request);
+        $lockedFor = $user->locked_until?->isFuture() ? (int) now()->diffInSeconds($user->locked_until) : 0;
+
+        if (RateLimiter::tooManyAttempts($key, 5) || $lockedFor > 0) {
+            $minutes = max(1, (int) ceil(max(RateLimiter::availableIn($key), $lockedFor) / 60));
+
+            return response()->json([
+                'message' => "Account temporarily locked. Try again in {$minutes} minute".($minutes === 1 ? '' : 's').'.',
+            ], 429);
+        }
+
+        $result = $this->tryCode($row, $data['code']);
+
+        if ($result['status'] === 'ok') {
+            /*
+             * Typing the code proves the reader can open this inbox, which is
+             * all confirming an address ever meant. So an account that never
+             * confirmed is confirmed now, rather than being sent a second code
+             * straight after this one.
+             */
+            if (! $user->hasVerifiedEmail()) {
+                $user->markEmailAsVerified();
+                Audit::log('user.email_verified', $user, ['via' => 'sign-in code'], $user->id);
+            }
+
+            return $this->completeSignIn($user->fresh(), (string) $row->portal, $key);
+        }
+
+        if ($result['status'] === 'malformed') {
+            return $this->codeRefusal('Enter the 6 digits from the e-mail.');
+        }
+
+        RateLimiter::hit($key, 15 * 60);
+        $attempts = $user->failed_login_attempts + 1;
+        $user->forceFill([
+            'failed_login_attempts' => $attempts,
+            'locked_until' => $attempts >= 5 ? now()->addMinutes(15) : $user->locked_until,
+        ])->save();
+
+        if ($result['status'] === 'dead') {
+            return $this->deadSignInCode();
+        }
+
+        return $this->codeRefusal($this->triesLeft($result['remaining']));
+    }
+
+    /** A new sign-in code for the same attempt, rationed [Login 5]. */
+    public function resendSignInCode(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'challenge' => ['required', 'string', 'max:128'],
+        ]);
+
+        $row = EmailCodes::findChallenge($data['challenge']);
+        $user = $row?->user;
+
+        if (! $row || ! $user || ! $user->is_active) {
+            return $this->deadSignInCode();
+        }
+
+        $wait = EmailCodes::resendWait($row);
+
+        if ($wait === null) {
+            return $this->deadSignInCode();
+        }
+
+        if ($wait > 0) {
+            return response()->json([
+                'message' => "You can ask for a new code in {$wait} second".($wait === 1 ? '' : 's').'.',
+                'retry_after' => $wait,
+            ], 429);
+        }
+
+        $code = EmailCodes::refresh($row);
+
+        try {
+            EmailCodes::send($user, EmailCode::LOGIN, $code);
+        } catch (\Throwable $e) {
+            Log::error('Sign-in code could not be resent.', [
+                'user_id' => $user->id,
+                'exception' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'message' => "We couldn't send a new code just now. Try again in a few minutes.",
+            ], 503);
+        }
+
+        return response()->json([
+            'message' => 'We sent a new code. Use the newest one.',
+            'data' => ['resend_after' => (int) config('auth.email_codes.resend_after', 60)],
+        ]);
+    }
+
+    /**
+     * A typed code, tidied and tried. Spaces and dashes are how people copy a
+     * code out of an e-mail, so they are dropped. Anything that is still not
+     * six digits is `malformed` and costs no try: it could not have been right,
+     * and charging a guess for a typo is how a reader gets locked out by a
+     * phone keyboard.
+     *
+     * @return array{status: 'ok'|'wrong'|'dead'|'malformed', remaining: int}
+     */
+    private function tryCode(EmailCode $row, string $typed): array
+    {
+        $code = (string) preg_replace('/[\s-]/', '', $typed);
+
+        if (! $row->isLive()) {
+            return ['status' => 'dead', 'remaining' => 0];
+        }
+
+        if (preg_match('/^\d{6}$/', $code) !== 1) {
+            return ['status' => 'malformed', 'remaining' => 0];
+        }
+
+        return EmailCodes::check($row, $code);
+    }
+
+    private function triesLeft(int $left): string
+    {
+        return "That code is not right. You have {$left} ".($left === 1 ? 'try' : 'tries').' left.';
+    }
+
+    private function codeRefusal(string $message): JsonResponse
+    {
+        return response()->json(['message' => $message, 'errors' => ['code' => [$message]]], 422);
+    }
+
+    /**
+     * One answer for every sign-in code that cannot work any more — used,
+     * expired, guessed out, or never ours. `reason` lets the page take the
+     * reader back to the password step instead of leaving them at a dead box.
+     */
+    private function deadSignInCode(): JsonResponse
+    {
+        return response()->json([
+            'message' => 'This code no longer works. Sign in again to get a new one.',
+            'reason' => 'code_expired',
+        ], 422);
     }
 
     public function logout(Request $request): JsonResponse
@@ -658,9 +938,17 @@ class AuthController extends Controller
          * cannot act on. It must not answer with a cheerful "sent" either —
          * that is the bug this method exists to fix — so the failure gets its
          * own 502 and its own sentence.
+         *
+         * A code with mail on, the link with mail off: the same split as
+         * registration.
          */
         try {
-            $user->sendEmailVerificationNotification();
+            if (EmailSwitch::on()) {
+                [, $code] = EmailCodes::issueVerify($user);
+                EmailCodes::send($user, EmailCode::VERIFY, $code);
+            } else {
+                $user->sendEmailVerificationNotification();
+            }
         } catch (\Throwable $e) {
             Log::error('Verification email failed to resend.', [
                 'user_id' => $user->id,
@@ -675,8 +963,50 @@ class AuthController extends Controller
         Audit::log('user.verification_resent', $user);
 
         return response()->json([
-            'message' => 'Verification email sent. Check your inbox — it can take a minute.',
+            'message' => EmailSwitch::on()
+                ? 'We sent a new code to '.EmailCodes::mask($user->email).'. It can take a minute.'
+                : 'Verification email sent. Check your inbox — it can take a minute.',
         ]);
+    }
+
+    /**
+     * Confirm the signed-in owner's address with the code from the e-mail
+     * [checklist 2026-09-27, Register 1].
+     *
+     * Behind auth:sanctum, so the code only has to prove the inbox; the session
+     * already proves the account. Five wrong guesses close the code, and the
+     * reader asks for a new one with the button beside the box.
+     */
+    public function verifyEmailCode(Request $request): JsonResponse
+    {
+        $data = $request->validate(['code' => ['required', 'string', 'max:32']]);
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json([
+                'message' => 'Your email address is already confirmed.',
+                'data' => $this->userPayload($user),
+            ]);
+        }
+
+        $row = EmailCodes::latestVerify($user);
+        $result = $row ? $this->tryCode($row, $data['code']) : ['status' => 'dead', 'remaining' => 0];
+
+        if ($result['status'] === 'ok') {
+            $user->markEmailAsVerified();
+            Audit::log('user.email_verified', $user, ['via' => 'code']);
+
+            return response()->json([
+                'message' => 'Your email address is confirmed.',
+                'data' => $this->userPayload($user->fresh()),
+            ]);
+        }
+
+        return $this->codeRefusal(match ($result['status']) {
+            'dead' => 'This code no longer works. Send yourself a new one.',
+            'malformed' => 'Enter the 6 digits from the e-mail.',
+            default => $this->triesLeft($result['remaining']),
+        });
     }
 
     /**
