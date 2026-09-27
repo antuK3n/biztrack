@@ -64,9 +64,11 @@ final class AnalyticsDatasets
                 'label' => 'Analytics Dashboard',
                 'dataset' => static fn (array $p): array => DashboardAnalytics::dataset(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                    $p['office'] ?? null,
                 ),
                 'build' => static fn (array $p): array => DashboardAnalytics::build(
                     $p['months'] ?? DashboardAnalytics::DEFAULT_WINDOW_MONTHS,
+                    $p['office'] ?? null,
                 ),
                 'defaults' => ['months' => DashboardAnalytics::DEFAULT_WINDOW_MONTHS],
             ],
@@ -124,12 +126,32 @@ final class AnalyticsDatasets
     /**
      * The parameter combinations `analytics:refresh` precomputes for a dataset.
      *
-     * @return list<array<string, int>>
+     * @return list<array<string, int|string>>
      */
     public static function variants(string $dataset): array
     {
         $variants = (array) config("analytics.variants.{$dataset}", []);
+        $variants = $variants === [] ? [self::get($dataset)['defaults']] : array_values($variants);
 
-        return $variants === [] ? [self::get($dataset)['defaults']] : array_values($variants);
+        /*
+         * The dashboard is also offered per office (checklist 2026-09-27, item 1),
+         * and the rule in config/analytics.php — if a screen offers it, it is
+         * precomputed — applies to the office menu as much as to the window
+         * menu. The offices are read from the register, not listed in config, so
+         * every window is multiplied out here: the whole city, then each office.
+         */
+        if ($dataset === self::DASHBOARD) {
+            $expanded = [];
+            foreach ($variants as $variant) {
+                $expanded[] = $variant;
+                foreach (AnalyticsOffice::codes() as $office) {
+                    $expanded[] = $variant + ['office' => $office];
+                }
+            }
+
+            return $expanded;
+        }
+
+        return $variants;
     }
 }

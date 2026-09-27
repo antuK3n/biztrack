@@ -1545,6 +1545,26 @@ export interface Computed<T> {
   meta: AnalyticsProvenance
 }
 
+/**
+ * Whose figures an analytics response carries (checklist 2026-09-27, item 1).
+ *
+ * Decided on the server (App\Support\AnalyticsOffice): an office account is
+ * answered with its own office whatever it asks for, so `office` here is the
+ * truth about the figures and the screen must label them from it rather than
+ * from its own state. `offices` is empty unless the reader may switch.
+ */
+export interface AnalyticsScope {
+  /** Department code, or null for every office. */
+  office: string | null
+  office_name: string
+  can_switch: boolean
+  offices: { code: string; name: string }[]
+}
+
+export interface ScopedComputed<T> extends Computed<T> {
+  scope: AnalyticsScope
+}
+
 /** One dataset variant's outcome from a manual refresh. */
 export interface AnalyticsRefreshRow {
   key: string

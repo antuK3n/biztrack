@@ -363,18 +363,15 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('analytics/summary', [AnalyticsController::class, 'summary']);
         Route::get('analytics/export', [AnalyticsController::class, 'export']);
         /*
-         * Features 6/7 moved out of the standalone r/ project and into the site.
-         * They stay on analytics.view because they aggregate every office's
-         * assignments — an office reviewer reading these would see round the
-         * scoping in ApplicationVisibility. Checklist #78 added BPLO to that
-         * permission; BPLO is the one office role that already holds
-         * application.view_any_office, so the boundary is not new to it.
-         */
-        /*
-         * The Analytics Dashboard (spec §1). Same permission and the same reason:
-         * these panels count every office's filings, decisions, inspections and
-         * permits, and the barangay and line-of-business rankings amount to a
-         * register-wide summary.
+         * The Analytics Dashboard (spec §1), one screen for every office
+         * (checklist 2026-09-27, item 1).
+         *
+         * `analytics.view` is on every office admin, BPLO and the super admin.
+         * It is NOT a register-wide read any more: the controller asks
+         * App\Support\AnalyticsOffice which office the request is answered for,
+         * and an office account gets its own office or a 403. Only readers with
+         * `application.view_any_office` may name another office or "all".
+         * summary/export above are register-wide and refuse everyone else.
          */
         Route::get('analytics/dashboard', [AnalyticsController::class, 'dashboard']);
         Route::get('analytics/dashboard/report', [AnalyticsController::class, 'dashboardReport']);
@@ -395,9 +392,10 @@ Route::middleware('auth:sanctum')->group(function () {
          * demo, or an officer who has just filed something and wants the figures
          * to include it.
          *
-         * Throttled because one call recomputes the whole register: a year of
-         * review history, the full renewal watchlist and a fitted model, over
-         * twenty dataset variants and a second or two of query and arithmetic.
+         * Throttled because one call recomputes the whole register: every
+         * dashboard window for the city and for each office, plus the two
+         * oversight screens — a few dozen variants and a few seconds of query
+         * and arithmetic.
          * It used to push all of that to a separate R service over HTTP; the
          * work is now in-process, which removes the network but not the cost.
          * Holding it to a few calls a minute stops a held-down button turning

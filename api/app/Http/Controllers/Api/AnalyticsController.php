@@ -11,6 +11,7 @@ use App\Models\ApplicationStatusHistory;
 use App\Models\Payment;
 use App\Models\Permit;
 use App\Support\AnalyticsDatasets;
+use App\Support\AnalyticsOffice;
 use App\Support\AnalyticsRefresher;
 use App\Support\AnalyticsResolver;
 use App\Support\DashboardAnalytics;
@@ -27,27 +28,83 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AnalyticsController extends Controller
 {
-    public function summary(): JsonResponse
+    /*
+     * summary() and export() are register-wide counts with no office in them.
+     * They sat on `analytics.view` when only BPLO held it; now that every office
+     * admin holds it (checklist 2026-09-27, item 1) they are closed to anyone
+     * who cannot read every office, rather than taught a second scoping rule.
+     * No screen calls either today — the office-scoped CSVs are on the Reports
+     * screen.
+     */
+    public function summary(Request $request): JsonResponse
     {
+        $this->requireEveryOffice($request);
+
         return response()->json(['data' => $this->buildSummary()]);
     }
 
+    /**
+     * The Analytics Dashboard, for one office or for all of them.
+     *
+     * The office is decided by AnalyticsOffice::forRequest() and nowhere else:
+     * an office account gets its own office whatever it sends, and asking for
+     * another is a 403. `scope` travels beside `data` and `meta` so the screen
+     * can say whose figures these are and draw the office menu for the two
+     * readers who have one.
+     */
     public function dashboard(Request $request): JsonResponse
     {
-        return $this->serve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+        $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
+        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, $this->dashboardParams($request, $office));
+
+        return response()->json([
+            'data' => $resolved['data'],
+            'meta' => $resolved['meta'],
+            'scope' => AnalyticsOffice::describe($request->user(), $office),
+        ]);
     }
 
     public function dashboardReport(Request $request): Response
     {
-        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, ['months' => $this->windowMonths($request)]);
+        $office = AnalyticsOffice::forRequest($request->user(), $request->query('office'));
+        $resolved = $this->resolve(AnalyticsDatasets::DASHBOARD, $this->dashboardParams($request, $office));
 
         $pdf = Pdf::loadView('pdf.analytics-dashboard-report', [
             'report' => $resolved['data'],
             'meta' => $resolved['meta'],
+            'scope' => AnalyticsOffice::describe($request->user(), $office),
             'generated_at' => Carbon::parse($resolved['data']['generated_at'])->format('F j, Y g:i A'),
         ])->setPaper('a4');
 
-        return PdfFile::render($pdf)->download('analytics-dashboard.pdf');
+        $suffix = $office === null ? '' : '-'.strtolower($office);
+
+        return PdfFile::render($pdf)->download("analytics-dashboard{$suffix}.pdf");
+    }
+
+    /**
+     * The snapshot key's parameters. The office is left OUT when it is every
+     * office, so the whole-city key stays `dashboard:months=12` — the string the
+     * snapshots stored before offices existed already carry.
+     *
+     * @return array<string, int|string>
+     */
+    private function dashboardParams(Request $request, ?string $office): array
+    {
+        $params = ['months' => $this->windowMonths($request)];
+        if ($office !== null) {
+            $params['office'] = $office;
+        }
+
+        return $params;
+    }
+
+    private function requireEveryOffice(Request $request): void
+    {
+        abort_unless(
+            AnalyticsOffice::canSwitch($request->user()),
+            403,
+            'These figures cover every office, so only BPLO and the administrator can read them.',
+        );
     }
 
     public function processingTime(Request $request): JsonResponse
@@ -175,7 +232,7 @@ class AnalyticsController extends Controller
     /**
      * Read a dataset's precomputed statistics, or compute them now.
      *
-     * @param  array<string, int>  $params
+     * @param  array<string, int|string>  $params
      * @return array{data: array<string, mixed>, meta: array<string, mixed>}
      */
     private function resolve(string $dataset, array $params): array
@@ -230,8 +287,10 @@ class AnalyticsController extends Controller
     }
 
     /** CSV download of the summary (status counts, monthly, KPIs). */
-    public function export(): StreamedResponse
+    public function export(Request $request): StreamedResponse
     {
+        $this->requireEveryOffice($request);
+
         $s = $this->buildSummary();
 
         return response()->streamDownload(function () use ($s) {
