@@ -13,6 +13,7 @@ import {
   MapPinIcon,
   ShieldCheckIcon,
   TrackIcon,
+  UploadIcon,
   UsersIcon,
 } from '../components/icons'
 import { portalPath } from './api'
@@ -212,6 +213,13 @@ const NAV_ITEMS: NavItem[] = [
    * product claims over eBOSS (PRODUCT.md §4), so the trail belongs in the rail.
    */
   { label: 'Audit Logs', icon: AuditIcon, to: '/admin/audit-logs', permission: 'audit.view' },
+  /*
+   * Importing the old register (Ken's checklist, 27 September 2026). Its own
+   * permission, `data.import`, held by the super admin alone — an import writes
+   * owners' personal data into the register in bulk, which no office does. The
+   * route in App.tsx carries the same claim.
+   */
+  { label: 'Import Records', icon: UploadIcon, to: '/admin/import', permission: 'data.import' },
 ]
 
 /**
