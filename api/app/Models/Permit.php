@@ -17,6 +17,10 @@ class Permit extends Model
         'issued_by_user_id',
         // Written by WorkflowService::revokePermit and nothing else.
         'revoked_at', 'revoked_reason',
+        // The old register's key for a certificate it issued on paper; null on
+        // every permit BizTrack mints (migration
+        // 2026_09_27_000100_let_the_register_hold_what_the_old_system_issued).
+        'legacy_id',
     ];
 
     protected $casts = [

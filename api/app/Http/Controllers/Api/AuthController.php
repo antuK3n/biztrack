@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Support\Audit;
 use App\Support\EmailCodes;
 use App\Support\EmailSwitch;
+use App\Support\LegacyImport\LegacyClaim;
 use App\Support\OfficeHours;
 use App\Support\Turnstile;
 use Illuminate\Http\JsonResponse;
@@ -151,10 +152,24 @@ class AuthController extends Controller
             'mobile_number' => ['required', 'string', 'max:20'],
             'password' => ['required', 'confirmed', PasswordRule::min(8)],
             'data_privacy_consent' => ['accepted'],
+            /*
+             * A business account or permit number from before BizTrack, to
+             * claim the businesses the old register holds under this person's
+             * name (Ken's checklist, "Migration 1"; see LegacyClaim). Optional:
+             * most people registering have nothing to claim.
+             */
+            'claim_number' => ['nullable', 'string', 'max:60'],
         ], [
             'email.unique' => 'This email is already registered. Try signing in instead.',
             'data_privacy_consent.accepted' => 'You must agree to the data privacy notice to continue.',
         ]);
+
+        // Checked BEFORE the account is written, so a mistyped number is
+        // answered on the form rather than with an account that claimed nothing
+        // and an email address that can no longer be used to try again.
+        $claimFrom = filled($data['claim_number'] ?? null)
+            ? LegacyClaim::match($data['claim_number'], $data['last_name'], $request->ip())
+            : null;
 
         $user = User::create([
             'name' => trim("{$data['first_name']} {$data['last_name']}"),
@@ -176,6 +191,10 @@ class AuthController extends Controller
         }
 
         Audit::log('user.registered', $user);
+
+        if ($claimFrom !== null) {
+            LegacyClaim::claim($claimFrom, $user, $data['claim_number']);
+        }
 
         /*
          * Send the verification email, and never let it fail the registration
@@ -445,7 +464,7 @@ class AuthController extends Controller
             'locked_until' => null,
             'last_login_at' => now(),
         ])->save();
-        Audit::log('user.logged_in', $user, [], $user->id);
+        Audit::log('user.logged_in', $user, actorId: $user->id);
 
         /*
          * An LGU sign-in outside office hours is written down [checklist
@@ -457,7 +476,7 @@ class AuthController extends Controller
             Audit::log('user.signed_in_outside_hours', $user, [
                 'portal' => $portal,
                 'local_time' => OfficeHours::now()->format('D, j M Y H:i'),
-            ], $user->id);
+            ], actorId: $user->id);
         }
 
         return $this->authPayload($user, $portal);
@@ -551,7 +570,7 @@ class AuthController extends Controller
              */
             if (! $user->hasVerifiedEmail()) {
                 $user->markEmailAsVerified();
-                Audit::log('user.email_verified', $user, ['via' => 'sign-in code'], $user->id);
+                Audit::log('user.email_verified', $user, ['via' => 'sign-in code'], actorId: $user->id);
             }
 
             return $this->completeSignIn($user->fresh(), (string) $row->portal, $key);

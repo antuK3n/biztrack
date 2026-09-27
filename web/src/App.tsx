@@ -43,6 +43,7 @@ import { OwnersPage } from './pages/admin/OwnersPage'
 import { RecordsPage } from './pages/admin/RecordsPage'
 import { PermitsPage as AdminPermitsPage } from './pages/admin/PermitsPage'
 import { BusinessMapPage } from './pages/admin/BusinessMapPage'
+import { ImportPage } from './pages/admin/ImportPage'
 import { ProfilePage } from './pages/ProfilePage'
 import { RequestsPage } from './pages/RequestsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -607,6 +608,14 @@ export default function App() {
               </RequirePermission>
             }
           />
+          <Route
+            path="/staff/admin/import"
+            element={
+              <RequirePermission permission="data.import">
+                <ImportPage />
+              </RequirePermission>
+            }
+          />
         </Route>
 
         {/*
@@ -744,6 +753,15 @@ export default function App() {
             element={
               <RequirePermission permission="audit.view">
                 <AuditLogsPage />
+              </RequirePermission>
+            }
+          />
+          {/* Importing the old register — `data.import`, the super admin's alone. */}
+          <Route
+            path="/admin/import"
+            element={
+              <RequirePermission permission="data.import">
+                <ImportPage />
               </RequirePermission>
             }
           />

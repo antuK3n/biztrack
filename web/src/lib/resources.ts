@@ -37,6 +37,8 @@ import type {
   HeldClearance,
   Inspection,
   InspectionResult,
+  LegacyImport,
+  LegacyImportGuide,
   Message,
   MessageThreadSummary,
   MessageTranscriptMeta,
@@ -1460,6 +1462,12 @@ export interface AuditLogFilters extends PageParams {
   auditable_id?: number
   /** The actor, by user id. */
   user_id?: number
+  /**
+   * Removals only — deletes and retires, which carry a copy of the record.
+   * Sent as 1, not `true`: Axios writes a boolean as the string "true", which
+   * Laravel's `boolean` rule refuses.
+   */
+  removed?: 1
 }
 
 /**
@@ -1594,6 +1602,39 @@ export const admin = {
       total: res.data.meta?.total ?? res.data.data.length,
     }
   },
+}
+
+/* ── Importing the old register ───────────────────────────────────────── */
+
+/*
+ * The super admin's import (permission `data.import`). Upload or name an ODBC
+ * source → dry run → confirm → import. Nothing reaches the register before
+ * `run`.
+ */
+export const legacyImports = {
+  guide: () => unwrap<LegacyImportGuide>(api.get('/admin/legacy-imports/guide')),
+  history: () => unwrap<LegacyImport[]>(api.get('/admin/legacy-imports')),
+  show: (id: number) => unwrap<LegacyImport>(api.get(`/admin/legacy-imports/${id}`)),
+  template: () => downloadBlob('/admin/legacy-imports/template', 'biztrack-legacy-import-template.csv'),
+  /** Upload a CSV and dry-run it. */
+  previewCsv: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return unwrap<LegacyImport>(
+      api.post('/admin/legacy-imports/csv', form, { headers: { 'Content-Type': 'multipart/form-data' } }),
+    )
+  },
+  /** Name an ODBC source and dry-run it. The credentials live on the server. */
+  previewOdbc: (body: { dsn: string; table?: string; query?: string }) =>
+    unwrap<LegacyImport>(api.post('/admin/legacy-imports/odbc', body)),
+  /** Confirm a dry run. Small imports finish in the call; large ones come back queued. */
+  run: (id: number) => unwrap<LegacyImport>(api.post(`/admin/legacy-imports/${id}/run`)),
+}
+
+/** Claim businesses from the old register, against the signed-in owner's surname. */
+export const legacyClaim = {
+  claim: (claimNumber: string) =>
+    unwrap<{ claimed: number }>(api.post('/businesses/claim', { claim_number: claimNumber })),
 }
 
 /* ── Unread badges ────────────────────────────────────────────────────── */

@@ -177,6 +177,27 @@ it('writes an audit entry naming the officer, the permit and the reason', functi
         ->and($entry->changes['from'])->toBe('active');
 });
 
+/*
+ * Audit Log 1 keeps a copy of every record taken out of use. Revoking arrived on
+ * a separate branch from that rule, and suspension (which can be undone) already
+ * kept its copy, so the one retirement that cannot be undone was the one that
+ * did not.
+ */
+it('keeps the permit as it stood before the revocation in the audit log', function () {
+    $permit = revocablePermit();
+
+    test()->withHeaders(authAs('bplo@biztrack.local'))
+        ->postJson("/api/v1/permits/{$permit->id}/revoke", ['reason' => 'Fraudulent documents.'])
+        ->assertOk();
+
+    $entry = AuditLog::where('action', 'permit.revoked')->latest('id')->firstOrFail();
+
+    expect($entry->snapshot)->not->toBeNull()
+        ->and($entry->snapshot['status'])->toBe('active')
+        ->and($entry->snapshot['permit_number'])->toBe($permit->permit_number)
+        ->and($entry->snapshot['revoked_at'])->toBeNull();
+});
+
 it('tells the owner in-app, with the permit number and the reason', function () {
     $permit = revocablePermit();
     $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
